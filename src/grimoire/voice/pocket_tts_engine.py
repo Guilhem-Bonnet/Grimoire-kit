@@ -6,7 +6,7 @@ import io
 import wave
 from typing import Any
 
-from grimoire.voice._offline import hub_offline, is_cache_miss
+from grimoire.voice._offline import is_cache_miss
 from grimoire.voice.engines import EngineUnavailableError, Speech, TextToSpeech, _one_line
 
 #: Code de langue du projet → modèle de langue de pocket-tts.
@@ -43,10 +43,14 @@ class PocketTextToSpeech(TextToSpeech):
         self._language = _pocket_language(language)
         self._states: dict[str, Any] = {}
         try:
-            with hub_offline(not allow_download):
-                self._model = TTSModel.load_model(language=self._language)
-                self._default_voice = voice or _default_voice(self._language)
-                self._state(self._default_voice)
+            if not allow_download and model_cached({}) is False:  # prouvé absent : rien ne part sur le réseau
+                raise EngineUnavailableError(
+                    f"modèle Pocket TTS « {self._language} » introuvable dans le cache local, et rien n'est "
+                    "téléchargé sans votre accord (voice.allow_download: true)"
+                )
+            self._model = TTSModel.load_model(language=self._language)
+            self._default_voice = voice or _default_voice(self._language)
+            self._state(self._default_voice)
         except Exception as exc:
             if allow_download:
                 raise
@@ -68,8 +72,7 @@ class PocketTextToSpeech(TextToSpeech):
                     f"la voix « {voice} » est une URL : rien n'est téléchargé sans votre accord "
                     "(voice.allow_download: true) — nommez une voix du cache ou un fichier local"
                 )
-            with hub_offline(not self._allow_download):
-                self._states[voice] = self._model.get_state_for_audio_prompt(voice)
+            self._states[voice] = self._model.get_state_for_audio_prompt(voice)
         return self._states[voice]
 
     def synthesize(self, text: str, *, voice: str | None = None) -> Speech:

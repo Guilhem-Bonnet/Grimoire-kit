@@ -138,6 +138,7 @@ def fake_pocket(fake_module, monkeypatch) -> type[FakeTTSModel]:
         get_default_voice_for_language=lambda language: {"french": "estelle"}.get(language, "alba"),
     )
     fake_module("torch", int16="int16")
+    monkeypatch.setattr("grimoire.voice.pocket_tts_engine.model_cached", lambda options: True)
     return FakeTTSModel
 
 
@@ -145,8 +146,7 @@ def test_pocket_loads_french_offline_and_returns_wav(fake_pocket) -> None:
     slot = EngineSlot(get_spec("tts", "pocket-tts"), {"language": "fr", "allow_download": False}, idle_unload_s=0)
     speech = slot.run(lambda e: e.synthesize("Bonjour."))
     assert fake_pocket.loads == [{"language": "french"}]
-    assert fake_pocket.offline_seen == ["1", "1"]  # chargement et voix par défaut, hors ligne
-    assert "HF_HUB_OFFLINE" not in os.environ  # rendu tel quel après le chargement
+    assert "HF_HUB_OFFLINE" not in os.environ  # l'état du processus n'est jamais touché
     assert speech.sample_rate == 24000 and not speech.client_side
     with wave.open(io.BytesIO(speech.audio or b"")) as wav:
         assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) == (1, 2, 24000)
@@ -158,7 +158,7 @@ def test_pocket_with_consent_does_not_force_offline(fake_pocket) -> None:
     EngineSlot(get_spec("tts", "pocket-tts"), {"allow_download": True, "voice": "alba"}, idle_unload_s=0).run(
         lambda e: e.synthesize("x", voice="alba"),
     )
-    assert fake_pocket.offline_seen == [None, None]
+    assert "HF_HUB_OFFLINE" not in os.environ
 
 
 def test_pocket_missing_model_is_a_readable_reason(fake_pocket) -> None:
@@ -168,16 +168,6 @@ def test_pocket_missing_model_is_a_readable_reason(fake_pocket) -> None:
     assert "« french »" in err.value.reason and "voice.allow_download: true" in err.value.reason
     assert "HF_HUB_OFFLINE" not in os.environ
 
-
-def test_hub_offline_flips_the_huggingface_constant(fake_module, monkeypatch) -> None:
-    from grimoire.voice._offline import hub_offline
-
-    constants = fake_module("huggingface_hub.constants", HF_HUB_OFFLINE=False)
-    fake_module("huggingface_hub", constants=constants)
-    monkeypatch.setenv("HF_HUB_OFFLINE", "0")
-    with hub_offline():
-        assert constants.HF_HUB_OFFLINE is True and os.environ["HF_HUB_OFFLINE"] == "1"
-    assert constants.HF_HUB_OFFLINE is False and os.environ["HF_HUB_OFFLINE"] == "0"
 
 
 def test_pocket_other_failure_is_not_called_a_cache_miss(fake_pocket) -> None:
@@ -219,7 +209,7 @@ def test_pocket_url_voice_is_refused_without_consent(fake_pocket) -> None:
     with pytest.raises(EngineUnavailableError) as err:
         slot.run(lambda e: None)
     assert "URL" in err.value.reason and "introuvable dans le cache" not in err.value.reason
-    assert fake_pocket.offline_seen == ["1"]  # refusée avant tout appel du moteur à la voix
+    assert fake_pocket.loads == [{"language": "french"}]  # refusée avant tout appel du moteur à la voix
 
 
 def test_pocket_url_voice_is_allowed_with_consent(fake_pocket) -> None:
@@ -227,58 +217,79 @@ def test_pocket_url_voice_is_allowed_with_consent(fake_pocket) -> None:
         get_spec("tts", "pocket-tts"), {"voice": "hf://kyutai/voix.wav", "allow_download": True}, idle_unload_s=0
     )
     slot.run(lambda e: None)
-    assert fake_pocket.offline_seen == [None, None]
+    assert "HF_HUB_OFFLINE" not in os.environ
 
 
-def test_overlapping_loads_never_leave_the_process_offline(fake_module, monkeypatch) -> None:
+def test_pocket_absent_from_cache_is_refused_before_loading(fake_pocket, monkeypatch) -> None:
+    monkeypatch.setattr("grimoire.voice.pocket_tts_engine.model_cached", lambda options: False)
+    with pytest.raises(EngineUnavailableError) as err:
+        EngineSlot(get_spec("tts", "pocket-tts"), {"language": "fr"}, idle_unload_s=0).run(lambda e: None)
+    assert "introuvable dans le cache" in err.value.reason
+    assert fake_pocket.loads == [] and fake_pocket.offline_seen == []  # rien n'a été chargé
+
+
+def test_loading_never_touches_the_process_hub_state(fake_pocket, monkeypatch) -> None:
     import threading
 
-    from grimoire.voice._offline import hub_offline
-
-    constants = fake_module("huggingface_hub.constants", HF_HUB_OFFLINE=False)
-    fake_module("huggingface_hub", constants=constants)
-    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
-    inside = threading.Barrier(2)
-    release = threading.Event()
-    first_out = threading.Event()
-
-    def worker(first: bool) -> None:
-        with hub_offline():
-            inside.wait(timeout=5)  # les deux sont dedans en même temps
-            if first:
-                release.wait(timeout=5)
-        if first:
-            first_out.set()
-
-    t1 = threading.Thread(target=worker, args=(True,))
-    t2 = threading.Thread(target=worker, args=(False,))
-    t1.start()
-    t2.start()
-    t2.join(timeout=5)  # le second sort d'abord : le premier, entré avant lui, tient encore
-    assert constants.HF_HUB_OFFLINE is True and os.environ["HF_HUB_OFFLINE"] == "1"
-    release.set()
-    t1.join(timeout=5)
-    assert first_out.is_set()
-    assert constants.HF_HUB_OFFLINE is False and "HF_HUB_OFFLINE" not in os.environ
-
-
-def test_many_threads_restore_the_original_state(fake_module, monkeypatch) -> None:
-    import threading
-
-    from grimoire.voice._offline import hub_offline
-
-    constants = fake_module("huggingface_hub.constants", HF_HUB_OFFLINE=False)
-    fake_module("huggingface_hub", constants=constants)
     monkeypatch.setenv("HF_HUB_OFFLINE", "0")
+    seen: list[str | None] = []
+    original = FakeTTSModel.load_model.__func__
 
-    def work() -> None:
-        for _ in range(50):
-            with hub_offline():
-                pass
+    def spy(cls, language=None):
+        seen.append(os.environ.get("HF_HUB_OFFLINE"))
+        return original(cls, language)
 
-    threads = [threading.Thread(target=work) for _ in range(8)]
+    monkeypatch.setattr(FakeTTSModel, "load_model", classmethod(spy))
+    threads = [
+        threading.Thread(
+            target=lambda: EngineSlot(get_spec("tts", "pocket-tts"), {"language": "fr"}, idle_unload_s=0).run(
+                lambda e: None
+            )
+        )
+        for _ in range(8)
+    ]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=10)
-    assert constants.HF_HUB_OFFLINE is False and os.environ["HF_HUB_OFFLINE"] == "0"
+    assert seen == ["0"] * 8 and os.environ["HF_HUB_OFFLINE"] == "0"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [FileNotFoundError("voix.wav"), RuntimeError("CUDA out of memory")],
+)
+def test_other_failures_are_not_cache_misses(exc) -> None:
+    from grimoire.voice._offline import is_cache_miss
+
+    assert not is_cache_miss(exc)
+
+
+def test_repository_not_found_is_not_a_cache_miss() -> None:
+    from grimoire.voice._offline import is_cache_miss
+
+    class RepositoryNotFoundError(Exception):
+        pass
+
+    assert not is_cache_miss(RepositoryNotFoundError("dépôt inexistant"))
+
+
+def test_context_does_not_make_a_cache_miss() -> None:
+    from grimoire.voice._offline import is_cache_miss
+
+    try:
+        try:
+            raise FileNotFoundError("x")
+        except FileNotFoundError:
+            raise RuntimeError("CUDA OOM") from None
+    except RuntimeError as exc:
+        assert not is_cache_miss(exc)
+
+
+def test_explicit_cause_local_entry_not_found_is_a_cache_miss() -> None:
+    from grimoire.voice._offline import is_cache_miss
+
+    try:
+        raise RuntimeError("enveloppe") from LocalEntryNotFoundError("x")
+    except RuntimeError as exc:
+        assert is_cache_miss(exc)
