@@ -12,7 +12,7 @@ janitor :
       host: claude-code           # l'hôte du projet : claude-code (défaut, absent = comportement d'avant) | gemini
                                   # (worker sur Gemini CLI, missions/gemini_host.py ; relecteur, arbitre et session
                                   # orchestrateur pas encore outillés sur Gemini : non lancés, la raison est dite) ;
-                                  # toute autre valeur rend la politique illisible
+                                  # toute autre valeur, vide comprise, rend la politique illisible
       roles:
         worker:
           enabled: false          # défaut : rien n'est lancé, le comportement actuel est inchangé
@@ -368,7 +368,9 @@ def _flag(data: dict[str, Any], key: str, where: str) -> bool:
 
 def _host(data: dict[str, Any], role: str, admitted: tuple[str, ...], default: str = CLAUDE_CODE_HOST) -> str:
     where = f"orchestrator.roles.{role}.host"
-    host = _text(data.get("host", default), where) or default
+    host = _text(data.get("host", default), where)
+    if not host:
+        raise _InvalidPolicyError(f"{where} : vide (admis : {', '.join(admitted)} ; omettre la clé pour {default})")
     if host not in admitted:
         raise _InvalidPolicyError(f"{where} : {host!r} inconnu ou non pris en charge (admis : {', '.join(admitted)})")
     return host
@@ -521,7 +523,12 @@ def _parse_arbiter(raw: Any) -> ArbiterRole:
 
 def _parse(block: Any) -> OrchestratorPolicy:
     top = _table(block, "orchestrator", frozenset({"base", "host", "roles", "breaker", "janitor", "probe_host"}))
-    host = _text(top.get("host", CLAUDE_CODE_HOST), "orchestrator.host") or CLAUDE_CODE_HOST
+    host = _text(top.get("host", CLAUDE_CODE_HOST), "orchestrator.host")
+    if not host:
+        # Une clé posée mais vide n'est pas « absente » : elle ne vaut pas claude-code en silence.
+        raise _InvalidPolicyError(
+            f"orchestrator.host : vide (admis : {', '.join(PROJECT_HOSTS)} ; omettre la clé pour {CLAUDE_CODE_HOST})"
+        )
     if host not in PROJECT_HOSTS:
         raise _InvalidPolicyError(f"orchestrator.host : {host!r} inconnu (admis : {', '.join(PROJECT_HOSTS)})")
     roles = _table(
