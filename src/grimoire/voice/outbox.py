@@ -36,6 +36,8 @@ __all__ = [
 SPOKEN_TAG = "voix"
 #: Débit moyen du français parlé : ~150 mots par minute.
 WORDS_PER_SECOND = 2.5
+#: Longueur moyenne d'un mot, espace comprise : un « mot » géant compte pour plusieurs mots.
+CHARS_PER_WORD = 8
 DETAIL_ON_SCREEN = "Le détail est à l'écran."
 
 _TAG_RE = re.compile(rf"<{SPOKEN_TAG}>(.*?)</{SPOKEN_TAG}>", re.DOTALL | re.IGNORECASE)
@@ -51,7 +53,12 @@ _SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
 
 def estimate_seconds(text: str) -> float:
     """Durée estimée de lecture, à ~150 mots par minute."""
-    return round(len(text.split()) / WORDS_PER_SECOND, 1)
+    return round(_units(text) / WORDS_PER_SECOND, 1)
+
+
+def _units(text: str) -> int:
+    """Mots, mais jamais moins que ``caractères / CHARS_PER_WORD`` : un mot de 100 000 signes n'est pas un mot."""
+    return max(len(text.split()), -(-len(text) // CHARS_PER_WORD))
 
 
 def spoken_instruction(max_seconds: float) -> str:
@@ -91,27 +98,39 @@ def _clean(text: str) -> tuple[str, bool]:
 
 def _cap(text: str, max_seconds: float) -> tuple[str, bool]:
     budget = max(1, int(max_seconds * WORDS_PER_SECOND))
-    if len(text.split()) <= budget:
+    if _units(text) <= budget:
         return text, False
     out: list[str] = []
     used = 0
     for sentence in _SENTENCE_RE.split(text):
-        n = len(sentence.split())
+        n = _units(sentence)
         if used + n > budget:
             break
         out.append(sentence)
         used += n
-    if not out:  # une seule phrase plus longue que le plafond : coupe au mot
-        out = [" ".join(text.split()[:budget]).rstrip(",;:") + "…"]
+    if not out:  # une seule phrase plus longue que le plafond : coupe au mot, puis au caractère
+        head = text[: budget * CHARS_PER_WORD]
+        words = head.split()[:budget]
+        if len(words) > 1 and not text[len(head) : len(head) + 1].isspace():
+            words = words[:-1]  # le dernier mot est coupé en deux : on ne le dit pas
+        out = [" ".join(words).rstrip(",;:") + "…"]
     return " ".join(out), True
+
+
+def _outside_code(reply: str) -> str:
+    """La réponse sans blocs de code, code en ligne ni citations : ce qui y est cité n'est pas le message de l'orchestrateur."""
+    text = _FENCE_RE.sub(" ", reply)
+    text = _INLINE_CODE_RE.sub(" ", text)
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
 
 
 def spoken_from_reply(reply: str, max_seconds: float) -> tuple[str, str]:
     """Le texte à dire pour une réponse, et sa source (``"tag"`` ou ``"rules"``). ``("", "none")`` s'il n'y a rien à dire."""
+    reply = _outside_code(reply)  # une balise citée (code, fichier recopié, citation) n'est jamais lue
     tags = _TAG_RE.findall(reply)
     source = "tag"
     if tags:
-        text, removed = _clean(tags[-1])
+        text, removed = _clean(tags[0])  # la première balise hors code ; le repli déterministe sinon
     else:
         text, removed = "", False
     if not text:
@@ -150,7 +169,7 @@ class OutboxMessage:
 
 
 class Outbox:
-    """Les messages parlés d'un projet. ``synthesize`` : ``texte -> Speech`` (le moteur de synthèse)."""
+    """Les messages parlés d'un projet, gardés en mémoire : une boîte d'envoi est perdue au redémarrage. ``synthesize`` : ``texte -> Speech`` (le moteur de synthèse)."""
 
     def __init__(self, synthesize: Callable[[str], Speech], *, keep: int = 20) -> None:
         self._synthesize = synthesize
@@ -181,15 +200,26 @@ class Outbox:
             return next((m for m in self._messages if m.id == message_id), None)
 
     def play(self, message_id: str) -> tuple[OutboxMessage, Speech]:
-        """Fige le message et rend son audio, synthétisé à ce moment-là seulement, une fois."""
-        with self._lock:
-            message = self.get(message_id)
-            if message is None:
-                raise KeyError(message_id)
-            message.played = True  # figé avant la synthèse : une réponse qui arrive ouvre un autre message
-            if message.audio is None:
-                message.audio = self._synthesize(message.text)
-            return message, message.audio
+        """Fige le message et rend son audio, synthétisé à ce moment-là seulement, une fois.
+
+        La synthèse tourne hors verrou (elle ne bloque pas ``submit``) ; le message n'est figé qu'après
+        une synthèse réussie, et si le texte a été révisé pendant ce temps on resynthétise le nouveau.
+        """
+        while True:
+            with self._lock:
+                message = self.get(message_id)
+                if message is None:
+                    raise KeyError(message_id)
+                if message.audio is not None:
+                    message.played = True
+                    return message, message.audio
+                text, revisions = message.text, message.revisions
+            speech = self._synthesize(text)  # échec : le message reste révisable
+            with self._lock:
+                if message.revisions == revisions or message.played:
+                    message.audio = message.audio or speech
+                    message.played = True
+                    return message, message.audio
 
     def state(self) -> dict[str, Any]:
         with self._lock:
