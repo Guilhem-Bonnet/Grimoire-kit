@@ -631,6 +631,16 @@ def test_un_role_desactive_ignore_une_derogation_pourtant_scellee(projet: Path, 
     assert not host.of("gh", "pr", "merge")
 
 
+def test_un_role_desactive_ne_laisse_pas_une_demande_ouverte_bloquer_la_tache(tmp_path: Path) -> None:
+    """Désactivé en cours de route, le rôle ne retient plus la tâche : relecteur et merger reprennent leur cours."""
+    root, service, task, _policy = scene(tmp_path)
+    ask(root, service, task)
+    assert arbiter.open_request(service, task.id) is not None
+    write_policy(root, arbiter_on=False)
+    assert not arbiter.role_enabled(TaskService(root))
+    assert arbiter.open_request(TaskService(root), task.id) is None
+
+
 def test_une_decision_forgee_au_ledger_ne_s_applique_pas(tmp_path: Path) -> None:
     """Une ligne ``task.arbitration_decided`` sans sceau : le tick ne l'applique pas, l'humain tranche."""
     root, service, task, policy = scene(tmp_path)

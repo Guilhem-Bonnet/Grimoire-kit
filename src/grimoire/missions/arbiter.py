@@ -106,6 +106,7 @@ __all__ = [
     "record_decision",
     "request_arbitration",
     "request_refusal",
+    "role_enabled",
     "sealed_decision",
     "sealed_request",
 ]
@@ -355,6 +356,17 @@ def _store(service: TaskService) -> Any:
     return MandateStore(service.home_root)
 
 
+def role_enabled(service: TaskService) -> bool:
+    """Le rôle ``arbiter`` est-il actif *maintenant* ? Une politique illisible le désactive (échec fermé)."""
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+
+    try:
+        read = load_orchestrator_policy(service.home_root)
+    except Exception:
+        return False
+    return bool(read.usable and read.policy is not None and read.policy.arbiter.enabled)
+
+
 def _seal_entries(service: TaskService, task_id: str, kind: str) -> list[dict[str, Any]]:
     """Les entrées *kind* de cette tâche, telles que le journal d'autorité les garde ; une lecture douteuse rend ``[]``."""
     try:
@@ -505,8 +517,11 @@ def open_request(service: TaskService, task_id: str) -> ArbitrationRequest | Non
     """La demande d'arbitrage encore ouverte d'une tâche (scellée, ni tranchée, ni rendue à l'humain), ou ``None``.
 
     Une ligne ``task.arbitration_requested`` sans sceau au journal d'autorité est ignorée : elle ne peut ni retenir la
-    fusion ni couper la relecture sur la foi du ledger.
+    fusion ni couper la relecture sur la foi du ledger. Rôle désactivé : aucune demande n'attend plus rien — le
+    relecteur et le merger reprennent le comportement d'avant au lieu de laisser la tâche dormir.
     """
+    if not role_enabled(service):
+        return None
     events = _events_of(service, task_id)
     closed = {
         e.payload.get("request_id") for e in events
@@ -809,16 +824,13 @@ def merge_grant(service: TaskService, task_id: str) -> LedgerEvent | None:
 
     Un READY scellé, lui, garde toujours le chemin du sceau.
     """
-    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
-
+    if not role_enabled(service):
+        return None
     try:
-        read = load_orchestrator_policy(service.home_root)
-        if not read.usable or read.policy is None or not read.policy.arbiter.enabled:
-            return None
         from grimoire.missions.reviewer import entered_review_at
 
         entered = entered_review_at(service, task_id)
-    except Exception:  # politique ou ledger illisible : aucune dérogation ne s'applique
+    except Exception:  # ledger illisible : aucune dérogation ne s'applique
         return None
     events = _events_of(service, task_id)
     grants = [e for e in events if e.event_type == ARBITRATED_EVENT
