@@ -1,0 +1,1 @@
+- feat(governance): `project-context.yaml` accepte `governance.roles` (`moa` : l'humain qui porte le besoin, obligatoire ; `moe` : « orchestrateur » par défaut), `grimoire doctor` rend un contrôle `moa_moe` (avertissement si la section est absente, jamais une erreur) et `grimoire init` pose la question de la MOA (Refs #1342)
