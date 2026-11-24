@@ -104,6 +104,15 @@ def detect_dialect(payload: Mapping[str, Any]) -> PayloadDialect:
     return PayloadDialect.UNKNOWN
 
 
+#: Agent cloud Copilot (#1280, P3) : aucune marque dans la charge. La référence des hooks
+#: (https://docs.github.com/en/copilot/reference/hooks-reference, lue le 2026-11-23)
+#: décrit la même entrée pour la CLI et l'agent cloud ; seuls `agentId`/`agentType`/
+#: `parentAgentId` s'ajoutent, et pour un sous-agent, quelle que soit la surface. Le
+#: bac à sable cloud se reconnaît à son environnement (`COPILOT_AGENT_PROMPT`), pas à la
+#: charge. La garde ne rend donc jamais `deny` à la place de `ask` d'après la charge :
+#: ce serait deviner. Et c'est inutile là où ça compterait — la même référence dit que
+#: l'hôte traite `ask` comme `deny` sous l'agent cloud « because no user is available ».
+
 #: Clés que seul Claude Code envoie à ses hooks : ``permission_mode`` est un champ
 #: commun de toutes ses entrées d'outil (https://code.claude.com/docs/en/hooks,
 #: « Common input fields »), ``effort``/``prompt_id``/``scratchpad_dir`` aussi.
