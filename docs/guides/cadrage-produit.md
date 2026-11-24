@@ -205,7 +205,11 @@ L'intake propose, avec sa raison, l'une des douze natures (nouveau projet, nouve
 fonctionnalité, évolution, anomalie, incident, investigation, analyse, recherche,
 maintenance, migration, sécurité, question), en français comme en anglais, sans modèle.
 `grimoire cadrage interview --kind <nature>` la corrige et rend les questions propres,
-le livrable attendu et la recette de la MOA. Une question ne déclenche aucun entretien ;
-un incident rend trois questions au plus, le cadrage complet est reporté au post-mortem
-et ne bloque jamais le `check`. Changer de nature en cours conserve les réponses déjà
+le livrable attendu et la recette de la MOA. Une question ne déclenche aucun entretien
+et n'efface jamais un entretien déjà entamé, qui reste contrôlé. Un incident rend trois
+questions au plus et ne bloque jamais l'action immédiate : le cadrage complet est reporté
+au post-mortem, que `grimoire cadrage check` signale comme dû (« Post-mortem dû ») tant
+que les angles obligatoires restent ouverts. Une demande interrogative ou étiquetée qui
+porte un verbe d'action (« Comment ajouter un export CSV ? », « incident: ajouter… »)
+reste classée par ce verbe. Changer de nature en cours conserve les réponses déjà
 consignées.

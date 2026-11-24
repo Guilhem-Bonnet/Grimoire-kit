@@ -213,13 +213,31 @@ def interview_plan(
         kind_source = f"intake ({proposal['request_kind']['reason']})"
     if depth is None:
         depth = classify_depth(proposal, current) if proposal else "standard"
-    if not KIND_PROFILES[current].interview and state is None:
-        return _render({"depth": depth, "angles": {}, "kind": current.value}, source, kind_source)
+    if not KIND_PROFILES[current].interview:
+        # Une question n'écrit rien et n'efface jamais un entretien déjà entamé : il reste contrôlé.
+        view = _render({"depth": depth, "angles": {}, "kind": current.value}, source, kind_source)
+        if state is not None:
+            kept = _open_required(state)
+            view.update(open_required=kept, complete=not kept, kept_kind=str(state.get("kind") or ""))
+            view["note"] += " L'entretien déjà entamé est conservé et reste contrôlé par cadrage check."
+        return view
     old_kind = (state or {}).get("kind")
     if state is None or state["depth"] != depth or old_kind != current.value:
         state = {"depth": depth, "kind": current.value, "angles": (state or {}).get("angles", {})}
         _save(root, chantier, state)
     return _render(state, source, kind_source)
+
+
+def _angle_done(rec: dict[str, Any]) -> bool:
+    state = rec.get("state", "ouvert")
+    return state == "couvert" or (state == "ecarte" and bool(str(rec.get("reason", "")).strip()))
+
+
+def _open_required(state: dict[str, Any]) -> list[str]:
+    """Angles obligatoires de la profondeur encore ouverts — quelle que soit la nature (gate)."""
+    required, _ = _PROFILE[str(state["depth"])]
+    recorded = state.get("angles", {})
+    return [aid for aid in required if not _angle_done(recorded.get(aid, {}))]
 
 
 def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée") -> dict[str, Any]:
@@ -230,14 +248,13 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
     if kind is not None and profile is not None and not profile.interview:
         return {
             "kind": kind.value, "kind_label": profile.label, "kind_source": kind_source,
-            "interview": False, "depth": depth, "depth_source": source, "questions_per_angle": 0,
+            "interview": False, "blocking": False, "postmortem_due": False, "depth": depth,
+            "depth_source": source, "questions_per_angle": 0,
             "kind_questions": [], "deliverable": profile.deliverable, "acceptance": profile.acceptance,
             "deferred": "", "angles": [], "open_required": [], "complete": True,
             "note": "Une question ne déclenche aucun entretien : répondre directement.",
         }
     non_blocking = profile is not None and not profile.blocking
-    if non_blocking:
-        required = ()
     recorded = state.get("angles", {})
     angles: list[dict[str, Any]] = []
     for a in ANGLES:
@@ -245,17 +262,15 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
         angles.append({
             "id": a.id, "title": a.title, "intent": a.intent,
             "required": a.id in required, "state": rec.get("state", "ouvert"),
-            "questions": list(a.seeds[:per_angle]),
+            "questions": [] if non_blocking else list(a.seeds[:per_angle]),
             "answers": list(rec.get("answers", [])), "reason": rec.get("reason", ""),
         })
-    open_required = [
-        x["id"] for x in angles
-        if x["required"] and not (x["state"] == "couvert" or (x["state"] == "ecarte" and x["reason"].strip()))
-    ]
+    open_required = _open_required(state)
     view: dict[str, Any] = {
-        "depth": depth, "depth_source": source, "questions_per_angle": per_angle,
+        "depth": depth, "depth_source": source, "questions_per_angle": 0 if non_blocking else per_angle,
         "angles": angles, "open_required": open_required, "complete": not open_required,
-        "interview": True, "deferred": "",
+        "interview": True, "blocking": not non_blocking, "postmortem_due": non_blocking and bool(open_required),
+        "deferred": "",
     }
     if profile is not None and kind is not None:
         questions = list(profile.questions[: profile.max_questions] if profile.max_questions else profile.questions)
@@ -264,10 +279,10 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
             deliverable=profile.deliverable, acceptance=profile.acceptance,
         )
         if non_blocking:
-            view["deferred"] = "Rétablir d'abord : l'entretien complet est reporté au post-mortem (jamais bloquant)."
-            for item in angles:
-                item["questions"] = []
-            view["questions_per_angle"] = 0
+            view["deferred"] = (
+                "Rétablir d'abord : l'action immédiate n'est jamais bloquée ; l'entretien complet est reporté "
+                "au post-mortem, dû tant que les angles obligatoires restent ouverts (cadrage check le signale)."
+            )
     return view
 
 
@@ -342,9 +357,13 @@ def check_interview(root: Path, chantier: str | None = None) -> list[str]:
         return [f"Entretien de cadrage : {exc}"]
     if state is None:
         return []
-    view = _render(state, "enregistrée")
-    if not view["open_required"]:
+    open_required = _open_required(state)
+    if not open_required:
         return []
-    names = ", ".join(view["open_required"])
-    return [f"Entretien de cadrage ({STATE_FILE}, profondeur {view['depth']}) : angle(s) obligatoire(s) "
+    names = ", ".join(open_required)
+    kind = parse_kind(str(state["kind"])) if state.get("kind") else None
+    if kind is not None and not KIND_PROFILES[kind].blocking:
+        return [f"Post-mortem dû ({STATE_FILE}, nature {kind.value}, profondeur {state['depth']}) : "
+                f"l'action immédiate n'a pas été bloquée ; angle(s) obligatoire(s) à couvrir — {names}"]
+    return [f"Entretien de cadrage ({STATE_FILE}, profondeur {state['depth']}) : angle(s) obligatoire(s) "
             f"encore ouvert(s) ou écarté(s) sans raison — {names}"]

@@ -272,6 +272,15 @@ _RULES: tuple[tuple[RequestKind, re.Pattern[str]], ...] = (
         ),
     ),
     (
+        # Corriger la documentation n'est pas une anomalie du produit : c'est de l'entretien.
+        RequestKind.MAINTENANCE,
+        _rx(
+            r"(?:corrig|fix|mettre a jour|update|reprendre|relire)\w*\b.{0,40}\b"
+            r"(?:doc\b|docs\b|documentation|readme|changelog|commentaires?\b|typos?\b|coquilles?\b|faute de frappe)",
+            r"typos? in",
+        ),
+    ),
+    (
         RequestKind.BUG,
         _rx(
             r"corrig",
@@ -459,6 +468,15 @@ _QUESTION_RX = _rx(
 
 
 _LEADING_QUESTION_RX = re.compile(r"^\W*(?:pourquoi|comment|c'est quoi|qu'est|why|how|what|where|explique|explain)\b")
+#: Verbe d'action : une demande interrogative (« Comment ajouter… ? ») ou préfixée (« incident: ajouter… »)
+#: qui en porte un reste une demande de travail, classée par les règles.
+_ACTION_RX = _rx(
+    r"ajout", r"implement", r"creer", r"cree\b", r"construi", r"developp", r"mettre en place", r"mise en place",
+    r"integrer", r"\badd\b", r"\badding\b", r"\bcreate\b", r"\bbuild\b", r"\bdevelop\b", r"set ?up\b",
+    r"\bintegrate\b",
+)
+#: Étiquette en tête de demande (« incident: », « urgent : », « bug — ») : un mot suivi d'un séparateur.
+_PREFIX_RX = re.compile(r"^\W*[a-z][\w-]{0,20}\s*[:\u2014-]\s+")
 
 
 def parse_kind(value: str) -> RequestKind:
@@ -474,13 +492,18 @@ def classify_request_kind(text: str) -> dict[str, Any]:
     """Propose la nature d'une demande et la raison du choix (déterministe, français et anglais).
 
     Une demande sans signal retombe sur « nouvelle fonctionnalité » avec une confiance faible ;
-    un texte interrogatif sans verbe d'action est une question.
+    un texte interrogatif sans verbe d'action est une question ; une étiquette de tête (« incident: »)
+    ne l'emporte pas sur un verbe d'action.
     """
     raw = text.strip()
     if not raw:
         raise ValueError("la demande est vide")
     folded = _fold(raw)
-    lead = _LEADING_QUESTION_RX.match(folded)
+    action = _ACTION_RX.search(folded)
+    prefix = _PREFIX_RX.match(folded)
+    if prefix and action and action.start() >= prefix.end():
+        folded = folded[prefix.end():]  # l'étiquette ne l'emporte pas sur le verbe d'action
+    lead = None if action else _LEADING_QUESTION_RX.match(folded)
     for kind, rx in _RULES:
         if lead and kind is not RequestKind.INCIDENT:
             return _proposal(RequestKind.QUESTION, f"formulation interrogative « {lead.group(0).strip()} »", "haute")

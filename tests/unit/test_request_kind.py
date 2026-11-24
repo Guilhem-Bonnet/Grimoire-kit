@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
-from grimoire.core.cadrage import scaffold
+from grimoire.core.cadrage import cadrage_dir, scaffold
 from grimoire.core.cadrage_interview import answer, check_interview, interview_plan
 from grimoire.missions.intake import intake_proposal
 from grimoire.missions.request_kind import KIND_PROFILES, RequestKind, classify_request_kind, parse_kind
@@ -189,11 +189,83 @@ def test_cadrage_interview_incident_three_questions_never_blocks(root: Path) -> 
     plan = interview_plan(root, "demo", text="Ça plante en prod", depth="approfondi")
     assert plan["kind"] == "incident"
     assert len(plan["kind_questions"]) <= 3
-    assert plan["open_required"] == [] and plan["complete"] is True
+    assert all(a["questions"] == [] for a in plan["angles"]) and plan["questions_per_angle"] == 0
+    # jamais bloquant pour l'action immédiate, mais le post-mortem reste dû et tracé dans le gate
+    assert plan["blocking"] is False and plan["postmortem_due"] is True
     assert "post-mortem" in plan["deferred"]
-    assert check_interview(root, "demo") == []
+    errors = check_interview(root, "demo")
+    assert len(errors) == 1 and errors[0].startswith("Post-mortem dû") and "incident" in errors[0]
     res = runner.invoke(app, ["cadrage", "check", "--chantier", "demo", str(root)])
-    assert "angle(s) obligatoire(s)" not in res.output
+    assert "Post-mortem dû" in res.output
+
+
+def test_cadrage_interview_incident_postmortem_cleared_when_angles_covered(root: Path) -> None:
+    interview_plan(root, "demo", kind="incident", depth="express")
+    for aid in ("utilisateurs", "criteres", "hors-perimetre"):
+        answer(root, "demo", aid, f"réponse {aid}")
+    plan = interview_plan(root, "demo")
+    assert plan["postmortem_due"] is False and plan["complete"] is True
+    assert check_interview(root, "demo") == []
+
+
+def test_cadrage_interview_incident_does_not_empty_started_gate(root: Path) -> None:
+    interview_plan(root, "demo", kind="nouvelle-fonctionnalite", depth="standard")
+    answer(root, "demo", "utilisateurs", "Les comptables")
+    plan = interview_plan(root, "demo", kind="incident")
+    assert plan["complete"] is False and len(plan["open_required"]) == 4
+    assert check_interview(root, "demo") != []
+
+
+def test_cadrage_interview_question_never_erases_started_interview(root: Path) -> None:
+    interview_plan(root, "demo", kind="nouvelle-fonctionnalite", depth="standard")
+    answer(root, "demo", "utilisateurs", "Les comptables")
+    plan = interview_plan(root, "demo", kind="question")
+    assert plan["interview"] is False and plan["complete"] is False
+    assert plan["kept_kind"] == "nouvelle-fonctionnalite" and "conservé" in plan["note"]
+    assert check_interview(root, "demo") != []
+    again = interview_plan(root, "demo")
+    assert again["kind"] == "nouvelle-fonctionnalite"
+    users = next(a for a in again["angles"] if a["id"] == "utilisateurs")
+    assert users["answers"] == ["Les comptables"]
+
+
+def test_cadrage_interview_legacy_question_state_still_gated(root: Path) -> None:
+    target = cadrage_dir(root, "demo") / "entretien.json"
+    target.write_text(json.dumps({"depth": "express", "kind": "question", "angles": {}}), encoding="utf-8")
+    assert check_interview(root, "demo") != []
+
+
+def test_cadrage_interview_invalid_recorded_kind(root: Path) -> None:
+    target = cadrage_dir(root, "demo") / "entretien.json"
+    target.write_text(json.dumps({"depth": "express", "kind": "zzz", "angles": {}}), encoding="utf-8")
+    errors = check_interview(root, "demo")
+    assert len(errors) == 1 and "nature inconnue" in errors[0]
+
+
+@pytest.mark.parametrize(
+    ("text", "kind"),
+    [
+        ("Comment ajouter un export CSV des factures ?", RequestKind.NEW_FEATURE),
+        ("How to implement OAuth login", RequestKind.NEW_FEATURE),
+        ("Comment faire pour ajouter le SSO ?", RequestKind.NEW_FEATURE),
+        ("incident: ajouter un export PDF", RequestKind.NEW_FEATURE),
+        ("Urgent : ajouter un bouton", RequestKind.NEW_FEATURE),
+        ("Pourquoi la prod est tombée ?", RequestKind.INCIDENT),
+        ("Comment fonctionne le cache ?", RequestKind.QUESTION),
+        ("corrige la doc", RequestKind.MAINTENANCE),
+        ("Fix typos in the README", RequestKind.MAINTENANCE),
+        ("incident : la prod est down", RequestKind.INCIDENT),
+        ("Dis-moi pourquoi le cache existe", RequestKind.QUESTION),
+    ],
+)
+def test_request_kind_action_verb_beats_question_or_prefix(text: str, kind: RequestKind) -> None:
+    assert classify_request_kind(text)["kind"] == kind.value
+
+
+def test_cadrage_interview_question_phrased_feature_starts_interview(root: Path) -> None:
+    plan = interview_plan(root, "demo", text="Comment ajouter un export CSV des factures ?")
+    assert plan["kind"] == "nouvelle-fonctionnalite" and plan["interview"] is True
+    assert check_interview(root, "demo") != []
 
 
 def test_cadrage_interview_kind_change_keeps_answers(root: Path) -> None:
@@ -212,9 +284,9 @@ def test_cadrage_interview_kind_change_keeps_answers(root: Path) -> None:
 
 def test_cadrage_interview_incident_then_bug_requires_angles(root: Path) -> None:
     interview_plan(root, "demo", kind="incident", depth="standard")
-    assert check_interview(root, "demo") == []
+    assert check_interview(root, "demo")[0].startswith("Post-mortem dû")
     interview_plan(root, "demo", kind="anomalie")
-    assert check_interview(root, "demo") != []
+    assert check_interview(root, "demo")[0].startswith("Entretien de cadrage")
 
 
 def test_cadrage_interview_deep_kinds_force_deep_depth(root: Path) -> None:
