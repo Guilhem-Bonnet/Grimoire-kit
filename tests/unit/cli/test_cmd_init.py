@@ -225,7 +225,7 @@ class TestWizardAsksThreeQuestions:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     ) -> None:
         _hermetic_memory(monkeypatch)
-        scripted = iter(["", "", "1", "python,go", "3", "web", "domain=infra who=team-ops", ""])
+        scripted = iter(["", "", "", "1", "python,go", "3", "web", "domain=infra who=team-ops", ""])
         monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(lambda *a, **kw: next(scripted)))
         monkeypatch.setattr(cmd_init.Confirm, "ask", staticmethod(lambda *a, **kw: True))
         result = cmd_init._run_wizard(tmp_path, _scan(tmp_path, "python"), ArchetypeResolver().resolve(_scan(tmp_path, "python")), "lexical")
