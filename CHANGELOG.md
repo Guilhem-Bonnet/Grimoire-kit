@@ -7,7 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(missions): arbitre — `open_request` et le tick ne lisent une clôture (`task.arbitrated`, `task.arbitration_fallback`) que scellée au journal d'autorité (`arbitration_closure`) : une ligne forgée au ledger avec le `request_id` d'une demande ouverte ne la ferme plus ; la session arbitre refuse `gh pr diff|view --web` , `-w` et toute option courte groupée (`-cw`), guillemet ou tabulation (`DISALLOWED_TOOLS`) ; le sceau de clôture est posé après l’événement.
+- fix(missions): arbitre — `open_request` et le tick ne lisent une clôture (`task.arbitrated`, `task.arbitration_fallback`) que scellée au journal d'autorité (`arbitration_closure`) : une ligne forgée au ledger avec le `request_id` d'une demande ouverte ne la ferme plus ; la session arbitre n'a plus de liste noire d'options gh (contournée trois fois : `-cw`, tabulation) mais une liste blanche fermée de formes exactes sans `*`, générée pour la PR de la demande (`allowed_tools` : `gh pr diff <n>`, `gh pr view <n> --json <champs fixes>`), `--web`/`-w` compris refusés ; le sceau de clôture est posé après l’événement.
 
 ## [3.105.0] - 2026-11-24
 

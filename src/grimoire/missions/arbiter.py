@@ -89,6 +89,8 @@ __all__ = [
     "CRITERION_DEROGATED_EVENT",
     "DECISIONS",
     "DISALLOWED_TOOLS",
+    "VIEW_FIELDS",
+    "allowed_tools",
     "MIN_CONFIDENCE",
     "PERMISSION_MODE",
     "SESSION_NAME",
@@ -167,20 +169,25 @@ SESSION_TOOLS = "Read,Bash"
 #: ``git diff`` n'y est **pas** : un motif ``Bash(git diff *)`` accepte ``--output=<fichier>`` (une écriture) et
 #: ``--ext-diff``/``diff.external``/``core.pager`` (une commande). Le diff se lit par ``gh pr diff`` (stdout seulement,
 #: PR de la branche courante) et par ``Read`` ; le pack de preuve aussi.
-ALLOWED_TOOLS = (
-    "Read Bash(grimoire task show *) Bash(grimoire task arbitrate *) Bash(gh pr diff) Bash(gh pr diff *) "
-    "Bash(gh pr view) Bash(gh pr view *)"
-)
-#: Le refus, qui l'emporte sur la liste blanche : ``--web``/``-w`` ouvre un navigateur, y compris groupé
-#: (``-cw``, ``-wc``) ou après une tabulation. Les motifs n'ont que ``*`` : on refuse donc toute option courte
-#: (``-<lettre>…``, ``-q`` compris : ``--jq`` existe), tout ``web``, tout guillemet ou antislash (``'--web'``) et toute
-#: tabulation après le verbe. ``gh pr diff|view`` ne s'appelle qu'en lecture sur stdout, par options longues.
-_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-DISALLOWED_TOOLS = " ".join(
-    [f"Bash(gh pr {verb} {head}-{letter}*)" for verb in ("diff", "view") for head in ("", "* ") for letter in _LETTERS]
-    + [f"Bash(gh pr {verb}{sep}*{bad}*)" for verb in ("diff", "view") for sep in (" ",) for bad in ("web", "'", '"', "\\")]
-    + [f"Bash(gh pr {verb}\t*)" for verb in ("diff", "view")]
-)
+#:
+#: Pour gh, aucun ``*`` : seules des formes exactes, générées pour la PR de la demande (:func:`allowed_tools`). Une
+#: liste noire d'options (``-w``, ``-cw``, tabulation, guillemets) s'est contournée trois fois ; une option libre
+#: n'existe plus, donc rien à contourner.
+_STATIC_ALLOWED = "Read Bash(grimoire task show *) Bash(grimoire task arbitrate *)"
+#: Champs de ``gh pr view`` lisibles, fixes.
+VIEW_FIELDS = "title,body,files,reviews,statusCheckRollup"
+
+
+def allowed_tools(pr: int = 0) -> str:
+    """La liste blanche de la session pour la PR *pr* (0 : celle de la branche courante), sans option libre."""
+    target = f" {int(pr)}" if pr else ""
+    return f"{_STATIC_ALLOWED} Bash(gh pr diff{target}) Bash(gh pr view{target} --json {VIEW_FIELDS})"
+
+
+#: Valeur par défaut (PR de la branche courante), pour qui n'a pas de demande en main.
+ALLOWED_TOOLS = allowed_tools()
+#: Filet en plus de la liste blanche : tout ``gh`` portant ``web`` ou ``-w`` est refusé (le refus l'emporte).
+DISALLOWED_TOOLS = "Bash(gh *web*) Bash(gh *-w*) Bash(gh *\t*)"
 #: Aucune sortie de git/gh ne passe par un paginateur : un ``core.pager`` du dépôt n'exécute rien dans la session.
 SESSION_ENV = {"GIT_PAGER": "cat", "PAGER": "cat", "GH_PAGER": "cat"}
 _JSON_KEYS = frozenset({"schema", "decision", "criteria", "justification", "confidence", "replacement", "followup_title"})
@@ -1135,7 +1142,7 @@ class ArbiterStage:
             argv += ["--settings", str(settings), "--strict-mcp-config"]
         else:
             argv += ["--restricted", "--strict-mcp-config"]
-        argv += ["--tools", SESSION_TOOLS, "--allowed-tools", ALLOWED_TOOLS,
+        argv += ["--tools", SESSION_TOOLS, "--allowed-tools", allowed_tools(request.pr),
                  "--disallowed-tools", DISALLOWED_TOOLS, "--permission-mode", PERMISSION_MODE, self._prompt(request, model)]
         result = self._exec(argv, cwd, {**session_env(), **SESSION_ENV})
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
