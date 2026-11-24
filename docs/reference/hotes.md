@@ -22,7 +22,8 @@ projet (agents, standard, mémoire)
   ProjectSurface  ← description host-neutre, construite une fois
         │
         ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
-        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}, .vscode/mcp.json
+        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}, .vscode/mcp.json,
+        │                            .github/workflows/copilot-setup-steps.yml
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
         ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, .agents/skills, GEMINI.md
         ├──▶ émetteur Cursor       → .cursor/{hooks.json,agents,skills,rules}
@@ -163,8 +164,19 @@ seule, l'agent les utilise sans confirmation) :
 }
 ```
 
-Le serveur doit exister dans l'environnement de l'agent (le kit installé par une
-étape d'installation du dépôt). Un secret se déclare en secret ou variable
+Le serveur doit exister dans l'environnement de l'agent : c'est le rôle de
+`.github/workflows/copilot-setup-steps.yml`, que l'émetteur Copilot écrit
+(source : documentation GitHub « Customize the agent environment », lue le
+2026-11-23). Un seul job, `copilot-setup-steps` (le seul nom que Copilot prend),
+limité aux clés qu'il lit (`runs-on`, `timeout-minutes` ≤ 59, `permissions`,
+`steps`) : Python puis `pip install "grimoire-kit==<version>"`, la version du kit
+qui émet le fichier (celle que `grimoire up` inscrit dans `_grimoire/kit/.up-version`).
+Ni secret ni variable, `permissions: contents: read` (Copilot a son propre
+jeton). Le fichier porte le marqueur de gestion : un `copilot-setup-steps.yml`
+écrit par le projet n'est jamais écrasé — `host sync` le préserve et le signale
+en conflit `foreign` (`edited` s'il a été modifié depuis l'émission) ; pour le
+garder sans conflit, déclarez-le dans `hosts.preserve` et ajoutez-y vous-même
+l'installation du kit. Un secret se déclare en secret ou variable
 d'environnement « Agents » préfixé `COPILOT_MCP_` et se référence par
 `$COPILOT_MCP_NOM` ou `${COPILOT_MCP_NOM}` dans `env` ; aucune valeur ne se
 commite.

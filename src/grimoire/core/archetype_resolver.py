@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.ci_markers import has_ci as repo_has_ci
 from grimoire.core.scanner import ScanResult
 
 
@@ -303,10 +304,6 @@ def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
 # *not* IaC (decision 2026-09-18, Guilhem: IaC means Terraform/K8s/Ansible/
 # Helm) — it falls through to `stack`, naming `stack-docker`.
 
-_CI_MARKERS: tuple[str, ...] = (
-    ".github/workflows", ".gitlab-ci.yml", ".circleci/config.yml",
-    "azure-pipelines.yml", ".travis.yml", "Jenkinsfile",
-)
 _JS_BUNDLERS: tuple[str, ...] = ("vite", "webpack")
 
 
@@ -332,7 +329,7 @@ def _package_json_bundler(root: Path) -> str | None:
 
 def _has_ci_and_tests(root: Path) -> bool:
     try:
-        has_ci = any((root / marker).exists() for marker in _CI_MARKERS)
+        has_ci = repo_has_ci(root)
         if not has_ci:
             return False
         return any(
