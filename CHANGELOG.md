@@ -7,6 +7,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(hosts): sous Copilot, le hook `SubagentStart` rend `additionalContext` avec la classe de vérifiabilité et le palier recommandés pour le sous-agent (décision `grimoire.subagent-start`, forme de la référence VS Code ; fixture documentée, pas une capture, aucune capacité bloquante annoncée). Claude Code, les autres hôtes et le harness Local (charge snake_case sans `timestamp`, qui exécute le même fichier) sont inchangés : la décision n'émet que sur une marque sourcée du harness Copilot. Refs #1280.
+- fix(missions): le merger ne fusionne plus une tâche qui déclare `--check` sans pack de preuve et verdict `verify` vert sur la tête relue — la question « fusionner ? » dit pourquoi, au ledger ; le verdict doit porter sur le dernier pack, couvrir chaque `--check` et avoir été rendu sur la tête relue (`verified-head`), une ligne de verdict illisible refuse (#1257)
+- test(guard): `test_une_ecriture_prouvee_est_refusee_et_revoque` distingue le refus par dépassement de `POLICY_BUDGET_S` (`detail.policy_budget == "exceeded"`, sans `authority_vector`) du refus de la garde : le refus reste exigé, le détail est affiché dans le message d'assertion, et un test force le chemin budget (#1305)
+
+### Fixed
+
+- **acp** : `AcpClient` ferme stdin et libère le sous-processus quand `start()` échoue (agent déjà sorti) ; `grimoire up` n'affiche plus « Exception ignored … BrokenPipeError » à la collecte du flux. Verdict doctor inchangé. Closes #1313.
+- **missions** : le janitor retire le `HOME` jetable d'un worker opencode (`~/.cache/grimoire-kit/opencode/<empreinte>/<tâche>-<nonce>`) quand sa tâche est terminale et son processus mort (nouvelle action `opencode_home`, rejouée tant que le worker vit), et balaie à chaque passage les dossiers orphelins inchangés depuis plus de 7 jours, hors tâche encore ouverte et worker vivant ; seul un enfant direct de la racine opencode du projet est supprimé, chemin résolu et liens symboliques refusés
+
 ## [3.104.0] - 2026-11-23
 
 - feat(missions): worker multi-hôte — interface `WorkerHost` (ligne de commande, environnement, modèle, mode de permission, consigne, identité, arrêt), Claude Code à l'identique (argv, environnement et fichiers comparés à une fixture produite depuis `origin/main`), et worker opencode sous `orchestrator.roles.worker.host: opencode` : `opencode run --format json` lancé en arrière-plan avec le fournisseur (DeepSeek, Moonshot/Kimi, Ollama local) et le modèle de la table `dispatch.models.opencode`, clé du magasin passée par l'environnement seulement (`OPENCODE_CONFIG_CONTENT` ne porte que `{env:VAR}`), plugin de garde du kit exigé dans le worktree et prouvé chargé par `opencode debug config` sinon rien ne part, identité lue dans `opencode session list`, battement, fin, arrêt et reprise (`--session`) suivis par le tick et le janitor ; la route sensible et les tâches V2 restent sur Claude Code (`host_fallback` noté), une tâche sans route est différée sans repli silencieux, et le relecteur reste sur Claude Code (`roles.reviewer.host: claude-code`, seule valeur admise) (#1310)

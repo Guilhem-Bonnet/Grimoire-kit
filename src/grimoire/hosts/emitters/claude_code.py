@@ -557,8 +557,9 @@ def _settings_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> J
             hooks = {}
         for event, entries in hooks_by_event.items():
             existing = hooks.get(event)
-            kept = [entry for entry in (existing if isinstance(existing, list) else []) if not _owned_entry(entry)]
-            hooks[event] = kept + entries
+            previous = existing if isinstance(existing, list) else []
+            kept = [entry for entry in previous if not _owned_entry(entry)]
+            hooks[event] = kept + [_keep_raised_timeout(entry, previous) for entry in entries]
         # An event we no longer install must lose its stale entry, or a project
         # keeps firing a rule its surface has dropped.
         for event, existing in list(hooks.items()):
@@ -586,6 +587,50 @@ def _settings_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> J
         return data
 
     return JsonMerge(relpath=CLAUDE_DIR / "settings.json", merge=merge, label=".claude/settings.json")
+
+
+def _hook_identity(entry: Any) -> tuple[str, str] | None:
+    """Ce qui désigne une entrée gérée d'un ``up`` à l'autre : son matcher et sa commande sans le lanceur.
+
+    Le lanceur (nom nu ou chemin du venv, voir :func:`_hook_program`) peut
+    changer entre deux ``up`` sans que le hook change : seule la queue
+    ``--host … --event … [--decision …]`` identifie la décision appelée.
+    """
+    if not isinstance(entry, dict):
+        return None
+    handlers = entry.get("hooks")
+    if not isinstance(handlers, list) or len(handlers) != 1 or not isinstance(handlers[0], dict):
+        return None
+    command = handlers[0].get("command")
+    if not isinstance(command, str) or " --host " not in command:
+        return None
+    matcher = entry.get("matcher", "")
+    return (matcher if isinstance(matcher, str) else "", command[command.index(" --host ") :])
+
+
+def _keep_raised_timeout(entry: dict[str, Any], previous: list[Any]) -> dict[str, Any]:
+    """*entry* émise, avec le délai de son entrée en place s'il est plus long (#1277).
+
+    Pour une garde en échec fermé un dépassement vaut refus : un délai relevé à
+    la main (machine lente, CI chargée) ne doit pas redescendre à chaque ``up``.
+    Un délai plus court que celui émis remonte, lui : c'est le plancher
+    :data:`FAIL_CLOSED_TIMEOUT`. Un hook consultatif reprend son délai émis.
+    """
+    (handler,) = entry["hooks"]
+    if handler.get("onFailure") != "block":
+        return entry
+    identity = _hook_identity(entry)
+    raised = handler["timeout"]
+    for candidate in previous:
+        if not _owned_entry(candidate) or _hook_identity(candidate) != identity:
+            continue
+        timeout = candidate["hooks"][0].get("timeout")
+        # ``bool`` est un ``int`` : ``true`` n'est pas un délai.
+        if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout > raised:
+            raised = timeout
+    if raised == handler["timeout"]:
+        return entry
+    return {**entry, "hooks": [{**handler, "timeout": raised}]}
 
 
 def _owned_entry(entry: Any) -> bool:
