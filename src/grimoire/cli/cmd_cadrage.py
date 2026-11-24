@@ -226,6 +226,30 @@ def _print_plan(plan: CadragePlan, *, check_only: bool = False, writes: bool = F
         )
 
 
+@cadrage_app.command("approve")
+def cadrage_approve(
+    requirement: str = typer.Argument(..., help="L'exigence à valider : REQ-001, ou <chantier>/REQ-001."),
+    path: Path = _path_arg,
+    actor: str = typer.Option("cli", "--actor", help="Qui valide (journalisé avec la MOA déclarée)."),
+) -> None:
+    """Valide une exigence au nom de la MOA — canal humain seulement (comme `task answer` et `task accept`).
+
+    La validation est scellée au journal d'autorité, pas au ledger : un agent, un orchestrateur — même sous
+    mandat — ne peut pas la poser. Modifier l'exigence ensuite la retire : la MOA a validé ce texte-là.
+    """
+    from grimoire.cli.cmd_task import _comment_origin
+    from grimoire.missions.mandate import gesture_origin
+    from grimoire.missions.requirement_gate import validate_requirement
+
+    root = path.resolve()
+    origin, _provenance = gesture_origin(_comment_origin())  # le même canal que task answer / accept
+    entry = _guard(lambda: validate_requirement(root, requirement, origin=origin, actor=actor))
+    console.print(
+        f"[green]exigence validée[/green] — {entry['requirement']} par la MOA {escape(entry['moa'])} "
+        f"[dim](journal d'autorité #{entry['seq']})[/dim]"
+    )
+
+
 # ── chantiers : plusieurs cadrages nommés par projet ─────────────────────────
 
 

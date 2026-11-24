@@ -499,7 +499,10 @@ def apply_plan(service: TaskService, plan: CadragePlan, actor: str) -> CadragePl
     for proposal in plan.proposals:
         added = service.add(
             proposal.title, proposal.acceptance, actor=actor, checks=proposal.checks, priority=proposal.priority,
-            extra={"cadrage": PLANNED, "covers": [plan.prefix + proposal.requirement]},
+            extra={
+                "cadrage": PLANNED, "covers": [plan.prefix + proposal.requirement],
+                "requirement": plan.prefix + proposal.requirement,  # M3 : la référence que le gate ready oppose
+            },
             mission_id=plan.mission,
         )
         proposal.task_id = added.task.id

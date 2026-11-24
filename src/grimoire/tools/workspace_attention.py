@@ -103,6 +103,8 @@ KIT_BEHIND = "kit_behind"
 SERVICE_RESOLVED = "service_resolved"
 #: Une option que le pilote a appliquée sans jugement assumé : hors des sections, dans le bloc « Décisions à revoir ».
 REVIEW_DECISION = "review_decision"
+#: #1342 (M3) : une tâche passée ``ready`` sans exigence validée par la MOA (mode signalé), à faire valider.
+REQUIREMENT_UNVALIDATED = "requirement_unvalidated"
 REVIEW_DECISIONS_LABEL = "Décisions à revoir"
 #: Le bloc montre ces décisions récentes et non reprises, jamais un historique sans fin (le journal « Décidé par le
 #: pilote » les garde toutes).
@@ -120,7 +122,7 @@ SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("review", "PR à revoir", (PR_REVIEW,)),
     ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
-    ("maintain", "À entretenir", (DIRECTIVE_UNACKED, *HYGIENE_KINDS, KIT_BEHIND)),
+    ("maintain", "À entretenir", (DIRECTIVE_UNACKED, REQUIREMENT_UNVALIDATED, *HYGIENE_KINDS, KIT_BEHIND)),
     ("resolved", "Résolu automatiquement", (SERVICE_RESOLVED,)),
 )
 #: Un type que :data:`SECTIONS` ne connaît pas tombe ici : jamais perdu.
@@ -438,6 +440,17 @@ def _orphan_reason(task: Any, card: dict[str, Any], now: datetime) -> str:
     return ""
 
 
+def _unvalidated_requirements(service: Any, tasks: list[Any]) -> list[str]:
+    """Les tâches ouvertes passées ``ready`` en mode signalé sans exigence validée (#1342, M3) : un item par projet."""
+    from grimoire.missions.requirement_gate import check_task, flagged_task_ids
+
+    flagged = flagged_task_ids(service.ledger.list_events())
+    return [
+        task.id for task in tasks
+        if task.id in flagged and task.status.value not in _FINISHED_STATES and check_task(service.home_root, task).gap
+    ]
+
+
 def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe | None) -> None:
     from grimoire.missions.autopilot_view import partition
     from grimoire.missions.decisions import pending_decisions
@@ -479,6 +492,13 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
         read.items[-1].update(_question_v2(service.ledger, decision.task_id, decision.question))
         if pilot is not None:
             read.items[-1]['pilot'] = pilot.to_dict()
+    unvalidated = _unvalidated_requirements(service, tasks)
+    if unvalidated:
+        _item(
+            read, REQUIREMENT_UNVALIDATED, "requirements", f"{len(unvalidated)} tâche(s) sans exigence validée",
+            "passées `ready` sans exigence validée par la MOA : `grimoire cadrage interview`, puis "
+            "`grimoire cadrage approve <exigence>`", task_ids=unvalidated,
+        )
     for task, card in zip(tasks, cards, strict=True):
         since = last.get(task.id) or str(task.created_at)
         session = card.get("session")

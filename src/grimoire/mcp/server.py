@@ -789,7 +789,7 @@ def task_add(
     actor: str = "mcp-agent",
     ready: bool = False,
     description: str = "",
-    finition: str = "", data_class: str = "",
+    finition: str = "", data_class: str = "", requirement: str = "",
     project_path: str = ".",
     ledger_root: str = "_grimoire-runtime-output/ledger",
 ) -> str:
@@ -810,6 +810,7 @@ def task_add(
         description: Context, rationale and leads for whoever claims the task — plain text, at most 4000 characters (#714). Shown by `task_show`, `task_context` and the cockpit card.
         finition: `maquette` or `peaufine`. Empty string inherits the project phase declared in project-context.yaml (exploration → maquette, construction/exploitation → peaufine), or stays undeclared.
         data_class: Class of the data the task reads. Empty string uses `routing.default_data_class` of the provider registry; with neither, no external provider receives the task (#1133).
+        requirement: The requirement the task serves (`REQ-001`). With `ready`, a project that requires validated requirements refuses a task whose requirement the MOA has not validated (#1342).
         project_path: Path to project root (default: current directory).
         ledger_root: Mission Ledger directory, relative to the project root.
     """
@@ -824,7 +825,7 @@ def task_add(
             origin="mcp",
             ready=ready,
             description=description,
-            finition=finition, data_class=data_class,
+            finition=finition, data_class=data_class, requirement=requirement,
         )
         return json.dumps(added.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:

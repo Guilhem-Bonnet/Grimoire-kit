@@ -354,6 +354,7 @@ def _parse_preserve(raw: Any) -> tuple[str, ...]:
 
 
 DEFAULT_MOE = "orchestrateur"
+REQUIREMENT_GATE_MODES = ("blocking", "flagged")
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,6 +369,14 @@ class GovernanceConfig:
     moa: str = ""
     moe: str = DEFAULT_MOE
     declared: bool = False
+    #: ``blocking`` ou ``flagged`` : la bascule du gate « exigence validée » (#1342, lot M3) ; vide = le défaut
+    #: (bloquant si les rôles sont déclarés, signalé sinon), voir :attr:`requirement_mode`.
+    requirement_gate: str = ""
+
+    @property
+    def requirement_mode(self) -> str:
+        """Le mode effectif du gate ``proposed → ready`` : la bascule déclarée, sinon bloquant dès que la MOA est nommée."""
+        return self.requirement_gate or ("blocking" if self.declared else "flagged")
 
     @classmethod
     def from_dict(cls, data: Any) -> GovernanceConfig:
@@ -375,14 +384,20 @@ class GovernanceConfig:
             return cls()
         if not isinstance(data, dict):
             raise GrimoireConfigError("'governance' must be a mapping", error_code=CONFIG_PARSE_ERROR.code)
+        gate = data.get("requirement_gate")
+        if gate is not None and gate not in REQUIREMENT_GATE_MODES:
+            raise GrimoireConfigError(
+                f"'governance.requirement_gate' must be one of {', '.join(REQUIREMENT_GATE_MODES)}, got {gate!r}",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
         roles = data.get("roles")
         if roles is None:
-            return cls()
+            return cls(requirement_gate=gate or "")
         if not isinstance(roles, dict):
             raise GrimoireConfigError("'governance.roles' must be a mapping", error_code=CONFIG_PARSE_ERROR.code)
         moa = _role_name(roles.get("moa"), "moa", required=True)
         moe = _role_name(roles.get("moe"), "moe", required=False) or DEFAULT_MOE
-        return cls(moa=moa, moe=moe, declared=True)
+        return cls(moa=moa, moe=moe, declared=True, requirement_gate=gate or "")
 
 
 def _role_name(raw: Any, role: str, *, required: bool) -> str:

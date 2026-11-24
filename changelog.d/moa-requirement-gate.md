@@ -1,0 +1,1 @@
+- feat(governance): exigence validée par la MOA (`grimoire cadrage approve`, scellée au journal d'autorité, tour humain attesté), tâche rattachée à une exigence (`task add --requirement`, repris par `cadrage plan`), gate `ready` bloquant ou signalé selon `governance` (Refs #1342 M3)

@@ -573,7 +573,8 @@ class TestConsignesDesTachesFinies:
         assert item["ref"]["unread"] == 3
         view = wa.attention_view(tmp_path, now=datetime.now(UTC), service_probe=_never_probe, watch=wa.ServiceWatch())
         assert view["count"] == 0  # rien ne demande un geste
-        assert view["maintainCount"] == 1
+        # La consigne, et l'avis « tâche passée ready sans exigence validée » (#1342) que ce projet nu signale.
+        assert view["maintainCount"] == 1 + view["counts"].get(wa.REQUIREMENT_UNVALIDATED, 0)
 
     @pytest.mark.parametrize("target", [TaskState.CLOSED, TaskState.CANCELLED])
     def test_une_tache_finie_ne_produit_aucune_consigne(self, tmp_path: Path, target: TaskState) -> None:

@@ -421,6 +421,12 @@ class TaskService:
             refusal = check_receipt(self.project_root, task)
             if refusal is not None:
                 return GateVerdict("review_receipt", "hard_fail", (refusal, *verdict.refusals))
+        if task.status is TaskState.PROPOSED and target is TaskState.READY:
+            from grimoire.missions.requirement_gate import refusal_of
+
+            missing, _check, _mode = refusal_of(self.home_root, task)  # la racine d'origine, jamais le worktree
+            if missing is not None:
+                return GateVerdict("requirement_validated", "hard_fail", (missing, *verdict.refusals))
         return verdict
 
     # ── Écriture ───────────────────────────────────────────────────────────
@@ -442,7 +448,7 @@ class TaskService:
         description: str = "",
         priority: str = "",
         extra: Mapping[str, Any] | None = None,
-        finition: str = "", data_class: str = "",
+        finition: str = "", data_class: str = "", requirement: str = "", nature: str = "",
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -461,8 +467,11 @@ class TaskService:
         :data:`PRIORITIES`) et *extra* (champs portés tels quels, ex. ``covers`` de ``cadrage plan``,
         W6-07b) sont posés à la création. *finition* (R24) : ``maquette`` ou ``peaufine`` ;
         vide, la tâche hérite de la phase de ``project-context.yaml`` (:mod:`grimoire.missions.finition`).
+        *requirement* (#1342, M3) : l'exigence servie (``REQ-001``), que le gate ``ready`` oppose ; *nature* : la
+        nature de la demande (``question`` et ``incident`` sont exemptées de ce gate).
         """
         from grimoire.missions.finition import finition_for
+        from grimoire.missions.requirement_gate import normalize_key
 
         finition = finition_for(self.project_root, finition)  # refuse une valeur inconnue avant toute écriture
         description = description.strip()
@@ -496,6 +505,10 @@ class TaskService:
         if _RISK_ORDER.index(risk) < _RISK_ORDER.index(RiskProfile.STANDARD):
             risk = RiskProfile.STANDARD
         fields: dict[str, Any] = dict(extra or {})
+        if requirement.strip():
+            fields["requirement"] = normalize_key(requirement)
+        if nature.strip():
+            fields["nature"] = nature.strip().lower()
         if any(x.strip() for x in files):
             fields["files"] = [f for f in (x.strip() for x in files) if f]
         task = ledger.create_task(
@@ -1291,6 +1304,10 @@ class TaskService:
             expected_from=task.status,
             lease_epoch=lease_epoch,
         )
+        if task.status is TaskState.PROPOSED and target is TaskState.READY:
+            from grimoire.missions.requirement_gate import record_ready
+
+            record_ready(self.ledger, self.home_root, task, actor)
         self._consolidate(moved, target, actor=actor, reason=reason, lesson=lesson)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
 
@@ -1423,40 +1440,10 @@ class TaskService:
             consolidate_task_memory(self.memory, self.ledger, task, target, actor=actor, reason=reason, lesson=lesson)
 
     def _record_refusal(self, task: MissionTask, target: TaskState, verdict: GateVerdict, actor: str) -> None:
-        """Journaliser un gate rouge dans le TraceLedger — le journal d'observabilité, pas la source.
+        """Journaliser un gate rouge dans le TraceLedger (best-effort, voir :mod:`grimoire.missions.gate_trace`)."""
+        from grimoire.missions.gate_trace import record_refusal
 
-        Le Mission Ledger ne reçoit rien : un refus n'est pas un changement
-        d'état. Mais `grimoire task trace` doit pouvoir montrer *pourquoi* une
-        tâche n'a pas avancé, et c'est ici que le gateway de hooks écrit déjà
-        ses refus. Best-effort : un journal inaccessible ne bloque pas le refus.
-        """
-        try:
-            from grimoire.core.standard_generation import TRACES_DIR
-            from grimoire.traces.ledger import TraceLedger
-            from grimoire.traces.schemas import TraceOutcome
-
-            TraceLedger(self.project_root / TRACES_DIR).record(
-                run_id=f"task-gate-{task.id}",
-                workflow_instance_id="",
-                mission_id=task.mission_id,
-                task_id=task.id,
-                recipe_id="grimoire.task-gate",
-                outcome=TraceOutcome.FAILURE,
-                started_at=datetime.now(UTC).isoformat(),
-                agent_id=actor,
-                policy_verdicts=[
-                    {
-                        "verdict_id": refusal.evidence,
-                        "action_kind": f"task.transition:{task.status.value}->{target.value}",
-                        "verdict": "block",
-                    }
-                    for refusal in verdict.refusals
-                ],
-                error_count=len(verdict.refusals),
-                tags=["task.gate", verdict.transition_id],
-            )
-        except Exception:  # noqa: S110 — observabilité : jamais au prix du refus lui-même
-            pass
+        record_refusal(self.project_root, task, target, verdict, actor)
 
     def project_board(self) -> Path | None:
         """Reprojette le board du standard depuis le ledger, si le projet est enrôlé.

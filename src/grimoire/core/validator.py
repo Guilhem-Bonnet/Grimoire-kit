@@ -547,9 +547,15 @@ def _validate_governance(section: Any, errors: list[ValidationError]) -> None:
     if not isinstance(section, dict):
         errors.append(ValidationError(path="governance", message="'governance' must be a mapping."))
         return
+    gate = section.get("requirement_gate")
+    if gate is not None and gate not in ("blocking", "flagged"):
+        errors.append(ValidationError(
+            path="governance.requirement_gate",
+            message="'governance.requirement_gate' must be 'blocking' or 'flagged'.",
+        ))
     roles = section.get("roles")
     if roles is None:
-        _check_unknown_keys(section, frozenset({"roles"}), "governance", errors)
+        _check_unknown_keys(section, frozenset({"roles", "requirement_gate"}), "governance", errors)
         return
     if not isinstance(roles, dict):
         errors.append(ValidationError(path="governance.roles", message="'governance.roles' must be a mapping."))
@@ -569,7 +575,7 @@ def _validate_governance(section: Any, errors: list[ValidationError]) -> None:
         elif not value.strip():
             errors.append(ValidationError(path=path, message=f"'{path}' must not be empty."))
     _check_unknown_keys(roles, frozenset({"moa", "moe"}), "governance.roles", errors)
-    _check_unknown_keys(section, frozenset({"roles"}), "governance", errors)
+    _check_unknown_keys(section, frozenset({"roles", "requirement_gate"}), "governance", errors)
 
 
 def _validate_hosts(section: Any, errors: list[ValidationError]) -> None:
