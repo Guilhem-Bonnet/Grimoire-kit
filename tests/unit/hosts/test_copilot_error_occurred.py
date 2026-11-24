@@ -73,6 +73,26 @@ def test_message_is_truncated_and_tool_kept_when_present(tmp_path: Path) -> None
     assert decision.detail["tool"] == "bash"
 
 
+def test_huge_tool_name_is_bounded(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    payload = _payload()
+    payload["toolName"] = "t" * 100_000
+    _, decision, _ = _run(root, payload)
+    assert len(decision.detail["tool"]) <= 80
+    assert all(len(json.dumps(t)) < 2000 for t in _traces(root))
+
+
+def test_secrets_are_masked_in_message(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    token = "ghp_" + "a1B2c3D4e5" * 4
+    payload = _payload()
+    payload["error"] = {"message": f"clone failed with {token} and sk-{'z9' * 20}", "name": "E"}
+    _, decision, _ = _run(root, payload)
+    blob = json.dumps(decision.detail) + json.dumps(_traces(root))
+    assert token not in blob and "sk-z9z9" not in blob
+    assert "[redacted:" in decision.detail["error_message"]
+
+
 @pytest.mark.parametrize("error", [None, "chaîne seule", 42, ["x"]])
 def test_malformed_error_never_raises(tmp_path: Path, error: Any) -> None:
     rendered, decision, _ = _run(_root(tmp_path), {**_payload(), "error": error})
