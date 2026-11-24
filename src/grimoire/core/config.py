@@ -353,6 +353,57 @@ def _parse_preserve(raw: Any) -> tuple[str, ...]:
     return tuple(out)
 
 
+DEFAULT_MOE = "orchestrateur"
+
+
+@dataclass(frozen=True, slots=True)
+class GovernanceConfig:
+    """La section ``governance:`` — qui porte le besoin et qui réalise (#1342, lot M1).
+
+    ``moa`` (maîtrise d'ouvrage) : l'humain qui porte le besoin, valide les exigences et prononce la
+    recette. ``moe`` (maîtrise d'œuvre) : l'orchestrateur et ses workers. ``declared`` vaut ``False``
+    quand la section est absente : un projet existant n'est pas cassé, ``grimoire doctor`` avertit.
+    """
+
+    moa: str = ""
+    moe: str = DEFAULT_MOE
+    declared: bool = False
+
+    @classmethod
+    def from_dict(cls, data: Any) -> GovernanceConfig:
+        if data is None:
+            return cls()
+        if not isinstance(data, dict):
+            raise GrimoireConfigError("'governance' must be a mapping", error_code=CONFIG_PARSE_ERROR.code)
+        roles = data.get("roles")
+        if roles is None:
+            return cls()
+        if not isinstance(roles, dict):
+            raise GrimoireConfigError("'governance.roles' must be a mapping", error_code=CONFIG_PARSE_ERROR.code)
+        moa = _role_name(roles.get("moa"), "moa", required=True)
+        moe = _role_name(roles.get("moe"), "moe", required=False) or DEFAULT_MOE
+        return cls(moa=moa, moe=moe, declared=True)
+
+
+def _role_name(raw: Any, role: str, *, required: bool) -> str:
+    """Nom d'un rôle : une chaîne non vide ; ``moe`` absent prend son défaut, ``moa`` absent est refusé."""
+    if raw is None:
+        if required:
+            raise GrimoireConfigError(
+                f"'governance.roles.{role}' is required: name the human who owns the need",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
+        return ""
+    if not isinstance(raw, str):
+        raise GrimoireConfigError(
+            f"'governance.roles.{role}' must be a string (a name), got {type(raw).__name__}",
+            error_code=CONFIG_PARSE_ERROR.code,
+        )
+    if not raw.strip():
+        raise GrimoireConfigError(f"'governance.roles.{role}' must not be empty", error_code=CONFIG_PARSE_ERROR.code)
+    return raw.strip()
+
+
 _VALID_EXECUTION_NEED_IDS = frozenset({
     "test-runner", "lint", "typecheck", "build", "migration-tool", "format",
 })
@@ -405,7 +456,7 @@ class NeedsConfig:
 # ── Root Config ───────────────────────────────────────────────────────────────
 
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "source",
+    "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "source", "governance",
 })
 
 
@@ -424,6 +475,7 @@ class GrimoireConfig:
     hosts: HostsConfig = field(default_factory=HostsConfig)
     needs: NeedsConfig = field(default_factory=NeedsConfig)
     source: SourceConfig = field(default_factory=SourceConfig)
+    governance: GovernanceConfig = field(default_factory=GovernanceConfig)
     installed_archetypes: tuple[str, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -485,6 +537,7 @@ class GrimoireConfig:
             hosts=HostsConfig.from_dict(data.get("hosts") or {}),
             needs=NeedsConfig.from_dict(data.get("needs") or {}),
             source=SourceConfig.from_dict(data.get("source") or {}),
+            governance=GovernanceConfig.from_dict(data.get("governance")),
             installed_archetypes=tuple(str(a) for a in raw_archetypes),
             extra=extra,
         )
