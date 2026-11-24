@@ -241,3 +241,28 @@ def route_worker(
         write_settings=True,
         context_tokens=context_tokens,
     )[0]
+
+
+def model_settings(root: Path, provider_id: str, tier: str, *, now: datetime | None = None) -> tuple[str, Path | None]:
+    """Le modèle du fournisseur *provider_id* au palier *tier* et le fichier de réglages qui le sert.
+
+    Pour une session qui n'est pas un worker (l'arbitre, GAO-r-le-arbitre-001) : pas de politique de données de
+    tâche à opposer, mais les mêmes conditions de route (fournisseur activé, URL admise, clé ou boucle locale,
+    modèle non suspendu). ``("", None)`` quand aucune route n'est possible : l'appelant retombe sur le palier de
+    l'hôte, sans inventer de modèle. L'écriture des réglages réutilise celle du worker (clé jamais recopiée).
+    """
+    provider = _enabled_provider(root, provider_id)
+    if provider is None:
+        return "", None
+    base_url = _admitted_base_url(provider)
+    if not base_url:
+        return "", None
+    state = load_state(root)
+    moment = now or datetime.now().astimezone()
+    models = available_models(provider, tier, state, now=moment) or available_models(provider, "cheap", state, now=moment)
+    if not models:
+        return "", None
+    key_var = _key_var(provider.id)
+    if provider.provider_type != "local" and not key_var:
+        return "", None
+    return models[0].id, _write_settings(provider.id, base_url, models[0].id, key_var)

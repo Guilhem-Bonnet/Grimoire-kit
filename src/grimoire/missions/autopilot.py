@@ -56,7 +56,7 @@ import os
 import re
 import unicodedata
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -104,6 +104,7 @@ __all__ = [
     "last_deferral",
     "load_autopilot_policy",
     "reserved_reason",
+    "reserved_texts_reason",
     "safe_option",
 ]
 
@@ -302,22 +303,40 @@ def reserved_reason(
     sa nature et ses options (elle ne se déclare pas « de conduite » sur parole). ``None`` : l'auteur n'est pas établi,
     la question de conduite se reconnaît à sa forme (#1159).
     """
-    policy = load_autopilot_policy(project_root) if policy is None else policy
-    if policy.error:
-        return f"politique du pilote invalide ({policy.error}) : tout reste à l'humain"
     # La recommandation est jugée comme les options : sans options, c'est un texte libre que l'auteur écrit seul.
     texts = [question.text, question.why, *question.options, question.recommended]
     # #1159 : une question de conduite écrite par le kit ne se juge pas sur le titre de la tâche.
-    if kit_written is False or not _kit_conduct(question):
-        texts.append(task.title)
-    folded = _fold(" ".join(texts))
+    include_title = kit_written is False or not _kit_conduct(question)
+    reason = reserved_texts_reason(texts, task, project_root, policy, include_title=include_title)
+    if reason:
+        return reason
+    if question.kind == "permission" and _outside_repo([question.text, question.why], project_root):
+        return f"catégorie réservée à l'humain, même pilote activé : {_OUTSIDE_REPO} (permission hors du dépôt, ou sans chemin)"
+    return ""
+
+
+def reserved_texts_reason(
+    texts: Iterable[str], task: MissionTask, project_root: Path, policy: AutopilotPolicy | None = None, *,
+    include_title: bool = True,
+) -> str:
+    """La liste fermée (:data:`RESERVED`) et les ajouts du projet sur des textes libres ; ``""`` si rien ne réserve.
+
+    C'est la même garde que :func:`reserved_reason`, pour un appelant qui n'a pas de :class:`Question` sous la main
+    (l'arbitre juge une cause d'escalade) : titre de la tâche compris quand *include_title*, catégories de la tâche
+    comprises. Une politique illisible réserve tout (échec fermé).
+    """
+    policy = load_autopilot_policy(project_root) if policy is None else policy
+    if policy.error:
+        return f"politique du pilote invalide ({policy.error}) : tout reste à l'humain"
+    parts = [str(t) for t in texts]
+    if include_title:
+        parts.append(task.title)
+    folded = _fold(" ".join(parts))
     if _LOOKALIKE.search(folded):
         return "catégorie réservée à l'humain, même pilote activé : texte aux lettres non latines (homoglyphes possibles)"
     for category, pattern in RESERVED.items():
         if pattern.search(folded):
             return f"catégorie réservée à l'humain, même pilote activé : {category}"
-    if question.kind == "permission" and _outside_repo([question.text, question.why], project_root):
-        return f"catégorie réservée à l'humain, même pilote activé : {_OUTSIDE_REPO} (permission hors du dépôt, ou sans chemin)"
     categories = task_categories(task)
     for extra in policy.extra:
         if extra in categories or extra in folded:
