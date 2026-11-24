@@ -92,6 +92,7 @@ from grimoire.tools.request_guard import (
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 from grimoire.tools.workspace_read_cache import cacheable_read
 from grimoire.tools.workspace_write_guard import cockpit_journal_path, guard_write
+from grimoire.voice.stt_service import MAX_BODY_BYTES, declared_length, discard_body
 
 cockpit_app = typer.Typer(
     help="Local multi-project governance cockpit (serves the bundled site).",
@@ -702,6 +703,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             if proot is None:
                 code, error = write_refusal_status(self.path)
                 self._send_json(code, {"ok": False, "error": error})
+                return
+            declared = declared_length(self.headers)
+            if declared > MAX_BODY_BYTES and path.endswith("/voice/transcribe"):
+                discard_body(self.rfile, declared)
+                self._send_json(413, {"ok": False, "error": "audio trop volumineux"})
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0))

@@ -9,6 +9,7 @@
       tts: pocket-tts       # ou {engine: pocket-tts, language: french, voice: estelle}
       idle_unload_seconds: 300
       language: fr
+      max_record_seconds: 120 # plafond d'un enregistrement (1 à 600)
       allow_download: false # true = l'utilisateur accepte le téléchargement des modèles
 
 Un réglage illisible ne casse rien : il retombe sur son défaut et le problème est
@@ -37,6 +38,9 @@ INTERACTION_MODES = ("text", "voice")
 DEFAULT_IDLE_UNLOAD_S = 300.0
 DEFAULT_STT = "faster-whisper"
 DEFAULT_TTS = "pocket-tts"
+#: Plafond d'un enregistrement : deux minutes tiennent dans un message, et bornent le poids de l'audio.
+DEFAULT_MAX_RECORD_S = 120.0
+MAX_RECORD_CEILING_S = 600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +61,7 @@ class VoiceSettings:
     idle_unload_s: float = DEFAULT_IDLE_UNLOAD_S
     language: str = "fr"
     allow_download: bool = False
+    max_record_s: float = DEFAULT_MAX_RECORD_S
     problems: tuple[str, ...] = ()
 
     @property
@@ -114,6 +119,14 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         problems.append(f"voice.allow_download={allow!r} invalide (true ou false) : false retenu")
         allow = False
 
+    max_record = voice.get("max_record_seconds", DEFAULT_MAX_RECORD_S)
+    if isinstance(max_record, bool) or not isinstance(max_record, (int, float)) or not 1 <= max_record <= MAX_RECORD_CEILING_S:
+        problems.append(
+            f"voice.max_record_seconds={max_record!r} invalide (entre 1 et {MAX_RECORD_CEILING_S:g}) : "
+            f"{DEFAULT_MAX_RECORD_S:g} retenu"
+        )
+        max_record = DEFAULT_MAX_RECORD_S
+
     return VoiceSettings(
         mode=mode,
         stt=_engine_choice(voice.get("stt"), "stt", DEFAULT_STT, problems),
@@ -121,6 +134,7 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         idle_unload_s=float(idle),
         language=language.strip(),
         allow_download=allow,
+        max_record_s=float(max_record),
         problems=tuple(problems),
     )
 
