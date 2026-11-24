@@ -264,3 +264,33 @@ def test_le_motif_d_un_refus_est_visible_dans_task_show(projet: Path) -> None:
     assert "boucle locale" in launch.payload["provider_refused"]
     shown = show(projet, tid)
     assert "repli sur l'hôte" in shown and "boucle locale" in shown
+
+
+# ── 5. Contexte du modèle vérifié au lancement ───────────────────────────────
+
+
+def _with_window(window: str) -> str:
+    return (
+        "  - id: ollama\n    enabled: true\n    provider_type: local\n"
+        "    anthropic_base_url: http://127.0.0.1:11434\n"
+        f"    models: [{{id: qwen-local, tier: cheap, capabilities: {{context_window: {window}}}}}]\n"
+    )
+
+
+def test_un_modele_au_contexte_trop_court_ferme_la_route(projet: Path) -> None:
+    write_registry(projet, _with_window("4096"))
+
+    assert route_worker(projet, "ollama", "cheap", task(), context_tokens=8000) is None
+    assert "4096" in route_denial(projet, "ollama", "cheap", task(), context_tokens=8000)
+
+
+def test_un_modele_au_contexte_suffisant_est_route(projet: Path) -> None:
+    write_registry(projet, _with_window("32768"))
+
+    assert route_worker(projet, "ollama", "cheap", task(), context_tokens=8000) is not None
+
+
+def test_sans_context_window_au_registre_rien_ne_bloque(projet: Path) -> None:
+    write_registry(projet, provider("http://127.0.0.1:11434"))
+
+    assert route_worker(projet, "ollama", "cheap", task(), context_tokens=10**7) is not None

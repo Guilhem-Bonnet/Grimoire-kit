@@ -27,7 +27,7 @@ from grimoire.core.fsio import atomic_write
 from grimoire.missions.schemas import MissionTask
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.data_policy import data_policy_refusal
-from grimoire.providers.registry import ProviderSpec, read_registry
+from grimoire.providers.registry import ModelSpec, ProviderSpec, read_registry
 from grimoire.providers.secrets import env_for_provider, provider_key_var, store_dir
 from grimoire.providers.state import available_models, load_state
 
@@ -107,6 +107,17 @@ def _write_settings(provider: str, base_url: str, model: str, key_var: str) -> P
     return path
 
 
+def _context_window(model: ModelSpec) -> int | None:
+    """``capabilities.context_window`` du registre pour *model* ; ``None`` si elle n'est pas déclarée."""
+    value = dict(model.capabilities).get("context_window")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def bundle_tokens(bundle: object) -> int:
+    """Estimation du contexte du bundle d'une tâche, en tokens (~4 caractères par token)."""
+    return len(json.dumps(bundle, default=str, ensure_ascii=False)) // 4
+
+
 def route_refusal(root: Path, provider_id: str, task: MissionTask) -> str:
     """Pourquoi la politique de données ferme *provider_id* à *task* ; vide si elle ne s'y oppose pas."""
     provider = _enabled_provider(root, provider_id)
@@ -122,6 +133,7 @@ def _decide(
     busy_providers: frozenset[str],
     now: datetime | None,
     write_settings: bool,
+    context_tokens: int = 0,
 ) -> tuple[WorkerRoute | None, str]:
     """``(route, motif)`` : la route du worker et, quand il n'y en a pas, pourquoi.
 
@@ -148,9 +160,17 @@ def _decide(
         return None, refusal
     moment = now or datetime.now().astimezone()
     state = load_state(root)
-    models = available_models(provider, tier, state, now=moment) or available_models(provider, "cheap", state, now=moment)
+    models = available_models(provider, tier, state, now=moment) or available_models(
+        provider, "cheap", state, now=moment
+    )
     if not models:
         return None, f"{provider.id} : aucun modèle disponible pour le palier {tier or 'cheap'}"
+    window = _context_window(models[0])
+    if context_tokens and window is not None and window < context_tokens:
+        return None, (
+            f"{provider.id} : contexte du modèle {models[0].id} ({window} tokens) inférieur "
+            f"à celui du bundle de la tâche (~{context_tokens} tokens)"
+        )
     key_var = _key_var(provider.id)
     if provider.provider_type != "local" and not key_var:
         name = f"{provider.id.upper().replace('-', '_')}_API_KEY"
@@ -170,6 +190,7 @@ def route_denial(
     *,
     busy_providers: frozenset[str] = frozenset(),
     now: datetime | None = None,
+    context_tokens: int = 0,
 ) -> str:
     """Pourquoi le worker de *task* n'est pas routé vers *provider_id* ; vide si rien ne l'en empêche.
 
@@ -178,7 +199,14 @@ def route_denial(
     « repli sur l'hôte », pour qu'un refus ne soit jamais silencieux (#1154).
     """
     return _decide(
-        root, provider_id, tier, task, busy_providers=busy_providers, now=now, write_settings=False
+        root,
+        provider_id,
+        tier,
+        task,
+        busy_providers=busy_providers,
+        now=now,
+        write_settings=False,
+        context_tokens=context_tokens,
     )[1]
 
 
@@ -196,6 +224,20 @@ def route_worker(
     *,
     now: datetime | None = None,
     busy_providers: frozenset[str] = frozenset(),
+    context_tokens: int = 0,
 ) -> WorkerRoute | None:
-    """La route du worker de *task* vers *provider_id*, ou ``None`` s'il garde son modèle habituel."""
-    return _decide(root, provider_id, tier, task, busy_providers=busy_providers, now=now, write_settings=True)[0]
+    """La route du worker de *task* vers *provider_id*, ou ``None`` s'il garde son modèle habituel.
+
+    Si *context_tokens* (contexte du bundle) dépasse ``capabilities.context_window`` du modèle, la route est
+    fermée ; sans ``context_window`` au registre, rien ne bloque.
+    """
+    return _decide(
+        root,
+        provider_id,
+        tier,
+        task,
+        busy_providers=busy_providers,
+        now=now,
+        write_settings=True,
+        context_tokens=context_tokens,
+    )[0]
