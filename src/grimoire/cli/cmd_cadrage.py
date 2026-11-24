@@ -24,6 +24,7 @@ cadrage_app = typer.Typer(help="Cadrage produit : brief → brainstorm → compr
 _path_arg = typer.Argument(Path(), help="Racine du projet.")
 _force_opt = typer.Option(False, "--force", "-f", help="Réécrire les gabarits existants.")
 _chantier_opt = typer.Option(None, "--chantier", "-c", help="Chantier visé (défaut : le cadrage principal).")
+_path_opt = typer.Option(Path(), "--path", "-p", help="Racine du projet.")
 _name_opt = typer.Option("", "--name", help="Nom du projet (défaut : nom du dossier).")
 
 
@@ -224,6 +225,73 @@ def _print_plan(plan: CadragePlan, *, check_only: bool = False, writes: bool = F
             "[red]incomplet[/red] — sans critère vérifiable : " + (", ".join(data["missing"]) or "aucune")
             + (f" ; conflits : {', '.join(data['conflicts'])}" if data["conflicts"] else "")
         )
+
+
+# ── entretien de cadrage : sept angles, profondeur selon la demande ──────────
+
+interview_app = typer.Typer(help="Entretien de cadrage : questions par angle, profondeur selon la demande.")
+cadrage_app.add_typer(interview_app, name="interview")
+
+
+@interview_app.callback(invoke_without_command=True)
+def cadrage_interview(
+    ctx: typer.Context,
+    path: Path = _path_opt,
+    chantier: str | None = _chantier_opt,
+    depth: str | None = typer.Option(None, "--depth", help="Force la profondeur : express, standard ou approfondi."),
+    output: str = typer.Option("", "--output", "-o", help="text ou json (remplace le --output global)."),
+) -> None:
+    """Rend le plan d'entretien : les sept angles, leur état, la profondeur et les questions d'amorce."""
+    if ctx.invoked_subcommand is not None:
+        return
+    import json
+
+    from grimoire.core.cadrage_interview import interview_plan
+
+    root = path.resolve()
+    plan = _guard(lambda: interview_plan(root, chantier, depth=depth))
+    if (output or str((ctx.obj or {}).get("output", "text"))) == "json":
+        typer.echo(json.dumps(plan, indent=2, ensure_ascii=False))
+        return
+    console.print(
+        f"[bold]Entretien de cadrage[/bold] — profondeur [cyan]{plan['depth']}[/cyan] "
+        f"({plan['depth_source']}), {plan['questions_per_angle']} question(s) par angle"
+    )
+    for a in plan["angles"]:
+        style = {"couvert": "green", "ecarte": "dim"}.get(a["state"], "yellow")
+        req = "obligatoire" if a["required"] else "facultatif"
+        console.print(f"\n[{style}]{a['state']:<8}[/{style}] [bold]{a['id']}[/bold] — {a['title']} [dim]({req})[/dim]")
+        console.print(f"  [dim]{a['intent']}[/dim]")
+        for q in a["questions"]:
+            console.print(f"  ? {q}")
+        if a["reason"]:
+            console.print(f"  [dim]écarté : {escape(a['reason'])}[/dim]")
+    console.print(
+        "\n[dim]Adaptez les questions à la demande, puis :[/dim] "
+        "[cyan]grimoire cadrage interview answer <angle> \"<réponse>\"[/cyan]"
+    )
+
+
+@interview_app.command("answer")
+def cadrage_interview_answer(
+    angle: str = typer.Argument(..., help="Id de l'angle (utilisateurs, existant, criteres, hors-perimetre, ...)."),
+    text: str = typer.Argument("", help="La réponse (ou la raison avec --skip, le contexte avec --unknown)."),
+    path: Path = _path_opt,
+    chantier: str | None = _chantier_opt,
+    unknown: bool = typer.Option(False, "--unknown", help="« Je ne sais pas » : inscrit comme hypothèse à valider."),
+    skip: bool = typer.Option(False, "--skip", help="Écarte l'angle ; le texte donne la raison."),
+) -> None:
+    """Consigne une réponse dans les fichiers du cadrage et met l'angle à jour."""
+    from grimoire.core.cadrage_interview import answer
+
+    root = path.resolve()
+    plan = _guard(lambda: answer(root, chantier, angle, text, unknown=unknown, skip=skip))
+    state = next(a["state"] for a in plan["angles"] if a["id"] == angle)
+    console.print(f"[green]{angle}[/green] → {state}")
+    if plan["open_required"]:
+        console.print(f"[dim]encore ouverts (obligatoires) : {', '.join(plan['open_required'])}[/dim]")
+    else:
+        console.print("[green]tous les angles obligatoires sont traités.[/green]")
 
 
 # ── chantiers : plusieurs cadrages nommés par projet ─────────────────────────
