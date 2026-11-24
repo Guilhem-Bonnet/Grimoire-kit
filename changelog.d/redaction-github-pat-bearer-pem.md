@@ -1,0 +1,1 @@
+- fix(security): `redact_secrets` masque les jetons `github_pat_` et les Bearer opaques (12+ caractères), le motif de clé privée devient linéaire (200 000 caractères en < 100 ms), et `ErrorOccurred` caviarde `name`, `errorContext` et `toolName` et jette tout le dernier mot coupé à la fenêtre de scan, un mot unique plus long qu'elle devenant `[truncated]` (GAO-masquage-des-001)
