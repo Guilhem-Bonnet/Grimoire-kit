@@ -9,6 +9,10 @@ janitor :
     orchestrator:
       base: main                  # branche de départ des worktrees ET cible de fusion ; vide : la branche par défaut du remote
                                   # (``origin/HEAD``), jamais la branche extraite du poste qui lance le tick
+      host: claude-code           # l'hôte du projet : claude-code (défaut, absent = comportement d'avant) | gemini
+                                  # (worker sur Gemini CLI, missions/gemini_host.py ; relecteur, arbitre et session
+                                  # orchestrateur pas encore outillés sur Gemini : non lancés, la raison est dite) ;
+                                  # toute autre valeur rend la politique illisible
       roles:
         worker:
           enabled: false          # défaut : rien n'est lancé, le comportement actuel est inchangé
@@ -24,8 +28,9 @@ janitor :
           sessions_per_day: 5     # plafond de lancements par jour (UTC)
           permission_mode: ""     # OBLIGATOIRE quand enabled: true (acceptEdits, plan, bypassPermissions…) ; transmis à
                                   # claude --permission-mode (opencode : traduit, missions/worker_host.py)
-          host: claude-code       # #1281 L4 : claude-code (défaut, absent = comportement d'avant) | opencode (exige
-                                  # provider ; route sensible et tâches V2 restent sur Claude Code)
+          host: claude-code       # #1281 L4 : claude-code (défaut, absent = orchestrator.host) | opencode (exige
+                                  # provider ; route sensible et tâches V2 restent sur Claude Code) | gemini (ni
+                                  # provider ni lean ; route sensible : palier strong de Gemini)
         reviewer:                 # lot 3 : relit chaque tâche lancée qui arrive en needs_verification
           enabled: false
           model: ""               # vide : le palier, sinon un autre modèle que celui du worker
@@ -99,7 +104,7 @@ from grimoire.missions.dual_review import (
     SECOND_REVIEWER_TIERS,
 )
 from grimoire.missions.sensitive_route import SENSITIVE_ROUTE_OFF, SENSITIVE_ROUTES
-from grimoire.missions.worker_host import CLAUDE_CODE_HOST, OPENCODE_HOST, WORKER_HOSTS
+from grimoire.missions.worker_host import CLAUDE_CODE_HOST, GEMINI_HOST, OPENCODE_HOST, PROJECT_HOSTS, WORKER_HOSTS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -114,6 +119,7 @@ __all__ = [
     "PolicyRead",
     "ReviewerRole",
     "WorkerRole",
+    "claude_only_refusal",
     "load_orchestrator_policy",
 ]
 
@@ -268,15 +274,28 @@ class OrchestratorPolicy:
     merger: MergerRole = field(default_factory=MergerRole)
     orchestrator: OrchestratorRole = field(default_factory=OrchestratorRole)
     arbiter: ArbiterRole = field(default_factory=ArbiterRole)
+    host: str = CLAUDE_CODE_HOST
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "worker": self.worker.to_dict(), "reviewer": self.reviewer.to_dict(), "merger": self.merger.to_dict(),
             "orchestrator": self.orchestrator.to_dict(), "arbiter": self.arbiter.to_dict(),
-            "base": self.base,
+            "base": self.base, "host": self.host,
             "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue,
             "probe_host": self.probe_host,
         }
+
+
+def claude_only_refusal(policy: OrchestratorPolicy, role: str) -> str:
+    """``""`` si le rôle *role* (relecteur, arbitre, session orchestrateur) peut partir sur l'hôte du projet ; sinon
+    pourquoi il n'est pas lancé. Ces rôles ne sont outillés que pour Claude Code : sur un projet Gemini, rien ne
+    retombe en silence sur ``claude``, la sortie du tick le dit."""
+    if policy.host == CLAUDE_CODE_HOST:
+        return ""
+    return (
+        f"{role} non lancé : orchestrator.host vaut {policy.host!r} et ce rôle n'est outillé que pour Claude Code "
+        "(aucun repli silencieux sur claude)"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,23 +366,32 @@ def _flag(data: dict[str, Any], key: str, where: str) -> bool:
     return value
 
 
-def _host(data: dict[str, Any], role: str, admitted: tuple[str, ...]) -> str:
+def _host(data: dict[str, Any], role: str, admitted: tuple[str, ...], default: str = CLAUDE_CODE_HOST) -> str:
     where = f"orchestrator.roles.{role}.host"
-    host = _text(data.get("host", CLAUDE_CODE_HOST), where) or CLAUDE_CODE_HOST
+    host = _text(data.get("host", default), where) or default
     if host not in admitted:
         raise _InvalidPolicyError(f"{where} : {host!r} inconnu ou non pris en charge (admis : {', '.join(admitted)})")
     return host
 
 
-def _parse_worker(raw: Any) -> WorkerRole:
+def _parse_worker(raw: Any, project_host: str = CLAUDE_CODE_HOST) -> WorkerRole:
     data = _table(raw, "orchestrator.roles.worker", _WORKER_KEYS)
     enabled, model, tier, mode = _session_role(data, "worker")
-    host = _host(data, "worker", WORKER_HOSTS)
+    host = _host(data, "worker", WORKER_HOSTS, project_host)
     provider = _text(data.get("provider", ""), "orchestrator.roles.worker.provider")
     if host == OPENCODE_HOST and not provider:
         raise _InvalidPolicyError(
             "orchestrator.roles.worker.provider est obligatoire avec host: opencode (fournisseur du registre : "
             "deepseek, moonshot ou un fournisseur local)"
+        )
+    if host == GEMINI_HOST and provider:
+        raise _InvalidPolicyError(
+            "orchestrator.roles.worker.provider ne s'applique pas à host: gemini (le worker prend le modèle de "
+            "Gemini CLI, `dispatch.models.gemini`) : retirer provider ou changer d'hôte"
+        )
+    if host == GEMINI_HOST and data.get("lean") is True:
+        raise _InvalidPolicyError(
+            "orchestrator.roles.worker.lean n'a pas d'équivalent sur host: gemini (options propres à Claude Code)"
         )
     route = _text(data.get("sensitive_route", SENSITIVE_ROUTE_OFF), "orchestrator.roles.worker.sensitive_route")
     if route not in SENSITIVE_ROUTES:
@@ -492,7 +520,10 @@ def _parse_arbiter(raw: Any) -> ArbiterRole:
 
 
 def _parse(block: Any) -> OrchestratorPolicy:
-    top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor", "probe_host"}))
+    top = _table(block, "orchestrator", frozenset({"base", "host", "roles", "breaker", "janitor", "probe_host"}))
+    host = _text(top.get("host", CLAUDE_CODE_HOST), "orchestrator.host") or CLAUDE_CODE_HOST
+    if host not in PROJECT_HOSTS:
+        raise _InvalidPolicyError(f"orchestrator.host : {host!r} inconnu (admis : {', '.join(PROJECT_HOSTS)})")
     roles = _table(
         top.get("roles", {}), "orchestrator.roles",
         frozenset({"worker", "reviewer", "merger", "orchestrator", "arbiter"}),
@@ -509,7 +540,7 @@ def _parse(block: Any) -> OrchestratorPolicy:
     if base and not _BRANCH.fullmatch(base):
         raise _InvalidPolicyError(f"orchestrator.base : {base!r} n'est pas un nom de branche simple (lettres, chiffres, . _ / -)")
     return OrchestratorPolicy(
-        worker=_parse_worker(roles["worker"]) if "worker" in roles else WorkerRole(),
+        worker=_parse_worker(roles["worker"], host) if "worker" in roles else WorkerRole(host=host),
         reviewer=_parse_reviewer(roles["reviewer"]) if "reviewer" in roles else ReviewerRole(),
         merger=_parse_merger(roles["merger"]) if "merger" in roles else MergerRole(),
         orchestrator=_parse_orchestrator(roles["orchestrator"]) if "orchestrator" in roles else OrchestratorRole(),
@@ -518,6 +549,7 @@ def _parse(block: Any) -> OrchestratorPolicy:
         breaker_threshold=_positive(breaker.get("threshold", DEFAULT_BREAKER_THRESHOLD), "orchestrator.breaker.threshold"),
         close_issue=close_issue,
         probe_host=probe_host,
+        host=host,
     )
 
 

@@ -676,7 +676,7 @@ orchestrator:
   roles:
     worker:
       enabled: true
-      host: opencode          # claude-code (défaut) | opencode ; toute autre valeur rend la politique invalide
+      host: opencode          # claude-code (défaut : orchestrator.host) | opencode | gemini ; sinon invalide
       provider: deepseek      # obligatoire avec opencode : deepseek, moonshot (ou kimi) ou un fournisseur local
       tier: cheap
       permission_mode: acceptEdits
@@ -759,6 +759,55 @@ dispatch:
   `opencode run --session <id>`.
 - **Limites** : la reprise automatique après une erreur transitoire du fournisseur (#1158) lit le journal de Claude
   Code et ne s'applique pas à opencode. `lean` est sans effet sur opencode. La relecture opencode n'est pas outillée.
+
+### Hôte du projet : Gemini CLI (`orchestrator.host`)
+
+`orchestrator.host` nomme l'hôte du projet. Absent ou `claude-code`, rien ne change. `gemini` place le worker sur
+Gemini CLI (`missions/gemini_host.py`, derrière la même interface `WorkerHost`). Toute autre valeur rend la politique
+invalide. `roles.worker.host`, s'il est posé, l'emporte pour le worker.
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  host: gemini                # claude-code (défaut) | gemini
+  roles:
+    worker:
+      enabled: true
+      tier: mid               # modèle : roles.worker.model, sinon dispatch.models.gemini.<palier>
+      permission_mode: acceptEdits
+```
+
+- **Frein d'abord** : aucune session ne part tant que le refus au `BeforeTool` n'est pas prouvé pour la version
+  exacte de `gemini` (`gemini --version`). La règle est celle de la reprise d'un bail Claude Code
+  (`is_fenced`). Sans preuve, rien n'est créé ni réclamé. La sortie du tick dit `worker Gemini CLI non lancé : frein
+  non prouvé pour Gemini CLI <version>…`. Au 2026-11-23, aucune capture de refus Gemini n'est versée (#1304) : en
+  pratique, le worker Gemini ne part pas encore.
+- **Commande** : `gemini --prompt=<consigne> --output-format stream-json --approval-mode <mode> [--model <modèle>]`.
+  La consigne passe en une seule chaîne (`--prompt=…`) : un message qui commence par `-` n'est jamais lu comme une
+  option. Reprise : la même commande avec `--resume <id>`, sur le même worktree.
+- **Processus tenu par le kit** : Gemini CLI ne documente aucune session détachée. Le kit lance le processus en
+  arrière-plan, dans son propre groupe, et écrit le flux dans `_grimoire-output/control/workers/<id>.gemini.jsonl`.
+  Le pid et le journal sont notés au lancement. Battement, fin, arrêt au repos et janitor suivent les règles
+  d'opencode : processus vivant et journal récent, le bail est renouvelé ; processus mort, la tâche est rendue ;
+  `SIGTERM` au groupe. POSIX seulement.
+- **Identité** : le `session_id` de l'événement `init` du flux. Seul compte ce que ce lancement a écrit (lecture à
+  partir de l'octet de départ). Le processus meurt sans `init` : le lancement échoue et compte au disjoncteur. Le
+  lanceur rattache lui-même la session au claim.
+- **Résultat final** : texte des événements `message` de rôle `assistant` ; issue lue dans l'événement `result`.
+- **Permission** : `acceptEdits` → `auto_edit`, `plan` → `plan`, `bypassPermissions` → `yolo`, `default` et
+  `dontAsk` → `default`. `auto` et tout autre mode font attendre la tâche.
+- **Worktree** : `.gemini/settings.json` doit porter le hook `BeforeTool` du kit, commité (`grimoire host sync`).
+  Sans lui, rien ne part. Pas de synchronisation à la volée : elle laisserait des fichiers non suivis.
+- **L'hôte du projet ne se quitte pas** : une tâche qui vise un chemin sensible part au palier `strong` de Gemini ;
+  une tâche V2 reste sur Gemini ; la reprise ne retombe jamais sur Claude Code. `provider` et `lean` ne s'appliquent
+  pas et rendent la politique invalide.
+- **Relecteur, arbitre, session orchestrateur** : seulement outillés pour Claude Code. Avec `orchestrator.host:
+  gemini`, ils ne sont pas lancés, et la sortie du tick le dit (`relecteur non lancé : orchestrator.host vaut
+  'gemini'…`). Aucun repli silencieux sur `claude`.
+- **Non vérifié** (Gemini CLI n'est pas installé sur le poste de développement : tout est testé sur un faux binaire
+  qui émet le flux documenté) : le format exact des événements `stream-json` ; un événement de fin de tour capable
+  de bloquer (`AfterAgent`) ; le format des fichiers de session ; le comportement du mode `default` sans interface
+  face à un outil qui demande confirmation.
 
 ### Fusion par le merger (#876, lot 4)
 
