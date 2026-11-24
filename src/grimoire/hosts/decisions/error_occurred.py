@@ -23,18 +23,34 @@ from grimoire.memory.validation import redact_secrets
 DECISION_ID = "grimoire.error-occurred"
 MAX_MESSAGE = 200
 _MAX_FIELD = 80
+_FRAGMENT_MARGIN = 64
 _SCAN_WINDOW = 2000  # borne du texte passé au caviardage : un message géant ne coûte pas cher
 
 
+def _clean(value: Any, limit: int) -> str:
+    """Le texte caviardé **avant** d'être tronqué à ``limit``.
+
+    Une coupe à ``_SCAN_WINDOW`` peut laisser un bout de jeton sous la longueur
+    minimale de son motif ; si un bloc PEM caviardé avant lui le ramène dans les
+    ``limit`` caractères gardés, il fuit. On jette donc le dernier fragment
+    coupé (jusqu'à la dernière espace) : mieux vaut perdre un mot qu'un secret.
+    """
+    if not isinstance(value, str):
+        return ""
+    window = value[:_SCAN_WINDOW]
+    if len(value) > _SCAN_WINDOW and not (value[_SCAN_WINDOW].isspace() or window[-1:].isspace()):
+        head = window.rsplit(None, 1)  # sans le dernier mot, coupé en deux
+        # Un seul « mot » : on recule d'une marge supérieure au plus court des motifs.
+        window = head[0] if len(head) == 2 else window[:-_FRAGMENT_MARGIN]
+    return redact_secrets(window)[0][:limit]
+
+
 def _text(value: Any, limit: int) -> str:
-    return value[:limit] if isinstance(value, str) else ""
+    return _clean(value, limit)
 
 
 def _message(value: Any) -> str:
-    """Le message caviardé avant d'être tronqué : une coupe ne doit pas laisser un bout de secret."""
-    if not isinstance(value, str):
-        return ""
-    return redact_secrets(value[:_SCAN_WINDOW])[0][:MAX_MESSAGE]
+    return _clean(value, MAX_MESSAGE)
 
 
 def _error_detail(hook: HookInput) -> dict[str, Any]:

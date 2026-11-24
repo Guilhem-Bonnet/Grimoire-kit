@@ -147,3 +147,36 @@ def test_copilot_emitter_wires_both_hooks_only_there(tmp_path: Path) -> None:
     assert "UserPromptTransformed" in json.loads(upt.content)["hooks"]
     claude = emitter_for(HostId.CLAUDE_CODE_CLI).plan(surface, tmp_path)
     assert all(DECISION not in f.content for f in claude.files if isinstance(f.content, str))
+
+
+def _detail_for(tmp_path: Path, **error: Any) -> dict[str, Any]:
+    payload = _payload()
+    payload.pop("toolName", None)
+    payload.pop("tool_name", None)
+    payload["error"] = {"name": "ToolError", "message": "x", **error}
+    return _run(_root(tmp_path), payload)[1].detail
+
+
+def test_pem_then_cut_ghp_leaves_no_token_fragment(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions.error_occurred import _SCAN_WINDOW
+
+    pem = "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----"
+    token = "ghp_" + "A" * 40
+    # Le jeton est coupé par la fenêtre : il n'en reste que `ghp_AAAA…` sous 30 caractères.
+    filler = "x " * ((_SCAN_WINDOW - 26 - len(pem) - 1) // 2)
+    message = pem + " " + filler
+    message += "y" * (_SCAN_WINDOW - len(message) - 12) + " " + token
+    assert len(message) > _SCAN_WINDOW
+    detail = _detail_for(tmp_path, message=message)
+    assert "ghp_" not in detail["error_message"]
+
+
+def test_name_context_and_tool_are_redacted(tmp_path: Path) -> None:
+    token = "ghp_" + "B" * 40
+    payload = _payload()
+    payload["error"] = {"name": token, "message": "m"}
+    payload["errorContext"] = token
+    payload["toolName"] = token
+    detail = _run(_root(tmp_path), payload)[1].detail
+    assert "ghp_" not in json.dumps(detail)
+    assert "[redacted:github-token]" in detail["error_name"]
