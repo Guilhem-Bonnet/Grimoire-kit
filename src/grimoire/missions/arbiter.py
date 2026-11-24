@@ -172,22 +172,42 @@ SESSION_TOOLS = "Read,Bash"
 #:
 #: Pour gh, aucun ``*`` : seules des formes exactes, générées pour la PR de la demande (:func:`allowed_tools`). Une
 #: liste noire d'options (``-w``, ``-cw``, tabulation, guillemets) s'est contournée trois fois ; une option libre
-#: n'existe plus, donc rien à contourner.
-_STATIC_ALLOWED = "Read Bash(grimoire task show *) Bash(grimoire task arbitrate *)"
+#: n'existe plus, donc rien à contourner. ``grimoire task show`` est exact aussi (la tâche de la demande, sans
+#: ``--project-root``) ; ``grimoire task arbitrate`` est fixé jusqu'à ``--json`` et seul le JSON reste libre, entre
+#: apostrophes, borné par :data:`DISALLOWED_TOOLS` (aucune apostrophe de plus : le cadre ne se rouvre pas).
 #: Champs de ``gh pr view`` lisibles, fixes.
 VIEW_FIELDS = "title,body,files,reviews,statusCheckRollup"
+#: Un identifiant de tâche ou de demande qu'on accepte d'écrire dans une règle de permission.
+_SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
-def allowed_tools(pr: int = 0) -> str:
-    """La liste blanche de la session pour la PR *pr* (0 : celle de la branche courante), sans option libre."""
+def allowed_tools(pr: int = 0, *, task_id: str = "", request_id: str = "") -> str:
+    """La liste blanche de la session pour la PR *pr* (0 : celle de la branche courante), sans option libre.
+
+    *task_id* et *request_id* (ceux du **sceau**) fixent les formes ``grimoire task show <tâche>`` et
+    ``grimoire task arbitrate <tâche> --request <demande> --json …`` ; sans eux, aucun geste ``grimoire`` n'est permis.
+    Un identifiant hors de ``[A-Za-z0-9._-]`` est refusé (:class:`ValueError`) : il n'entre jamais dans une règle.
+    """
     target = f" {int(pr)}" if pr else ""
-    return f"{_STATIC_ALLOWED} Bash(gh pr diff{target}) Bash(gh pr view{target} --json {VIEW_FIELDS})"
+    rules = ["Read"]
+    if task_id or request_id:
+        for value in (task_id, request_id):
+            if not _SAFE_ID.fullmatch(value):
+                raise ValueError(f"identifiant impropre à une règle de permission : {value!r}")
+        rules += [f"Bash(grimoire task show {task_id})",
+                  f"Bash(grimoire task arbitrate {task_id} --request {request_id} --json '*')"]
+    rules += [f"Bash(gh pr diff{target})", f"Bash(gh pr view{target} --json {VIEW_FIELDS})"]
+    return " ".join(rules)
 
 
 #: Valeur par défaut (PR de la branche courante), pour qui n'a pas de demande en main.
 ALLOWED_TOOLS = allowed_tools()
 #: Filet en plus de la liste blanche : tout ``gh`` portant ``web`` ou ``-w`` est refusé (le refus l'emporte).
-DISALLOWED_TOOLS = "Bash(gh *web*) Bash(gh *-w*) Bash(gh *\t*)"
+#: Le JSON de ``task arbitrate`` est le seul texte libre, et la règle l'encadre d'apostrophes droites : entre elles,
+#: le shell ne lit rien (ni ``;``, ni ``$(…)``, ni ``>``, ni saut de ligne). Une troisième apostrophe fermerait le cadre
+#: et rouvrirait le shell : toute commande qui en porte trois est refusée. Le JSON s'écrit donc sans ``'`` (``’`` à la
+#: place) ; un critère qui porte ``'`` se recopie avec ``’`` (:func:`_canonical_criteria`).
+DISALLOWED_TOOLS = "Bash(gh *web*) Bash(gh *-w*) Bash(*'*'*'*)"
 #: Aucune sortie de git/gh ne passe par un paginateur : un ``core.pager`` du dépôt n'exécute rien dans la session.
 SESSION_ENV = {"GIT_PAGER": "cat", "PAGER": "cat", "GH_PAGER": "cat"}
 _JSON_KEYS = frozenset({"schema", "decision", "criteria", "justification", "confidence", "replacement", "followup_title"})
@@ -421,6 +441,23 @@ def sealed_closure(service: TaskService, task_id: str, request_id: str) -> dict[
     return found[-1] if found else None
 
 
+def _with_seal(request: ArbitrationRequest, sealed: dict[str, Any]) -> ArbitrationRequest:
+    """*request* dont tout champ qui décide quoi lire ou juger vient du **sceau** (le ledger, le worker l'écrit).
+
+    Une ligne ``task.arbitration_requested`` forgée sous le ``request_id`` d'une demande scellée ne redirige donc
+    la session ni vers une autre PR, ni vers une autre tête, ni vers d'autres critères.
+    """
+    criteria = sealed.get("criteria")
+    refused = sealed.get("refused")
+    return replace(
+        request, task_id=str(sealed.get("task_id") or request.task_id),
+        source=str(sealed.get("source") or ""), cause=str(sealed.get("cause") or ""),
+        criteria=tuple(str(c) for c in criteria) if isinstance(criteria, list) else (),
+        refused=tuple(str(c) for c in refused) if isinstance(refused, list) else (),
+        pr=int(sealed.get("pr") or 0), head=str(sealed.get("head") or ""),
+    )
+
+
 def _closed_ids(service: TaskService, task_id: str, events: Iterable[LedgerEvent]) -> set[str]:
     """Les demandes closes **et scellées** : une ligne de clôture du ledger sans sceau ne ferme rien."""
     claimed = {
@@ -564,8 +601,9 @@ def open_request(service: TaskService, task_id: str) -> ArbitrationRequest | Non
     events = _events_of(service, task_id)
     closed = _closed_ids(service, task_id, events)
     for request in reversed(_requested(events)):
-        if request.id not in closed and sealed_request(service, task_id, request.id) is not None:
-            return request
+        sealed = sealed_request(service, task_id, request.id) if request.id not in closed else None
+        if sealed is not None:
+            return _with_seal(request, sealed)
     return None
 
 
@@ -586,6 +624,20 @@ class ArbiterOutcome:
 
 
 # ── Le vote (CLI ``task arbitrate``) ─────────────────────────────────────────
+
+
+def _fold(text: str) -> str:
+    return text.replace("\u2019", "'").strip()
+
+
+def _canonical_criteria(criteria: Iterable[str], known: Iterable[str]) -> tuple[str, ...]:
+    """Les critères du vote, recopiés tels que la demande les porte quand seule l'apostrophe diffère (``’`` / ``'``).
+
+    Le vote passe entre apostrophes droites (:data:`DISALLOWED_TOOLS`) : un critère qui porte ``'`` n'y entre qu'en
+    ``’``. Tout autre écart reste un écart (le critère est inconnu et la décision refusée plus loin).
+    """
+    by_fold = {_fold(k): k for k in known}
+    return tuple(dict.fromkeys(by_fold.get(_fold(c), c) for c in criteria))
 
 
 def _derogation_refusal(decision: ArbiterDecision, refused: Iterable[str]) -> str:
@@ -645,6 +697,8 @@ def record_decision(
         _reject(service, task_id, request_id, str(exc), raw, actor=actor, model=model, mandate_id=mandate_id)
         raise
     refused = tuple(str(c) for c in sealed.get("refused") or ())
+    known_criteria = (*(str(c) for c in sealed.get("criteria") or ()), *refused)
+    decision = replace(decision, criteria=_canonical_criteria(decision.criteria, known_criteria))
     if refusal := _derogation_refusal(decision, refused):
         _reject(service, task_id, request_id, refusal, raw, actor=actor, model=model, mandate_id=mandate_id)
         raise ArbiterDecisionError(refusal)
@@ -943,8 +997,12 @@ class ArbiterStage:
                 tid = str(event.payload.get("task_id") or event.entity_id or "")
                 if rid and sealed_closure(self._service, tid, rid) is not None:
                     closed.add((tid, rid))
-        return [r for key, r in seen.items() if key not in closed
-                and sealed_request(self._service, key[0], key[1]) is not None]
+        found: list[ArbitrationRequest] = []
+        for key, request in seen.items():
+            sealed = sealed_request(self._service, key[0], key[1]) if key not in closed else None
+            if sealed is not None:  # la PR, la tête et les critères lus viennent du sceau, pas de la ligne du ledger
+                found.append(_with_seal(request, sealed))
+        return found
 
     def _events(self, request: ArbitrationRequest) -> list[LedgerEvent]:
         return _events_of(self._service, request.task_id)
@@ -1142,7 +1200,11 @@ class ArbiterStage:
             argv += ["--settings", str(settings), "--strict-mcp-config"]
         else:
             argv += ["--restricted", "--strict-mcp-config"]
-        argv += ["--tools", SESSION_TOOLS, "--allowed-tools", allowed_tools(request.pr),
+        try:  # les identifiants du sceau entrent dans les règles ; un identifiant impropre n'y entre jamais
+            allowed = allowed_tools(request.pr, task_id=tid, request_id=request.id)
+        except ValueError as exc:
+            return self._fallback(request, str(exc), analysis="")
+        argv += ["--tools", SESSION_TOOLS, "--allowed-tools", allowed,
                  "--disallowed-tools", DISALLOWED_TOOLS, "--permission-mode", PERMISSION_MODE, self._prompt(request, model)]
         result = self._exec(argv, cwd, {**session_env(), **SESSION_ENV})
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
@@ -1215,7 +1277,7 @@ class ArbiterStage:
         example = (
             f'grimoire task arbitrate {request.task_id} --request {request.id} '
             f'--json \'{{"schema": "{DECISION_SCHEMA}", "decision": "back_to_worker", '
-            f'"criteria": ["<critère exact>"], "justification": "<au moins 12 caractères>", "confidence": 0.8}}\''
+            f'"criteria": ["CRITÈRE EXACT"], "justification": "AU MOINS 12 CARACTÈRES", "confidence": 0.8}}\''
         )
         return (
             f"Tu es l'arbitre de la tâche {request.task_id}. Un désaccord persiste entre le worker et "
@@ -1238,7 +1300,10 @@ class ArbiterStage:
             f"- criteria : les critères concernés, recopiés exactement ;\n"
             f"- justification : au moins 12 caractères ;\n"
             f"- confidence : entre 0 et 1 (en deçà de {MIN_CONFIDENCE:.2f}, l'humain tranche).\n\n"
-            f"Vote par une seule commande Bash, sans boucle ni `;` ni `&&` ni `|` :\n{example}\n"
+            f"Vote par une seule commande Bash, exactement de cette forme (aucune autre option, le JSON entre deux "
+            f"apostrophes droites et sans aucune autre apostrophe droite : écris ’ à la place, y compris dans un "
+            f"critère recopié) :\n{example}\n"
+            f"Lis la tâche par `grimoire task show {request.task_id}`, sans autre option.\n"
             f"Une commande refusée par les permissions se reformule seule ; ne modifie aucun fichier."
         )
 

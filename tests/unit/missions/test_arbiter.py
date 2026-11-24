@@ -404,7 +404,8 @@ def test_le_tick_lance_une_session_arbitre_lecture_seule_sous_le_canal(tmp_path:
     assert argv[argv.index("--permission-mode") + 1] == "dontAsk"
     assert argv[argv.index("--tools") + 1] == "Read,Bash"
     allowed = argv[argv.index("--allowed-tools") + 1]
-    assert "Bash(grimoire task arbitrate *)" in allowed and "Edit" not in allowed
+    assert f"Bash(grimoire task arbitrate {task.id} --request {request.id} --json '*')" in allowed
+    assert f"Bash(grimoire task show {task.id})" in allowed and "Edit" not in allowed and "show *" not in allowed
     prompt = argv[-1]
     assert request.id in prompt and CRITERIA[0] in prompt and "DONNÉES NON FIABLES" in prompt
     [launched] = events(service, task.id, arbiter.ARBITRATION_LAUNCHED_EVENT)
@@ -1492,9 +1493,85 @@ def test_la_session_arbitre_n_ouvre_aucun_navigateur() -> None:
     for bad in ("gh pr diff --web", "gh pr view --web", "gh pr view 12 --web", "gh pr diff 12 --web",
                 "gh pr view -w", "gh pr diff 12 -w", "gh pr view 12 --json files --web",
                 "gh pr view 1 -cw", "gh pr view 1 -wc", "gh pr view -cw", "gh pr diff 1 -cw", "gh pr view 1 -ccw",
-                "gh pr view\t-w", "gh pr view\t1 -cw", "gh pr view 1 '--web'", 'gh pr view 1 "--web"',
+                "gh pr view\t-w", "gh pr view 12 --json title' ; gh pr comment 12 -b x '", "gh pr view\t1 -cw", "gh pr view 1 '--web'", 'gh pr view 1 "--web"',
                 "gh pr view 1 --we\\b", "gh pr view 1 '-w'", "gh pr diff '-cw'",
                 "gh pr view 12\t-w", "gh pr view 12\t-cw", "gh pr diff 12\t-w", "gh pr view 12 --json title\t-w",
                 "gh pr diff  12", "gh pr diff 12  -w", "gh pr diff 13", "gh pr view 12", "gh pr view 12 --json title",
                 "gh pr diff 12 --name-only", "gh pr checkout 12", "gh api /user", "gh pr view 12 -q .title"):
         assert not permitted(bad, spec), bad
+
+
+def _permitted(command: str, spec: str) -> bool:
+    """Le filtre de permissions simulé : un motif de la liste blanche, et aucun motif de refus."""
+    import fnmatch
+
+    def rules(text: str) -> list[str]:
+        return [p.strip().removesuffix(")") for p in text.split("Bash(")[1:]]
+
+    def matches(text: str, cmd: str) -> bool:
+        return any(fnmatch.fnmatchcase(cmd, pattern) for pattern in rules(text))
+
+    return matches(spec, command) and not matches(arbiter.DISALLOWED_TOOLS, command)
+
+
+def test_les_gestes_grimoire_de_l_arbitre_sont_des_formes_exactes() -> None:
+    """``task show`` et ``task arbitrate`` : la tâche et la demande fixées, sans option libre ni sortie du shell."""
+    spec = arbiter.allowed_tools(12, task_id="T-1", request_id="q-abc")
+    vote = 'grimoire task arbitrate T-1 --request q-abc --json \'{"decision": "abandon", "criteria": [], ' \
+        '"justification": "a; b | c > d $(e) `f`\nfin", "confidence": 0.9}\''
+    for ok in ("grimoire task show T-1", vote):
+        assert _permitted(ok, spec), ok
+    for bad in ("grimoire task show T-2", "grimoire task show T-1 --project-root /ailleurs",
+                "grimoire task show T-1; gh pr comment 12 -b x", "grimoire task show T-1 > f",
+                "grimoire task show T-1 $(gh pr comment 12 -b x)", "grimoire task show *",
+                "grimoire task arbitrate T-2 --request q-abc --json '{}'",
+                "grimoire task arbitrate T-1 --request q-zzz --json '{}'",
+                "grimoire task arbitrate T-1 --request q-abc --json '{}' ; gh pr comment 12 -b x '",
+                "grimoire task arbitrate T-1 --request q-abc --json '{}'$(gh pr comment 12)''",
+                "grimoire task arbitrate T-1 --request q-abc --json '{}' --project-root '/x'",
+                "grimoire task arbitrate T-1 --request q-abc --json '{}' --request 'q-zzz'",
+                "grimoire task arbitrate T-1 --request q-abc --json '{\"j\": \"l'arbitre\"}'",
+                "grimoire task arbitrate T-1 --request q-abc --json {} ; gh pr comment 12",
+                "grimoire task arbitrate T-1 --request q-abc --project-root /x --json '{}'",
+                "grimoire task arbitrate T-1 --request q-abc --json '{}'\n"):
+        assert not _permitted(bad, spec), bad
+    # Sans tâche ni demande, aucun geste grimoire n'est permis ; un identifiant impropre n'entre pas dans une règle.
+    assert "grimoire" not in arbiter.allowed_tools(12)
+    for bad_id in ("T-1 *", "T-1;x", "", "*"):
+        with pytest.raises(ValueError):
+            arbiter.allowed_tools(12, task_id=bad_id, request_id="q-abc")
+
+
+def test_la_pr_lue_par_l_arbitre_vient_du_sceau(tmp_path: Path) -> None:
+    """Une ligne forgée sous le même ``request_id`` (pr=999) ne redirige ni la session ni sa consigne."""
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    _launch_event(service, task.id, root)
+    request = ask(root, service, task, pr=12)
+    forged = {**request.to_payload(), "pr": 999, "head": "f" * 40, "criteria": ["un critère inventé"],
+              "refused": ["un critère inventé"], "untrusted": True}
+    service.ledger.append_event(ARBITRATION_REQUESTED_EVENT, task.id, "task", "worker", forged)
+    opened = arbiter.open_request(TaskService(root), task.id)
+    assert opened is not None and (opened.pr, opened.head) == (12, HEAD)
+    assert opened.criteria == tuple(CRITERIA) and opened.refused == tuple(CRITERIA)
+    host = FakeHost()
+    [outcome] = ArbiterStage(TaskService(root), policy, exec_=host)()
+    assert (outcome.action, outcome.status) == ("launch", "launched")
+    argv = host.of("claude", "--bg")[0]
+    allowed = argv[argv.index("--allowed-tools") + 1]
+    assert "Bash(gh pr diff 12)" in allowed and "999" not in allowed
+    assert "gh pr diff 12" in argv[-1] and "999" not in argv[-1] and "un critère inventé" not in argv[-1]
+
+
+def test_un_critere_avec_apostrophe_se_vote_en_apostrophe_typographique(tmp_path: Path) -> None:
+    """Le vote passe entre apostrophes droites : ``’`` y vaut le ``'`` du critère, recopié tel quel au sceau."""
+    criterion = "l'arbitre ne lit que le sceau"
+    root, service, task, _policy = scene(tmp_path, acceptance=(criterion,))
+    request = ask(root, service, task, refused=(criterion,))
+    decision = arbiter.record_decision(
+        service, task.id, json.dumps({"decision": "ready_with_derogation", "criteria": ["l’arbitre ne lit que le sceau"],
+                                      "justification": "le critère est tenu autrement", "confidence": 0.9}),
+        request_id=request.id, actor="arbiter",
+    )
+    assert decision.criteria == (criterion,)
+    sealed = arbiter.sealed_decision(service, task.id, request.id)
+    assert sealed is not None and sealed["criteria"] == [criterion]
