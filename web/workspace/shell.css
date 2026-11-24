@@ -3516,6 +3516,15 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   flex: none;
 }
 
+.chat-mic[hidden] {
+  display: none;
+}
+
+.chat-mic[aria-pressed='true'] {
+  border-color: var(--bad-mark);
+  color: var(--bad-mark);
+}
+
 .chat-stop[hidden] {
   display: none;
 }

@@ -16,6 +16,7 @@
 
 import { api, host, projectName } from './api.js';
 import { renderMarkdown } from './markdown.js';
+import { createVoiceInput } from './voice.js';
 
 const SAFE_HREF = /^(https?:|mailto:|#)/i;
 
@@ -90,6 +91,10 @@ export function createChat({ readOnly = () => false } = {}) {
   const form = mk('form', { class: 'chat-form', 'aria-label': 'Message à l’orchestrateur' },
     mk('label', { for: 'chat-input', class: 'sr-only', text: 'Message à l’orchestrateur' }),
     input, mk('div', { class: 'chat-actions' }, send, stop));
+  const voice = createVoiceInput({
+    api, input, slot: form.querySelector('.chat-actions'), readOnly,
+    note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text),
+  });
   const hostSelect = mk('select', { class: 'chat-host', id: 'chat-host', 'aria-label': 'Hôte de l’orchestrateur' });
   const hostBar = mk('div', { class: 'chat-hostbar' },
     mk('label', { for: 'chat-host', class: 'chat-host-label', text: 'Hôte' }), hostSelect);
@@ -491,9 +496,10 @@ export function createChat({ readOnly = () => false } = {}) {
     if (!text || busy || readOnly()) return;
     input.value = '';
     const answering = target;
+    const dictation = voice.consumeDictation();
     if (answering) {
       try {
-        await api.chatSend(text, { task_id: answering.task_id, question_id: answering.question_id });
+        await api.chatSend(text, { task_id: answering.task_id, question_id: answering.question_id }, { dictation });
         answering.state.textContent = 'Réponse transmise : tranchée par vous.';
         setTarget(null);
       } catch (error) {
@@ -504,7 +510,7 @@ export function createChat({ readOnly = () => false } = {}) {
     }
     setBusy(true);
     try {
-      await api.chatSend(text);
+      await api.chatSend(text, null, { dictation });
     } catch (error) {
       setBusy(false);
       input.value = text;
@@ -538,6 +544,7 @@ export function createChat({ readOnly = () => false } = {}) {
           setBusy(false);
           setStatus('Connexion à l’orchestrateur…');
           loadHosts();
+          voice.refresh();
           connect();
         }
       }
@@ -545,6 +552,7 @@ export function createChat({ readOnly = () => false } = {}) {
       scrollDown();
     },
     close() {
+      voice.abort();
       if (stream) stream.close();
       stream = null;
       opened = false;
