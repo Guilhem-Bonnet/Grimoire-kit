@@ -258,3 +258,4 @@ installed_archetypes: []               # Rempli par grimoire-init.sh install
 #   language: fr
 #   idle_unload_seconds: 300           # déchargement après inactivité (0 = jamais)
 #   allow_download: false              # true = vous acceptez le téléchargement des modèles
+#   max_record_seconds: 120            # plafond d'un enregistrement vocal (1 à 600)
