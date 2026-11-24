@@ -56,6 +56,12 @@ janitor :
           wip: 1                  # sessions orchestrateur en même temps
           sessions_per_day: 12    # plafond de lancements par jour (UTC)
           permission_mode: dontAsk  # imposé : toute autre valeur rend la politique illisible (liste blanche d'outils)
+        arbiter:                # GAO-r-le-arbitre-001 : un modèle fort tranche un désaccord avant l'humain
+          enabled: false          # défaut : les escalades posent leur question à l'humain, comme avant
+          tier: strong            # cheap | mid | strong : palier du modèle, lu à la table palier x hôte x fournisseur
+          provider: ""            # fournisseur du registre (optionnel) ; vide : l'hôte, au palier
+          sessions_per_day: 5     # plafond de lancements par jour (UTC)
+          permission_mode: dontAsk  # imposé : lecture seule + un seul canal de vote (`task arbitrate`)
       probe_host: false           # P86 : sonder le frein de la version d'hôte à la récolte d'un bail perdu (deux appels
                                   # modèle payants, une seule fois par version) ; faux : jamais, la reprise reste humaine
       breaker:
@@ -101,6 +107,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DEFAULT_BREAKER_THRESHOLD",
     "ORCHESTRATION_FILE",
+    "ArbiterRole",
     "MergerRole",
     "OrchestratorPolicy",
     "OrchestratorRole",
@@ -116,6 +123,7 @@ TIERS = ("cheap", "mid", "strong")
 _BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _MODE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
+_PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _WORKER_KEYS = frozenset(
     {"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode", "lean", "model_by_class",
      "sensitive_route", "sensitive_paths", "host"}
@@ -129,11 +137,16 @@ _MERGER_KEYS = frozenset(
      "second_reviewer_min_tier"}
 )
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
+_ARBITER_KEYS = frozenset({"enabled", "tier", "provider", "sessions_per_day", "permission_mode"})
 #: Le modèle de la session orchestrateur quand la politique n'en nomme pas : le palier ``mid`` de Claude Code
 #: (défaut du kit de la table palier x hôte x fournisseur, ``sonnet``).
 DEFAULT_ORCHESTRATOR_MODEL = kit_model("mid")
 #: Le seul mode de permission de la session orchestrateur (``orchestrator_session.PERMISSION_MODE``).
 ORCHESTRATOR_PERMISSION_MODE = "dontAsk"
+#: Le palier de l'arbitre quand la politique n'en nomme pas (``strong`` : c'est un arbitrage, pas une revue).
+DEFAULT_ARBITER_TIER = "strong"
+#: Le seul mode de permission de la session arbitre (``arbiter.PERMISSION_MODE``) : lecture seule + un canal de vote.
+ARBITER_PERMISSION_MODE = "dontAsk"
 #: Les checks qui ne disent rien du code (couverture rapportée par un service tiers) : hors du verdict par défaut.
 DEFAULT_IGNORED_CHECKS: tuple[str, ...] = ("codecov/*",)
 
@@ -207,6 +220,25 @@ class MergerRole:
 
 
 @dataclass(frozen=True, slots=True)
+class ArbiterRole:
+    """Le rôle ``arbiter`` : un modèle fort tranche un désaccord avant toute question à l'humain.
+
+    Désactivé par défaut. Son mode de permission est imposé (``dontAsk`` : tout outil hors de sa liste blanche est
+    refusé sans demander) ; la politique ne peut pas le changer, encore moins en ``bypassPermissions``.
+    """
+
+    enabled: bool = False
+    tier: str = DEFAULT_ARBITER_TIER
+    provider: str = ""
+    sessions_per_day: int = 5
+    permission_mode: str = ARBITER_PERMISSION_MODE
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"enabled": self.enabled, "tier": self.tier, "provider": self.provider,
+                "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode}
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestratorRole:
     """Le rôle ``orchestrator`` (#962) : désactivé par défaut ; une session à la fois, sonnet, 12 lancements par jour.
 
@@ -235,11 +267,12 @@ class OrchestratorPolicy:
     reviewer: ReviewerRole = field(default_factory=ReviewerRole)
     merger: MergerRole = field(default_factory=MergerRole)
     orchestrator: OrchestratorRole = field(default_factory=OrchestratorRole)
+    arbiter: ArbiterRole = field(default_factory=ArbiterRole)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "worker": self.worker.to_dict(), "reviewer": self.reviewer.to_dict(), "merger": self.merger.to_dict(),
-            "orchestrator": self.orchestrator.to_dict(),
+            "orchestrator": self.orchestrator.to_dict(), "arbiter": self.arbiter.to_dict(),
             "base": self.base,
             "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue,
             "probe_host": self.probe_host,
@@ -428,9 +461,42 @@ def _parse_orchestrator(raw: Any) -> OrchestratorRole:
     )
 
 
+def _parse_arbiter(raw: Any) -> ArbiterRole:
+    """Le rôle ``arbiter`` : palier ``strong`` par défaut, ``dontAsk`` imposé, fournisseur optionnel du registre."""
+    where = "orchestrator.roles.arbiter"
+    data = _table(raw, where, _ARBITER_KEYS)
+    enabled = data.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise _InvalidPolicyError(f"{where}.enabled doit être un booléen, pas {enabled!r}")
+    tier = _text(data.get("tier", DEFAULT_ARBITER_TIER), f"{where}.tier") or DEFAULT_ARBITER_TIER
+    if tier not in TIERS:
+        raise _InvalidPolicyError(f"{where}.tier : {tier!r} inconnu (admis : {', '.join(TIERS)})")
+    provider = _text(data.get("provider", ""), f"{where}.provider")
+    if provider and not _PROVIDER.fullmatch(provider):
+        raise _InvalidPolicyError(
+            f"{where}.provider : {provider!r} n'est pas un identifiant de fournisseur du registre (lettres, chiffres, . _ -)"
+        )
+    mode = _text(data.get("permission_mode", ARBITER_PERMISSION_MODE), f"{where}.permission_mode")
+    if mode != ARBITER_PERMISSION_MODE:
+        raise _InvalidPolicyError(
+            f"{where}.permission_mode : {mode!r} refusé — la session arbitre tourne toujours en "
+            f"{ARBITER_PERMISSION_MODE} (lecture seule, un seul canal de vote)"
+        )
+    return ArbiterRole(
+        enabled=enabled,
+        tier=tier,
+        provider=provider,
+        sessions_per_day=_positive(data.get("sessions_per_day", 5), f"{where}.sessions_per_day"),
+        permission_mode=mode,
+    )
+
+
 def _parse(block: Any) -> OrchestratorPolicy:
     top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor", "probe_host"}))
-    roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker", "reviewer", "merger", "orchestrator"}))
+    roles = _table(
+        top.get("roles", {}), "orchestrator.roles",
+        frozenset({"worker", "reviewer", "merger", "orchestrator", "arbiter"}),
+    )
     breaker = _table(top.get("breaker", {}), "orchestrator.breaker", frozenset({"threshold"}))
     janitor = _table(top.get("janitor", {}), "orchestrator.janitor", frozenset({"close_issue"}))
     close_issue = janitor.get("close_issue", False)
@@ -447,6 +513,7 @@ def _parse(block: Any) -> OrchestratorPolicy:
         reviewer=_parse_reviewer(roles["reviewer"]) if "reviewer" in roles else ReviewerRole(),
         merger=_parse_merger(roles["merger"]) if "merger" in roles else MergerRole(),
         orchestrator=_parse_orchestrator(roles["orchestrator"]) if "orchestrator" in roles else OrchestratorRole(),
+        arbiter=_parse_arbiter(roles["arbiter"]) if "arbiter" in roles else ArbiterRole(),
         base=base,
         breaker_threshold=_positive(breaker.get("threshold", DEFAULT_BREAKER_THRESHOLD), "orchestrator.breaker.threshold"),
         close_issue=close_issue,

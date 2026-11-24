@@ -45,6 +45,10 @@ class HookEvent(StrEnum):
     SUBAGENT_STOP = "subagent_stop"
     PRE_COMPACT = "pre_compact"
     STOP = "stop"
+    #: Propres au harness Copilot CLI (#1280, P3) : ``errorOccurred`` (une erreur survient)
+    #: et ``userPromptTransformed`` (mutation seule du prompt). Observés, jamais bloquants.
+    ERROR_OCCURRED = "error_occurred"
+    USER_PROMPT_TRANSFORMED = "user_prompt_transformed"
     #: Événements que le kit sait décider (au minimum tracer) mais qu'aucun
     #: émetteur n'écrit : voir :data:`NOT_EMITTED_EVENTS` (R31, veille
     #: ``hooks-echec-ferme-2026-10``).

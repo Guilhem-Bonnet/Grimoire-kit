@@ -165,6 +165,8 @@ STOP_BLOCK_LIMIT = 8
 EVENT_ALIASES: dict[str, HookEvent] = {
     "userpromptsubmitted": HookEvent.USER_PROMPT_SUBMIT,
     "agentstop": HookEvent.STOP,
+    "erroroccurred": HookEvent.ERROR_OCCURRED,
+    "userprompttransformed": HookEvent.USER_PROMPT_TRANSFORMED,
 }
 
 

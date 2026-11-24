@@ -25,9 +25,16 @@ if TYPE_CHECKING:
     from grimoire.missions.ledger import LeaseView
 
 __all__ = [
+    "CRITERION_AMENDED_EVENT", "CRITERION_REMOVED_EVENT",
     "UnjudgedClaimError", "blocks_path", "default_claim_expiry", "deferred_waiting", "parse_jsonl", "read_jsonl", "replay_link", "replay_steering", "unclosed_blockers", "unfenced_question",
     "waiting_guard",
 ]
+
+
+#: GAO-r-le-arbitre-001 : le texte d'un critère remplacé par un arbitrage (l'ancien reste dans l'événement).
+CRITERION_AMENDED_EVENT = "task.criterion_amended"
+#: GAO-r-le-arbitre-001 : un critère détaché dans une tâche de suite ; la tâche courante continue sans lui.
+CRITERION_REMOVED_EVENT = "task.criterion_removed"
 
 
 class UnjudgedClaimError(Exception):
@@ -277,6 +284,21 @@ def replay_steering(tasks: dict[str, MissionTask], evt_type: str, payload: dict[
             {**d, "acknowledged_at": d.get("acknowledged_at") or at} if d.get("id") == did else d
             for d in data.get("directives", [])
         ]
+    elif evt_type == CRITERION_AMENDED_EVENT:
+        # GAO-r-le-arbitre-001 : le texte d'un critère est remplacé ; l'événement garde l'ancien (l'historique
+        # reste au ledger), la tâche ne porte que le nouveau.
+        old, new = str(payload.get("from", "")), str(payload.get("to", "")).strip()
+        acceptance = [str(c) for c in data.get("acceptance", [])]
+        if new and old in acceptance:
+            data["acceptance"] = [new if c == old else c for c in acceptance]
+    elif evt_type == CRITERION_REMOVED_EVENT:
+        # Un critère inatteignable part dans une tâche de suite : la tâche courante continue sans lui. Le dernier
+        # critère n'est jamais retiré (une tâche sans critère n'a plus rien à vérifier) : l'événement est ignoré.
+        criterion = str(payload.get("criterion", ""))
+        acceptance = [str(c) for c in data.get("acceptance", [])]
+        kept = [c for c in acceptance if c != criterion]
+        if criterion in acceptance and kept:
+            data["acceptance"] = kept
     tasks[tid] = MissionTask.from_dict(data)
 
 
