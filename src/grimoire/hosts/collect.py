@@ -596,16 +596,7 @@ def collect_agents(
 
 #: Événements qu'un hook d'agent peut viser (noms PascalCase du fichier d'agent Copilot).
 AGENT_HOOK_EVENTS = frozenset(
-    {
-        "SessionStart",
-        "UserPromptSubmit",
-        "PreToolUse",
-        "PostToolUse",
-        "PreCompact",
-        "SubagentStart",
-        "SubagentStop",
-        "Stop",
-    }
+    {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "SubagentStart", "SubagentStop", "Stop"}
 )
 
 #: Ce qui désigne la garde du kit : un hook d'agent qui l'appellerait la doublerait.
@@ -613,7 +604,7 @@ _GUARD_MARKERS = ("grimoire-hook", "grimoire host hook", "grimoire standard acti
 
 
 def _agent_hooks(raw: Any, name: str, ref: str) -> tuple[AgentHookSpec, ...]:
-    """Lit la clé ``hooks:`` d'un fichier d'agent : ``{Événement: [{command, timeout?}]}`` (#1280 P3).
+    """Lit la clé ``hooks:`` d'un fichier d'agent : ``{Événement: [{command, windows?, timeout?}]}`` (#1280 P3).
 
     Un hook qui relance la garde du kit est refusé : elle vit dans les fichiers de hooks
     du projet, la répéter ici la ferait tourner deux fois (ou la ferait croire retirée).
@@ -637,14 +628,17 @@ def _agent_hooks(raw: Any, name: str, ref: str) -> tuple[AgentHookSpec, ...]:
             command = entry.get("command") if isinstance(entry, dict) else None
             if not isinstance(command, str) or not command.strip():
                 raise GrimoireAgentError(f"{where} « {event} » : chaque hook porte une `command` non vide.")
-            if any(marker in command for marker in _GUARD_MARKERS):
+            windows = entry.get("windows") or ""
+            if not isinstance(windows, str):
+                raise GrimoireAgentError(f"{where} « {event} » : `windows` est une chaîne.")
+            if any(marker in f"{command} {windows}" for marker in _GUARD_MARKERS):
                 raise GrimoireAgentError(
                     f"{where} « {event} » : la garde du kit est globale, un hook d'agent ne la relance pas."
                 )
             timeout = entry.get("timeout")
             if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0):
                 raise GrimoireAgentError(f"{where} « {event} » : `timeout` est un entier de secondes positif.")
-            out.append(AgentHookSpec(event=str(event), command=command.strip(), timeout=timeout))
+            out.append(AgentHookSpec(str(event), command.strip(), windows.strip(), timeout))
     return tuple(out)
 
 
@@ -920,7 +914,9 @@ def _is_override(agent: AgentSpec) -> bool:
     return agent.override_ref is not None
 
 
-def build_surface(project_root: Path, *, project_name: str | None = None, write_cache: bool = True) -> ProjectSurface:
+def build_surface(
+    project_root: Path, *, project_name: str | None = None, write_cache: bool = True
+) -> ProjectSurface:
     """Read *project_root* into the surface every emitter renders from.
 
     Skills are collected before agents on purpose: an agent's ``skills:``
@@ -993,7 +989,9 @@ def build_surface(project_root: Path, *, project_name: str | None = None, write_
         skills=skills,
         commands=collect_commands(root, governed=governed),
         hooks=governance_hooks(governed=governed),
-        permissions=default_permissions(active_profile_id(root, write_cache=write_cache) if governed else "starter"),
+        permissions=default_permissions(
+            active_profile_id(root, write_cache=write_cache) if governed else "starter"
+        ),
         mcp_servers=collect_mcp_servers(root),
         governed=governed,
     )

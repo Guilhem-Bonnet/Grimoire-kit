@@ -156,21 +156,28 @@ def _model_tiers(project_root: Path) -> dict[str, str]:
 def _with_agent_hooks(header: str, agent: AgentSpec) -> str:
     """Ajoute au frontmatter le bloc ``hooks:`` propre à *agent* (#1280 P3).
 
-    Format de https://code.visualstudio.com/docs/copilot/customization/custom-agents :
-    ``hooks:`` {Événement: [{type: command, command, timeout}]}, écrit en YAML de flux (JSON).
+    Forme de la référence GitHub « Agent-scoped hooks » (docs.github.com/en/copilot/reference/
+    hooks-reference) : ``hooks:`` {Événement: [{type: command, command, windows?, timeoutSec?}]}.
     Il ne porte que ce que la persona déclare : la garde globale reste dans
     ``.github/hooks/`` — le collecteur refuse un hook d'agent qui la relancerait.
     """
     if not agent.hooks:
         return header
-    block: dict[str, list[dict[str, Any]]] = {}
+    by_event: dict[str, list[Any]] = {}
     for hook in agent.hooks:
-        entry: dict[str, Any] = {"type": "command", "command": hook.command}
-        if hook.timeout is not None:
-            entry["timeout"] = hook.timeout
-        block.setdefault(hook.event, []).append(entry)
+        by_event.setdefault(hook.event, []).append(hook)
+    lines = ["hooks:"]
+    for event, hooks in by_event.items():
+        lines.append(f"  {event}:")
+        for hook in hooks:
+            lines.append("    - type: command")
+            lines.append(f"      command: {json.dumps(hook.command, ensure_ascii=False)}")
+            if hook.windows:
+                lines.append(f"      windows: {json.dumps(hook.windows, ensure_ascii=False)}")
+            if hook.timeout is not None:
+                lines.append(f"      timeoutSec: {hook.timeout}")
     head, _, _ = header.rpartition("\n---")
-    return f"{head}\nhooks: {json.dumps(block, ensure_ascii=False)}\n---"
+    return "\n".join([head, *lines, "---"])
 
 
 def _agent_file(

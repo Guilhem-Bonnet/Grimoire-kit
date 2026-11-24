@@ -158,12 +158,13 @@ class ModelAffinity:
 class AgentHookSpec:
     """Un hook que la persona déclare pour elle seule (clé ``hooks:`` de son fichier, #1280 P3).
 
-    ``event`` est le nom d'événement PascalCase ; ``command`` la ligne de commande telle
-    que l'auteur l'a écrite ; ``timeout`` en secondes, ``None`` laissant le défaut de l'hôte.
+    ``event`` : nom PascalCase ; ``command`` : ligne de commande telle qu'écrite ;
+    ``windows`` : variante Windows facultative ; ``timeout`` en secondes (``None`` = défaut de l'hôte).
     """
 
     event: str
     command: str
+    windows: str = ""
     timeout: int | None = None
 
 
@@ -336,7 +337,9 @@ def body_fingerprint(body: str) -> str:
     :class:`AgentSpec` (the IR handed to every emitter) need not carry every
     agent body in memory.
     """
-    normalized = "\n".join(line.rstrip() for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n")).strip()
+    normalized = "\n".join(
+        line.rstrip() for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ).strip()
     if not normalized:
         return ""
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -384,7 +387,9 @@ def _partition_duplicate_pairs(
         ordered = sorted(names)
         duplicates.extend((ordered[i], ordered[j]) for i in range(len(ordered)) for j in range(i + 1, len(ordered)))
     by_name = {agent.name: agent for agent in agents}
-    strict = [pair for pair in duplicates if any(is_override(by_name[n]) for n in pair if n in by_name)]
+    strict = [
+        pair for pair in duplicates if any(is_override(by_name[n]) for n in pair if n in by_name)
+    ]
     return tuple(strict), tuple(duplicates)
 
 

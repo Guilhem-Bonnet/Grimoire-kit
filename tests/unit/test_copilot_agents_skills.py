@@ -185,19 +185,28 @@ def _agent_with_hooks(root: Path, name: str, hooks: str) -> None:
 def test_agent_hooks_rendered_in_agent_md(project: Path) -> None:
     import json
 
-    _agent_with_hooks(project, "scribe", "  PostToolUse:\n    - command: ./scripts/fmt.sh\n      timeout: 20\n")
+    from ruamel.yaml import YAML
+
+    _agent_with_hooks(
+        project,
+        "scribe",
+        "  PostToolUse:\n    - command: ./scripts/fmt.sh\n      windows: ./scripts/fmt.ps1\n      timeout: 20\n",
+    )
     files, _ = _copilot(project)
-    text = files[".github/agents/scribe.agent.md"]
-    front = text.split("---")[1]
-    line = next(x for x in front.splitlines() if x.startswith("hooks: "))
-    assert json.loads(line[len("hooks: ") :]) == {
-        "PostToolUse": [{"type": "command", "command": "./scripts/fmt.sh", "timeout": 20}]
+    meta = YAML(typ="safe").load(files[".github/agents/scribe.agent.md"].split("---")[1])
+    # Forme de la référence GitHub « Agent-scoped hooks ».
+    assert meta["hooks"] == {
+        "PostToolUse": [
+            {"type": "command", "command": "./scripts/fmt.sh", "windows": "./scripts/fmt.ps1", "timeoutSec": 20}
+        ]
     }
     # Un agent sans hooks propres n'en reçoit pas.
     assert "hooks:" not in files[".github/agents/architecte.agent.md"].split("---")[1]
-    # La garde globale reste dans son fichier, une seule fois, hors de l'agent.
-    assert "grimoire" not in line
-    assert ".github/hooks/grimoire-pre-tool-use.json" in files or any(k.startswith(".github/hooks/") for k in files)
+    # La garde globale reste dans son fichier, une seule fois, et nulle part dans un .agent.md.
+    guard = json.loads(files[".github/hooks/grimoire-pre-tool-use.json"])["hooks"]["PreToolUse"]
+    assert any("grimoire" in e["bash"] for e in guard)
+    holders = [k for k, v in files.items() if k.endswith(".agent.md") and "grimoire host hook" in v]
+    assert holders == []
 
 
 def test_agent_hook_cannot_relaunch_the_global_guard(project: Path) -> None:
