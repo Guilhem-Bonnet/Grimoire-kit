@@ -51,10 +51,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CLAUDE_CODE_HOST",
+    "GEMINI_HOST",
     "LEAN_SESSION_ARGS",
     "LEAN_TOOLS",
     "OPENCODE_HOST",
     "OPENCODE_PERMISSION_ARGS",
+    "PROJECT_HOSTS",
     "WORKER_HOSTS",
     "ClaudeCodeWorkerHost",
     "LaunchPlan",
@@ -70,8 +72,12 @@ __all__ = [
 
 CLAUDE_CODE_HOST = "claude-code"
 OPENCODE_HOST = "opencode"
+#: Gemini CLI (:mod:`.gemini_host`) : l'hôte du projet quand ``orchestrator.host`` le nomme.
+GEMINI_HOST = "gemini"
 #: Les valeurs admises pour ``roles.worker.host`` ; la première est le défaut.
-WORKER_HOSTS: tuple[str, ...] = (CLAUDE_CODE_HOST, OPENCODE_HOST)
+WORKER_HOSTS: tuple[str, ...] = (CLAUDE_CODE_HOST, OPENCODE_HOST, GEMINI_HOST)
+#: Les valeurs admises pour ``orchestrator.host`` (l'hôte du projet) ; la première est le défaut.
+PROJECT_HOSTS: tuple[str, ...] = (CLAUDE_CODE_HOST, GEMINI_HOST)
 #: Mesuré le 2026-11-06 : 45 k jetons de contexte au premier tour sans ces options, 10 k avec. Sans ``Skill`` ni ``Agent``.
 #: ``--tools`` est variadique : en deux jetons, il avale la consigne qui le suit (relecteur muet, #1160).
 LEAN_TOOLS = "Bash,Read,Edit,Write,Glob,Grep"
@@ -288,8 +294,9 @@ class ClaudeCodeWorkerHost:
         return False, f", session {handle} NON arrêtée ({why})"
 
 
-def _pid_alive(pid: int) -> bool:
-    """Vrai si *pid* vit et est un processus opencode (un pid recyclé par un autre programme ne compte pas)."""
+def _pid_alive(pid: int, marker: bytes = b"opencode") -> bool:
+    """Vrai si *pid* vit et porte *marker* dans sa ligne de commande (un pid recyclé par un autre programme ne compte
+    pas) ; *marker* vaut ``opencode`` par défaut, ``gemini`` pour :class:`~.gemini_host.GeminiWorkerHost`."""
     if pid <= 0 or not _POSIX:
         return False  # sous Windows, ``os.kill`` termine le processus : on ne sonde pas
     try:
@@ -301,7 +308,7 @@ def _pid_alive(pid: int) -> bool:
     cmdline = Path(f"/proc/{pid}/cmdline")
     if cmdline.is_file():
         with contextlib.suppress(OSError):
-            return b"opencode" in cmdline.read_bytes()
+            return marker in cmdline.read_bytes()
     return True
 
 
@@ -548,6 +555,10 @@ def _same_file(spec: object, expected: Path) -> bool:
 
 def worker_host(name: str, *, claude_bin: str = "claude") -> WorkerHost:
     """L'hôte nommé par ``roles.worker.host`` ; vide ou ``claude-code`` : Claude Code."""
+    if name == GEMINI_HOST:
+        from grimoire.missions.gemini_host import GeminiWorkerHost
+
+        return GeminiWorkerHost()
     return OpencodeWorkerHost() if name == OPENCODE_HOST else ClaudeCodeWorkerHost(claude_bin)
 
 

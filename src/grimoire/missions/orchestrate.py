@@ -312,7 +312,7 @@ def _one_pass(
         dispatched = tuple(o.task_id for o in launches if o.status == "launched") if launches else tuple(a.task_id for a in plan.admitted)
     routes = _planned_routes(service, policy, plan.admitted) if mode == "plan" else ()
     reviews: tuple[ReviewOutcome, ...] = ()
-    if mode == "apply" and policy is not None and policy.reviewer.enabled:
+    if mode == "apply" and policy is not None and policy.reviewer.enabled and not _host_refused(policy, "relecteur", attention):
         from grimoire.missions.launcher import default_exec
         from grimoire.missions.reviewer import ReviewStage
 
@@ -437,11 +437,21 @@ def _merger_stage(
         return ()
 
 
+def _host_refused(policy: Any, role: str, attention: list[str]) -> bool:
+    """Vrai (et la raison en note d'attention) si *role* n'est pas outillé sur l'hôte du projet (``orchestrator.host``)."""
+    from grimoire.missions.orchestrator_policy import claude_only_refusal
+
+    if refusal := claude_only_refusal(policy, role):
+        attention.append(refusal)
+        return True
+    return False
+
+
 def _arbiter_stage(
     service: TaskService, policy: Any, mode: str, exec_: Exec | None, now: datetime | None, attention: list[str]
 ) -> tuple[Any, ...]:
     """L'arbitre (GAO-r-le-arbitre-001), appliqué seulement ; une étape en erreur ne casse pas le tick."""
-    if mode != "apply" or policy is None or not policy.arbiter.enabled:
+    if mode != "apply" or policy is None or not policy.arbiter.enabled or _host_refused(policy, "arbitre", attention):
         return ()
     from grimoire.missions.arbiter import ArbiterStage
     from grimoire.missions.launcher import default_exec
@@ -457,7 +467,9 @@ def _orchestrator_session_stage(
     service: TaskService, policy: Any, mode: str, exec_: Exec | None, now: datetime | None, attention: list[str]
 ) -> tuple[OrchestratorOutcome, ...]:
     """La session orchestrateur (#962), appliquée seulement ; une étape en erreur ne casse pas le tick."""
-    if mode != "apply" or policy is None or not policy.orchestrator.enabled:
+    if mode != "apply" or policy is None or not policy.orchestrator.enabled or _host_refused(
+        policy, "orchestrateur", attention
+    ):
         return ()
     from grimoire.missions.launcher import default_exec
     from grimoire.missions.orchestrator_session import OrchestratorStage

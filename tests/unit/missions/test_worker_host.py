@@ -348,7 +348,7 @@ def test_sans_host_le_worker_et_le_relecteur_restent_sur_claude_code(tmp_path: P
     ("extra", "error"),
     [
         ("      host: opencode\n", "provider est obligatoire avec host: opencode"),
-        ("      host: gemini\n", "'gemini' inconnu"),
+        ("      host: cursor\n", "'cursor' inconnu"),  # gemini est admis depuis GAO-orchestrateu-001
         ("      host: 3\n", "doit être du texte"),
     ],
 )
