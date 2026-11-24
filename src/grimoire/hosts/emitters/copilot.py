@@ -153,6 +153,33 @@ def _model_tiers(project_root: Path) -> dict[str, str]:
     return {choice.tier: choice.model for choice in choices if choice.model}
 
 
+def _with_agent_hooks(header: str, agent: AgentSpec) -> str:
+    """Ajoute au frontmatter le bloc ``hooks:`` propre à *agent* (#1280 P3).
+
+    Forme de la référence GitHub « Agent-scoped hooks » (docs.github.com/en/copilot/reference/
+    hooks-reference) : ``hooks:`` {Événement: [{type: command, command, windows?, timeoutSec?}]}.
+    Il ne porte que ce que la persona déclare : la garde globale reste dans
+    ``.github/hooks/`` — le collecteur refuse un hook d'agent qui la relancerait.
+    """
+    if not agent.hooks:
+        return header
+    by_event: dict[str, list[Any]] = {}
+    for hook in agent.hooks:
+        by_event.setdefault(hook.event, []).append(hook)
+    lines = ["hooks:"]
+    for event, hooks in by_event.items():
+        lines.append(f"  {event}:")
+        for hook in hooks:
+            lines.append("    - type: command")
+            lines.append(f"      command: {json.dumps(hook.command, ensure_ascii=False)}")
+            if hook.windows:
+                lines.append(f"      windows: {json.dumps(hook.windows, ensure_ascii=False)}")
+            if hook.timeout is not None:
+                lines.append(f"      timeoutSec: {hook.timeout}")
+    head, _, _ = header.rpartition("\n---")
+    return "\n".join([head, *lines, "---"])
+
+
 def _agent_file(
     agent: AgentSpec,
     surface: ProjectSurface,
@@ -194,7 +221,7 @@ def _agent_file(
         fields["agents"] = [other.name for other in routed]
         verbs = ", ".join(dict.fromkeys(v.value for other in (agent, *routed) for v in other.tools))
         boundary = f"{verbs} (l'union de tes personas), plus la délégation par l'outil `agent` aux personas listées dans `agents`"
-    header = Emitter.frontmatter(fields)
+    header = _with_agent_hooks(Emitter.frontmatter(fields), agent)
     role = (
         "Point d'entrée : sur une demande directe et bornée (`grimoire-agent-dispatch` en juge), tu "
         "fais le travail toi-même avec tes outils ; sinon tu délègues à la persona adaptée avec l'outil "
