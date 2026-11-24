@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from grimoire.missions.request_kind import classify_request_kind
 from grimoire.missions.schemas import RiskProfile, TaskType
 
 __all__ = [
@@ -323,6 +324,7 @@ def intake_proposal(text: str) -> dict[str, Any]:
     result = MissionIntakeService().analyze(IntakeRequest(raw_text=text))
     return {
         **result.to_dict(),
+        "request_kind": classify_request_kind(text),
         "written": False,
         "next": "`grimoire task add \"<titre>\" -a \"<critère>\"` pour chaque tâche retenue",
     }

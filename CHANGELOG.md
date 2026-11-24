@@ -8,6 +8,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cadrage): `grimoire cadrage interview` rend le plan d'entretien de cadrage — sept angles (utilisateurs, existant, critères de réussite, hors périmètre, contraintes, risques et pré-mortem, alternatives) avec intention et deux questions d'amorce ; la profondeur (express, standard, approfondi) vient de l'intake déterministe et borne les questions et les angles obligatoires (`--depth` la force) ; `interview answer` consigne une réponse, un `--unknown` (hypothèse) ou un `--skip` motivé dans les fichiers du cadrage ; `cadrage check` refuse un angle obligatoire resté ouvert, écarté sans raison ou d'état inconnu, et un `entretien.json` illisible ou invalide ; les réponses sont repliées sur une ligne (#1342 M2).
+- feat(cadrage): nature de la demande (`RequestKind`, 12 natures, distincte de `TaskType`) proposée par l'intake en français et en anglais, avec sa raison ; `grimoire cadrage interview --kind` rend les questions propres, le livrable et la recette MOA ; une question ne déclenche aucun entretien, un incident rend trois questions au plus et n'est jamais bloqué (#1342 M2b)
+
 ## [3.105.0] - 2026-11-24
 
 - fix(security): `redact_secrets` masque les jetons `github_pat_` et les `Bearer` opaques (`Bearer: …` compris, pas la prose « Bearer authentication failed »), le motif de clé privée est linéaire (200 000 caractères < 100 ms) ; `ErrorOccurred` caviarde `name`, `errorContext` et `toolName` et jette tout le dernier mot coupé par la fenêtre de balayage (URL à authentification comprise) ; un mot unique plus long que la fenêtre devient `[truncated]`.

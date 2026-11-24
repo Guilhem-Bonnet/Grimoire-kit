@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.cadrage import PHASES, PLACEHOLDER, cadrage_dir
+from grimoire.missions.request_kind import KIND_PROFILES, RequestKind, parse_kind
 
 __all__ = [
     "ANGLES",
@@ -98,8 +99,13 @@ _DEEP_TYPES = {"migration", "security", "architecture"}
 _DEEP_RISKS = {"strict", "security_critical"}
 
 
-def classify_depth(proposal: dict[str, Any]) -> str:
-    """Profondeur déduite d'une proposition d'intake : risque, type de mission, périmètre."""
+_DEEP_KINDS = {RequestKind.NEW_PROJECT, RequestKind.MIGRATION, RequestKind.SECURITY}
+
+
+def classify_depth(proposal: dict[str, Any], kind: RequestKind | None = None) -> str:
+    """Profondeur déduite d'une proposition d'intake : risque, type de mission, périmètre, nature."""
+    if kind in _DEEP_KINDS:
+        return "approfondi"
     risk = str(proposal.get("risk_profile", ""))
     mission_type = str(proposal.get("mission_type", ""))
     scopes = [s for s in proposal.get("scope_hints", []) if s != "repo"]
@@ -127,6 +133,11 @@ def _load(root: Path, chantier: str | None) -> dict[str, Any] | None:
         raise ValueError(f"{STATE_FILE} illisible ({exc.__class__.__name__}) : corrigez-le ou supprimez-le") from exc
     if not isinstance(data, dict) or data.get("depth") not in DEPTHS:
         raise ValueError(f"{STATE_FILE} invalide : profondeur absente ou inconnue ({', '.join(DEPTHS)})")
+    if "kind" in data:
+        try:
+            parse_kind(str(data["kind"]))
+        except ValueError as exc:
+            raise ValueError(f"{STATE_FILE} invalide : {exc}") from exc
     angles = data.get("angles", {})
     if not isinstance(angles, dict):
         raise ValueError(f"{STATE_FILE} invalide : « angles » doit être un objet")
@@ -169,36 +180,64 @@ def _request_text(root: Path, chantier: str | None) -> str:
 
 
 def interview_plan(
-    root: Path, chantier: str | None = None, *, depth: str | None = None, text: str | None = None
+    root: Path, chantier: str | None = None, *, depth: str | None = None, text: str | None = None,
+    kind: str | None = None,
 ) -> dict[str, Any]:
     """Le plan d'entretien : fige la profondeur au premier appel, puis rend l'état courant des angles.
 
     ``depth`` force (et enregistre) la profondeur ; sans elle, l'état enregistré fait foi, sinon
-    l'intake déterministe la calcule.
+    l'intake déterministe la calcule. ``kind`` force la nature de la demande ; sans elle, la nature
+    enregistrée, sinon celle que l'intake propose. Changer de nature conserve les réponses.
+    Une question ne déclenche aucun entretien : rien n'est écrit.
     """
     if depth is not None and depth not in DEPTHS:
         raise ValueError(f"profondeur inconnue : {depth!r} — {', '.join(DEPTHS)}")
+    forced_kind = parse_kind(kind) if kind else None
     from grimoire.missions.intake import intake_proposal
 
     state = _load(root, chantier)
     source = "enregistrée"
-    if depth is not None:
-        source = "forcée"
-    elif state is not None:
+    proposal: dict[str, Any] | None = None
+    if depth is None and state is not None:
         depth = str(state["depth"])
     else:
         proposal = intake_proposal(text or _request_text(root, chantier))
-        depth = classify_depth(proposal)
-        source = f"intake ({proposal['risk_profile']}, {proposal['mission_type']})"
-    if state is None or state["depth"] != depth:
-        state = {"depth": depth, "angles": (state or {}).get("angles", {})}
+        source = "forcée" if depth is not None else f"intake ({proposal['risk_profile']}, {proposal['mission_type']})"
+    if forced_kind is not None:
+        current, kind_source = forced_kind, "forcée"
+    elif state is not None and state.get("kind"):
+        current, kind_source = parse_kind(str(state["kind"])), "enregistrée"
+    else:
+        proposal = proposal or intake_proposal(text or _request_text(root, chantier))
+        current = parse_kind(str(proposal["request_kind"]["kind"]))
+        kind_source = f"intake ({proposal['request_kind']['reason']})"
+    if depth is None:
+        depth = classify_depth(proposal, current) if proposal else "standard"
+    if not KIND_PROFILES[current].interview and state is None:
+        return _render({"depth": depth, "angles": {}, "kind": current.value}, source, kind_source)
+    old_kind = (state or {}).get("kind")
+    if state is None or state["depth"] != depth or old_kind != current.value:
+        state = {"depth": depth, "kind": current.value, "angles": (state or {}).get("angles", {})}
         _save(root, chantier, state)
-    return _render(state, source)
+    return _render(state, source, kind_source)
 
 
-def _render(state: dict[str, Any], source: str) -> dict[str, Any]:
+def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée") -> dict[str, Any]:
     depth = str(state["depth"])
     required, per_angle = _PROFILE[depth]
+    kind = parse_kind(str(state["kind"])) if state.get("kind") else None
+    profile = KIND_PROFILES[kind] if kind else None
+    if profile is not None and not profile.interview:
+        return {
+            "kind": kind.value, "kind_label": profile.label, "kind_source": kind_source,
+            "interview": False, "depth": depth, "depth_source": source, "questions_per_angle": 0,
+            "kind_questions": [], "deliverable": profile.deliverable, "acceptance": profile.acceptance,
+            "deferred": "", "angles": [], "open_required": [], "complete": True,
+            "note": "Une question ne déclenche aucun entretien : répondre directement.",
+        }
+    non_blocking = profile is not None and not profile.blocking
+    if non_blocking:
+        required = ()
     recorded = state.get("angles", {})
     angles = []
     for a in ANGLES:
@@ -213,10 +252,23 @@ def _render(state: dict[str, Any], source: str) -> dict[str, Any]:
         x["id"] for x in angles
         if x["required"] and not (x["state"] == "couvert" or (x["state"] == "ecarte" and x["reason"].strip()))
     ]
-    return {
+    view: dict[str, Any] = {
         "depth": depth, "depth_source": source, "questions_per_angle": per_angle,
         "angles": angles, "open_required": open_required, "complete": not open_required,
+        "interview": True, "deferred": "",
     }
+    if profile is not None and kind is not None:
+        questions = list(profile.questions[: profile.max_questions] if profile.max_questions else profile.questions)
+        view.update(
+            kind=kind.value, kind_label=profile.label, kind_source=kind_source, kind_questions=questions,
+            deliverable=profile.deliverable, acceptance=profile.acceptance,
+        )
+        if non_blocking:
+            view["deferred"] = "Rétablir d'abord : l'entretien complet est reporté au post-mortem (jamais bloquant)."
+            for a in angles:
+                a["questions"] = []
+            view["questions_per_angle"] = 0
+    return view
 
 
 def _append_to_section(path: Path, section: str, line: str) -> None:
