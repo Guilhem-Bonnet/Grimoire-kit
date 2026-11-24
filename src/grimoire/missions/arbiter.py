@@ -77,6 +77,7 @@ __all__ = [
     "ARBITRABLE_CAUSES",
     "ARBITRATED_EVENT",
     "ARBITRATION_CHANNEL",
+    "ARBITRATION_CLOSURE_ENTRY",
     "ARBITRATION_DECIDED_EVENT",
     "ARBITRATION_DECISION_ENTRY",
     "ARBITRATION_FALLBACK_EVENT",
@@ -87,6 +88,7 @@ __all__ = [
     "ARBITRATION_REQUEST_ENTRY",
     "CRITERION_DEROGATED_EVENT",
     "DECISIONS",
+    "DISALLOWED_TOOLS",
     "MIN_CONFIDENCE",
     "PERMISSION_MODE",
     "SESSION_NAME",
@@ -107,6 +109,7 @@ __all__ = [
     "request_arbitration",
     "request_refusal",
     "role_enabled",
+    "sealed_closure",
     "sealed_decision",
     "sealed_request",
 ]
@@ -129,6 +132,9 @@ CRITERION_DEROGATED_EVENT = "task.criterion_derogated"
 #: READY du relecteur : la demande (écrite par le tick) et le vote (écrit par ``task arbitrate``, sous le canal).
 ARBITRATION_REQUEST_ENTRY = "arbitration_request"
 ARBITRATION_DECISION_ENTRY = "arbitration_decision"
+#: La clôture d'une demande (``task.arbitrated`` ou ``task.arbitration_fallback``), scellée par le tick : une ligne de
+#: clôture du ledger, écrit par le worker, ne ferme rien sans elle.
+ARBITRATION_CLOSURE_ENTRY = "arbitration_closure"
 
 READY_WITH_DEROGATION = "ready_with_derogation"
 AMEND_CRITERION = "amend_criterion"
@@ -164,6 +170,11 @@ SESSION_TOOLS = "Read,Bash"
 ALLOWED_TOOLS = (
     "Read Bash(grimoire task show *) Bash(grimoire task arbitrate *) Bash(gh pr diff) Bash(gh pr diff *) "
     "Bash(gh pr view) Bash(gh pr view *)"
+)
+#: Le refus, qui l'emporte sur la liste blanche : ``--web``/``-w`` ouvre un navigateur (un motif ``gh pr diff *``
+#: l'accepterait). ``gh pr diff|view`` ne s'appelle qu'en lecture sur stdout.
+DISALLOWED_TOOLS = " ".join(
+    f"Bash(gh pr {verb} {head}{flag}*)" for verb in ("diff", "view") for flag in ("--web", "-w") for head in ("", "* ")
 )
 #: Aucune sortie de git/gh ne passe par un paginateur : un ``core.pager`` du dépôt n'exécute rien dans la session.
 SESSION_ENV = {"GIT_PAGER": "cat", "PAGER": "cat", "GH_PAGER": "cat"}
@@ -391,6 +402,22 @@ def sealed_decision(service: TaskService, task_id: str, request_id: str) -> dict
     return found[-1] if found else None
 
 
+def sealed_closure(service: TaskService, task_id: str, request_id: str) -> dict[str, Any] | None:
+    """La clôture de cette demande scellée au journal d'autorité par le tick, ou ``None``."""
+    found = [e for e in _seal_entries(service, task_id, ARBITRATION_CLOSURE_ENTRY)
+             if str(e.get("request_id") or "") == request_id]
+    return found[-1] if found else None
+
+
+def _closed_ids(service: TaskService, task_id: str, events: Iterable[LedgerEvent]) -> set[str]:
+    """Les demandes closes **et scellées** : une ligne de clôture du ledger sans sceau ne ferme rien."""
+    claimed = {
+        str(e.payload.get("request_id") or "") for e in events
+        if e.event_type in (ARBITRATED_EVENT, ARBITRATION_FALLBACK_EVENT)
+    }
+    return {rid for rid in claimed if rid and sealed_closure(service, task_id, rid) is not None}
+
+
 def _seal(service: TaskService, entry: dict[str, Any]) -> None:
     """Ajoute une entrée au journal d'autorité ; une erreur remonte (l'appelant échoue fermé)."""
     store = _store(service)
@@ -523,10 +550,7 @@ def open_request(service: TaskService, task_id: str) -> ArbitrationRequest | Non
     if not role_enabled(service):
         return None
     events = _events_of(service, task_id)
-    closed = {
-        e.payload.get("request_id") for e in events
-        if e.event_type in (ARBITRATED_EVENT, ARBITRATION_FALLBACK_EVENT)
-    }
+    closed = _closed_ids(service, task_id, events)
     for request in reversed(_requested(events)):
         if request.id not in closed and sealed_request(service, task_id, request.id) is not None:
             return request
@@ -690,6 +714,8 @@ def apply_decision(
         raise ArbiterDecisionError("split_followup retirerait le dernier critère de la tâche : à l'humain")
     if decision.decision == READY_WITH_DEROGATION and not request.head:
         raise ArbiterDecisionError("ready_with_derogation sans tête de PR connue : à l'humain")
+    _seal(service, {"type": ARBITRATION_CLOSURE_ENTRY, "task_id": task.id, "request_id": request.id,
+                    "event": ARBITRATED_EVENT})  # sans sceau, pas de clôture : l'erreur remonte, la demande reste ouverte
     service.ledger.append_event(
         ARBITRATED_EVENT, task.id, "task", ARBITER_ACTOR,
         {"task_id": task.id, "request_id": request.id, "cause": request.cause, "source": request.source,
@@ -903,7 +929,8 @@ class ArbiterStage:
             elif event.event_type in (ARBITRATED_EVENT, ARBITRATION_FALLBACK_EVENT):
                 rid = str(event.payload.get("request_id") or "")
                 tid = str(event.payload.get("task_id") or event.entity_id or "")
-                closed.add((tid, rid))
+                if rid and sealed_closure(self._service, tid, rid) is not None:
+                    closed.add((tid, rid))
         return [r for key, r in seen.items() if key not in closed
                 and sealed_request(self._service, key[0], key[1]) is not None]
 
@@ -1030,6 +1057,11 @@ class ArbiterStage:
     def _fallback(self, request: ArbitrationRequest, why: str, *, analysis: str = "") -> ArbiterOutcome:
         """Le JSON invalide, la confiance basse ou le silence rendent la question à l'humain, l'analyse jointe."""
         tid = request.task_id
+        try:
+            _seal(self._service, {"type": ARBITRATION_CLOSURE_ENTRY, "task_id": tid, "request_id": request.id,
+                                  "event": ARBITRATION_FALLBACK_EVENT})
+        except Exception as exc:  # sans sceau la clôture ne compte pas : la demande reste ouverte, le tick reprend
+            return ArbiterOutcome(tid, "fallback", "failed", f"clôture non scellée ({type(exc).__name__})", request.id)
         self._service.ledger.append_event(
             ARBITRATION_FALLBACK_EVENT, tid, "task", ARBITER_ACTOR,
             {"task_id": tid, "request_id": request.id, "reason": why[:400], "analysis": analysis[:2000]},
@@ -1099,7 +1131,7 @@ class ArbiterStage:
         else:
             argv += ["--restricted", "--strict-mcp-config"]
         argv += ["--tools", SESSION_TOOLS, "--allowed-tools", ALLOWED_TOOLS,
-                 "--permission-mode", PERMISSION_MODE, self._prompt(request, model)]
+                 "--disallowed-tools", DISALLOWED_TOOLS, "--permission-mode", PERMISSION_MODE, self._prompt(request, model)]
         result = self._exec(argv, cwd, {**session_env(), **SESSION_ENV})
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:

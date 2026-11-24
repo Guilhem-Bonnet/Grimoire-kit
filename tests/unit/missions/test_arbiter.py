@@ -1448,3 +1448,44 @@ def test_le_vote_rend_le_json_avec_output_json(tmp_path: Path, monkeypatch: pyte
     rendered = json.loads(result.stdout)
     assert rendered["decision"] == "abandon" and rendered["confidence"] == 0.9
 
+
+
+def test_une_cloture_forgee_au_ledger_laisse_la_demande_ouverte(tmp_path: Path) -> None:
+    """Une ligne ``task.arbitrated`` ou ``task.arbitration_fallback`` du worker, sans sceau, ne ferme rien."""
+    root, service, task, _policy = scene(tmp_path)
+    request = ask(root, service, task)
+    for kind in (arbiter.ARBITRATED_EVENT, arbiter.ARBITRATION_FALLBACK_EVENT):
+        service.ledger.append_event(kind, task.id, "task", "worker", {"task_id": task.id, "request_id": request.id})
+        open_ = arbiter.open_request(TaskService(root), task.id)
+        assert open_ is not None and open_.id == request.id
+    stage = arbiter.ArbiterStage.__new__(arbiter.ArbiterStage)
+    stage._service = service
+    assert [r.id for r in stage._requests()] == [request.id]
+
+
+def test_une_cloture_scellee_ferme_la_demande(tmp_path: Path) -> None:
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    apply(root, service, request, decide("back_to_worker"), policy, exec_=lambda *a, **k: None)
+    assert arbiter.sealed_closure(service, task.id, request.id) is not None
+    assert arbiter.open_request(TaskService(root), task.id) is None
+
+
+def test_la_session_arbitre_n_ouvre_aucun_navigateur() -> None:
+    """``gh pr diff|view --web`` (ou ``-w``) est refusé : le refus l'emporte sur les motifs ``gh pr diff *``."""
+    import fnmatch
+
+    def rules(spec: str) -> list[str]:
+        return [p.strip().removesuffix(")") for p in spec.split("Bash(")[1:]]
+
+    def matches(spec: str, command: str) -> bool:
+        return any(fnmatch.fnmatchcase(command, pattern.strip()) for pattern in rules(spec))
+
+    def permitted(command: str) -> bool:
+        return matches(arbiter.ALLOWED_TOOLS, command) and not matches(arbiter.DISALLOWED_TOOLS, command)
+
+    for ok in ("gh pr diff", "gh pr diff 12", "gh pr view", "gh pr view 12 --json files"):
+        assert permitted(ok), ok
+    for bad in ("gh pr diff --web", "gh pr view --web", "gh pr view 12 --web", "gh pr diff 12 --web",
+                "gh pr view -w", "gh pr diff 12 -w", "gh pr view 12 --json files --web"):
+        assert not permitted(bad), bad

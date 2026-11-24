@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(missions): arbitre — `open_request` et le tick ne lisent une clôture (`task.arbitrated`, `task.arbitration_fallback`) que scellée au journal d'autorité (`arbitration_closure`) : une ligne forgée au ledger avec le `request_id` d'une demande ouverte ne la ferme plus ; la session arbitre refuse `gh pr diff|view --web` et `-w` (`DISALLOWED_TOOLS`).
+
 ## [3.105.0] - 2026-11-24
 
 - fix(security): `redact_secrets` masque les jetons `github_pat_` et les `Bearer` opaques (`Bearer: …` compris, pas la prose « Bearer authentication failed »), le motif de clé privée est linéaire (200 000 caractères < 100 ms) ; `ErrorOccurred` caviarde `name`, `errorContext` et `toolName` et jette tout le dernier mot coupé par la fenêtre de balayage (URL à authentification comprise) ; un mot unique plus long que la fenêtre devient `[truncated]`.
