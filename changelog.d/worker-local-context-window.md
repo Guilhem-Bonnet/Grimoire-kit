@@ -1,0 +1,1 @@
+- feat(missions): le worker vérifie au lancement que `capabilities.context_window` du modèle couvre le bundle de la tâche, sinon la route est fermée ; sans valeur au registre, rien ne bloque (#1154)
