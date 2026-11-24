@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 from rich.console import Console
@@ -22,6 +22,7 @@ console = Console()
 cadrage_app = typer.Typer(help="Cadrage produit : brief → brainstorm → compréhension → exigences → cahier des charges.")
 
 _path_arg = typer.Argument(Path(), help="Racine du projet.")
+_path_opt = typer.Option(Path(), "--path", help="Racine du projet.")
 _force_opt = typer.Option(False, "--force", "-f", help="Réécrire les gabarits existants.")
 _chantier_opt = typer.Option(None, "--chantier", "-c", help="Chantier visé (défaut : le cadrage principal).")
 _name_opt = typer.Option("", "--name", help="Nom du projet (défaut : nom du dossier).")
@@ -224,6 +225,88 @@ def _print_plan(plan: CadragePlan, *, check_only: bool = False, writes: bool = F
             "[red]incomplet[/red] — sans critère vérifiable : " + (", ".join(data["missing"]) or "aucune")
             + (f" ; conflits : {', '.join(data['conflicts'])}" if data["conflicts"] else "")
         )
+
+
+@cadrage_app.command("recette")
+def cadrage_recette(
+    ctx: typer.Context,
+    requirement: str = typer.Argument("", help="L'exigence à recetter (REQ-NNN) ; sans argument : celles en attente."),
+    path: Path = _path_opt,
+    verdict: str = typer.Option(
+        "", "--verdict", help="« conforme », « conforme avec réserve » ou « non conforme » (tour humain attesté)."
+    ),
+    motif: str = typer.Option("", "--motif", help="Le motif du prononcé (requis avec --verdict)."),
+    nature: str = typer.Option("", "--nature", help="Nature de la demande : fixe le critère de recette."),
+    output: str = typer.Option("", "--output", "-o", help="text ou json (remplace le --output global)."),
+    chantier: str | None = _chantier_opt,
+) -> None:
+    """Recette MOA : l'exigence validée, son critère de recette, les tâches livrées et leurs preuves ; puis le prononcé."""
+    import json
+
+    from grimoire.missions import moa_acceptance as moa
+    from grimoire.missions.service import TaskService
+
+    root = path.resolve()
+    fmt = output or str((ctx.obj or {}).get("output", "text"))
+    service = TaskService(root)
+    if not requirement:
+        pending = _guard(lambda: moa.pending_requirements(root, service, chantier))
+        if fmt == "json":
+            typer.echo(json.dumps(pending, indent=2, ensure_ascii=False))
+        elif not pending:
+            console.print("[green]aucune exigence en attente de recette[/green]")
+        else:
+            for item in pending:
+                console.print(f"{item['requirement']} — {escape(item['title'])} (livré par {', '.join(item['delivered'])})")
+        return
+    kind = nature or moa.DEFAULT_NATURE
+    brief = _guard(lambda: moa.build_brief(root, service, requirement, nature=kind, chantier=chantier))
+    outcome = None
+    if verdict or motif:
+        if not verdict:
+            console.print("[red]--motif sans --verdict : dites ce que vous prononcez.[/red]")
+            raise typer.Exit(1)
+        outcome = _guard(lambda: moa.pronounce(
+            root, service, requirement, verdict, motif, nature=kind, chantier=chantier, actor="moa",
+        ))
+    if fmt == "json":
+        typer.echo(json.dumps({"brief": brief.to_dict(), "outcome": outcome.to_dict() if outcome else None},
+                              indent=2, ensure_ascii=False))
+    else:
+        _print_recette(brief, outcome)
+    if outcome is not None and not outcome.sealed:
+        raise typer.Exit(1)
+
+
+def _print_recette(brief: Any, outcome: Any) -> None:
+    from grimoire.missions import moa_acceptance as moa
+
+    console.print(f"[bold]Recette {brief.requirement}[/bold] — {escape(brief.title) or 'sans titre'}")
+    console.print(f"Critère de recette ({brief.nature}) : [cyan]{escape(brief.recette_criterion)}[/cyan]")
+    for crit in brief.criteria:
+        console.print(f"  • exigence : {escape(crit)}")
+    for task in brief.delivered:
+        console.print(f"  ✓ {task.id} — {escape(task.title)} [{task.state}] preuve : {escape(task.proof)}")
+    for problem in brief.problems:
+        console.print(f"[yellow]⚠ {escape(problem)}[/yellow]")
+    if outcome is None:
+        if brief.recettable:
+            console.print(
+                "\n[dim]Prononcez (tour humain attesté) :[/dim] [cyan]grimoire cadrage recette "
+                f"{brief.requirement} --verdict conforme|\"conforme avec réserve\"|\"non conforme\" --motif \"…\"[/cyan]"
+            )
+        return
+    if not outcome.sealed:
+        console.print(
+            f"[red]✗ prononcé refusé[/red] — {escape(outcome.attestation.explain())}\n"
+            "[dim]Le challenge est ouvert : dites le verdict dans un tour humain, puis relancez la même commande.[/dim]"
+        )
+        return
+    label = moa.VERDICT_LABELS[outcome.verdict]
+    console.print(f"[green]✓ recette scellée[/green] — {brief.requirement} : {label}")
+    if outcome.task_id:
+        console.print(f"  tâche {outcome.task_id} ({outcome.task_state}) rattachée à {brief.requirement}")
+    console.print("  exigence close" if outcome.closed else "  exigence non close")
 
 
 # ── chantiers : plusieurs cadrages nommés par projet ─────────────────────────

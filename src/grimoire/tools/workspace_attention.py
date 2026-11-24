@@ -97,6 +97,8 @@ TASK_BLOCKED = "task_blocked"
 DIRECTIVE_UNACKED = "directive_unacked"
 CLAIM_ORPHANED = "claim_orphaned"
 SERVICE = "service"
+#: Une exigence livrée qui attend le prononcé de la MOA (#1342 M4).
+RECETTE = "recette"
 UNREADABLE = "unreadable"
 PROBE_FAILED = "probe_failed"
 KIT_BEHIND = "kit_behind"
@@ -116,7 +118,7 @@ MAX_ARBITRATIONS = 20
 #: Les sections, de la plus urgente à la moins urgente, et les types de chacune
 #: dans leur ordre. Un type n'apparaît que dans une section.
 SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("decide", "À décider", (BREAKER, CHECKPOINT, QUESTION, PROPOSAL)),
+    ("decide", "À décider", (BREAKER, CHECKPOINT, QUESTION, RECETTE, PROPOSAL)),
     ("review", "PR à revoir", (PR_REVIEW,)),
     ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
@@ -534,6 +536,23 @@ def _collect_breaker(read: _ProjectRead) -> None:
           source=state.source or "inconnu")
 
 
+def _collect_recette(read: _ProjectRead) -> None:
+    """Les exigences livrées qui attendent la recette de la MOA, avec la commande qui la présente (#1342 M4)."""
+    from grimoire.missions.moa_acceptance import pending_requirements
+    from grimoire.missions.service import TaskService
+
+    assert read.root is not None
+    if read.row["state"] == "unreadable":  # le ledger est déjà signalé : pas de seconde alerte pour la même panne
+        return
+    for item in pending_requirements(read.root, TaskService(read.root)):
+        last = f" (dernier prononcé : {item['last_verdict']})" if item["last_verdict"] else ""
+        _item(read, RECETTE, item["requirement"], f"{item['requirement']} — {item['title'] or 'recette'}",
+              f"livrée par {', '.join(item['delivered'])}, en attente de la recette MOA{last}",
+              gesture={"command": f"grimoire cadrage recette {item['requirement']}",
+                       "note": "Présenter l'exigence, ses preuves et prononcer (tour humain)"},
+              requirement=item["requirement"])
+
+
 def _collect_checkpoints(read: _ProjectRead) -> None:
     from grimoire.tools.flow_runs import flow_runs_view
 
@@ -705,6 +724,7 @@ def _read_project(
     if not read.activity and _live_journal(read.root, now):
         read.activity = "session vivante"
     _guarded(read, "checkpoints", lambda: _collect_checkpoints(read))
+    _guarded(read, "recette", lambda: _collect_recette(read))
     _guarded(read, "propositions", lambda: _collect_proposals(read))
     _guarded(read, "PR", lambda: _collect_reviews(read, reviews or _ReviewSource()))
     _guarded(read, "kit", lambda: _collect_kit(read))

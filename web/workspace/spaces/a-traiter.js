@@ -125,6 +125,7 @@ const KINDS = {
   breaker: { word: 'disjoncteur ouvert', icon: 'stop', tone: 'bad', action: 'Refermer' },
   checkpoint: { word: 'checkpoint', icon: 'gate', tone: 'warn', action: 'Examiner' },
   question: { word: 'question', icon: 'chat', tone: 'warn', action: 'Répondre' },
+  recette: { word: 'recette MOA', icon: 'scale', tone: 'warn', action: 'Recetter' },
   proposal: { word: 'proposition', icon: 'agent', tone: 'warn', action: 'Examiner' },
   pr_review: { word: 'PR à revoir', icon: 'pr', tone: '', action: 'Revoir' },
   review_blocked: { word: 'revue bloquée', icon: 'scale', tone: 'warn', action: 'Voir ce qui manque' },

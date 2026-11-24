@@ -403,6 +403,7 @@ function renderNewProject(ctx, onCreated) {
 const ATTENTION_WORDS = {
   checkpoint: ['checkpoint à valider', 'checkpoints à valider', 'warn'],
   question: ['question', 'questions', 'warn'],
+  recette: ['exigence en attente de recette', 'exigences en attente de recette', 'warn'],
   proposal: ['proposition', 'propositions', 'warn'],
   review_blocked: ['revue bloquée', 'revues bloquées', 'warn'],
   task_blocked: ['tâche bloquée', 'tâches bloquées', 'bad'],
