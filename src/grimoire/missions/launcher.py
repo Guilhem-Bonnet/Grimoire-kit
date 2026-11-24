@@ -74,6 +74,7 @@ from grimoire.missions.task_worktree import create_task_worktree
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.missions.worker_host import (
     BG_ID,
+    GEMINI_HOST,
     OPENCODE_HOST,
     ClaudeCodeWorkerHost,
     OpencodeWorkerHost,
@@ -96,9 +97,11 @@ from grimoire.tools.workspace_work import transcript_path
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import Admit
+    from grimoire.missions.gemini_host import GeminiWorkerHost
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.schemas import MissionTask
     from grimoire.missions.service import TaskService
+    from grimoire.missions.worker_host import WorkerHost
     from grimoire.providers.capabilities import ProviderCapabilities
 
 __all__ = [
@@ -277,9 +280,22 @@ def live_background_sessions(exec_: Exec, cwd: Path, claude_bin: str = "claude")
     )
 
 
+#: Les hôtes dont le kit tient lui-même le processus (pid et journal notés au lancement), pas une session ``--bg``.
+DETACHED_HOSTS = (OPENCODE_HOST, GEMINI_HOST)
+
+
+def detached_host(name: str, opencode: OpencodeWorkerHost | None = None, gemini: GeminiWorkerHost | None = None) -> Any:
+    """L'hôte d'un lancement noté ``host: opencode`` ou ``host: gemini`` ; les doubles injectés passent avant."""
+    if name == GEMINI_HOST:
+        from grimoire.missions.gemini_host import GeminiWorkerHost
+
+        return gemini or GeminiWorkerHost()
+    return opencode or OpencodeWorkerHost()
+
+
 def renew_live_workers(
     service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None,
-    opencode: OpencodeWorkerHost | None = None,
+    opencode: OpencodeWorkerHost | None = None, gemini: GeminiWorkerHost | None = None,
 ) -> tuple[str, ...]:
     """Le battement des workers (#961) : renouvelle le bail de chaque tâche tenue dont la session lancée vit encore.
 
@@ -296,11 +312,12 @@ def renew_live_workers(
                 and payload.get("lease_epoch") == task.claim.lease_epoch:
             held[tid] = (payload, task.claim.lease_epoch)
     renewed: list[str] = []
-    if others := {tid: epoch for tid, (payload, epoch) in held.items() if payload.get("host") == OPENCODE_HOST}:
-        from grimoire.missions.worker_lifecycle import renew_opencode
+    for name in DETACHED_HOSTS:
+        if others := {tid: epoch for tid, (payload, epoch) in held.items() if payload.get("host") == name}:
+            from grimoire.missions.worker_lifecycle import renew_opencode
 
-        renewed += renew_opencode(service, others, opencode or OpencodeWorkerHost(), now=now)
-        held = {tid: value for tid, value in held.items() if tid not in others}
+            renewed += renew_opencode(service, others, detached_host(name, opencode, gemini), now=now)
+            held = {tid: value for tid, value in held.items() if tid not in others}
     if not held:
         return tuple(renewed)
     alive = live_background_sessions(exec_, service.home_root, claude_bin)
@@ -320,7 +337,7 @@ def renew_live_workers(
 
 def release_ended_workers(
     service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None,
-    opencode: OpencodeWorkerHost | None = None,
+    opencode: OpencodeWorkerHost | None = None, gemini: GeminiWorkerHost | None = None,
 ) -> tuple[str, ...]:
     """P2 de la vivacité (P90) : rend ``ready`` la tâche tenue dont la session lancée est sondée terminée.
 
@@ -335,11 +352,12 @@ def release_ended_workers(
         and task.claim is not None and payload.get("lease_epoch") == task.claim.lease_epoch
     }
     released: list[str] = []
-    if others := {tid: int(p["lease_epoch"]) for tid, p in held.items() if p.get("host") == OPENCODE_HOST}:
-        from grimoire.missions.worker_lifecycle import release_opencode
+    for name in DETACHED_HOSTS:
+        if others := {tid: int(p["lease_epoch"]) for tid, p in held.items() if p.get("host") == name}:
+            from grimoire.missions.worker_lifecycle import release_opencode
 
-        released += release_opencode(service, others, opencode or OpencodeWorkerHost(), now=now)
-        held = {tid: p for tid, p in held.items() if tid not in others}
+            released += release_opencode(service, others, detached_host(name, opencode, gemini), now=now)
+            held = {tid: p for tid, p in held.items() if tid not in others}
     if not held:
         return tuple(released)
     raw = _read_agents(exec_, service.home_root, claude_bin)
@@ -443,8 +461,8 @@ def resume_provider_failed_workers(
         task = service.ledger.get_task(tid)
         if task is None or task.status not in (TaskState.CLAIMED, TaskState.RUNNING) or task.claim is None:
             continue
-        if launch.get("lease_epoch") != task.claim.lease_epoch or launch.get("host") == OPENCODE_HOST:
-            continue  # opencode : pas de journal Claude Code à relire, la récolte juge
+        if launch.get("lease_epoch") != task.claim.lease_epoch or launch.get("host") in DETACHED_HOSTS:
+            continue  # opencode, gemini : pas de journal Claude Code à relire, la récolte juge
         short, _started, _halted = _session_marks(service, tid)
         if not short or (short, f"grimoire-{tid}") in alive:
             continue  # elle travaille encore : rien à reprendre
@@ -688,6 +706,7 @@ def _session_marks(service: TaskService, task_id: str) -> tuple[str, int, int]:
 
 def halt_idle_workers(
     service: TaskService, exec_: Exec, claude_bin: str = "claude", *, opencode: OpencodeWorkerHost | None = None,
+    gemini: GeminiWorkerHost | None = None,
 ) -> tuple[str, ...]:
     """Arrête (``claude stop``) la session de chaque worker dont la tâche est en revue ou en attente ; rend les tâches arrêtées.
 
@@ -703,10 +722,10 @@ def halt_idle_workers(
         short, started, last_halt = _session_marks(service, tid)
         if not short or last_halt > started:
             continue
-        if payload.get("host") == OPENCODE_HOST:
+        if payload.get("host") in DETACHED_HOSTS:
             from grimoire.missions.worker_lifecycle import halt_opencode
 
-            if halt_opencode(service, tid, task.status.value, opencode or OpencodeWorkerHost()):
+            if halt_opencode(service, tid, task.status.value, detached_host(str(payload["host"]), opencode, gemini)):
                 halted.append(tid)
             continue
         cwd = Path(str(payload.get("cwd") or service.home_root))
@@ -763,6 +782,7 @@ def _sensitive_now(service: TaskService, task_id: str) -> str:
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
     permission_mode: str = "", cause: str = "", opencode: OpencodeWorkerHost | None = None,
+    gemini: GeminiWorkerHost | None = None,
 ) -> ExecResult:
     """Rend la tâche à son worker : reprend la session arrêtée par ``claude --bg --resume``, à défaut en lance une neuve.
 
@@ -773,6 +793,13 @@ def resume_worker(
     (``provider_error`` pour le tick, #1158) ; elle est notée au ledger et plafonne les reprises automatiques.
     """
     fresh_only = ""
+    if launch.get("host") == GEMINI_HOST:
+        # Gemini est l'hôte du projet : la reprise reste sur lui (frein revérifié), jamais un repli sur Claude Code.
+        from grimoire.missions.gemini_lifecycle import resume_gemini_worker
+
+        return resume_gemini_worker(
+            service, exec_, task_id, launch, message, permission_mode=permission_mode, cause=cause, host=gemini,
+        )
     if launch.get("host") == OPENCODE_HOST:
         if not (fresh_only := _sensitive_now(service, task_id)):
             from grimoire.missions.worker_lifecycle import resume_opencode_worker
@@ -836,6 +863,7 @@ class WorkerLauncher:
     def __init__(
         self, service: TaskService, policy: OrchestratorPolicy, *, exec_: Exec = default_exec,
         claude_bin: str = "claude", now: datetime | None = None, opencode: OpencodeWorkerHost | None = None,
+        gemini: GeminiWorkerHost | None = None,
     ) -> None:
         self._service = service
         self._policy = policy
@@ -845,6 +873,12 @@ class WorkerLauncher:
         self._version: str | None = None
         self._host = ClaudeCodeWorkerHost(claude_bin)
         self._opencode = opencode or OpencodeWorkerHost()
+        if gemini is None:
+            from grimoire.missions.gemini_host import GeminiWorkerHost
+
+            gemini = GeminiWorkerHost()
+        self._gemini = gemini
+        self._gemini_version: str | None = None
 
     # -- gardes -------------------------------------------------------------
 
@@ -948,18 +982,24 @@ class WorkerLauncher:
             ahead = service.require(tid)
             sensitive = self.routing_for(ahead)
             host, fallback = self.host_for(ahead, sensitive)
+            if host == GEMINI_HOST and (unproven := self._gemini_refusal()):
+                # Sans frein prouvé pour cette version de gemini, rien n'est créé ni réclamé : la raison est dite.
+                return LaunchOutcome(tid, "skipped", f"worker Gemini CLI non lancé : {unproven}")
             wt = create_task_worktree(service, tid, repo=service.home_root, base=base, into=into, actor=WORKER_ACTOR)
             bundle = service.context(tid)
-            service.claim(tid, WORKER_ACTOR, host=self._opencode.claim_host if host == OPENCODE_HOST else _HOST)
+            service.claim(tid, WORKER_ACTOR, host=self._claim_host(host))
         except (GrimoireError, ValueError, OSError) as exc:
             # Ni le claude ni la tâche ne sont en cause du côté « session » : rien n'est compté au disjoncteur.
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
         task = service.require(tid)
-        prepare = prepare_opencode_worktree if host == OPENCODE_HOST else _worktree_hooks
-        refused = prepare(wt.path) or _freeze_repository(service, tid)
+        refused = self._prepare(host, wt.path) or _freeze_repository(service, tid)
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
+        if host == GEMINI_HOST:
+            from grimoire.missions.gemini_lifecycle import launch_gemini
+
+            return launch_gemini(self, task, wt, self._gemini_version or "")
         if host == OPENCODE_HOST:
             from grimoire.missions.worker_lifecycle import launch_opencode
 
@@ -1054,7 +1094,7 @@ class WorkerLauncher:
         return base, name, ""
 
     def _abandon(
-        self, tid: str, short: str, cwd: Path, detail: str, *, count: bool, host: OpencodeWorkerHost | None = None,
+        self, tid: str, short: str, cwd: Path, detail: str, *, count: bool, host: WorkerHost | None = None,
     ) -> LaunchOutcome:
         """Une session lancée qu'on n'atteste pas : arrêtée, la tentative notée, la tâche rendue.
 
@@ -1120,6 +1160,8 @@ class WorkerLauncher:
         politique ; une tâche V2 aussi : rien ne pourrait juger seul le travail d'un modèle tiers (même règle que la
         route compatible Anthropic). Le repli est noté au ledger, jamais silencieux.
         """
+        if self._policy.worker.host == GEMINI_HOST:
+            return GEMINI_HOST, ""  # l'hôte du projet : ni route sensible ni tâche V2 ne le quittent (palier fort)
         if self._policy.worker.host != OPENCODE_HOST:
             return self._host.name, ""
         if sensitive.strong:
@@ -1127,6 +1169,25 @@ class WorkerLauncher:
         if classify(task) is Verifiability.V2:
             return self._host.name, "tâche V2 : aucun verdict mécanique, le travail reste sur Claude Code"
         return OPENCODE_HOST, ""
+
+    def _claim_host(self, host: str) -> str:
+        if host == GEMINI_HOST:
+            return self._gemini.claim_host
+        return self._opencode.claim_host if host == OPENCODE_HOST else _HOST
+
+    def _prepare(self, host: str, wt_path: Path) -> str:
+        """Le worktree prêt pour l'hôte (garde du kit armée) ; ``""`` ou la raison d'un refus."""
+        if host == GEMINI_HOST:
+            from grimoire.missions.gemini_host import gemini_worktree_refusal
+
+            return gemini_worktree_refusal(wt_path)
+        return prepare_opencode_worktree(wt_path) if host == OPENCODE_HOST else _worktree_hooks(wt_path)
+
+    def _gemini_refusal(self) -> str:
+        """``""`` si le frein de Gemini CLI est prouvé pour la version installée (lue une fois par tick)."""
+        if self._gemini_version is None:
+            self._gemini_version = self._gemini.version(self._exec, self._service.home_root)
+        return self._gemini.proof_refusal(self._gemini_version, self._service.project_root)
 
     def _argv(self, tid: str, model: str, route: WorkerRoute | None = None) -> list[str]:
         spec = SessionSpec(
