@@ -53,7 +53,6 @@ seule.
 from __future__ import annotations
 
 import copy
-import json
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -72,6 +71,7 @@ from grimoire.tools.workspace_portfolio import (
     DEFAULT_LIVE_MINUTES,
     RUNS_RELPATH,
     annotate_cards,
+    journal_fields,
     unread_directives,
 )
 
@@ -712,7 +712,9 @@ def _live_journal(root: Path, now: datetime) -> bool:
     window = timedelta(minutes=DEFAULT_LIVE_MINUTES)
     for path in runs.glob("session-*.json"):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = journal_fields(path)
+            if data is None:
+                continue
             moment = datetime.fromisoformat(str(data.get("updated_at") or data.get("started_at")))
         except (OSError, ValueError, AttributeError, TypeError):
             continue

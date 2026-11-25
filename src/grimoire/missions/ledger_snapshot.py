@@ -209,7 +209,7 @@ def save_if_slow(ledger: MissionLedger, replay: Replay) -> None:
 
 #: Événements couverts, relus une fois par (journal, offset, empreinte du préfixe) : le préfixe d'un journal
 #: en ajout seul est immuable, et son empreinte (déjà prouvée au chargement) change s'il est réécrit.
-_COVERED_MAX = 4
+_COVERED_MAX = 32
 _covered_cache: dict[tuple[str, int, str], list[LedgerEvent]] = {}
 _covered_lock = threading.Lock()
 
