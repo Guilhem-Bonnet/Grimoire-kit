@@ -1202,7 +1202,7 @@ def test_safety_a_chain_of_commands_names_no_program(command: str) -> None:
         ("grep 'it''s' f", "programme grep"),
         ("nohup accorde &", "un programme lancé par l'intermédiaire de nohup"),
         ("ls 2>&1", "programme ls"),
-        ("echo a\;b", "programme echo"),
+        (r"echo a\;b", "programme echo"),
     ],
 )
 def test_safety_ordinary_commands_stay_named(command: str, said: str) -> None:
