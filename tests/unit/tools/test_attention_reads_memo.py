@@ -231,6 +231,29 @@ class TestViewJournal:
             view.append({"type": "revoke"})
         assert base.path.read_bytes().count(b"\n") == lines
 
+    def test_sous_windows_rien_n_est_garde_et_l_alteration_est_vue(
+        self, _vieux_pour_la_vue: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(autopilot_view, "_WINDOWS", True)
+        base = _journal(tmp_path)
+        view = ViewJournal(base.path)
+        links: list[int] = []
+        original = mandate._link
+        monkeypatch.setattr(mandate, "_link", lambda *a: (links.append(1), original(*a))[1])
+        view.read()
+        first = len(links)
+        view.read()
+        assert first > 0
+        assert len(links) == 2 * first  # deux lectures, deux vérifications complètes
+        assert not autopilot_view._view_verified
+        info = base.path.stat()
+        data = base.path.read_bytes()
+        forged = data.replace(b'"n": 1', b'"n": 7', 1) if b'"n": 1' in data else data.replace(b'"n":1', b'"n":7', 1)
+        base.path.write_bytes(forged)
+        os.utime(base.path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        with pytest.raises(JournalError):
+            view.read()
+
     def test_une_tete_retiree_ou_en_avance_est_refusee_meme_a_chaud(
         self, _vieux_pour_la_vue: None, tmp_path: Path
     ) -> None:

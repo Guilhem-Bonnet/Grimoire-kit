@@ -13,6 +13,7 @@ Lecture et gestes de relecture seulement : l'activation reste dans :class:`~grim
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -50,6 +51,8 @@ _OUT_OF_MANDATE = "le pilote ne peut pas la trancher : hors du périmètre du ma
 _view_lock = threading.Lock()
 _view_verified: dict[str, tuple[tuple[int, int, int, int], list[dict[str, Any]]]] = {}
 _VIEW_MAX = 8
+#: Sous Windows, ``st_ctime_ns`` est la date de création et non de changement : la clé ne verrait pas une réécriture en place.
+_WINDOWS = os.name == "nt"
 
 
 class ViewJournal(AuthorityJournal):
@@ -69,6 +72,8 @@ class ViewJournal(AuthorityJournal):
     """
 
     def read(self) -> list[dict[str, Any]]:
+        if _WINDOWS:
+            return super().read()  # pas de ctime de changement : la vue relit le journal en entier
         head = self._read_head()
         try:
             info = self.path.stat()
