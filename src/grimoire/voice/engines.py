@@ -47,6 +47,7 @@ __all__ = [
     "engine_names",
     "get_spec",
     "install_hint",
+    "model_cache",
     "register_engine",
     "voice_extra_installed",
 ]
@@ -60,6 +61,8 @@ def install_hint(extra: str = VOICE_EXTRA) -> str:
     from grimoire.cli.updater import extras_install_hint
 
     return extras_install_hint([extra])
+
+
 _T = TypeVar("_T")
 
 
@@ -191,6 +194,9 @@ class EngineSpec:
     factory: str
     modules: tuple[str, ...] = ()
     extra: str = VOICE_EXTRA
+    #: ``"module:fonction"`` : ``f(options) -> bool | None`` dit si le modèle est dans le cache local
+    #: (``None`` : on ne sait pas). Appelée par ``grimoire doctor``, jamais au chargement.
+    cache_probe: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +220,7 @@ for _spec in (
         "Whisper (faster-whisper)",
         "grimoire.voice.faster_whisper_engine:FasterWhisperSpeechToText",
         ("faster_whisper",),
+        cache_probe="grimoire.voice.faster_whisper_engine:model_cached",
     ),
     EngineSpec("browser", "stt", "Navigateur (Web Speech)", f"{__name__}:BrowserSpeechToText"),
     EngineSpec(
@@ -222,6 +229,7 @@ for _spec in (
         "Pocket TTS (Kyutai)",
         "grimoire.voice.pocket_tts_engine:PocketTextToSpeech",
         ("pocket_tts",),
+        cache_probe="grimoire.voice.pocket_tts_engine:model_cached",
     ),
     EngineSpec("browser", "tts", "Voix du navigateur", f"{__name__}:BrowserTextToSpeech"),
 ):
@@ -255,6 +263,25 @@ def availability(spec: EngineSpec) -> Availability:
             False, f"{spec.label} n'est pas installé ({', '.join(missing)} absent) : {install_hint(spec.extra)}"
         )
     return Availability(True, f"{spec.label} installé")
+
+
+def model_cache(spec: EngineSpec, options: dict[str, Any]) -> Availability | None:
+    """Le modèle du moteur est-il dans le cache local ? ``None`` : moteur sans modèle, ou on ne sait pas."""
+    if not spec.cache_probe:
+        return None
+    module_name, _, attr = spec.cache_probe.partition(":")
+    try:
+        cached = getattr(importlib.import_module(module_name), attr)(options)
+    except Exception:
+        return None
+    if cached is None:
+        return None
+    if cached:
+        return Availability(True, f"{spec.label} : modèle dans le cache local")
+    return Availability(
+        False,
+        f"{spec.label} : modèle absent du cache local, rien n'est téléchargé sans voice.allow_download: true",
+    )
 
 
 def voice_extra_installed() -> bool:
@@ -409,7 +436,7 @@ class VoiceEngines:
 def _slot(kind: Kind, choice: EngineChoice, settings: VoiceSettings, slot_kwargs: dict[str, Any]) -> EngineSlot:
     spec = get_spec(kind, choice.engine)
     options = dict(choice.options)
-    if spec.modules:  # moteurs locaux : la langue et l'accord de téléchargement viennent du projet
-        options.setdefault("allow_download", settings.allow_download)
+    if spec.modules:  # moteurs locaux : l'accord de téléchargement est celui du projet, jamais celui du moteur
+        options["allow_download"] = settings.allow_download
         options.setdefault("language", settings.language)
     return EngineSlot(spec, options, idle_unload_s=settings.idle_unload_s, **slot_kwargs)

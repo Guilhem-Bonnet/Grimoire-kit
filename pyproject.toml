@@ -97,7 +97,8 @@ search = ["tantivy>=0.26"]
 # Messages vocaux (#1343) : reconnaissance faster-whisper, synthèse Pocket TTS.
 # Volontairement hors de `all` (et donc de `dev` et de la CI) : pocket-tts tire
 # torch, plusieurs centaines de Mo pour une fonction que l'utilisateur active
-# lui-même. Sans cet extra, rien d'audio n'est importé (grimoire.voice ne
+# lui-même (torch CPU d'abord : `pip install torch --index-url
+# https://download.pytorch.org/whl/cpu`, sinon les roues CUDA suivent). Sans cet extra, rien d'audio n'est importé (grimoire.voice ne
 # charge un moteur qu'à son premier appel) et le repli « navigateur » reste
 # disponible. Aucun modèle n'est téléchargé à l'installation ni au chargement
 # sans `voice.allow_download: true`. Bornes basses vérifiées le 2026-11-24 sur
