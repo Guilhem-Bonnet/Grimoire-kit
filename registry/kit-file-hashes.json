@@ -2386,6 +2386,10 @@
    "version": "3.64.0",
    "path": "framework/mcp/grimoire-mcp-server.md"
   },
+  "93b12b5207c9c3aad3ef6a28e8325a7be6921bbdeeb422a50938726d4f9892a3": {
+   "version": "3.105.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
+  },
   "9460a0425ed146b54aca0671e5ebbb1a8230a577290086ab8aebc38a69820de9": {
    "version": "3.4.2",
    "path": "framework/tools/self-healing.py"
@@ -3729,6 +3733,10 @@
   "d9a71b942da3a0f4f724b8a15b25cd68915a7dedf312ce6934b89f7bb4ab8d75": {
    "version": "3.4.2",
    "path": "framework/memory/mem0-bridge.py"
+  },
+  "d9c0fcf16b9bf1bb43abb57a3e14f0f3de0f197d39f558da518710441cc4fa94": {
+   "version": "3.105.0",
+   "path": "archetypes/meta/agents/concierge.md"
   },
   "da43e73863741d46d59b1c17a2ec4a2d0c3f8531076b4d7831e6f3ca0aba6074": {
    "version": "3.61.1",
