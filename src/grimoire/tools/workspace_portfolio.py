@@ -44,6 +44,7 @@ from grimoire.missions.liveness import (
     VIVANT,
     SessionProbe,
     attention,
+    git_commit_times,
     last_sign,
     liveness,
     presence,
@@ -453,6 +454,7 @@ def annotate_cards(
     closed: frozenset[str] | None = None
     probed: Mapping[str, str] | None = None
     probe_done = False
+    commit_at = git_commit_times(project_root)  # un seul git pour toutes les tâches tenues
     for task, card in zip(tasks, cards, strict=True):
         held = task.status in (TaskState.CLAIMED, TaskState.RUNNING)
         if held and probe is not None and not probe_done:
@@ -464,7 +466,7 @@ def annotate_cards(
             live_minutes=live_minutes,
             lease=service.ledger.lease_file(task.id) if held else None,
             probe=probed,
-            progress=task_progress(service.ledger, task.id, project_root) if held else None,
+            progress=task_progress(service.ledger, task.id, project_root, commit_at=commit_at) if held else None,
             claimed_at=claim_time(service.ledger, task.id) if held else None,
         )
         card["cost"] = cost_of(costs, task.id)

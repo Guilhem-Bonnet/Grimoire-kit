@@ -1,0 +1,1 @@
+- perf(cockpit): la vue « attention » à chaud passe d'environ 0,6 s à 0,15 s sur un ledger de 400 tâches : un seul `git for-each-ref` pour les tâches tenues, préfixe du ledger couvert par l'instantané relu une fois (clé : empreinte du préfixe), verdict de vérifiabilité mémoïsé, propositions et version de l'outil du projet gardées tant que leurs fichiers ne bougent pas (#1243)
