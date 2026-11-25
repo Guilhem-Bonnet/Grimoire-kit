@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.core.exceptions import GrimoireEvidenceError
 from grimoire.evidence.schemas import (
     EvidenceCoverage,
@@ -34,6 +36,31 @@ def _now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
 
+def _parse_packs(data: bytes) -> dict[str, EvidencePack]:
+    packs: dict[str, EvidencePack] = {}
+    for line in data.decode("utf-8").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            pack = EvidencePack.from_dict(json.loads(line))
+            packs[pack.id] = pack
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return packs
+
+
+def _parse_verdicts(data: bytes) -> list[VerificationVerdict]:
+    verdicts: list[VerificationVerdict] = []
+    for line in data.decode("utf-8").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        with contextlib.suppress(json.JSONDecodeError, KeyError):
+            verdicts.append(VerificationVerdict.from_dict(json.loads(line)))
+    return verdicts
+
+
 class EvidenceService:
     """Manages evidence packs and verification verdicts for tasks.
 
@@ -54,20 +81,11 @@ class EvidenceService:
         self._verdicts_path = root / "verdicts.jsonl"
 
     def _load_packs(self) -> dict[str, EvidencePack]:
-        packs: dict[str, EvidencePack] = {}
         if not self._packs_path.exists():
-            return packs
-        for line in self._packs_path.read_text(encoding="utf-8").split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                packs_raw = json.loads(line)
-                pack = EvidencePack.from_dict(packs_raw)
-                packs[pack.id] = pack
-            except (json.JSONDecodeError, KeyError):
-                pass
-        return packs
+            return {}
+        # Dans une lecture d'affichage du cockpit (``file_memo.view_scope``), le fichier immobile n'est parsé qu'une
+        # fois ; partout ailleurs (gate d'une transition, écriture), c'est une lecture simple.
+        return dict(file_memo.view_derived(self._packs_path, "evidence-packs", _parse_packs))
 
     def _append(self, path: Path, record: dict[str, Any]) -> None:
         line = json.dumps(record, ensure_ascii=False) + "\n"
@@ -130,13 +148,13 @@ class EvidenceService:
         return pack
 
     def get_pack(self, pack_id: str) -> EvidencePack | None:
-        return self._load_packs().get(pack_id)
+        return file_memo.view_copy(self._load_packs().get(pack_id))
 
     def list_packs(self, task_id: str | None = None) -> list[EvidencePack]:
         packs = list(self._load_packs().values())
         if task_id is not None:
             packs = [p for p in packs if p.task_id == task_id]
-        return packs
+        return file_memo.view_copy(packs)
 
     def verify(
         self,
@@ -225,21 +243,11 @@ class EvidenceService:
         self._append(self._verdicts_path, verdict.to_dict())
 
     def _load_verdicts(self, task_id: str | None = None) -> list[VerificationVerdict]:
-        verdicts: list[VerificationVerdict] = []
         if not self._verdicts_path.exists():
-            return verdicts
-        for line in self._verdicts_path.read_text(encoding="utf-8").split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-                v = VerificationVerdict.from_dict(raw)
-                if task_id is None or v.task_id == task_id:
-                    verdicts.append(v)
-            except (json.JSONDecodeError, KeyError):
-                pass
-        return verdicts
+            return []
+        verdicts = file_memo.view_derived(self._verdicts_path, "evidence-verdicts", _parse_verdicts)
+        chosen = list(verdicts) if task_id is None else [v for v in verdicts if v.task_id == task_id]
+        return file_memo.view_copy(chosen)
 
     def has_unreadable_verdicts(self, task_id: str) -> bool:
         """``True`` si une ligne de ``verdicts.jsonl`` est illisible et peut concerner *task_id* (échec fermé, #1257).
