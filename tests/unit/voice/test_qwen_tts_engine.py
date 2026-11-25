@@ -109,7 +109,11 @@ def test_english_language(fake_qwen, hf_cache) -> None:
 def test_loads_local_only_when_cache_is_complete(fake_qwen, hf_cache) -> None:
     _fill(hf_cache)
     _slot(language="fr").run(lambda e: None)
-    assert FakeModel.loads == [{"repo": MODEL_REPO, "local_files_only": True}]
+    assert len(FakeModel.loads) == 1
+    load = FakeModel.loads[0]
+    assert load["repo"] != MODEL_REPO  # un CHEMIN de snapshot : aucun appel au hub, processeur compris
+    assert Path(load["repo"]).is_dir() and Path(load["repo"]).parent.name == "snapshots"
+    assert str(hf_cache) in load["repo"] and load["local_files_only"] is True
 
 
 def test_refuses_without_cache_and_without_network(fake_qwen, hf_cache) -> None:
@@ -142,7 +146,7 @@ def test_no_local_files_only_when_from_pretrained_rejects_it(fake_qwen, hf_cache
 
     sys.modules["qwen_tts"].Qwen3TTSModel = Strict  # type: ignore[attr-defined]
     _slot(language="fr").run(lambda e: None)
-    assert seen == [MODEL_REPO]
+    assert len(seen) == 1 and seen[0] != MODEL_REPO and Path(seen[0]).is_dir()
 
 
 def test_cache_miss_raised_by_loader_is_readable(fake_qwen, hf_cache) -> None:

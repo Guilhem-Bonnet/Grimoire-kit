@@ -143,10 +143,18 @@ class QwenCloneTextToSpeech(TextToSpeech):
                         f"modèle Qwen3-TTS « {MODEL_REPO} » introuvable dans le cache local, et rien n'est "
                         "téléchargé sans votre accord (voice.allow_download: true)"
                     )
-            kwargs: dict[str, Any] = {}
-            if not allow_download and _accepts_local_files_only(Qwen3TTSModel.from_pretrained):
-                kwargs["local_files_only"] = True  # relayé à transformers : aucun appel réseau
-            self._model = Qwen3TTSModel.from_pretrained(MODEL_REPO, **kwargs)
+            if allow_download:
+                self._model = Qwen3TTSModel.from_pretrained(MODEL_REPO)
+            else:
+                # Chargement PAR CHEMIN : qwen-tts ne relaie local_files_only qu'au modèle, pas au processeur
+                # (AutoProcessor), qui joindrait le hub avec le nom du dépôt. Un dossier local n'appelle rien.
+                from huggingface_hub import snapshot_download
+
+                path = snapshot_download(MODEL_REPO, local_files_only=True)  # LocalEntryNotFoundError si absent
+                kwargs: dict[str, Any] = {}
+                if _accepts_local_files_only(Qwen3TTSModel.from_pretrained):
+                    kwargs["local_files_only"] = True
+                self._model = Qwen3TTSModel.from_pretrained(path, **kwargs)
         except EngineUnavailableError:
             raise
         except Exception as exc:
