@@ -177,3 +177,85 @@ class TestPristineRegistryStillRefreshes:
         save_generation_manifest(project, {str(REGISTRY): digest(target)})
         _up(runner, cli_app, project)
         assert target.read_text(encoding="utf-8") != stale
+
+
+class TestMergeEdgeCases:
+    """Branches de `standard_merge` que `up` n'atteint pas dans un projet sain."""
+
+    TEMPLATE = (
+        '$schema: "s/v1"\n'
+        "tools:\n  - id: A\n    risk: moyen\n  - id: B\n    risk: faible\n"
+        "mcp_servers: []\nextra: {k: 1}\nlegacy_free: 1\n"
+    )
+
+    def _setup(self, tmp_path: Path, project_text: str, base_text: str | None) -> Path:
+        dest = Path("_grimoire/standard/tool-registry.yaml")
+        (tmp_path / dest).parent.mkdir(parents=True)
+        (tmp_path / dest).write_text(project_text, encoding="utf-8")
+        if base_text is not None:
+            from grimoire.core.standard_merge import base_path
+
+            base_path(tmp_path, dest).parent.mkdir(parents=True)
+            base_path(tmp_path, dest).write_text(base_text, encoding="utf-8")
+        return dest
+
+    def test_without_base_only_missing_keys_are_added(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_merge import merge_project_registry
+
+        dest = self._setup(tmp_path, '$schema: "s/v1"\ntools:\n  - id: A\n    risk: critique\n', None)
+        out = merge_project_registry(tmp_path, dest, self.TEMPLATE)
+        data = _load(tmp_path / dest)
+        assert out.changed
+        assert [t["id"] for t in data["tools"]] == ["A"]  # liste jamais touchée sans base
+        assert data["tools"][0]["risk"] == "critique"
+        assert data["extra"] == {"k": 1}
+
+    def test_key_retired_by_the_kit_is_kept_and_reported(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_merge import merge_project_registry
+
+        base = self.TEMPLATE + "gone: 1\n"
+        proj = base.replace("extra: {k: 1}", "extra: {k: 2}")
+        dest = self._setup(tmp_path, proj, base)
+        out = merge_project_registry(tmp_path, dest, self.TEMPLATE)
+        data = _load(tmp_path / dest)
+        assert data["gone"] == 1
+        assert data["extra"] == {"k": 2}
+        assert any("gone" in n and "conservé" in n for n in out.notices)
+
+    def test_unreadable_base_is_ignored(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_merge import merge_project_registry
+
+        dest = self._setup(tmp_path, '$schema: "s/v1"\ntools: []\n', "tools: [\n  - : :\n")
+        out = merge_project_registry(tmp_path, dest, self.TEMPLATE)
+        assert out.changed
+        assert "extra" in _load(tmp_path / dest)
+
+    def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_merge import merge_project_registry
+
+        text = '$schema: "s/v1"\ntools: []\n'
+        dest = self._setup(tmp_path, text, None)
+        out = merge_project_registry(tmp_path, dest, self.TEMPLATE, dry_run=True)
+        assert out.changed
+        assert (tmp_path / dest).read_text(encoding="utf-8") == text
+        bad = merge_project_registry(tmp_path, dest, "- pas un registre\n", dry_run=True)
+        assert "laissé tel quel" in bad.notices[0]
+        assert not list((tmp_path / dest).parent.glob("*.unreadable-*"))
+
+    def test_missing_file_is_reported_not_raised(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_merge import merge_project_registry
+
+        out = merge_project_registry(tmp_path, Path("_grimoire/standard/absent.yaml"), self.TEMPLATE)
+        assert not out.changed
+        assert "laissé tel quel" in out.notices[0]
+
+    def test_record_base_failure_is_silent(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_merge import record_base
+
+        (tmp_path / "_grimoire").write_text("fichier, pas un dossier", encoding="utf-8")
+        record_base(tmp_path, "_grimoire/standard/tool-registry.yaml", "x: 1\n")
+
+    def test_backup_failure_is_reported(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_merge import _backup_unreadable
+
+        assert _backup_unreadable(tmp_path / "absent.yaml") == "(sauvegarde impossible)"
