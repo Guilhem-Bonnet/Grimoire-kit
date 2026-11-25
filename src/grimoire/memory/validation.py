@@ -295,6 +295,8 @@ _SPACE_LOOKALIKES = dict.fromkeys(
     " ",
 )
 
+_LOOKALIKE_CHARS = frozenset(map(chr, _SPACE_LOOKALIKES))
+
 #: Séparateur de jeton replié : un saut de ligne entre deux fragments longs de
 #: caractères de jeton. Sert uniquement à la *détection*, jamais au stockage.
 _WRAPPED_TOKEN = re.compile(r"([A-Za-z0-9_\-+/=.~]{6,})\s*\n\s*([A-Za-z0-9_\-+/=.~]{6,})")
@@ -310,14 +312,23 @@ def normalize_for_storage(text: str) -> tuple[str, tuple[str, ...]]:
     qui sera stocké : normaliser pour détecter puis stocker l'original
     reviendrait à stocker exactement ce qu'on vient de juger piégé.
     """
+    # Chemin court exact : un texte ASCII est déjà sa propre forme NFKC, ne porte aucun caractère ``Cf`` (les
+    # contrôles ASCII sont ``Cc``) et aucune des espaces exotiques (toutes hors ASCII). Mesuré le 2026-11-25 : le
+    # parcours caractère par caractère de 7 millions de caractères de journaux de session coûtait ~4 s.
+    if text.isascii():
+        return text, ()
     applied: list[str] = []
     folded = unicodedata.normalize("NFKC", text)
     if folded != text:
         applied.append("nfkc")
-    stripped = "".join(ch for ch in folded if unicodedata.category(ch) != "Cf")
+    # Les caractères distincts d'abord (une poignée, au débit du C) : le parcours caractère par caractère et la
+    # traduction ne sont payés que si l'un d'eux est réellement un ``Cf`` ou une espace exotique. Même résultat.
+    distinct = set(folded)
+    format_chars = {ch for ch in distinct if unicodedata.category(ch) == "Cf"}
+    stripped = "".join(ch for ch in folded if ch not in format_chars) if format_chars else folded
     if stripped != folded:
         applied.append("format-characters")
-    spaced = stripped.translate(_SPACE_LOOKALIKES)
+    spaced = stripped.translate(_SPACE_LOOKALIKES) if distinct & _LOOKALIKE_CHARS else stripped
     if spaced != stripped:
         applied.append("space-lookalikes")
     return spaced, tuple(applied)
