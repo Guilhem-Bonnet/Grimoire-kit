@@ -294,3 +294,24 @@ def test_moa_requirement_json_refusal_names_the_remedy(blocking: Path) -> None:
     )
     assert result.exit_code != 0
     assert "interview" in result.output
+
+
+@pytest.mark.parametrize("name", ["github-actions[bot]", "Dependabot[BOT]", "Ada\nLovelace"])
+def test_moa_requirement_refuses_bot_and_multiline_moa(name: str) -> None:
+    from grimoire.core.config import GovernanceConfig
+    from grimoire.core.exceptions import GrimoireConfigError
+
+    with pytest.raises(GrimoireConfigError, match="MOA"):
+        GovernanceConfig.from_dict({"roles": {"moa": name}})
+
+
+def test_moa_requirement_doctor_shows_malformed_governance(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_moa_moe import moa_moe_verdict
+
+    (tmp_path / "project-context.yaml").write_text(
+        "project:\n  name: x\ngovernance:\n  roles:\n    moa: 'bot[bot]'\n", encoding="utf-8"
+    )
+    verdict = moa_moe_verdict(tmp_path)
+    assert verdict is not None
+    assert verdict["level"] == "warn"
+    assert "mal formée" in verdict["detail"]

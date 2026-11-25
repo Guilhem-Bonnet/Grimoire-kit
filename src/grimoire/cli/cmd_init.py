@@ -45,6 +45,7 @@ from grimoire.cli.init_questions import (
     prefill,
 )
 from grimoire.core.archetype_resolver import ArchetypeResolver, ResolvedArchetype
+from grimoire.core.config import moa_name_problem
 from grimoire.core.expertises import detect_expertises
 from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan, ScaffoldResult
 from grimoire.core.scanner import ScanResult, StackScanner
@@ -641,8 +642,11 @@ def _run_wizard(
     user_name = Prompt.ask("  [bold]Your name[/bold]", default=git_name or "Developer")
     moa = Prompt.ask(
         "  [bold]Who owns the need (MOA — the human who validates requirements and signs off)?[/bold]",
-        default=user_name,
+        default=user_name if not moa_name_problem(user_name) else "",
     ).strip()
+    if moa_name_problem(moa):
+        console.print(f"  [yellow]MOA ignorée : {moa_name_problem(moa)}.[/yellow] Nommez-la dans project-context.yaml.")
+        moa = ""
 
     # ── Step 2/5 · Preferences ────────────────────────────────────────
     console.print()
@@ -1230,7 +1234,7 @@ def run_init(
     user_name = git_name or "Developer"
     # MOA (#1342) : sans question possible, le nom git est le seul humain connu ; sans lui, la section
     # reste absente et `grimoire doctor` avertit plutôt que d'inventer un nom.
-    moa = git_name
+    moa = git_name if not moa_name_problem(git_name) else ""  # un bot de CI n'est pas une MOA
     language = "Français"
     skill_level = "intermediate"
     offline = False

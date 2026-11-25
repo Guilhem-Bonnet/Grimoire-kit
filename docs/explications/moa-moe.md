@@ -13,7 +13,7 @@ Grimoire sépare deux rôles, avec les mots du métier du bâtiment et de l'info
 
 ## Pourquoi les déclarer
 
-Une tâche livrée par des agents reste la décision de quelqu'un. Écrire le nom de la MOA dans le projet dit à qui revient la recette, et évite qu'un agent la prononce à sa place. La déclaration pose le vocabulaire ; le blocage vient avec le gate d'exigence (voir « Une tâche part d'une exigence validée » plus bas).
+Une tâche livrée par des agents reste la décision de quelqu'un. Écrire le nom de la MOA dans le projet dit à qui revient la recette, La déclaration seule n'empêche rien : elle pose le vocabulaire. Ce qui vaut preuve, c'est la validation par un tour humain attesté (`grimoire cadrage approve`, voir « Une tâche part d'une exigence validée » plus bas), scellée au journal d'autorité ; un agent qui écrit le nom de la MOA ne valide rien. Le blocage vient avec le gate d'exigence (voir « Une tâche part d'une exigence validée » plus bas).
 
 ## La déclaration
 
@@ -35,7 +35,7 @@ Le contrôle `moa_moe` n’échoue jamais :
 - section absente (projet existant) : avertissement, avec la ligne à ajouter ;
 - section présente : `OK`, avec le nom de la MOA.
 
-`grimoire init` pose la question (« Qui porte le besoin ? », le nom saisi pour vous par défaut) et écrit la section. Avec `-y`, la MOA est le nom git de la machine ; sans nom git, la section est omise et le doctor avertit.
+`grimoire init` pose la question (« Qui porte le besoin ? », le nom saisi pour vous par défaut) et écrit la section. Avec `-y`, la MOA est le nom git de la machine ; sans nom git, ou si ce nom est celui d'un bot de CI (`github-actions[bot]`), la section est omise et le doctor avertit. Un nom de bot ou sur plusieurs lignes est refusé dans `governance.roles.moa` ; une section `governance` mal formée est signalée par le doctor.
 
 ## Une tâche part d'une exigence validée
 

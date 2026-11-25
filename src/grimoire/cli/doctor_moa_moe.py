@@ -24,8 +24,14 @@ def moa_moe_verdict(project_root: Path) -> dict[str, Any] | None:
         return None
     try:
         gov = GrimoireConfig.from_yaml(config_path).governance
-    except GrimoireConfigError:
-        return None
+    except GrimoireConfigError as exc:
+        # Une section governance mal formée ne disparaît pas en silence ; toute autre erreur reste aux autres contrôles.
+        if "governance" not in str(exc):
+            return None
+        return {
+            "name": "moa_moe", "passed": True, "level": "warn",
+            "detail": f"governance mal formée dans project-context.yaml : {exc}",
+        }
     if not gov.declared:
         return {
             "name": "moa_moe", "passed": True, "level": "warn",

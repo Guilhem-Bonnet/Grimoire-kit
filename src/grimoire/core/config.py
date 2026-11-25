@@ -400,6 +400,19 @@ class GovernanceConfig:
         return cls(moa=moa, moe=moe, declared=True, requirement_gate=gate or "")
 
 
+def moa_name_problem(name: str) -> str:
+    """Pourquoi ``name`` ne peut pas être la MOA (chaîne vide si le nom convient) : un humain, sur une seule ligne.
+
+    Un compte de CI (``github-actions[bot]``) n'est pas la personne qui valide : le déclarer MOA ferait bloquer
+    le gate sur un nom que personne ne peut incarner (#1342, lot M3).
+    """
+    if "\n" in name or "\r" in name:
+        return "doit tenir sur une seule ligne"
+    if "[bot]" in name.lower():
+        return "doit nommer un humain, pas un compte de bot"
+    return ""
+
+
 def _role_name(raw: Any, role: str, *, required: bool) -> str:
     """Nom d'un rôle : une chaîne non vide ; ``moe`` absent prend son défaut, ``moa`` absent est refusé."""
     if raw is None:
@@ -416,7 +429,14 @@ def _role_name(raw: Any, role: str, *, required: bool) -> str:
         )
     if not raw.strip():
         raise GrimoireConfigError(f"'governance.roles.{role}' must not be empty", error_code=CONFIG_PARSE_ERROR.code)
-    return raw.strip()
+    name = raw.strip()
+    problem = moa_name_problem(name) if role == "moa" else ("doit tenir sur une seule ligne" if "\n" in name else "")
+    if problem:
+        raise GrimoireConfigError(
+            f"'governance.roles.{role}' {problem} (got {name!r}) : nommez explicitement la MOA",
+            error_code=CONFIG_PARSE_ERROR.code,
+        )
+    return name
 
 
 _VALID_EXECUTION_NEED_IDS = frozenset({

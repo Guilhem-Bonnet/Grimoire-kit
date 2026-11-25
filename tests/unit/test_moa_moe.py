@@ -86,10 +86,12 @@ def test_moa_moe_doctor_ok_names_the_moa(tmp_path: Path) -> None:
     assert "Ada Lovelace" in verdict["detail"]
 
 
-def test_moa_moe_doctor_silent_without_valid_config(tmp_path: Path) -> None:
+def test_moa_moe_doctor_silent_without_config_loud_on_bad_governance(tmp_path: Path) -> None:
     assert moa_moe_verdict(tmp_path) is None
     _write(tmp_path, _data({"moa": ""}))
-    assert moa_moe_verdict(tmp_path) is None
+    verdict = moa_moe_verdict(tmp_path)
+    assert verdict is not None and verdict["level"] == "warn"
+    assert "mal formée" in verdict["detail"]
 
 
 def test_moa_moe_scaffold_writes_the_section() -> None:
