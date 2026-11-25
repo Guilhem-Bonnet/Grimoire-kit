@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +41,7 @@ DEPTHS: tuple[str, ...] = ("express", "standard", "approfondi")
 STATES: tuple[str, ...] = ("ouvert", "couvert", "ecarte")
 #: Un état d'entretien tient en quelques Kio ; au-delà, il est refusé (il est relu à chaque lecture du cockpit).
 MAX_STATE_BYTES = 1_048_576
+_SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 UNKNOWN_PREFIX = "À valider (je ne sais pas) : "
 
 
@@ -123,17 +127,41 @@ def _state_path(root: Path, chantier: str | None) -> Path:
     return cadrage_dir(root, chantier) / STATE_FILE
 
 
+def read_regular(path: Path, *, limit: int | None = None) -> str | None:
+    """Le texte d'un fichier ORDINAIRE du cadrage ; ``None`` s'il n'existe pas.
+
+    Un lien, une FIFO, un périphérique ou un fichier trop gros lève ``ValueError`` AVANT toute lecture (une FIFO
+    bloquerait le tour). Ouvert sans suivre de lien et sans bloquer, puis revérifié sur le descripteur ouvert.
+    """
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError(f"{path.name} illisible ({exc.__class__.__name__})") from exc
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError(f"{path.name} n'est pas un fichier ordinaire : refusé")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise ValueError(f"{path.name} illisible ({exc.__class__.__name__})") from exc
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"{path.name} n'est pas un fichier ordinaire : refusé")
+        if limit is not None and info.st_size > limit:
+            raise ValueError(f"{path.name} dépasse {limit // 1024} Kio : refusé")
+        return handle.read().decode("utf-8", errors="replace")
+
+
 def _load(root: Path, chantier: str | None) -> dict[str, Any] | None:
     """L'état enregistré ; ``None`` si aucun entretien. Un fichier présent mais invalide lève ValueError."""
     path = _state_path(root, chantier)
-    if path.is_symlink():
-        raise ValueError(f"{STATE_FILE} est un lien symbolique : refusé")
-    if not path.exists():
-        return None
     try:
-        if path.stat().st_size > MAX_STATE_BYTES:
-            raise ValueError(f"{STATE_FILE} dépasse {MAX_STATE_BYTES // 1024} Kio : refusé")
-        data = json.loads(path.read_text(encoding="utf-8"))
+        raw = read_regular(path, limit=MAX_STATE_BYTES)
+        if raw is None:
+            return None
+        data = json.loads(raw)
     except (OSError, ValueError, RecursionError) as exc:
         raise ValueError(f"{STATE_FILE} illisible ({exc.__class__.__name__}) : corrigez-le ou supprimez-le") from exc
     if not isinstance(data, dict) or data.get("depth") not in DEPTHS:
@@ -176,8 +204,11 @@ def _request_text(root: Path, chantier: str | None) -> str:
     with contextlib.suppress(Exception):  # un chantier illisible ne bloque pas l'entretien
         parts.append(read_chantier(root, chantier).titre)
     brief = cadrage_dir(root, chantier) / PHASES[0].filename
-    if brief.is_file():
-        for line in brief.read_text(encoding="utf-8", errors="replace").splitlines():
+    text = ""
+    with contextlib.suppress(ValueError, OSError):  # un brief qui n'est pas un fichier ordinaire n'est pas lu
+        text = read_regular(brief) or ""
+    if text:
+        for line in text.splitlines():
             s = line.strip()
             if s and not s.startswith(("#", "---", "_", PLACEHOLDER, "phase:", "projet:", "status:")):
                 parts.append(s)
@@ -292,7 +323,7 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
 
 
 def _append_to_section(path: Path, section: str, line: str) -> None:
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = (read_regular(path) or "").splitlines()
     head = f"## {section}"
     start = next((i for i, ln in enumerate(lines) if ln.strip() == head), None)
     if start is None:
@@ -374,7 +405,11 @@ def interview_states(root: Path) -> list[dict[str, Any]]:
         return []
     names: list[str | None] = [None]
     with contextlib.suppress(OSError):
-        found = sorted(d.name for d in base.iterdir() if d.is_dir() and not d.is_symlink())
+        # Ne comptent que les dossiers à nom de chantier sûr qui portent un état d'entretien.
+        found = sorted(
+            d.name for d in base.iterdir()
+            if _SLUG_RE.fullmatch(d.name) and d.is_dir() and not d.is_symlink() and os.path.lexists(d / STATE_FILE)
+        )
         names += found[:MAX_STATE_DIRS]
     out: list[dict[str, Any]] = []
     for name in names:

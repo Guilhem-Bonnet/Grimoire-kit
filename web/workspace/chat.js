@@ -17,7 +17,7 @@
 import { api, host, projectName } from './api.js';
 import { renderMarkdown } from './markdown.js';
 import { createVoiceInput } from './voice.js';
-import { createVoiceOutbox, withoutSpokenTag } from './voice_outbox.js';
+import { createVoiceOutbox, liveTarget, withoutSpokenTag } from './voice_outbox.js';
 
 function mk(tag, attrs, ...children) {
   const node = document.createElement(tag);
@@ -315,13 +315,20 @@ export function createChat({ readOnly = () => false } = {}) {
 
   /** « Répondre » sur une question vocale : la saisie vise cette question (dictée ou texte, relue avant l'envoi). */
   function replyToVoiceQuestion(message) {
-    const entry = message.ref ? questions.get(`${message.ref.task_id}/${message.ref.question_id}`) : null;
-    if (entry) setTarget(entry); else input.focus({ preventScroll: true });
+    if (!message.ref) { input.focus({ preventScroll: true }); return true; } // question d'entretien : la saisie suffit
+    const entry = liveTarget(message, questions);
+    if (!entry) { // la carte n'existe plus dans le fil : aucune cible gardée, rien de prérempli
+      setTarget(null);
+      note('Cette question n’est plus posée dans le fil.', 'error');
+      return false;
+    }
+    setTarget(entry);
+    return true;
   }
 
   /** Un clic sur une option d'une question vocale ne répond pas : il cible la question et préremplit la saisie. L'envoi reste un geste explicite. */
   function answerVoiceQuestion(message, option) {
-    replyToVoiceQuestion(message);
+    if (!replyToVoiceQuestion(message)) return;
     input.value = option;
     input.focus({ preventScroll: true });
   }

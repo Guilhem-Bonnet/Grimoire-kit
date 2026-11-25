@@ -3567,6 +3567,15 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   opacity: 0.7;
 }
 
+.chat-voice-option,
+.chat-voice-text {
+  unicode-bidi: isolate;
+}
+
+.chat-voice-options-note[hidden] {
+  display: none;
+}
+
 .chat-voice-text.is-folded:not(.is-open) {
   max-height: 6em;
   overflow: hidden;

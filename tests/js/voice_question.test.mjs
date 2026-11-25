@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { clickableOptions, displayOrder, needsFold, shownText } from '../../web/workspace/voice_outbox.js';
+import { choicesVisible, clickableOptions, displayOrder, liveTarget, needsFold, shownText } from '../../web/workspace/voice_outbox.js';
 
 const msg = (id, order, kind = 'report', answered = false) => ({ id, order, kind, answered });
 
@@ -16,7 +16,7 @@ test('les questions en attente gardent leur ordre, une question répondue rentre
 });
 
 const question = {
-  kind: 'question', answered: false, reserved: false, ref: { task_id: 't', question_id: 'q' }, options: ['Oui', 'Non'],
+  kind: 'question', answered: false, reserved: false, truncated: false, ref: { task_id: 't', question_id: 'q' }, options: ['Oui', 'Non'],
   text: 'Puis-je lancer et pousser en force sur ? Options : Oui ou Non.',
   full_text: 'Puis-je lancer `rm -rf ~/projets` et pousser en force sur /home/guilhem/prod/repo ?',
 };
@@ -48,4 +48,33 @@ test('un clic sur une option n’appelle pas l’envoi : le module ne référenc
   const fn = chat.slice(chat.indexOf('function answerVoiceQuestion'), chat.indexOf('function questionResolved'));
   assert.equal(/chatSend|submit\(/.test(fn), false);
   assert.match(fn, /input\.value = option/);
+});
+
+test('réservé sauf si la valeur est exactement false : l’absence ou une valeur vague ne donnent aucun bouton', () => {
+  for (const reserved of [undefined, null, 0, '', 'false', true]) {
+    assert.deepEqual(clickableOptions({ ...question, reserved }), [], String(reserved));
+  }
+  assert.deepEqual(clickableOptions({ ...question, reserved: false }), ['Oui', 'Non']);
+});
+
+test('un texte tronqué, ou sans indicateur truncated, n’a aucun bouton d’option', () => {
+  assert.deepEqual(clickableOptions({ ...question, truncated: true }), []);
+  assert.deepEqual(clickableOptions({ ...question, truncated: undefined }), []);
+});
+
+test('les boutons d’option ne s’affichent que si le texte est entièrement visible', () => {
+  assert.equal(choicesVisible(2, false, false), true); // texte court
+  assert.equal(choicesVisible(2, true, false), false); // replié : fin cachée
+  assert.equal(choicesVisible(2, true, true), true); // déplié
+  assert.equal(choicesVisible(0, false, false), false);
+});
+
+test('la cible d’une question vocale n’existe que si sa carte est encore posée dans le fil', () => {
+  const card = (done) => ({ box: { classList: { contains: (c) => c === 'is-done' && done } } });
+  const message = { ref: { task_id: 't', question_id: 'q' } };
+  assert.equal(liveTarget(message, new Map()), null); // carte disparue
+  assert.equal(liveTarget(message, new Map([['t/q', card(true)]])), null); // déjà tranchée
+  const live = card(false);
+  assert.equal(liveTarget(message, new Map([['t/q', live]])), live);
+  assert.equal(liveTarget({ ref: null }, new Map()), null);
 });

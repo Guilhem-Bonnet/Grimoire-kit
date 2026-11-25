@@ -17,8 +17,20 @@ export const FOLD_CHARS = 280;
 
 /** Les options cliquables d'un message : jamais pour une question réservée à l'humain, ni sans référence. */
 export function clickableOptions(message) {
-  if (message.kind !== 'question' || message.answered || message.reserved || !message.ref) return [];
+  if (message.kind !== 'question' || message.answered || message.reserved !== false || message.truncated !== false || !message.ref) return [];
   return Array.isArray(message.options) ? message.options : [];
+}
+
+/** Les boutons d'option ne s'affichent que si le texte de la question est entièrement visible. */
+export function choicesVisible(optionCount, folded, open) {
+  return optionCount > 0 && (!folded || open);
+}
+
+/** La carte du fil visée par un message vocal, ou null si elle n'existe plus ou n'est plus posée. */
+export function liveTarget(message, questions) {
+  if (!message || !message.ref) return null;
+  const entry = questions.get(`${message.ref.task_id}/${message.ref.question_id}`);
+  return entry && !entry.box.classList.contains('is-done') ? entry : null;
 }
 
 /** Le texte que la boîte affiche : le texte complet d'une question, le texte tel quel sinon. */
@@ -152,11 +164,15 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
         const open = text.classList.toggle('is-open');
         fold.setAttribute('aria-expanded', String(open));
         fold.textContent = open ? 'Replier' : 'Tout afficher';
+        syncChoices(rows.get(message.id));
       });
-      node.append(badge, text, fold, meta, button, reply, choices);
+      const hiddenNote = document.createElement('p');
+      hiddenNote.className = 'chat-voice-options-note';
+      hiddenNote.hidden = true;
+      node.append(badge, text, fold, meta, button, reply, choices, hiddenNote);
       element.append(node);
       counter += 1;
-      row = { node, text, meta, button, badge, choices, reply, fold, order: counter };
+      row = { node, text, meta, button, badge, choices, reply, fold, hiddenNote, optionCount: 0, order: counter };
       rows.set(message.id, row);
       button.addEventListener('click', () => toggle(message.id));
       reply.addEventListener('click', () => onReply(messages.get(message.id)));
@@ -179,8 +195,11 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
     row.reply.hidden = !waiting;
     row.choices.replaceChildren();
     const options = clickableOptions(message);
-    row.choices.hidden = options.length === 0;
-    if (!row.choices.hidden) {
+    row.optionCount = options.length;
+    const hiddenCount = waiting ? Number(message.options_hidden) || 0 : 0;
+    row.hiddenNote.hidden = hiddenCount === 0;
+    row.hiddenNote.textContent = hiddenCount ? `${hiddenCount} autre${hiddenCount > 1 ? 's' : ''} option${hiddenCount > 1 ? 's' : ''} dans le fil.` : '';
+    if (options.length) {
       for (const option of options) {
         const choice = document.createElement('button');
         choice.type = 'button';
@@ -191,8 +210,16 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
         row.choices.append(choice);
       }
     }
+    syncChoices(row);
     arrange();
     element.hidden = false;
+  }
+
+  /** Les boutons d'option n'existent à l'écran que lorsque la question est lisible en entier. */
+  function syncChoices(row) {
+    if (!row) return;
+    const folded = row.text.classList.contains('is-folded');
+    row.choices.hidden = !choicesVisible(row.optionCount, folded, row.text.classList.contains('is-open'));
   }
 
   function paintInterview(state) {

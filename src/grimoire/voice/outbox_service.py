@@ -99,11 +99,12 @@ def record_pilot_question(root: Path, row: dict[str, Any]) -> dict[str, Any] | N
     text = spoken_question(str(row.get("text", "")), options, limit)
     ref = (str(row.get("task_id", "")), str(row.get("question_id", "")))
     # Ce que le cockpit affiche : le texte d'origine en entier (commande, chemin), la raison de réserve, jamais le texte parlé.
-    full = str(row.get("text", ""))
-    for label, key in (("Pourquoi", "why"), ("Reste à vous", "kept")):
-        if row.get(key):
-            full += f"\n{label} : {row[key]}"
-    message = _outbox(root).submit_question(text, options, ref, full_text=full, reserved=bool(row.get("reserved", True)))
+    context = "\n".join(
+        f"{label} : {row[key]}" for label, key in (("Reste à vous", "kept"), ("Pourquoi", "why")) if row.get(key)
+    )
+    message = _outbox(root).submit_question(
+        text, options, ref, full_text=str(row.get("text", "")), context=context, reserved=row.get("reserved") is not False
+    )
     return message.public() if message else None
 
 

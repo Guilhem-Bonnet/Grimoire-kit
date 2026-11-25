@@ -22,6 +22,7 @@ import itertools
 import re
 import secrets
 import threading
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -54,6 +55,8 @@ MAX_WAITING_QUESTIONS = 20
 MAX_OPTIONS = 8
 MAX_OPTION_CHARS = 200
 MAX_FULL_TEXT_CHARS = 4000
+MAX_CONTEXT_CHARS = 1000
+TRUNCATED_MARK = "… (texte tronqué : la question complète est dans le fil)"
 OPTIONS_ON_SCREEN = "Les autres options sont à l'écran."
 
 _FENCE_RE = re.compile(r"```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|<pre\b.*?(?:</pre>|\Z)", re.DOTALL | re.IGNORECASE)
@@ -230,6 +233,20 @@ def spoken_from_reply(reply: str, max_seconds: float, token: str | None = None) 
     return text, source
 
 
+def clean_display(text: str, *, keep_newlines: bool = False) -> str:
+    """Retire les caractères de contrôle (Cc) et de format (Cf, dont les marques bidi) d'un texte affiché."""
+    out = []
+    for char in text:
+        category = unicodedata.category(char)
+        if char == "\n" and keep_newlines:
+            out.append(char)
+        elif category == "Cc":
+            out.append(" " if char in "\n\t\r" else "")
+        elif category != "Cf":
+            out.append(char)
+    return "".join(out)
+
+
 def asks_a_question(text: str) -> bool:
     """Le message dit une question : il se termine par un point d'interrogation (hors mention « détail à l'écran »)."""
     body = text.strip().removesuffix(DETAIL_ON_SCREEN).rstrip()
@@ -272,6 +289,8 @@ class OutboxMessage:
     options: tuple[str, ...] = ()
     ref: tuple[str, str] | None = None  # (tâche, question) du pilote ; None pour une question de l'entretien
     answered: bool = False
+    truncated: bool = False  # le texte affiché est coupé : aucune option cliquable
+    options_hidden: int = 0  # options sans bouton (trop nombreuses, modifiées ou coupées) : à traiter dans le fil
     full_text: str = ""  # texte d'origine, complet et non nettoyé : c'est lui que le cockpit affiche (``text`` n'est que l'audio)
     reserved: bool = False  # catégorie réservée à l'humain : aucune option cliquable
 
@@ -293,6 +312,8 @@ class OutboxMessage:
             "answered": self.answered,
             "full_text": self.full_text or self.text,
             "reserved": self.reserved,
+            "truncated": self.truncated,
+            "options_hidden": self.options_hidden,
         }
 
 
@@ -330,13 +351,14 @@ class Outbox:
         source: str = "question",
         *,
         full_text: str = "",
-        reserved: bool = False,
+        context: str = "",
+        reserved: bool = True,
     ) -> OutboxMessage | None:
         """Dépose une question : toujours un message distinct, jamais fusionné dans un compte rendu.
 
         Une question du pilote (``ref``) n'est déposée qu'une fois, quel que soit le nombre de relevés.
         """
-        text = text.strip()
+        text = clean_display(text).strip()
         if not text:
             return None
         with self._lock:
@@ -344,10 +366,25 @@ class Outbox:
                 known = next((m for m in self._messages if m.ref == ref), None)
                 if known is not None:
                     return known
-            options = tuple(o[:MAX_OPTION_CHARS] for o in options[:MAX_OPTIONS])
-            message = self._open(text, source, kind="question", options=options, ref=ref)
-            message.full_text = full_text[:MAX_FULL_TEXT_CHARS]
-            message.reserved = reserved
+            # Un bouton n'existe que pour une option exacte : ni caractère de contrôle ou bidi retiré, ni coupée,
+            # ni au-delà de MAX_OPTIONS (la valeur préremplie doit toujours être l'option réelle).
+            safe = tuple(o for o in options[:MAX_OPTIONS] if o and o == clean_display(o) and len(o) <= MAX_OPTION_CHARS)
+            if len(options) > MAX_OPTIONS:
+                safe = ()
+            message = self._open(text, source, kind="question", options=safe, ref=ref)
+            message.options_hidden = len(options) - len(safe)
+            # La raison d'abord, hors du plafond du texte : seule la question est coupée, et la coupure se voit.
+            head = clean_display(context, keep_newlines=True).strip()[:MAX_CONTEXT_CHARS]
+            body = clean_display(full_text, keep_newlines=True).strip()
+            room = MAX_FULL_TEXT_CHARS - len(head) - 2
+            if len(body) > room:
+                body = body[: max(0, room - len(TRUNCATED_MARK))].rstrip() + TRUNCATED_MARK
+                message.truncated = True
+            message.full_text = f"{head}\n\n{body}" if head else body
+            message.reserved = reserved is not False
+            if message.truncated:
+                message.options_hidden += len(message.options)
+                message.options = ()
             waiting = [m for m in self._messages if m.kind == "question" and not m.answered]
             for old in waiting[: max(0, len(waiting) - MAX_WAITING_QUESTIONS)]:
                 self._messages.remove(old)

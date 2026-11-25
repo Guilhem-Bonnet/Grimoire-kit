@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import struct
+import time
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, ClassVar
@@ -330,7 +332,7 @@ def test_interview_question_without_reserved_flag_is_treated_as_reserved(project
 def test_interview_options_and_waiting_questions_are_bounded() -> None:
     box = Outbox(lambda text: Speech(text=text, audio=b"x", sample_rate=1))
     first = box.submit_question("Q0 ?", tuple("o" * 1000 for _ in range(50)), ("t", "q0"))
-    assert first is not None and len(first.options) == 8 and all(len(o) == 200 for o in first.options)
+    assert first is not None and first.options == () and first.options_hidden == 50  # trop nombreuses : aucun bouton
     for i in range(1, 60):
         box.submit_question(f"Q{i} ?", (), ("t", f"q{i}"))
     state = box.state()
@@ -368,3 +370,107 @@ def test_interview_chantier_name_is_matched_in_full(project: Path) -> None:
     for angle in cadrage_interview.interview_plan(project)["open_required"]:
         cadrage_interview.answer(project, None, angle, "ok")  # le principal est terminé
     assert interview.open_interview(project) is None  # « refonte\n » n'est pas un nom sûr
+
+
+# ── seconde contre-vérification : texte tronqué, caractères de contrôle, fichiers non ordinaires ──────────────
+
+
+def _box() -> Outbox:
+    return Outbox(lambda text: Speech(text=text, audio=b"x", sample_rate=1))
+
+
+def test_interview_long_question_keeps_reasons_first_and_marks_the_cut() -> None:
+    box = _box()
+    body = "Début. " + "mot " * 3000 + "FIN DANGEREUSE : pousser en force"
+    message = box.submit_question(
+        "Court ?",
+        ("Oui", "Non"),
+        ("t", "q"),
+        full_text=body,
+        context="Reste à vous : réservé\nPourquoi : destructif",
+        reserved=False,
+    )
+    assert message is not None
+    assert message.full_text.startswith("Reste à vous : réservé\nPourquoi : destructif")  # la raison d'abord
+    assert message.full_text.endswith("(texte tronqué : la question complète est dans le fil)")
+    assert "FIN DANGEREUSE" not in message.full_text and len(message.full_text) <= 4000
+    assert message.truncated is True and message.options == () and message.options_hidden == 2  # aucun bouton
+
+
+def test_interview_short_question_is_not_truncated_and_keeps_its_buttons() -> None:
+    message = _box().submit_question("Q ?", ("Oui", "Non"), ("t", "q"), full_text="Fusionner ?", reserved=False)
+    assert message is not None and message.truncated is False and message.options == ("Oui", "Non")
+
+
+@pytest.mark.parametrize("value", [None, 0, "", "no", 1])
+def test_interview_reserved_is_true_unless_exactly_false(project: Path, value: Any) -> None:
+    row = {"task_id": "T", "question_id": f"q{value!r}", "text": "Ok ?", "options": ["Oui"], "reserved": value}
+    message = outbox_service.record_pilot_question(project, row)
+    assert message is not None and message["reserved"] is True
+    row = {"task_id": "T", "question_id": "qf", "text": "Ok ?", "options": ["Oui"], "reserved": False}
+    free = outbox_service.record_pilot_question(project, row)
+    assert free is not None and free["reserved"] is False and free["options"] == ["Oui"]
+
+
+def test_interview_control_and_bidi_characters_never_reach_the_display_or_a_button() -> None:
+    box = _box()
+    message = box.submit_question(
+        "Ligne\u202e inversée ?",
+        ("oui\u202e", "non\nsuite", "ok"),
+        ("t", "q"),
+        full_text="Texte\u202e\nsur deux lignes\x07",
+        reserved=False,
+    )
+    assert message is not None
+    assert message.options == ("ok",) and message.options_hidden == 2  # une option modifiée n'a pas de bouton
+    assert "\u202e" not in message.full_text and "\x07" not in message.full_text and "\n" in message.full_text
+    assert "\u202e" not in message.text
+    cut = box.submit_question("Q2 ?", ("x" * 201, "y" * 200), ("t", "q2"), reserved=False)
+    assert cut is not None and cut.options == ("y" * 200,) and cut.options_hidden == 1
+    many = box.submit_question("Q3 ?", tuple(str(i) for i in range(9)), ("t", "q3"), reserved=False)
+    assert many is not None and many.options == () and many.options_hidden == 9
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="pas de FIFO ici")
+def test_interview_fifo_state_is_refused_without_blocking(project: Path) -> None:
+    base = project / "_grimoire" / "cadrage"
+    base.mkdir(parents=True)
+    os.mkfifo(base / "entretien.json")
+    started = time.monotonic()
+    view = interview.interview_view(project)
+    assert interview.open_interview(project) is None
+    assert time.monotonic() - started < 5  # jamais bloqué sur la FIFO
+    assert "error" in view["interviews"][0]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="pas de FIFO ici")
+def test_interview_fifo_brief_is_not_read(project: Path) -> None:
+    cadrage_interview.interview_plan(project, depth="standard", text="Un tableau de bord")
+    os.mkfifo(project / "_grimoire" / "cadrage" / "01-brief.md")
+    started = time.monotonic()
+    with pytest.raises(ValueError, match="ordinaire"):
+        cadrage_interview.answer(project, None, "utilisateurs", "L'équipe")
+    assert cadrage_interview._request_text(project, None)  # le brief FIFO n'est pas lu, la demande reste calculable
+    assert time.monotonic() - started < 5
+
+
+def test_interview_empty_directories_do_not_hide_the_real_chantier(project: Path) -> None:
+    base = project / "_grimoire" / "cadrage"
+    for i in range(60):
+        (base / f"a{i:02d}").mkdir(parents=True)
+    cadrage_interview.interview_plan(project, depth="standard", text="Un tableau de bord")
+    real = base / "zz-vrai"
+    real.mkdir()
+    (real / "entretien.json").write_text((base / "entretien.json").read_text(encoding="utf-8"), encoding="utf-8")
+    names = [r["chantier"] for r in cadrage_interview.interview_states(project)]
+    assert names == ["principal", "zz-vrai"]
+
+
+def test_interview_states_list_only_safe_chantier_names(project: Path) -> None:
+    base = project / "_grimoire" / "cadrage"
+    cadrage_interview.interview_plan(project, depth="standard", text="Un tableau de bord")
+    payload = (base / "entretien.json").read_text(encoding="utf-8")
+    for name in ("a\nb", "Maj", "ok-1"):
+        (base / name).mkdir()
+        (base / name / "entretien.json").write_text(payload, encoding="utf-8")
+    assert [r["chantier"] for r in cadrage_interview.interview_states(project)] == ["principal", "ok-1"]
