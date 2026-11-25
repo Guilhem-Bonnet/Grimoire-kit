@@ -203,3 +203,99 @@ def test_moa_guide_doctor_is_silent_without_requirement(tmp_path: Path) -> None:
     root = _project(tmp_path)
     (root / "_grimoire" / "cadrage" / "04-exigences.md").write_text("# Exigences\n", encoding="utf-8")
     assert journey_verdict(root) is None
+
+
+# ── Branches du parcours : états regroupés, chantiers, formats, états illisibles ──
+
+
+def test_moa_guide_journey_groups_every_state_and_counts_extra_chantiers(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_moa_moe import requirement_journey
+
+    root = _project(tmp_path)
+    _delivered(root)  # REQ-001 livrée ; REQ-002 proposée
+    rg.approve_requirement(root, "REQ-002", actor="ada")  # validée, sans tâche
+    other = root / CADRAGE_DIR / "atelier"
+    other.mkdir()
+    (other / "04-exigences.md").write_text("# Exigences\n\n- REQ-001 [Must] : une autre exigence\n  - ok\n")
+    (root / CADRAGE_DIR / "sans-exigences").mkdir()  # un dossier sans fichier d'exigences n'est pas un chantier
+    counts = requirement_journey(root)
+    assert counts == {"proposed": 1, "validated": 1, "awaiting_recette": 1, "accepted": 0, "to_rework": 0}
+    _verdict(root, "conforme")
+    counts = requirement_journey(root)
+    assert counts is not None and (counts["accepted"], counts["awaiting_recette"]) == (1, 0)
+
+
+def test_moa_guide_journey_reports_requirements_to_rework(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    _delivered(root)
+    _verdict(root, "non-conforme", "le lien n'expire jamais")  # la reprise est ouverte : exigence non conforme
+    verdict = journey_verdict(root)
+    assert verdict is not None and verdict["to_rework"] == 1
+    assert "1 à reprendre (non conforme ou suite à créer)" in verdict["detail"]
+
+
+def test_moa_guide_journey_without_cadrage_folder_has_nothing_to_say(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_moa_moe import _chantiers
+
+    root = _project(tmp_path)
+    assert _chantiers(tmp_path / "absent") == [None]  # dossier introuvable : le seul chantier principal
+    (root / CADRAGE_DIR / "04-exigences.md").write_text("# Exigences\n", encoding="utf-8")
+    assert journey_verdict(root) is None
+
+
+def test_moa_guide_journey_unreadable_state_gives_no_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.cli.doctor_moa_moe import requirement_journey
+
+    root = _project(tmp_path)
+
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise ValueError("exigences illisibles")
+
+    monkeypatch.setattr(moa, "requirement_views", _boom)
+    assert requirement_journey(root) is None and journey_verdict(root) is None
+
+
+def test_moa_guide_doctor_json_format_adds_results_without_printing(tmp_path: Path) -> None:
+    from rich.console import Console
+
+    root = _project(tmp_path)
+    results: list[dict[str, Any]] = []
+    console = Console(record=True, width=200)
+    apply_moa_moe_check(results, root, fmt="json", console=console)
+    assert [r["name"] for r in results] == ["moa_moe", "moa_journey"] and console.export_text() == ""
+    assert results[1]["proposed"] == 2
+
+
+def test_moa_guide_status_json_reports_unreadable_requirements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.core.exceptions import GrimoireError
+
+    root = _project(tmp_path)
+
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise GrimoireError("exigences illisibles")
+
+    monkeypatch.setattr(moa, "requirement_views", _boom)
+    result = runner.invoke(app, ["cadrage", "status", str(root), "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["requirements"] == [] and "exigences illisibles" in data["requirements_error"]
+
+
+def test_moa_guide_cockpit_ignores_unreadable_requirement_reference() -> None:
+    tasks = [
+        SimpleNamespace(id="T1", extra={"requirement": "pas-une-cle"}),
+        SimpleNamespace(id="T2", extra={"requirement": "REQ-004"}),
+        SimpleNamespace(id="T3", extra={"requirement": "REQ-009"}),  # hors de la liste demandée
+        SimpleNamespace(id="T4", extra={}),
+    ]
+    assert wa._cited_keys(tasks, ["T1", "T2", "T4"]) == ["REQ-004"]
+
+
+def test_moa_guide_doctor_adds_no_journey_line_without_requirement(tmp_path: Path) -> None:
+    from rich.console import Console
+
+    root = _project(tmp_path)
+    (root / CADRAGE_DIR / "04-exigences.md").write_text("# Exigences\n", encoding="utf-8")
+    results: list[dict[str, Any]] = []
+    apply_moa_moe_check(results, root, fmt="text", console=Console(record=True, width=200))
+    assert [r["name"] for r in results] == ["moa_moe"]
