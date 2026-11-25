@@ -470,3 +470,49 @@ def test_a_closed_page_unsubscribes_and_the_agent_stops_after_the_grace(server: 
     while workspace_chat.chat_state(server["root"], {})["subscribers"] and time.monotonic() < deadline:
         time.sleep(0.1)
     assert workspace_chat.chat_state(server["root"], {})["subscribers"] == 0
+
+
+def test_the_idle_close_decides_and_detaches_the_agent_in_one_locked_section(tmp_path: Path) -> None:
+    """Fermeture à délai de grâce nul : le constat « plus personne » et le retrait de l'agent ne font qu'une section.
+
+    Avant, `_close_if_idle` relâchait le verrou puis `close()` le reprenait : un abonné (ou un message) arrivé
+    entre les deux trouvait l'agent en marche, puis le voyait disparaître sous lui (tour vide, flux « connecté »
+    sans agent). On rejoue l'entrelacement : à la sortie de la première section verrouillée, l'agent doit déjà
+    être détaché.
+    """
+
+    class Closed:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    conv = workspace_chat.Conversation(tmp_path)
+    agent = Closed()
+    conv._client = agent  # type: ignore[assignment]
+    seen_at_first_exit: list[object] = []
+
+    class Hooked(threading.Condition):
+        def __exit__(self, *exc: object) -> None:
+            if not seen_at_first_exit:
+                seen_at_first_exit.append(conv._client)
+            return super().__exit__(*exc)
+
+    conv._cond = Hooked()
+    conv._close_if_idle()
+
+    assert seen_at_first_exit == [None], "l'agent était encore attaché quand le verrou a été relâché"
+    assert agent.closed is True
+    assert conv.running is False
+
+
+def test_a_turn_whose_agent_vanished_says_so_instead_of_staying_silent(tmp_path: Path) -> None:
+    conv = workspace_chat.Conversation(tmp_path)
+    conv.ensure_started = lambda *a, **k: None  # type: ignore[method-assign]  # l'agent a disparu juste après son démarrage
+    conv._busy = True
+
+    conv._run_turn("bonjour")
+
+    kinds = [e["type"] for e in conv._log]
+    assert kinds == ["error", "turn_ended"] and conv._log[-1]["stop_reason"] == "error"
+    assert conv._busy is False
