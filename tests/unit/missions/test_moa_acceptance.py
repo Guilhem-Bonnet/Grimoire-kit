@@ -232,6 +232,16 @@ def test_moa_acceptance_follow_up_failure_keeps_seal_and_says_so(
     monkeypatch.setattr(TaskService, "add", _boom)
     done = _verdict(root, "non-conforme", "rien ne marche")
     assert "disque plein" in done["error"] and len(_recettes()) == 1
+    assert "grimoire task add 'Recette non conforme REQ-001 : rien ne marche'" in done["error"]
+    assert "--acceptance 'rien ne marche' --requirement REQ-001" in done["error"]
+    assert done["state"] == "suite-a-creer"
+    from rich.console import Console
+
+    from grimoire.cli import cmd_cadrage
+
+    monkeypatch.setattr(cmd_cadrage, "console", Console(width=300))
+    status = runner.invoke(app, ["cadrage", "status", str(root)])
+    assert "suite à créer" in status.output
 
 
 # ── Les refus : exigence non validée, modifiée, non livrée ──────────────────
@@ -482,10 +492,15 @@ def test_moa_acceptance_state_rules() -> None:
     done, running = moa.TaskProof("T1", "t", "closed"), moa.TaskProof("T2", "t", "running")
     assert moa.state_of(False, [done], None) == "proposee"
     assert moa.state_of(True, [], None) == "validee"
-    assert moa.state_of(True, [done, running], {"verdict": "conforme", "tasks": ["T1"]}) == "validee"
+    assert moa.state_of(True, [done, running], {"verdict": "conforme", "tasks": ["T1"]}) == "recettee-en-cours"
     assert moa.state_of(True, [done, running], {"verdict": "non-conforme", "tasks": ["T1"]}) == "non-conforme"
-    assert moa.state_of(True, [done], {"verdict": "non-conforme", "tasks": ["T1"]}) == "non-conforme"
-    assert moa.state_of(True, [done], {"verdict": "conforme-avec-reserve", "tasks": ["T1"]}) == "recettee-avec-reserve"
+    assert moa.state_of(True, [done], {"verdict": "non-conforme", "tasks": ["T1"], "seq": 3}) == "suite-a-creer"
+    assert moa.state_of(True, [done], {"verdict": "conforme-avec-reserve", "tasks": ["T1"]}) == "suite-a-creer"
+    follow = moa.TaskProof("T3", "t", "running", follows=3)
+    reserve = {"verdict": "conforme-avec-reserve", "tasks": ["T1"], "seq": 3}
+    assert moa.state_of(True, [done, follow], reserve) == "recettee-avec-reserve"
+    cancelled_follow = moa.TaskProof("T3", "t", "closed", follows=3)
+    assert moa.state_of(True, [done, cancelled_follow], reserve) == "livree"
 
 
 # ── État lisible : cadrage status, cockpit ──────────────────────────────────
@@ -621,3 +636,70 @@ def test_moa_acceptance_cli_presents_tasks_less_and_last_verdict(
     monkeypatch.setattr(moa, "requirement_views", _boom)
     status = runner.invoke(app, ["cadrage", "status", str(root)])
     assert "exigences illisibles" in status.output
+
+
+# ── Relecture de #1368 : texte hostile, preuves étiquetées, état après recette ──
+
+_HOSTILE = "\x1b[31mrouge\x1b]0;titre\x07\u202eenrevne\u2066x\u2069"
+
+
+def _assert_clean(text: str) -> None:
+    for bad in ("\x1b", "\x07", "\u202e", "\u2066", "\u2069"):
+        assert bad not in text
+
+
+def test_moa_acceptance_control_characters_never_reach_the_moa_screen_nor_the_seal(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    _approve(root)
+    service = TaskService(root)
+    tid = service.add("titre " + _HOSTILE, ("ok",), requirement="REQ-001").task.id
+    _deliver(service, tid)
+    view = moa.requirement_view(root, "REQ-001", service=TaskService(root))
+    _assert_clean(view.tasks[0].title)
+    assert "rouge" in view.tasks[0].title
+    shown = runner.invoke(app, ["cadrage", "recette", "REQ-001", "--path", str(root)])
+    _assert_clean(shown.output)
+    as_json = runner.invoke(app, ["cadrage", "recette", "REQ-001", "--path", str(root), "--json"])
+    _assert_clean(json.loads(as_json.output)["tasks"][0]["title"])
+    done = _verdict(root, "non-conforme", "motif " + _HOSTILE)
+    _assert_clean(done["entry"]["motif"])
+    _assert_clean(TaskService(root).require(done["task_id"]).title)
+    for args in (["cadrage", "status", str(root)], ["cadrage", "recette", "REQ-001", "--path", str(root)]):
+        _assert_clean(runner.invoke(app, args).output)
+
+
+def test_moa_acceptance_requirement_text_sanitized_in_approve_and_recette(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    text = EXIGENCES.replace("lien magique", "lien magique " + _HOSTILE)
+    (root / CADRAGE_DIR / "04-exigences.md").write_text(text, encoding="utf-8")
+    approved = runner.invoke(app, ["cadrage", "approve", "REQ-001", "--path", str(root)])
+    assert approved.exit_code == 0, approved.output
+    _assert_clean(approved.output)
+    _assert_clean(AuthorityJournal().read()[-1]["title"])
+    _assert_clean(runner.invoke(app, ["cadrage", "status", str(root)]).output)
+    assert rg.safe_text("a\nb", newlines=True) == "a\nb" and rg.safe_text("a\tb") == "a b"
+    assert rg.safe_text("e\u0301\u200d") == "e\u0301\u200d"  # accents combinants et ZWJ gardés
+
+
+def test_moa_acceptance_proofs_are_labelled_as_declared_by_moe(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    _delivered(root)
+    shown = runner.invoke(app, ["cadrage", "recette", "REQ-001", "--path", str(root)])
+    assert moa.PROOF_SOURCE in " ".join(shown.output.split())
+    data = json.loads(runner.invoke(app, ["cadrage", "recette", "REQ-001", "--path", str(root), "--json"]).output)
+    assert data["tasks"][0]["source"] == moa.PROOF_SOURCE
+    service = TaskService(root)
+    _task(service, title="sans preuve")
+    data = json.loads(runner.invoke(app, ["cadrage", "recette", "REQ-001", "--path", str(root), "--json"]).output)
+    assert [t["source"] for t in data["tasks"]] == [moa.PROOF_SOURCE, ""]
+
+
+def test_moa_acceptance_new_task_after_acceptance_keeps_it_visible(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    _delivered(root)
+    _verdict(root, "conforme")
+    later = _task(TaskService(root), title="amélioration ultérieure")
+    assert _state(root) == "recettee-en-cours"
+    assert moa.STATE_LABELS["recettee-en-cours"] == "recettée, nouvelle tâche en cours"
+    _deliver(TaskService(root), later, pr=20)
+    assert _state(root) == "livree"

@@ -29,6 +29,13 @@ _path_opt = typer.Option(Path(), "--path", "-p", help="Racine du projet.")
 _name_opt = typer.Option("", "--name", help="Nom du projet (défaut : nom du dossier).")
 
 
+def _safe(text: object) -> str:
+    """Texte venu du ledger, du cadrage ou de la saisie, montré à la MOA : sans contrôle ni markup interprété."""
+    from grimoire.missions.requirement_gate import safe_text
+
+    return escape(safe_text(text))
+
+
 def _guard[T](fn: Callable[[], T]) -> T:
     """Un nom de chantier invalide ou une erreur du kit : message net, code 1, pas de trace."""
     try:
@@ -108,7 +115,7 @@ def _print_requirement_states(root: Path, chantier: str | None) -> None:
     for v in views:
         style = _STATE_STYLE.get(v.state, "white")
         tasks = ", ".join(f"{t.id}{'' if t.delivered else ' (' + t.status + ')'}" for t in v.tasks) or "—"
-        table.add_row(v.key, f"[{style}]{STATE_LABELS[v.state]}[/{style}]", tasks, escape(v.title))
+        table.add_row(v.key, f"[{style}]{STATE_LABELS[v.state]}[/{style}]", _safe(tasks), _safe(v.title))
     console.print(table)
 
 
@@ -270,19 +277,19 @@ def cadrage_approve(
     key = _guard(lambda: normalize_key(requirement, chantier))
     found = _guard(lambda: lookup(origin_root(root), key))
     if found is not None:  # la MOA lit ce qu'elle valide avant d'attester
-        console.print(f"[bold]{key}[/bold] — {escape(found.title)}" + (f" [dim]({found.priority})[/dim]" if found.priority else ""))
+        console.print(f"[bold]{key}[/bold] — {_safe(found.title)}" + (f" [dim]({_safe(found.priority)})[/dim]" if found.priority else ""))
         for criterion in found.criteria:
-            console.print(f"  - {escape(criterion)}")
+            console.print(f"  - {_safe(criterion)}")
     entry = _guard(lambda: approve_requirement(root, key, actor=actor))  # l'origine s'établit dedans
     console.print(
-        f"[green]exigence validée[/green] — {entry['requirement']} par la MOA {escape(str(entry['moa']))} "
+        f"[green]exigence validée[/green] — {entry['requirement']} par la MOA {_safe(entry['moa'])} "
         f"[dim](journal d'autorité, entrée {entry['seq']})[/dim]"
     )
 
 
 _STATE_STYLE = {
     "proposee": "dim", "validee": "cyan", "livree": "yellow", "recettee": "green",
-    "recettee-avec-reserve": "green", "non-conforme": "red",
+    "recettee-avec-reserve": "green", "non-conforme": "red", "recettee-en-cours": "green", "suite-a-creer": "red",
 }
 
 
@@ -329,43 +336,43 @@ def cadrage_recette(
     done = _guard(lambda: moa.pronounce(root, key, verdict, motif, actor=actor, service=service))
     entry = done["entry"]
     console.print(
-        f"[green]recette scellée[/green] — {key} : {entry['verdict']} par la MOA {escape(str(entry['moa']))} "
+        f"[green]recette scellée[/green] — {key} : {entry['verdict']} par la MOA {_safe(entry['moa'])} "
         f"[dim](journal d'autorité, entrée {entry['seq']})[/dim]"
     )
     if done["task_id"]:
         console.print(f"  tâche MOE {done['task_id']} ouverte (proposed), rattachée à {key}")
     console.print(f"  état : {moa.STATE_LABELS[done['state']]}")
     if done["error"]:
-        console.print(f"[red]{escape(done['error'])}[/red]")
+        console.print(f"[red]{_safe(done['error'])}[/red]")
         raise typer.Exit(1)
 
 
 def _print_recette(view: RequirementView) -> None:
-    from grimoire.missions.moa_acceptance import STATE_LABELS, acceptance_criterion
+    from grimoire.missions.moa_acceptance import PROOF_SOURCE, STATE_LABELS, acceptance_criterion
 
-    console.print(f"[bold]{view.key}[/bold] — {escape(view.title) or 'sans formulation'}"
-                  + (f" [dim]({view.priority})[/dim]" if view.priority else ""))
+    console.print(f"[bold]{view.key}[/bold] — {_safe(view.title) or 'sans formulation'}"
+                  + (f" [dim]({_safe(view.priority)})[/dim]" if view.priority else ""))
     for criterion in view.criteria:
-        console.print(f"  - {escape(criterion)}")
-    console.print(f"Nature : {view.nature or 'non déclarée'} — critère de recette : "
-                  f"[cyan]{escape(acceptance_criterion(view.nature))}[/cyan]")
+        console.print(f"  - {_safe(criterion)}")
+    console.print(f"Nature : {_safe(view.nature) or 'non déclarée'} — critère de recette : "
+                  f"[cyan]{_safe(acceptance_criterion(view.nature))}[/cyan]")
     style = _STATE_STYLE.get(view.state, "white")
     console.print(f"État : [{style}]{STATE_LABELS[view.state]}[/{style}]"
-                  + (f" [dim]({escape(view.reason)})[/dim]" if view.reason and not view.validated else ""))
+                  + (f" [dim]({_safe(view.reason)})[/dim]" if view.reason and not view.validated else ""))
     if not view.tasks:
         console.print("  [yellow]aucune tâche rattachée[/yellow] (`task add --requirement`)")
     for task in view.tasks:
         proofs = [p for p in (f"verdict {task.verdict}" if task.verdict else "",
                               f"pack {task.pack}" if task.pack else "", task.merged) if p]
-        mark = "[green]livrée[/green]" if task.delivered else f"[yellow]{task.status}[/yellow]"
-        console.print(f"  {task.id} {mark} — {escape(task.title)}"
-                      + (f" [dim]({escape('; '.join(proofs))})[/dim]" if proofs else
+        mark = "[green]livrée[/green]" if task.delivered else f"[yellow]{_safe(task.status)}[/yellow]"
+        console.print(f"  {_safe(task.id)} {mark} — {_safe(task.title)}"
+                      + (f" [dim]({_safe('; '.join(proofs))} — {PROOF_SOURCE})[/dim]" if proofs else
                          (" [dim](aucune preuve enregistrée)[/dim]" if task.delivered else "")))
     if view.verdict:
         last = view.verdict
-        console.print(f"Dernier verdict : {last.get('verdict')}"
-                      + (f" — {escape(str(last.get('motif')))}" if last.get("motif") else "")
-                      + f" [dim]({last.get('ts', '')})[/dim]")
+        console.print(f"Dernier verdict : {_safe(last.get('verdict'))}"
+                      + (f" — {_safe(last.get('motif'))}" if last.get("motif") else "")
+                      + f" [dim]({_safe(last.get('ts', ''))})[/dim]")
 
 
 # ── entretien de cadrage : sept angles, profondeur selon la demande ──────────

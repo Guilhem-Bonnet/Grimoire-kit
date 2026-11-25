@@ -85,6 +85,7 @@ __all__ = [
     "record_transition",
     "refuse_agent_origin",
     "requirement_of",
+    "safe_text",
     "sealed_validations",
     "task_fields",
     "transition_refusal",
@@ -116,6 +117,32 @@ class RequirementRefusedError(GrimoireMissionError):
     def __init__(self, code: str, message: str) -> None:
         self.code = code
         super().__init__(message)
+
+
+# ── Texte affiché à la MOA ──────────────────────────────────────────────────
+
+#: Contrôles de format (Cf) qui réordonnent ou masquent le texte : bidirectionnels, espaces et marques invisibles.
+_HIDDEN_FORMAT = frozenset(
+    [*range(0x200B, 0x2010), *range(0x202A, 0x202F), *range(0x2060, 0x2070), 0x061C, 0xFEFF, 0x00AD]
+) - {0x200C, 0x200D}
+
+
+def safe_text(text: object, *, newlines: bool = False) -> str:
+    """Le texte sans caractère de contrôle (catégorie Cc : ESC, BEL, OSC…) ni contrôle de format qui réordonne ou
+    masque l'affichage (bidirectionnels U+202A-202E, U+2066-2069…). Tout texte venu du ledger, du cadrage ou de la
+    saisie passe ici avant d'être montré à la MOA ou scellé : un agent ne réécrit pas l'écran sur lequel elle décide.
+    *newlines* garde les sauts de ligne là où ils sont voulus."""
+    import unicodedata
+
+    out = []
+    for ch in str(text):
+        if ch == "\n" and newlines:
+            out.append(ch)
+        elif unicodedata.category(ch) == "Cc":
+            out.append(" " if ch in "\t\n\r" else "")
+        elif ord(ch) not in _HIDDEN_FORMAT:
+            out.append(ch)
+    return "".join(out)
 
 
 # ── Clés, rattachement, nature ──────────────────────────────────────────────
@@ -390,7 +417,7 @@ def approve_requirement(
             "project": str(project),
             "requirement": key,
             "fingerprint": fingerprint(key, requirement),
-            "title": requirement.title.strip(),
+            "title": safe_text(requirement.title).strip(),
             "moa": mode.moa,
             "actor": actor,
             "origin": ORIGIN_HUMAN,

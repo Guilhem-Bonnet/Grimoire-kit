@@ -91,7 +91,7 @@ grimoire cadrage recette REQ-001 --verdict conforme-avec-reserve --reserve "libe
 grimoire cadrage recette REQ-001 --verdict non-conforme --motif "le lien n'expire pas"
 ```
 
-La commande présente l'exigence validée et ses critères, le critère de recette fixé par la nature de la demande (une anomalie : « le cas ne se reproduit plus » ; une migration : « bascule faite, retour arrière prouvé »…), puis chaque tâche rattachée avec son état et ses preuves : dernier verdict et pack de preuve, PR fusionnée. La nature est celle des tâches si elles s'accordent, sinon celle de l'entretien de cadrage ; sans nature déclarée, la MOA recette l'exigence telle qu'elle l'a validée.
+La commande présente l'exigence validée et ses critères, le critère de recette fixé par la nature de la demande (une anomalie : « le cas ne se reproduit plus » ; une migration : « bascule faite, retour arrière prouvé »…), puis chaque tâche rattachée avec son état et ses preuves : dernier verdict et pack de preuve, PR fusionnée. Ces preuves sont étiquetées « déclaré par la MOE, non vérifié par le kit » (champ `source` en JSON). Les textes venus du ledger, du cadrage ou de la saisie sont débarrassés de leurs caractères de contrôle (séquences d'échappement, contrôles bidirectionnels) avant d'être affichés ou scellés. La nature est celle des tâches si elles s'accordent, sinon celle de l'entretien de cadrage ; sans nature déclarée, la MOA recette l'exigence telle qu'elle l'a validée.
 
 Le verdict passe par les mêmes contrôles que la validation, par le même code : refus d'emblée pour une session d'agent, l'orchestrateur ou une exécution sans humain, puis terminal interactif et « oui » à l'écran. Il est refusé aussi quand :
 
@@ -107,7 +107,9 @@ Le verdict s'inscrit au journal d'autorité avec le projet, le chantier, l'exige
 | `conforme-avec-reserve` (réserve obligatoire) | une tâche `proposed` pour la réserve, rattachée à l'exigence | recettée avec réserve, tant que la réserve est en cours |
 | `non-conforme` (motif obligatoire) | une tâche MOE `proposed`, rattachée à l'exigence, le motif pour critère d'acceptation | non conforme, tant que la reprise est en cours |
 
-Une tâche close ne se rouvre pas : la reprise est une tâche nouvelle qui cite celles qu'elle reprend. Quand elle est livrée, l'exigence revient « livrée, en attente de recette » et la MOA recette de nouveau : une exigence n'est recettée qu'à `conforme`. Une tâche livrée après le dernier verdict remet de même l'exigence en attente.
+Une tâche close ne se rouvre pas : la reprise est une tâche nouvelle qui cite celles qu'elle reprend. Cette tâche de suite cite l'exigence déjà validée : elle peut passer `ready` sans nouvelle validation. Si le motif ou la réserve change le périmètre, la MOA fait évoluer l'exigence elle-même, ce qui change son empreinte et redemande une validation. Si la tâche de suite n'a pas pu être créée, la commande donne la ligne `grimoire task add … --requirement <exigence>` à lancer, et `grimoire cadrage status` signale l'exigence comme « suite à créer ».
+
+Une tâche rattachée après un verdict `conforme` ne fait pas oublier la recette : l'exigence s'affiche « recettée, nouvelle tâche en cours », puis revient en attente de recette quand cette tâche est livrée. Quand elle est livrée, l'exigence revient « livrée, en attente de recette » et la MOA recette de nouveau : une exigence n'est recettée qu'à `conforme`. Une tâche livrée après le dernier verdict remet de même l'exigence en attente.
 
 Comme pour la validation, seul le sceau compte : une ligne écrite au ledger ou un statut ajouté dans un fichier du cadrage ne vaut pas recette. Modifier l'exigence après coup retire validation et recette ; une fois l'exigence revalidée, l'ancienne recette ne vaut pas pour le nouveau texte.
 

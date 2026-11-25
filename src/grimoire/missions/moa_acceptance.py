@@ -58,6 +58,7 @@ __all__ = [
     "ACCEPTED_ENTRY",
     "CONFORME",
     "NON_CONFORME",
+    "PROOF_SOURCE",
     "RECETTE_GESTURE",
     "RESERVE",
     "STATE_LABELS",
@@ -65,6 +66,7 @@ __all__ = [
     "RequirementView",
     "TaskProof",
     "acceptance_criterion",
+    "follow_up_command",
     "parse_verdict",
     "pending_acceptance",
     "pronounce",
@@ -87,6 +89,11 @@ RECETTE_GESTURE = rg.HumanGesture(
 
 PROPOSED, VALIDATED, DELIVERED = "proposee", "validee", "livree"
 ACCEPTED, ACCEPTED_RESERVE, REJECTED = "recettee", "recettee-avec-reserve", "non-conforme"
+#: Recettée pour le périmètre livré, une tâche rattachée depuis est en cours ; une suite (reprise ou réserve) qui n'a
+#: pas pu être créée après le sceau.
+ACCEPTED_WIP, FOLLOW_UP_MISSING = "recettee-en-cours", "suite-a-creer"
+#: Les preuves affichées viennent du ledger et du registre de preuves, que la MOE écrit.
+PROOF_SOURCE = "déclaré par la MOE, non vérifié par le kit"
 STATE_LABELS = {
     PROPOSED: "proposée (non validée)",
     VALIDATED: "validée",
@@ -94,6 +101,8 @@ STATE_LABELS = {
     ACCEPTED: "recettée",
     ACCEPTED_RESERVE: "recettée avec réserve",
     REJECTED: "non conforme",
+    ACCEPTED_WIP: "recettée, nouvelle tâche en cours",
+    FOLLOW_UP_MISSING: "suite à créer (tâche de reprise ou de réserve absente)",
 }
 _DONE, _DROPPED = "closed", "cancelled"
 _NO_NATURE = (
@@ -134,10 +143,16 @@ class TaskProof:
     verdict: str = ""
     pack: str = ""
     merged: str = ""
+    #: Le numéro du verdict scellé dont cette tâche est la suite (``extra.recette.seq``), 0 sinon.
+    follows: int = 0
 
     @property
     def delivered(self) -> bool:
         return self.status == _DONE
+
+    @property
+    def has_proof(self) -> bool:
+        return bool(self.verdict or self.pack or self.merged)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -148,6 +163,7 @@ class TaskProof:
             "verdict": self.verdict,
             "evidence_pack": self.pack,
             "merged": self.merged,
+            "source": PROOF_SOURCE if self.has_proof else "",
         }
 
 
@@ -221,11 +237,14 @@ def state_of(validated: bool, tasks: list[TaskProof], verdict: dict[str, Any] | 
         return PROPOSED
     last = str((verdict or {}).get("verdict") or "")
     if any(not t.delivered for t in tasks):  # du travail en cours : la reprise, la réserve, ou une suite
-        return {NON_CONFORME: REJECTED, RESERVE: ACCEPTED_RESERVE}.get(last, VALIDATED)
+        return {NON_CONFORME: REJECTED, RESERVE: ACCEPTED_RESERVE, CONFORME: ACCEPTED_WIP}.get(last, VALIDATED)
     delivered = {t.id for t in tasks}
     judged = {str(t) for t in (verdict or {}).get("tasks") or ()}
     if delivered and (not last or delivered - judged):
         return DELIVERED
+    seq = (verdict or {}).get("seq")
+    if last in (NON_CONFORME, RESERVE) and not any(seq is not None and t.follows == seq for t in tasks):
+        return FOLLOW_UP_MISSING
     return {CONFORME: ACCEPTED, RESERVE: ACCEPTED_RESERVE, NON_CONFORME: REJECTED}.get(last, VALIDATED)
 
 
@@ -271,7 +290,11 @@ def _proof(home: Path, service: TaskService | None, task: MissionTask) -> TaskPr
     from grimoire.missions.ledger import EXTERNAL_MERGED_EVENT
     from grimoire.missions.task_worktree import MERGED_EVENT
 
-    proof = TaskProof(task.id, task.title, task.status.value)
+    recette = (task.extra or {}).get("recette")
+    raw_seq = recette.get("seq") if isinstance(recette, dict) else None
+    follows = raw_seq if isinstance(raw_seq, int) and not isinstance(raw_seq, bool) else 0
+    title = rg.safe_text(task.title)
+    proof = TaskProof(task.id, title, task.status.value, follows=follows)
     if service is None or not proof.delivered:
         return proof
     verdict = pack = merged = ""
@@ -282,15 +305,15 @@ def _proof(home: Path, service: TaskService | None, task: MissionTask) -> TaskPr
 
             found = EvidenceService(evidence).get_latest_verdict(task.id)
             if found is not None:
-                verdict, pack = found.verdict.value, found.evidence_pack_id
+                verdict, pack = rg.safe_text(found.verdict.value), rg.safe_text(found.evidence_pack_id)
         for event in reversed(service.ledger.events_for(task.id)):
             if event.event_type in (MERGED_EVENT, EXTERNAL_MERGED_EVENT):
                 sha = str(event.payload.get("merged_sha") or "")
-                merged = f"PR #{event.payload.get('pr', '?')} fusionnée à {sha[:12]}"
+                merged = rg.safe_text(f"PR #{event.payload.get('pr', '?')} fusionnée à {sha[:12]}")
                 break
     except Exception:  # noqa: S110 — une preuve illisible s'affiche absente, elle ne casse pas la recette
         pass
-    return TaskProof(task.id, task.title, task.status.value, verdict, pack, merged)
+    return TaskProof(task.id, title, task.status.value, verdict, pack, merged, follows)
 
 
 def _entries(journal: AuthorityJournal | None) -> tuple[list[dict[str, Any]], str]:
@@ -351,9 +374,9 @@ def _view(ctx: _Context, key: str, *, proofs: bool) -> RequirementView:
         view.reason = f"exigence {key} introuvable dans le cadrage du projet"
         return view
     view.title, view.priority, view.criteria = (
-        requirement.title.strip(),
-        requirement.priority,
-        tuple(requirement.criteria),
+        rg.safe_text(requirement.title).strip(),
+        rg.safe_text(requirement.priority),
+        tuple(rg.safe_text(c) for c in requirement.criteria),
     )
     if not ctx.declared:
         view.reason = "aucune MOA déclarée : aucune exigence ne peut être validée ni recettée"
@@ -457,15 +480,13 @@ def _follow_up(
     """La tâche MOE qui suit un verdict non conforme ou avec réserve, à l'état ``proposed`` ; rend son id."""
     from grimoire.missions.request_kind import parse_kind
 
-    label = "Réserve de recette" if verdict == RESERVE else "Recette non conforme"
-    short = motif if len(motif) <= 90 else motif[:89] + "…"
     reopens = [t.id for t in view.delivered_tasks]
     try:
         nature = parse_kind(view.nature).value if view.nature else ""
     except ValueError:
         nature = ""
     added = service.add(
-        f"{label} {view.key} : {short}",
+        follow_up_title(view.key, verdict, motif),
         (motif,),
         mission_id=missions.get(reopens[0], "") if reopens else "",
         actor=actor,
@@ -476,6 +497,25 @@ def _follow_up(
         extra={"recette": {"verdict": verdict, "seq": entry.get("seq"), "reopens": reopens}},
     )
     return added.task.id
+
+
+def follow_up_title(key: str, verdict: str, motif: str) -> str:
+    label = "Réserve de recette" if verdict == RESERVE else "Recette non conforme"
+    short = motif if len(motif) <= 90 else motif[:89] + "…"
+    return f"{label} {key} : {short}"
+
+
+def follow_up_command(key: str, verdict: str, motif: str) -> str:
+    """La commande exacte qui crée à la main la tâche de suite d'un verdict (si sa création a échoué).
+
+    Sans ``extra.recette``, ``cadrage status`` continue de signaler la suite à créer : la tâche créée ainsi se voit
+    comme une nouvelle livraison une fois close, et la MOA recette de nouveau."""
+    import shlex
+
+    return (
+        f"grimoire task add {shlex.quote(follow_up_title(key, verdict, motif))} "
+        f"--acceptance {shlex.quote(motif)} --requirement {key}"
+    )
 
 
 def pronounce(
@@ -498,7 +538,7 @@ def pronounce(
 
     rg.refuse_agent_origin(RECETTE_GESTURE)
     verdict = parse_verdict(verdict)
-    motif = " ".join(str(motif).split())
+    motif = " ".join(rg.safe_text(motif).split())
     if verdict != CONFORME and not motif:
         what = "la réserve" if verdict == RESERVE else "le motif"
         raise rg.RequirementRefusedError(
@@ -542,6 +582,9 @@ def pronounce(
         try:
             out["task_id"] = _follow_up(service, view, verdict, motif, entry, actor, missions)
         except Exception as exc:  # le verdict est scellé : on dit ce qui manque, on ne le défait pas
-            out["error"] = f"verdict scellé, mais la tâche de suite n'a pas pu être créée : {exc}"
+            out["error"] = (
+                f"verdict scellé, mais la tâche de suite n'a pas pu être créée : {exc}. À lancer : "
+                + follow_up_command(view.key, verdict, motif)
+            )
     out["state"] = requirement_view(project, key, service=service, journal=journal, proofs=False).state
     return out
