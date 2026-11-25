@@ -48,7 +48,7 @@ _OUT_OF_MANDATE = "le pilote ne peut pas la trancher : hors du périmètre du ma
 
 
 _view_lock = threading.Lock()
-_view_verified: dict[str, tuple[tuple[int, int, int], list[dict[str, Any]]]] = {}
+_view_verified: dict[str, tuple[tuple[int, int, int, int], list[dict[str, Any]]]] = {}
 _VIEW_MAX = 8
 
 
@@ -60,8 +60,12 @@ class ViewJournal(AuthorityJournal):
     que (date, taille, inode) du journal tiennent et que sa date avait déjà plus de deux secondes à la lecture
     (:data:`~grimoire.core.file_memo.COARSE_CLOCK_NS`). La tête, elle, est relue et comparée à chaque appel.
 
-    Jamais sur un chemin de décision : le mandat, le pilote et les transitions gardent :class:`AuthorityJournal`
-    (``read`` vérifie toujours). Une écriture passe par la classe mère et change la taille : la lecture suivante revérifie.
+    Garanties : la clé comprend ``st_ctime_ns`` (que l'espace utilisateur ne peut pas fixer : restaurer la date d'un
+    journal réécrit ne suffit pas), et rien n'est gardé tant que la date de modification OU de changement est dans la
+    fenêtre d'horloge grossière. Toute écriture (:meth:`AuthorityJournal.append`) vérifie la chaîne complète par la lecture
+    de la classe mère, jamais par celle-ci : un journal rompu n'est jamais prolongé, même par une écriture d'office
+    (révocation) déclenchée depuis la vue. Les lecteurs de la vue (état du mandat, du pilote) voient ce que la lecture
+    complète leur aurait donné, à l'octet près, tant que ctime, taille, inode et date tiennent.
     """
 
     def read(self) -> list[dict[str, Any]]:
@@ -70,7 +74,7 @@ class ViewJournal(AuthorityJournal):
             info = self.path.stat()
         except OSError:
             return super().read()  # absent ou illisible : les refus de la classe mère, tels quels
-        sig = (info.st_mtime_ns, info.st_size, info.st_ino)
+        sig = (info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino)
         key = str(self.path)
         with _view_lock:
             known = _view_verified.get(key)
@@ -84,7 +88,7 @@ class ViewJournal(AuthorityJournal):
                 )
             return [dict(entry) for entry in entries]
         entries = super().read()
-        if time.time_ns() - info.st_mtime_ns > COARSE_CLOCK_NS:
+        if time.time_ns() - max(info.st_mtime_ns, info.st_ctime_ns) > COARSE_CLOCK_NS:
             with _view_lock:
                 if len(_view_verified) >= _VIEW_MAX:
                     _view_verified.clear()

@@ -232,6 +232,9 @@ def _covered_events(ledger: MissionLedger, cover: Cover) -> list[LedgerEvent]:
     covered = [LedgerEvent.from_dict(raw) for raw in records]
     if cover.prefix_sha256:
         with _covered_lock:
+            # Une entrée par journal : une version périmée du même chemin ne reste pas en mémoire.
+            for stale in [k for k in _covered_cache if k[0] == key[0]]:
+                del _covered_cache[stale]
             if len(_covered_cache) >= _COVERED_MAX:
                 _covered_cache.clear()
             _covered_cache[key] = covered

@@ -7,6 +7,7 @@ Défaut à ne pas rouvrir : servir une valeur périmée après une écriture.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -131,6 +132,12 @@ class TestSessionJournals:
         assert wa._live_journal(tmp_path, now) is False
 
 
+@pytest.fixture
+def _vieux_pour_la_vue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ctime`` ne se vieillit pas depuis l'espace utilisateur : on abaisse la fenêtre d'horloge de la vue."""
+    monkeypatch.setattr(autopilot_view, "COARSE_CLOCK_NS", -(10**18))
+
+
 def _journal(tmp_path: Path, count: int = 4) -> AuthorityJournal:
     journal = AuthorityJournal(tmp_path / "authority.jsonl")
     for i in range(count):
@@ -140,13 +147,15 @@ def _journal(tmp_path: Path, count: int = 4) -> AuthorityJournal:
 
 
 class TestViewJournal:
-    def test_meme_lecture_que_le_journal_verifie(self, tmp_path: Path) -> None:
+    def test_meme_lecture_que_le_journal_verifie(self, _vieux_pour_la_vue: None, tmp_path: Path) -> None:
         base = _journal(tmp_path)
         view = ViewJournal(base.path)
         assert view.read() == base.read()
         assert view.read() == base.read()  # chaud
 
-    def test_chaud_ne_reverifie_pas_la_chaine(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_chaud_ne_reverifie_pas_la_chaine(
+        self, _vieux_pour_la_vue: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         base = _journal(tmp_path)
         view = ViewJournal(base.path)
         view.read()
@@ -158,14 +167,14 @@ class TestViewJournal:
         base.read()  # le chemin de décision, lui, vérifie toujours
         assert links
 
-    def test_une_entree_ajoutee_est_vue(self, tmp_path: Path) -> None:
+    def test_une_entree_ajoutee_est_vue(self, _vieux_pour_la_vue: None, tmp_path: Path) -> None:
         base = _journal(tmp_path)
         view = ViewJournal(base.path)
         assert len(view.read()) == 4
         base.append({"type": "t", "n": 4})
         assert len(view.read()) == 5
 
-    def test_un_journal_reecrit_a_taille_egale_est_revu(self, tmp_path: Path) -> None:
+    def test_un_journal_reecrit_a_taille_egale_est_revu(self, _vieux_pour_la_vue: None, tmp_path: Path) -> None:
         base = _journal(tmp_path)
         view = ViewJournal(base.path)
         view.read()
@@ -177,7 +186,54 @@ class TestViewJournal:
         with pytest.raises(JournalError):  # chaîne rompue : la vérification complète refuse
             view.read()
 
-    def test_une_tete_retiree_ou_en_avance_est_refusee_meme_a_chaud(self, tmp_path: Path) -> None:
+    def test_meme_taille_et_date_restauree_est_revu_a_chaud(self, _vieux_pour_la_vue: None, tmp_path: Path) -> None:
+        """B2 de la relecture : ``utime`` restaure la date, pas ``ctime`` ; la chaîne rompue est refusée, comme à pleine lecture."""
+        base = _journal(tmp_path)
+        view = ViewJournal(base.path)
+        view.read()  # chaud
+        info = base.path.stat()
+        data = base.path.read_bytes()
+        forged = data.replace(b'"n": 1', b'"n": 7', 1) if b'"n": 1' in data else data.replace(b'"n":1', b'"n":7', 1)
+        assert forged != data and len(forged) == len(data)
+        base.path.write_bytes(forged)
+        os.utime(base.path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        with pytest.raises(JournalError):
+            AuthorityJournal.read(base)
+        with pytest.raises(JournalError):
+            view.read()
+
+    def test_un_fichier_tout_juste_change_n_est_pas_garde_meme_a_date_ancienne(self, tmp_path: Path) -> None:
+        base = _journal(tmp_path)  # date vieillie, mais ctime = maintenant
+        ViewJournal(base.path).read()
+        assert not autopilot_view._view_verified
+
+    def test_une_ecriture_ne_passe_jamais_par_la_lecture_allegee(
+        self, _vieux_pour_la_vue: None, tmp_path: Path
+    ) -> None:
+        """B1 de la relecture : un journal rompu n'est pas prolongé, même si la vue le sert encore depuis sa mémoire."""
+        base = _journal(tmp_path)
+        view = ViewJournal(base.path)
+        view.read()
+        info = base.path.stat()
+        data = base.path.read_bytes()
+        forged = data.replace(b'"n": 1', b'"n": 7', 1) if b'"n": 1' in data else data.replace(b'"n":1', b'"n":7', 1)
+        base.path.write_bytes(forged)
+        os.utime(base.path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        # Pire cas : la vue croit encore sa version (empreinte forcée à celle du fichier altéré).
+        new = base.path.stat()
+        key = str(base.path)
+        autopilot_view._view_verified[key] = (
+            (new.st_mtime_ns, new.st_ctime_ns, new.st_size, new.st_ino),
+            autopilot_view._view_verified[key][1],
+        )
+        lines = base.path.read_bytes().count(b"\n")
+        with pytest.raises(JournalError):
+            view.append({"type": "revoke"})
+        assert base.path.read_bytes().count(b"\n") == lines
+
+    def test_une_tete_retiree_ou_en_avance_est_refusee_meme_a_chaud(
+        self, _vieux_pour_la_vue: None, tmp_path: Path
+    ) -> None:
         base = _journal(tmp_path)
         view = ViewJournal(base.path)
         view.read()
@@ -219,3 +275,63 @@ class TestCoveredCacheHoldsAFleet:
         for root in roots:
             MissionLedger(root).list_events()
         assert [n for n in parsed if n > 0] == []
+
+
+class TestViewNeverWritesThroughTheLightRead:
+    """B1 de la relecture : une écriture d'office déclenchée depuis la vue ne prolonge jamais un journal rompu."""
+
+    def _armed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, ViewJournal, Path]:
+        from grimoire.missions.mandate import MandateRequest, MandateStore
+        from grimoire.missions.schemas import ORIGIN_HUMAN
+
+        home = tmp_path / "user-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        for var in ("GRIMOIRE_TASK_ID", "GRIMOIRE_ACTOR", "GRIMOIRE_SESSION_ID", mandate.PRINCIPAL_ENV):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr(autopilot_view, "COARSE_CLOCK_NS", -(10**18))
+        root = tmp_path / "proj"
+        root.mkdir()
+        with mandate.acting_as_orchestrator():
+            MandateStore(root).grant(
+                MandateRequest.build(("answer",), ("implementation",), 3, "+1d"), origin=ORIGIN_HUMAN, via="test"
+            )
+        journal = ViewJournal()
+        store = MandateStore(root, journal)
+        assert store.state().active  # vue chaude
+        # Altération indétectable pour la vue (même taille, date restaurée, empreinte alignée) : le pire cas.
+        info = journal.path.stat()
+        data = journal.path.read_bytes()
+        forged = data.replace(b'"type":"grant"', b'"type":"grxnt"', 1)
+        if forged == data:
+            forged = data.replace(b'"type": "grant"', b'"type": "grxnt"', 1)
+        assert forged != data
+        journal.path.write_bytes(forged)
+        os.utime(journal.path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        new = journal.path.stat()
+        key = str(journal.path)
+        autopilot_view._view_verified[key] = (
+            (new.st_mtime_ns, new.st_ctime_ns, new.st_size, new.st_ino),
+            autopilot_view._view_verified[key][1],
+        )
+        return store, journal, root
+
+    def test_revocation_d_office_par_expiration(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        store, journal, _ = self._armed(tmp_path, monkeypatch)
+        before = journal.path.read_bytes()
+        with contextlib.suppress(JournalError):
+            store.state(datetime.now(UTC) + timedelta(days=3))
+        assert journal.path.read_bytes() == before
+
+    def test_revocation_par_changement_de_politique(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.missions.mandate import MandateRefusedError
+
+        store, journal, root = self._armed(tmp_path, monkeypatch)
+        policy = root / "_grimoire" / "standard" / "orchestration-policy.yaml"
+        policy.parent.mkdir(parents=True)
+        policy.write_text("escalation:\n  merge: orchestrator\n", encoding="utf-8")
+        before = journal.path.read_bytes()
+        with mandate.acting_as_orchestrator(), contextlib.suppress(MandateRefusedError, JournalError):
+            store.authorize("answer", None, {"kind": "rule", "ref": "r"}, record=False)
+        assert journal.path.read_bytes() == before
