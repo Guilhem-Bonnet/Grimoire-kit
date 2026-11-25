@@ -923,15 +923,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             return
         if atelier:  # Atelier en test : écriture d'un bloc, 409 si le fichier a changé depuis la lecture
             raw = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
-            try:
-                parsed = json.loads(raw or b"{}")
-            except (ValueError, json.JSONDecodeError):
-                self._send_json(400, {"ok": False, "error": "bad json"})
-                return
-            if not self._body_confirms_slug(parsed):
-                self._send_json(403, {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"})
-                return
-            self._send_json(*workspace_atelier.put_http(proot, path, raw))
+            self._send_json(*workspace_atelier.put_http(proot, path, raw, self._body_confirms_slug))
             return
         try:
             length = int(self.headers.get("Content-Length", 0))

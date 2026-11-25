@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -323,12 +324,16 @@ def post(root: Path, path: str, body: dict[str, Any]) -> Any:
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
-def put_http(root: Path, path: str, raw: bytes) -> tuple[int, dict[str, Any]]:
+def put_http(
+    root: Path, path: str, raw: bytes, confirms: Callable[[Any], bool] | None = None
+) -> tuple[int, dict[str, Any]]:
     """``PUT`` complet : le code HTTP et la charge, avec les refus du domaine déjà traduits."""
     try:
         body = json.loads(raw or b"{}")
         if not isinstance(body, dict):
             raise ValueError("corps JSON attendu : un objet")
+        if confirms is not None and not confirms(body):
+            return 403, {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"}
         _need_flag(root)
         rest = path[len(ATELIER) :].strip("/").split("/") if path.startswith(ATELIER) else []
         if len(rest) != 4 or rest[0] != "chantiers" or rest[2] != "blocs":
