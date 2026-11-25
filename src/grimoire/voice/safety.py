@@ -205,9 +205,18 @@ def _file_label(call: dict[str, Any]) -> str:
     return ""
 
 
+def _background_or_and(command: str, i: int) -> bool:
+    """Le ``&`` en position ``i`` enchaîne-t-il une autre commande (``&&``, ``a & b``) ? Non dans une redirection
+    (``>&``, ``&>``, ``2>&1``) ni en dernier (``nohup x &`` : l'enveloppe reste lue)."""
+    before, after = command[i - 1 : i] if i else "", command[i + 1 : i + 2]
+    if before == ">" or after == ">":
+        return False
+    return after == "&" or bool(command[i + 1 :].strip())
+
+
 def _chained(command: str) -> bool:
     """Vrai si la commande (forme chaîne) enchaîne plusieurs commandes hors guillemets : ``|`` (donc ``||``),
-    ``;``, ``&&``, saut de ligne, ``$(`` ou apostrophe inverse (ces deux-là aussi entre guillemets doubles)."""
+    ``;``, ``&`` (hors redirection et ``&`` final), saut de ligne, substitution de processus ``<(`` ``>(``, ``$(`` ou apostrophe inverse (ces deux-là aussi entre guillemets doubles)."""
     quote = ""
     skip = False
     for i, ch in enumerate(command):
@@ -226,7 +235,11 @@ def _chained(command: str) -> bool:
             quote = "" if ch == '"' else quote
         elif ch in "'\"":
             quote = ch
-        elif ch in "|;\n" or (ch == "&" and command[i + 1 : i + 2] == "&"):
+        elif (
+            ch in "|;\n"
+            or (ch in "<>" and command[i + 1 : i + 2] == "(")
+            or (ch == "&" and _background_or_and(command, i))
+        ):  # substitution de processus
             return True
     return False
 

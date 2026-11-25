@@ -1183,6 +1183,11 @@ def test_safety_inline_code_flag_is_found_after_other_options(command: Any, wrap
         "echo `rm x`",
         'echo "$(rm x)"',
         "ls\nrm x",
+        "git status & rm -rf /",
+        "sleep 1 & x",
+        "cat <(x)",
+        "git log >(sh)",
+        "ls 2>&1 & rm x",
     ],
 )
 def test_safety_a_chain_of_commands_names_no_program(command: str) -> None:
@@ -1202,6 +1207,11 @@ def test_safety_a_chain_of_commands_names_no_program(command: str) -> None:
         ("grep 'it''s' f", "programme grep"),
         ("nohup accorde &", "un programme lancé par l'intermédiaire de nohup"),
         ("ls 2>&1", "programme ls"),
+        ("ls &>/dev/null", "programme ls"),
+        ("ls &>>/dev/null", "programme ls"),
+        ("cmd >&2", "un programme"),
+        ("git status &", "programme git"),
+        ("echo '<(x) & y'", "programme echo"),
         (r"echo a\;b", "programme echo"),
     ],
 )
