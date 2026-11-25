@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 from grimoire.tools.ext_manager import ExtensionError
 from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
-from grimoire.tools.page_security import html_page, serve_session_script
+from grimoire.tools.page_security import SecureHandlerMixin, html_page, serve_session_script
 from grimoire.tools.project_registry import DEFAULT_SCAN_DEPTH, looks_grimoire, register_project
 from grimoire.tools.request_guard import (
     check_host,
@@ -41,7 +41,7 @@ if TYPE_CHECKING:  # pragma: no cover - uniquement pour le typage
 __all__ = ["make_handler", "serve"]
 
 
-class _ForgeHandler(BaseHTTPRequestHandler):
+class _ForgeHandler(SecureHandlerMixin, BaseHTTPRequestHandler):
     """Transport HTTP de l'atelier — ``api`` est posée par :func:`make_handler`."""
 
     api: ForgeAPI
@@ -392,6 +392,8 @@ class _ForgeHandler(BaseHTTPRequestHandler):
         )
         for name, value in security:
             self.send_header(name, value)
+        if security:
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

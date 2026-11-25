@@ -61,7 +61,7 @@ from grimoire.cli.cockpit_write_target import (
 )
 from grimoire.data import site_script, web_path
 from grimoire.tools.cockpit_registry_routes import REGISTRY_ROUTES, registry_post
-from grimoire.tools.page_security import NoDirectoryListing, html_page, serve_session_script
+from grimoire.tools.page_security import SecureHandlerMixin, html_page, serve_session_script
 from grimoire.tools.project_registry import (
     browse,
     classify_registry,
@@ -259,7 +259,7 @@ def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
         pool.shutdown(wait=False)
 
 
-class _CockpitHandler(NoDirectoryListing, SimpleHTTPRequestHandler):
+class _CockpitHandler(SecureHandlerMixin, SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
     #: Vrai le temps d'une écriture (``do_POST``/``do_PUT``) : :meth:`send_response` vide alors le cache des lectures.

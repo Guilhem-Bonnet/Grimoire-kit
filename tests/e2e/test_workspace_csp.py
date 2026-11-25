@@ -315,3 +315,32 @@ def test_le_collecteur_voit_une_vraie_violation(watched: _Watched, url: str) -> 
     page.wait_for_timeout(300)
     seen = watched.violations()
     assert any("style-src" in line for line in seen), seen
+
+
+_WEB = Path(__file__).resolve().parents[2] / "web"
+_PAGES = sorted(p.name for p in _WEB.glob("*.html"))
+
+
+@pytest.mark.parametrize("mode", ["vitrine", "atelier"])
+@pytest.mark.parametrize("legacy", [False, True], ids=["sans-legacy", "legacy"])
+def test_chaque_page_html_servie_sans_violation(browser: Browser, url: str, legacy: bool, mode: str) -> None:
+    """Pages historiques et vitrine (politique à nonce), dans les deux modes d'habillage, avec et sans `?legacy=1`."""
+    assert len(_PAGES) >= 14, _PAGES
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context.add_init_script(_COLLECT)
+    context.add_init_script(f"try {{ localStorage.setItem('grimoire.mode', '{mode}'); }} catch (e) {{}}")
+    page = context.new_page()
+    watched = _Watched(page)
+    try:
+        failures: dict[str, list[str]] = {}
+        for name in _PAGES:
+            watched.console.clear()
+            response = page.goto(f"{url}/{name}{'?legacy=1' if legacy else ''}", wait_until="load")
+            assert response is not None and response.status == 200, (name, response and response.status)
+            page.wait_for_timeout(700)
+            seen = watched.violations()
+            if seen:
+                failures[name] = seen
+        assert failures == {}, failures
+    finally:
+        context.close()
