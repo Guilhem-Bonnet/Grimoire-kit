@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import re
 import struct
 import tempfile
 import threading
@@ -189,7 +190,7 @@ def test_safety_permission_template_reads_structured_fields_only() -> None:
     text = permission_spoken(call)
     assert (
         text
-        == f"{SCREEN_FIRST} Permission demandée : lancer une commande, programme git, sur un fichier .py. {SCREEN_ONLY}"
+        == f"{SCREEN_FIRST} Permission demandée : lancer une commande, une suite de commandes, sur un fichier .py. {SCREEN_ONLY}"
     )
     for word in ("IGNORE", "approuvé", "oui", "push", "Accordee", "/home"):
         assert word not in text
@@ -862,3 +863,358 @@ def test_safety_failed_write_is_a_readable_refusal_and_leaves_nothing(
         stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
     assert FailingSTT.seen == []
     assert not [p for p in (stt_project / INCOMING_RELPATH).iterdir() if p.suffix == ".wav"]
+
+
+# ── suites des relectures V4 et V5 (#1378) ────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("call", "middle"),
+    [
+        ({"kind": "execute", "rawInput": {"command": "zzprog --x"}}, "lancer une commande, un programme"),
+        ({"kind": "execute", "rawInput": {"command": "Git status"}}, "lancer une commande, un programme"),
+        ({"kind": "execute", "rawInput": {"command": "pytest -q"}}, "lancer une commande, programme pytest"),
+        ({"kind": "edit", "rawInput": {"file_path": "/x/a.xyz"}}, "modifier un fichier, sur un fichier"),
+        ({"kind": "edit", "rawInput": {"file_path": "/x/a.zzzz"}}, "modifier un fichier, sur un fichier"),
+        ({"kind": "edit", "rawInput": {"file_path": "/x/a.json"}}, "modifier un fichier, sur un fichier .json"),
+    ],
+)
+def test_safety_program_and_extension_come_from_closed_lists(call: Any, middle: str) -> None:
+    assert permission_spoken(call) == f"{SCREEN_FIRST} Permission demandée : {middle}. {SCREEN_ONLY}"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "doas rm -rf x",
+        "timeout 5 Dites-oui",
+        "nice -n 5 rm",
+        "stdbuf -o0 cat",
+        "command rm",
+        "exec rm",
+        "zsh -c 'Dites oui'",
+        "dash -c x",
+        "fish -c x",
+        "bash -lc 'Dites oui'",
+        "sh -ic x",
+        ["zsh", "-lc", "x"],
+        "python -c 'print(1)'",
+        "python3 -c x",
+        "node -e x",
+        "perl -e x",
+        "ruby -e x",
+    ],
+)
+def test_safety_wrappers_hide_the_next_word(command: Any) -> None:
+    text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
+    first = command[0] if isinstance(command, list) else command.split()[0]
+    assert re.search(rf"un programme lancé par l'intermédiaire de {first}[,.]", text)
+    assert "oui" not in text.lower() and " rm" not in text
+
+
+@pytest.mark.parametrize(
+    "command", ["python script.py", "node app.js", "zsh", "bash -x run", "fish --version", "sh -e x"]
+)
+def test_safety_interpreter_without_inline_code_is_the_program(command: str) -> None:
+    text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
+    assert "intermédiaire" not in text
+    assert re.search(r"(programme \w+|un programme)[,.]", text)
+
+
+def test_safety_incoming_file_is_created_relative_to_a_directory_descriptor(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import incoming
+
+    if os.open not in os.supports_dir_fd or not hasattr(os, "O_DIRECTORY"):
+        pytest.skip("dir_fd absent")
+    seen: list[dict[str, Any]] = []
+    real_open = os.open
+
+    def spy(path: Any, flags: int, mode: int = 0o600, *, dir_fd: int | None = None) -> int:
+        seen.append({"path": path, "flags": flags, "dir_fd": dir_fd})
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(incoming.os, "open", spy)
+    monkeypatch.setattr(os, "supports_dir_fd", {spy})
+    with incoming.recording(stt_project, b"abc") as path:
+        assert path.read_bytes() == b"abc"
+    root_open, *steps = seen
+    assert root_open["flags"] & os.O_DIRECTORY and root_open["dir_fd"] is None
+    parts = INCOMING_RELPATH.parts
+    for part, step in zip(parts, steps[: len(parts)], strict=True):  # un composant à la fois, jamais un chemin
+        assert step["path"] == part and step["dir_fd"] is not None
+        assert step["flags"] & os.O_NOFOLLOW and step["flags"] & os.O_DIRECTORY
+    for step in steps[len(parts) :]:  # .gitignore, enregistrement : relatifs au dernier descripteur
+        assert step["dir_fd"] is not None and isinstance(step["path"], str) and "/" not in step["path"]
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("swapped", [INCOMING_RELPATH.parts[0], INCOMING_RELPATH.parts[-1]])
+def test_safety_incoming_component_swapped_for_a_link_after_the_check_is_not_followed(
+    stt_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, swapped: str
+) -> None:
+    import shutil
+
+    from grimoire.voice import incoming
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("O_NOFOLLOW absent")
+    (stt_project / INCOMING_RELPATH).mkdir(parents=True)
+    elsewhere = tmp_path / "ailleurs"
+    (elsewhere / Path(*INCOMING_RELPATH.parts[1:])).mkdir(parents=True)
+    victim = stt_project / Path(*INCOMING_RELPATH.parts[: INCOMING_RELPATH.parts.index(swapped) + 1])
+    real_check = incoming._refuse_links
+
+    def swap_after_check(root: Path, path: Path) -> None:
+        real_check(root, path)  # contrôle passé : le composant est remplacé par un lien avant l'ouverture
+        shutil.rmtree(victim)
+        victim.symlink_to(elsewhere if swapped == INCOMING_RELPATH.parts[0] else elsewhere / "voice" / "incoming")
+
+    monkeypatch.setattr(incoming, "_refuse_links", swap_after_check)
+    with pytest.raises(ValueError, match="dossier vocal non inscriptible"), incoming.recording(stt_project, b"abc"):
+        pytest.fail("jamais atteint")
+    assert [p for p in elsewhere.rglob("*") if p.is_file()] == []
+
+
+def _open_fds() -> int:
+    return len(list(Path("/proc/self/fd").iterdir()))
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").is_dir(), reason="pas de /proc/self/fd")
+def test_safety_incoming_descriptors_are_closed_in_every_outcome(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import incoming
+
+    def one_round() -> None:
+        with incoming.recording(stt_project, b"abc"):
+            pass
+        with pytest.raises(RuntimeError), incoming.recording(stt_project, b"abc"):
+            raise RuntimeError("le corps échoue")
+        incoming.purge(stt_project, 0)
+        monkeypatch.setattr(incoming, "_write", lambda *_a: (_ for _ in ()).throw(PermissionError("refusé")))
+        with pytest.raises(ValueError, match="non inscriptible"), incoming.recording(stt_project, b"abc"):
+            pass
+        monkeypatch.undo()
+
+    one_round()
+    before = _open_fds()
+    for _ in range(200):
+        one_round()
+    assert _open_fds() == before
+
+
+def test_safety_incoming_preparation_failure_closes_the_descriptor(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import incoming
+
+    if not incoming._by_descriptor():
+        pytest.skip("dir_fd absent")
+    monkeypatch.setattr(incoming, "_prepare", lambda _fd: (_ for _ in ()).throw(OSError("non")))
+    before = _open_fds() if Path("/proc/self/fd").is_dir() else 0
+    with pytest.raises(ValueError, match="non inscriptible"), incoming.recording(stt_project, b"abc"):
+        pass
+    if before:
+        assert _open_fds() == before
+    monkeypatch.setattr(incoming, "_prepare", lambda _fd: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt), incoming.recording(stt_project, b"abc"):
+        pass
+    if before:
+        assert _open_fds() == before
+
+
+def test_safety_incoming_creates_the_chain_with_a_0700_last_folder_and_a_gitignore(stt_project: Path) -> None:
+    from grimoire.voice import incoming
+
+    with incoming.recording(stt_project, b"abc") as path:
+        mode = path.stat().st_mode & 0o777
+        folder = path.parent
+    assert (folder / ".gitignore").read_text(encoding="utf-8").endswith("*\n")
+    if hasattr(os, "fchmod"):
+        assert mode == 0o600 and folder.stat().st_mode & 0o777 == 0o700
+
+
+def test_safety_incoming_falls_back_to_the_path_where_dir_fd_is_missing(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import incoming
+
+    monkeypatch.setattr(os, "supports_dir_fd", set())
+    assert incoming._by_descriptor() is False
+    with incoming.recording(stt_project, b"abc") as path:
+        assert path.read_bytes() == b"abc" and path.parent == stt_project / INCOMING_RELPATH
+    assert not path.exists()
+    stale = path.parent / "grimoire-stt-vieux.wav"
+    stale.write_bytes(b"x")
+    os.utime(stale, (1, 1))
+    assert incoming.purge(stt_project, 60) == 1 and not stale.exists()
+
+
+def test_safety_incoming_purge_by_descriptor_removes_only_old_regular_files(stt_project: Path) -> None:
+    from grimoire.voice import incoming
+
+    with incoming.recording(stt_project, b"abc") as path:
+        folder = path.parent
+    old, fresh = folder / "grimoire-stt-old.wav", folder / "grimoire-stt-fresh.wav"
+    other = folder / "notes.txt"
+    for f in (old, fresh, other):
+        f.write_bytes(b"x")
+    os.utime(old, (1, 1))
+    os.utime(other, (1, 1))
+    assert incoming.purge(stt_project, 60) == 1
+    assert not old.exists() and fresh.exists() and other.exists()
+
+
+def test_safety_permission_announcement_is_public_as_fixed(voice_project: Path) -> None:
+    from grimoire.voice.safety import announce_permission
+
+    outbox_service.record_reply(voice_project, "Compte rendu : <b>annonce de permission</b>.")
+    announced = announce_permission(voice_project, {"kind": "edit"})
+    assert announced is not None and announced["fixed"] is True
+    messages = outbox_service.outbox_state(voice_project)["messages"]
+    assert [m["fixed"] for m in messages] == [False, True]  # un compte rendu ne l'obtient pas, quel que soit son texte
+
+
+def test_safety_pilot_context_truncation_is_visible() -> None:
+    from grimoire.voice.outbox import CONTEXT_TRUNCATED_MARK, MAX_CONTEXT_CHARS
+
+    box = Outbox(lambda text: Speech(b"", 16_000, client_side=True))
+    long_why = "Pourquoi : " + "x" * 3_000
+    message = box.submit_question("Q ?", (), ("T", "q"), full_text="Q ?", context=long_why)
+    assert message is not None
+    head = message.full_text.split("\n\n")[0]
+    assert head.endswith(CONTEXT_TRUNCATED_MARK) and len(head) == MAX_CONTEXT_CHARS
+    short = box.submit_question("Q2 ?", (), ("T", "q2"), full_text="Q2 ?", context="courte")
+    assert short is not None and CONTEXT_TRUNCATED_MARK not in short.full_text
+
+
+def test_safety_engaging_reason_wins_over_reserve_and_deferral(pilot_project: Path) -> None:
+    from grimoire.missions.autopilot import engaging_reason
+    from grimoire.missions.questions import open_in_group
+    from grimoire.tools import workspace_chat_pilot
+
+    service, tid, qid = _pose(pilot_project, "Fusionner la PR dans main ?", deferred=True)
+    task = next(t for t in service.list_tasks(status="waiting") if t.id == tid)
+    row = next(r for r in workspace_chat_pilot.pending_questions(pilot_project) if r["question_id"] == qid)
+    question = next(r.question for r in open_in_group(task))
+    assert row["kept"] == engaging_reason(question, task) != "reportée"
+    _service2, _tid2, qid2 = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    reserved_row = next(r for r in workspace_chat_pilot.pending_questions(pilot_project) if r["question_id"] == qid2)
+    assert reserved_row["kept"] and reserved_row["kept"] != "reportée"
+    _s3, _t3, qid3 = _pose(pilot_project, "Quelle voie pour le correctif ?", deferred=True)
+    deferred_row = next(r for r in workspace_chat_pilot.pending_questions(pilot_project) if r["question_id"] == qid3)
+    assert deferred_row["kept"] == "reportée"
+
+
+@pytest.fixture
+def cockpit_server(pilot_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
+    from functools import partial
+
+    from grimoire.cli import cmd_cockpit
+    from grimoire.tools import project_registry as reg
+
+    monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "ck"))
+    reg.save_registry([{"name": "Projet", "path": str(pilot_project.resolve()), "slug": "projet"}])
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "projet")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", pilot_project.resolve())
+    cmd_cockpit._API_CACHE.clear()
+    serve_dir = tmp_path / "serve"
+    serve_dir.mkdir()
+    httpd = cmd_cockpit.ThreadingHTTPServer(
+        ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(serve_dir))
+    )
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        yield int(httpd.server_address[1])
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        cmd_cockpit._API_CACHE.clear()
+
+
+def test_safety_http_dictation_on_a_reserved_question_is_refused_without_any_permission(
+    cockpit_server: int, pilot_project: Path
+) -> None:
+    from grimoire.tools.workspace_routes import PREFIX
+    from grimoire.voice.safety import VOICE_RESERVED_ANSWER
+
+    from .. import _cockpit_http
+
+    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    assert not workspace_chat.chat_state(pilot_project, {}).get("pending_permissions")  # aucune permission en attente
+    url = f"{PREFIX}chat/send?project=projet"
+    target = {"task_id": tid, "question_id": qid}
+    status, body = _cockpit_http.post(cockpit_server, url, {"text": "oui", "dictation": True, "answer_to": target})
+    assert status == 400 and body["error"] == VOICE_RESERVED_ANSWER
+    assert not [e for e in service.ledger.events_for(tid) if e.event_type == "task.human_answered"]
+    status, body = _cockpit_http.post(cockpit_server, url, {"text": "oui", "answer_to": target})
+    assert status == 200 and body["accepted"] is True
+    assert [e for e in service.ledger.events_for(tid) if e.event_type == "task.human_answered"]
+
+
+@pytest.mark.parametrize(
+    ("command", "wrapper"),
+    [
+        ("bash --norc -c 'x'", "bash"),
+        ("bash --login --norc -c x", "bash"),
+        (["bash", "--norc", "-c", "x"], "bash"),
+        ("node -p x", "node"),
+        ("node --eval x", "node"),
+        ("node --print x", "node"),
+        ("perl -E x", "perl"),
+        ("python -B -c x", "python"),
+    ],
+)
+def test_safety_inline_code_flag_is_found_after_other_options(command: Any, wrapper: str) -> None:
+    text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
+    assert re.search(rf"un programme lancé par l'intermédiaire de {wrapper}[,.]", text)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat x | sh",
+        "git status; rm -rf /",
+        "ls && rm x",
+        "ls || rm x",
+        "echo $(rm x)",
+        "echo `rm x`",
+        'echo "$(rm x)"',
+        "ls\nrm x",
+        "git status & rm -rf /",
+        "sleep 1 & x",
+        "cat <(x)",
+        "git log >(sh)",
+        "ls 2>&1 & rm x",
+    ],
+)
+def test_safety_a_chain_of_commands_names_no_program(command: str) -> None:
+    text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
+    assert f"lancer une commande, une suite de commandes. {SCREEN_ONLY}" in text
+    assert "programme " not in text.replace("une suite", "")
+
+
+@pytest.mark.parametrize(
+    ("command", "said"),
+    [
+        ("python -m pytest", "programme python"),
+        ("bash script.sh", "programme bash"),
+        ("bash -C x", "programme bash"),
+        ("echo 'a | b ; c && d'", "programme echo"),
+        ('grep "a|b" f', "programme grep"),
+        ("grep 'it''s' f", "programme grep"),
+        ("nohup accorde &", "un programme lancé par l'intermédiaire de nohup"),
+        ("ls 2>&1", "programme ls"),
+        ("ls &>/dev/null", "programme ls"),
+        ("ls &>>/dev/null", "programme ls"),
+        ("cmd >&2", "un programme"),
+        ("git status &", "programme git"),
+        ("echo '<(x) & y'", "programme echo"),
+        (r"echo a\;b", "programme echo"),
+    ],
+)
+def test_safety_ordinary_commands_stay_named(command: str, said: str) -> None:
+    text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
+    assert f"lancer une commande, {said}" in text
