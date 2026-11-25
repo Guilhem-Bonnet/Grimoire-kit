@@ -51,11 +51,11 @@ def default_tts() -> str:
 
     Lu par ``find_spec`` : aucun paquet n'est importé. Un ``voice.tts`` explicite garde la priorité.
     """
-    from grimoire.voice.engines import ENGINES, availability
+    from grimoire.voice.engines import ENGINES, installed
 
-    for name in (QWEN_TTS, POCKET_TTS):
+    for name in (QWEN_TTS, POCKET_TTS):  # sans le message d'installation : il lance des sous-processus
         spec = ENGINES.get(("tts", name))
-        if spec is not None and availability(spec).ok:
+        if spec is not None and installed(spec):
             return name
     return BROWSER_TTS
 

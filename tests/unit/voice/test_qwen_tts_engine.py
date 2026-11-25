@@ -220,6 +220,17 @@ def test_default_engine_follows_installed_packages(monkeypatch: pytest.MonkeyPat
     assert settings_from_mapping({}).tts.engine == "browser"
 
 
+def test_default_engine_spawns_no_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lu à chaque tour du chat en mode vocal : jamais de sous-processus (détection du gestionnaire de paquets)."""
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: False)
+
+    def forbidden(*_a: object, **_k: object) -> None:
+        raise AssertionError("sous-processus lancé")
+
+    monkeypatch.setattr("subprocess.run", forbidden)
+    assert default_tts() == "browser"
+
+
 def test_explicit_engine_wins_over_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
     assert settings_from_mapping({"voice": {"tts": "pocket-tts"}}).tts.engine == "pocket-tts"

@@ -142,13 +142,13 @@ export function createChat({ readOnly = () => false } = {}) {
 
   // ── Messages : le texte arrive par morceaux, le markdown se rend sur le tout ─
   // Le message parlé (balise au jeton du tour) a sa place dans la boîte vocale : le fil ne le montre pas,
-// même en cours de flux (balise ouvrante encore incomplète).
-const SPOKEN_TAG_RE = /<voix-[0-9a-f]{8}>[\s\S]*?(?:<\/voix-[0-9a-f]{8}>|$)|<(?:v(?:o(?:i(?:x(?:-[0-9a-f]{0,8})?)?)?)?)?$/g;
-function withoutSpokenTag(text) {
-  return text.replace(SPOKEN_TAG_RE, '');
-}
+  // même en cours de flux (balise ouvrante encore incomplète).
+  const SPOKEN_TAG_RE = /<voix-[0-9a-f]{8}>[\s\S]*?(?:<\/voix-[0-9a-f]{8}>|$)|<(?:v(?:o(?:i(?:x(?:-[0-9a-f]{0,8})?)?)?)?)?$/g;
+  function withoutSpokenTag(text) {
+    return text.replace(SPOKEN_TAG_RE, '');
+  }
 
-function addText(role, text) {
+  function addText(role, text) {
     const follow = nearBottom();
     if (!current || current.role !== role) {
       const body = mk('div', { class: 'chat-body' });
