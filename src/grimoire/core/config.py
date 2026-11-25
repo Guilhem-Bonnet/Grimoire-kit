@@ -15,6 +15,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -632,3 +633,23 @@ class GrimoireConfig:
             f"No 'project-context.yaml' found in {current} or any parent directory",
             error_code=CONFIG_NOT_FOUND.code,
         )
+
+
+def governance_block(moa: str, *, confirmed: bool = False) -> str:
+    """La section ``governance`` (#1342) ; vide quand aucune MOA humaine n'est nommée : le doctor avertira.
+
+    *confirmed* : un humain a nommé la MOA (l'assistant interactif) — le gate d'exigence (lot M3) part en ``block``.
+    Sinon (``init -y``, nom git deviné), la section est écrite mais le gate reste en ``warn`` : un nom deviné ne
+    bloque personne tant qu'un humain ne l'a pas confirmé en passant ``requirement_gate`` à ``block``.
+    """
+    if not moa or moa_name_problem(moa):
+        return ""
+    quoted = json.dumps(moa, ensure_ascii=False)
+    gate = "block" if confirmed else "warn"
+    note = "" if confirmed else (
+        "  # MOA déduite du nom git, non confirmée : vérifiez-la, puis passez requirement_gate à block\n"
+    )
+    return (
+        f"\ngovernance:\n{note}  roles:\n    moa: {quoted}\n    moe: \"orchestrateur\"\n"
+        f"  requirement_gate: {gate}\n"
+    )

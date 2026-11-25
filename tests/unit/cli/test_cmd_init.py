@@ -255,6 +255,21 @@ class TestWizardAsksThreeQuestions:
         assert calls["n"] == 9  # 3 essais × 3 questions
         assert result["archetype"] == "stack"
 
+    def test_bot_moa_is_reasked(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """#1342 : un compte de bot saisi comme MOA est refusé à l'écran et la question revient."""
+        _hermetic_memory(monkeypatch)
+        moa_answers = iter(["dependabot[bot]", "Ada Lovelace"])
+
+        def ask(prompt: str, **kw: Any) -> str:
+            if "MOA" in prompt:
+                return next(moa_answers)
+            return str(kw.get("default", ""))
+
+        monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(ask))
+        monkeypatch.setattr(cmd_init.Confirm, "ask", staticmethod(lambda *a, **kw: True))
+        result = cmd_init._run_wizard(tmp_path, _scan(tmp_path), ArchetypeResolver().resolve(_scan(tmp_path)), "lexical")
+        assert result["moa"] == "Ada Lovelace"
+
 
 class TestExpressAsksNothing:
     def test_yes_mode_never_prompts(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

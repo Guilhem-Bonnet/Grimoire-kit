@@ -40,10 +40,7 @@ def _disarmed(project_root: Path, mode: str) -> str:
         return ""
     from grimoire.missions.requirement_gate import sealed_validations
 
-    try:
-        count = sealed_validations(project_root)
-    except Exception:
-        return ""
+    count = sealed_validations(project_root)  # journal illisible : 0, sans lever
     if not count:
         return ""
     return (

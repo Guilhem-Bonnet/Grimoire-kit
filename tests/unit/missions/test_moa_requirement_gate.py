@@ -587,3 +587,133 @@ def test_moa_requirement_doctor_warns_when_gate_disarmed_after_validation(tmp_pa
     _project(root, moa=None, gate="block")
     assert "scellée" in moa_moe_verdict(root)["detail"]  # type: ignore[index]
     assert rg.sealed_validations(root) == 1
+
+
+# ── Cas limites (chaque branche d'échec fermé) ──────────────────────────────
+
+
+def _break_journal() -> None:
+    journal = AuthorityJournal()
+    journal.append({"type": "noise"})
+    journal.path.write_text("pas du json\n", encoding="utf-8")
+
+
+def test_moa_requirement_broken_journal_validates_nothing(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    _approve(root)
+    _break_journal()
+    found, reason = rg.validation_of(root, "REQ-001")
+    assert found is None and "journal d'autorité illisible" in reason
+    assert rg.sealed_validations(root) == 0
+
+
+def test_moa_requirement_explicit_journal_is_used(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    journal = AuthorityJournal(tmp_path / "ailleurs" / "journal.jsonl")
+    rg.approve_requirement(root, "REQ-001", actor="ada", journal=journal)
+    assert rg.validation_of(root, "REQ-001", journal=journal)[0] is not None
+    assert rg.validation_of(root, "REQ-001")[0] is None  # le journal par défaut n'a rien
+    assert rg.sealed_validations(root, journal=journal) == 1
+
+
+@pytest.mark.parametrize(
+    ("text", "code"),
+    [
+        ("- REQ-001 : une formulation\n- REQ-001 : une autre formulation\n", "conflict"),
+        ("- REQ-001\n  - un critère sans formulation\n", "no_text"),
+        ("- REQ-001 [Won't] : plus tard\n", "out_of_scope"),
+    ],
+)
+def test_moa_requirement_unvalidatable_requirement_refused(tmp_path: Path, text: str, code: str) -> None:
+    root = _project(tmp_path, text=text)
+    with pytest.raises(rg.RequirementRefusedError) as refused:
+        _approve(root)
+    assert refused.value.code == code
+
+
+def test_moa_requirement_unreadable_context_or_cadrage_is_warn_and_unvalidated(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    (root / "project-context.yaml").write_text("governance: [pas fermé\n", encoding="utf-8")
+    mode = rg.gate_mode(root)
+    assert mode.mode == "warn" and "illisible" in mode.problem
+    found, reason = rg.validation_of(root, "REQ-001")
+    assert found is None and "aucune MOA" in reason
+    assert rg.lookup(root, "pas-une-cle") is None
+    assert rg.validation_of(_project(tmp_path / "b"), "REQ-404")[1].endswith("introuvable dans le cadrage du projet")
+
+
+def test_moa_requirement_task_reference_fallbacks(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    _approve(root)
+    service = TaskService(root)
+    planned = service.add("x", ("ok",), extra={"covers": ["REQ-001"]}).task  # tâche d'avant M3 : un seul covers
+    assert rg.requirement_of(planned) == "REQ-001"
+    assert rg.check_task(root, planned).state == "ok"
+    bad = service.add("y", ("ok",), extra={"requirement": "n'importe quoi"}).task
+    check = rg.check_task(root, bad)
+    assert check.gap and "invalide" in check.detail
+    assert rg.task_fields("", "") == {}
+
+
+def test_moa_requirement_record_ready_never_breaks_the_transition(tmp_path: Path) -> None:
+    class _Broken:
+        def append_event(self, *args: Any) -> None:
+            raise OSError("disque plein")
+
+    root = _project(tmp_path, gate="warn")
+    task = _add(TaskService(root)).task
+    rg.record_ready(_Broken(), root, task, "agent")  # ne lève pas
+    assert rg.transition_refusal(root, task, TaskState.CANCELLED) is None
+
+
+def test_moa_requirement_pending_review_empty_without_moa_and_skips_cancelled(tmp_path: Path) -> None:
+    root = _project(tmp_path, gate="warn")
+    service = TaskService(root)
+    task = _add(service, ready=True).task
+    events = service.ledger.list_events()
+    service.cancel(task.id, "abandon", "cli")
+    assert rg.pending_review(root, service.list_tasks(), events)["unvalidated"] == []
+    bare = _project(tmp_path / "nu", moa=None, gate=None)
+    assert rg.pending_review(bare, service.list_tasks(), events) == {
+        "unvalidated": [],
+        "questions": [],
+        "postmortem": [],
+    }
+
+
+def test_moa_requirement_doctor_check_prints(tmp_path: Path) -> None:
+    from rich.console import Console
+
+    from grimoire.cli.doctor_moa_moe import apply_moa_moe_check
+
+    root = _project(tmp_path)
+    results: list[dict[str, Any]] = []
+    console = Console(record=True, width=200)
+    apply_moa_moe_check(results, root, fmt="text", console=console)
+    apply_moa_moe_check(results, tmp_path / "absent", fmt="text", console=console)
+    assert [r["level"] for r in results] == ["ok"]
+    assert "gate d'exigence : block" in console.export_text()
+
+
+def test_moa_requirement_cockpit_item_questions_and_unreadable_ledger(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from grimoire.tools import workspace_attention as wa
+
+    root = _project(tmp_path, gate="warn")
+    service = TaskService(root)
+    question = service.add(_TITLES["question"], ("ok",), nature="question", ready=True).task
+    read = SimpleNamespace(row={"slug": "p", "name": "p"}, items=[])
+    wa._requirement_item(read, service, service.list_tasks())  # type: ignore[arg-type]
+    assert read.items[0]["ref"]["questions"] == [question.id] and "question(s) exemptée(s)" in read.items[0]["title"]
+
+    class _Unreadable:
+        def list_events(self) -> list[Any]:
+            raise OSError("ledger illisible")
+
+    empty = SimpleNamespace(row={"slug": "p", "name": "p"}, items=[])
+    wa._requirement_item(empty, SimpleNamespace(home_root=root, ledger=_Unreadable()), [])  # type: ignore[arg-type]
+    assert empty.items == []
+    nothing = SimpleNamespace(row={"slug": "p", "name": "p"}, items=[])
+    wa._requirement_item(nothing, SimpleNamespace(home_root=root, ledger=_CountingLedger()), [])  # type: ignore[arg-type]
+    assert nothing.items == []

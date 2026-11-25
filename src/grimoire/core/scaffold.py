@@ -24,6 +24,7 @@ from grimoire.__version__ import __version__ as _grimoire_version
 from grimoire.archetypes import bundled_path as archetypes_path
 from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
+from grimoire.core.config import governance_block as _governance_block
 from grimoire.core.expertises import _safe_skill_source
 from grimoire.core.scanner import ScanResult
 from grimoire.core.stack_skills import detected_stack_skill_slugs
@@ -262,28 +263,6 @@ $governance_block
 installed_archetypes: [$archetype_list]
 """
 
-def _governance_block(moa: str, *, confirmed: bool = False) -> str:
-    """La section ``governance`` (#1342) ; vide quand aucune MOA humaine n'est nommée : le doctor avertira.
-
-    *confirmed* : un humain a nommé la MOA (l'assistant interactif) — le gate d'exigence (lot M3) part en ``block``.
-    Sinon (``init -y``, nom git deviné), la section est écrite mais le gate reste en ``warn`` : un nom deviné ne
-    bloque personne tant qu'un humain ne l'a pas confirmé en passant ``requirement_gate`` à ``block``.
-    """
-    from grimoire.core.config import moa_name_problem
-
-    if not moa or moa_name_problem(moa):
-        return ""
-    quoted = json.dumps(moa, ensure_ascii=False)
-    gate = "block" if confirmed else "warn"
-    note = "" if confirmed else (
-        "  # MOA déduite du nom git, non confirmée : vérifiez-la, puis passez requirement_gate à block\n"
-    )
-    return (
-        f"\ngovernance:\n{note}  roles:\n    moa: {quoted}\n    moe: \"orchestrateur\"\n"
-        f"  requirement_gate: {gate}\n"
-    )
-
-
 _MEMORY_CONFIG_TPL = """\
 # Grimoire Memory Configuration — auto-generated
 user_name: "$user_name"
@@ -459,11 +438,9 @@ class ProjectScaffolder:
         force: bool = False,
         profile: str = "",
         collection_prefix: str = "",
-        moa: str = "",
-        moa_confirmed: bool = False,
+        moa: str = "", moa_confirmed: bool = False,
     ) -> None:
-        self._moa = moa.strip()
-        self._moa_confirmed = moa_confirmed
+        self._moa, self._moa_confirmed = moa.strip(), moa_confirmed
         self._offline = offline
         self._profile = profile
         self._target = target.resolve()

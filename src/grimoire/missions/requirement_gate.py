@@ -47,7 +47,7 @@ from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.schemas import ORIGIN_HUMAN
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
     from grimoire.core.cadrage_requirements import Requirement
@@ -74,9 +74,13 @@ __all__ = [
     "normalize_key",
     "origin_root",
     "pending_review",
+    "queue_refusal",
     "record_ready",
+    "record_transition",
     "requirement_of",
     "sealed_validations",
+    "task_fields",
+    "transition_refusal",
     "validation_of",
 ]
 
@@ -509,6 +513,51 @@ def gate_refusal(home_root: Path, task: MissionTask, *, journal: AuthorityJourna
     if not check.gap:
         return None
     return GateRefusal("requirement_validated", f"{check.detail} — à faire : {REMEDY}", REMEDY)
+
+
+def task_fields(requirement: str, nature: str) -> dict[str, str]:
+    """Les champs ``extra`` d'une tâche à sa création : l'exigence normalisée, la nature validée (vides : rien)."""
+    from grimoire.missions.request_kind import parse_kind
+
+    fields: dict[str, str] = {}
+    if requirement.strip():
+        fields["requirement"] = normalize_key(requirement)
+    if nature.strip():
+        try:
+            fields["nature"] = parse_kind(nature).value
+        except ValueError as exc:
+            raise GrimoireMissionError(str(exc)) from exc
+    return fields
+
+
+def transition_refusal(home_root: Path, task: MissionTask, target: Any) -> GateRefusal | None:
+    """Le refus du gate pour ``task.status → target`` : ``proposed → ready``, et ``ready → claimed`` (en mode bloquant
+    seulement, comme tout refus) contre une transition ``ready`` forgée au ledger ou une exigence modifiée depuis."""
+    from grimoire.missions.schemas import TaskState
+
+    if (task.status, target) not in {(TaskState.PROPOSED, TaskState.READY), (TaskState.READY, TaskState.CLAIMED)}:
+        return None
+    return gate_refusal(home_root, task)
+
+
+def queue_refusal(home_root: Path) -> Callable[[MissionTask], str] | None:
+    """En mode bloquant, la raison qui écarte une tâche ``ready`` de la file d'admission ; ``None`` sinon."""
+    if not gate_mode(home_root).blocking:
+        return None
+
+    def refused(task: MissionTask) -> str:
+        found = gate_refusal(home_root, task)
+        return f"exigence non validée par la MOA : {found.reason}" if found is not None else ""
+
+    return refused
+
+
+def record_transition(ledger: Any, home_root: Path, previous: Any, moved: MissionTask, actor: str) -> None:
+    """Après une transition écrite : seul ``proposed → ready`` laisse un événement (:func:`record_ready`)."""
+    from grimoire.missions.schemas import TaskState
+
+    if previous is TaskState.PROPOSED and moved.status is TaskState.READY:
+        record_ready(ledger, home_root, moved, actor)
 
 
 def record_ready(ledger: Any, home_root: Path, task: MissionTask, actor: str) -> None:
