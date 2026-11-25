@@ -73,6 +73,11 @@ def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: 
                 cache = model_cache(spec, dict(choice.options))
                 if cache is not None and not cache.ok:
                     ok, reason = False, cache.reason
+        detail = f"Vocal, {label} (voice.{kind}: {choice.engine}) : {reason}"
+        if kind == "tts" and choice.engine == "qwen3-tts-clone":
+            from grimoire.voice.qwen_tts_engine import EXPECTED_MEMORY_GB
+
+            detail += f" ; mémoire attendue : environ {EXPECTED_MEMORY_GB} Go"
         entries.append(
             {
                 "name": f"voice_{kind}",
@@ -80,7 +85,7 @@ def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: 
                 "level": "ok" if ok else "warn",
                 "engine": choice.engine,
                 "available": ok,
-                "detail": f"Vocal, {label} (voice.{kind}: {choice.engine}) : {reason}",
+                "detail": detail,
             }
         )
 
