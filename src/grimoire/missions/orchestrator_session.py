@@ -329,21 +329,20 @@ def worker_at_work(service: TaskService, task_id: str, states: dict[str, str] | 
     return not short or states.get(short) not in _AT_REST
 
 
-#: Le type de l'exception qui a fait échouer la dernière lecture des sessions (``""`` : aucune), pour le motif du refus.
-_STATES_FAILURE: ContextVar[str] = ContextVar("grimoire_states_failure", default="")
+def _states(service: TaskService, claude_bin: str = "claude") -> tuple[dict[str, str] | None, str]:
+    """``(état des sessions de fond, type de l'erreur de lecture)``.
 
-
-def _states(service: TaskService, claude_bin: str = "claude") -> dict[str, str] | None:
-    """L'état des sessions de fond : celui que le tick a déjà lu s'il est en train d'appliquer, sinon lu ici."""
+    L'état est celui que le tick a déjà lu s'il est en train d'appliquer, sinon lu ici. Une lecture qui échoue n'est pas
+    une preuve d'arrêt : ``(None, type de l'exception)`` (le worker reste « au travail » ; le type seulement, le message
+    peut porter des chemins).
+    """
     held = _TICK_STATES.get()
     if held is not None:
-        return held[0]
-    _STATES_FAILURE.set("")
+        return held[0], ""
     try:
-        return session_states(_read_agents(default_exec, service.home_root, claude_bin))
-    except Exception as exc:  # une lecture qui échoue n'est pas une preuve d'arrêt : ``None`` (le worker reste « au travail »)
-        _STATES_FAILURE.set(type(exc).__name__)  # le type seulement : le message peut porter des chemins
-        return None
+        return session_states(_read_agents(default_exec, service.home_root, claude_bin)), ""
+    except Exception as exc:
+        return None, type(exc).__name__
 
 
 def _defaults_taken(events: list[LedgerEvent]) -> int:
@@ -523,14 +522,16 @@ def answer_plan(
         _check_caller(service, task, question, events, pilot=pilot)
     if policy is None:
         return gesture, None
-    kit, fallback, ruling, unread = kit_written(events, question), "", None, ""
+    kit, fallback, ruling, unread, read_failure = kit_written(events, question), "", None, "", ""
     if not assumes(confidence):  # personne n'assume : un précédent, sinon l'option par défaut, si les gardes en rendent
         plan = precedent_plan(service, task, question, events, policy)
         fallback, ruling, unread = plan.option, plan.precedent, plan.reason if plan.unreadable else ""
         if not fallback and not plan.contrary:
             fallback = default_plan(service, task, question, events, policy)[0]
-        if fallback and (kit or gesture == "resume") and worker_at_work(service, task.id, _states(service)):
-            fallback, ruling = "", None
+        if fallback and (kit or gesture == "resume"):
+            states, read_failure = _states(service)
+            if worker_at_work(service, task.id, states):
+                fallback, ruling = "", None
     try:
         decision = judge(
             question, answer, justification=justification, confidence=confidence, default=fallback,
@@ -539,8 +540,8 @@ def answer_plan(
         )
     except GrimoireMissionError as exc:
         reason = f"{exc} ; {unread}" if unread else str(exc)  # des précédents illisibles : le dire à l'humain
-        if failure := _STATES_FAILURE.get():  # la lecture des sessions a échoué : le dire, par son type seulement
-            reason = f"{reason} ; lecture des sessions impossible ({failure})"
+        if read_failure:  # la lecture des sessions a échoué : le dire, par son type seulement
+            reason = f"{reason} ; lecture des sessions impossible ({read_failure})"
         _defer(service, task.id, question.id, reason)
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {reason}") from exc
     # Une option appliquée à la place de la réponse n'est jamais « abandonner » (:func:`~.autopilot.safe_option`).

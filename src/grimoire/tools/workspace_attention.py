@@ -323,6 +323,7 @@ def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any], list[Any]]:
     from grimoire.missions.arbiter import ARBITRATED_EVENT
     from grimoire.missions.autopilot import DECIDED_EVENT
     from grimoire.missions.autopilot_view import REVERTED_EVENT
+    from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
 
     last: dict[str, str] = {}
     pilot: list[Any] = []
@@ -330,7 +331,9 @@ def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any], list[Any]]:
     for event in ledger.list_events():
         if event.created_at and event.created_at > last.get(event.entity_id, ""):
             last[event.entity_id] = event.created_at
-        if event.event_type in (DECIDED_EVENT, REVERTED_EVENT):
+        if event.event_type in (DECIDED_EVENT, REVERTED_EVENT) or (
+            event.event_type == HUMAN_ANSWERED_EVENT and event.payload.get("origin") == "orchestrator"
+        ):  # les réponses du pilote : une reprise « sans réponse » ne couvre pas une décision déjà suivie de la sienne
             pilot.append(event)
         elif event.event_type == ARBITRATED_EVENT:
             arbitrated.append(event)

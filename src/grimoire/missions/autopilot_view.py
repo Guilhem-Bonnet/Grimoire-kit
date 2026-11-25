@@ -32,7 +32,7 @@ from grimoire.missions.autopilot import (
     reserved_reason,
 )
 from grimoire.missions.mandate import AuthorityJournal, JournalError
-from grimoire.missions.schemas import TaskState
+from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR, TaskState
 from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
 
 if TYPE_CHECKING:
@@ -183,24 +183,45 @@ def _how_to_revert(service: TaskService, task_id: str, question_id: str = "") ->
     return ""
 
 
+def _pilot_answer(event: Any) -> bool:
+    return bool(event.event_type == HUMAN_ANSWERED_EVENT and event.payload.get("origin") == ORIGIN_ORCHESTRATOR)
+
+
+def _position(decisions: list[tuple[str, int]], decision_id: str) -> int:
+    return next((at for known, at in decisions if known == decision_id), -1)
+
+
 def reverted_decisions(events: list[Any]) -> dict[str, str]:
     """``{identifiant de la décision: date de la reprise}`` : une reprise porte sur **une** décision, jamais sur la question.
 
     Une reprise nomme sa décision (``decision_id``). Une reprise ancienne, sans identifiant, vaut pour les décisions de la
     même question inscrites avant elle (l'ordre du ledger) : jamais pour une décision postérieure. *events* est dans
     l'ordre du ledger.
+
+    Règle de lecture, insensible à l'ordre d'écriture entre « Revenir » et la réponse : une reprise ``unanswered`` ne
+    couvre sa décision que si aucune réponse du pilote à cette question ne la suit au ledger. Sinon la réponse est
+    appliquée : la reprise est sans effet, la décision reste visible et se défait par le chemin normal.
     """
-    earlier: dict[tuple[Any, Any], list[str]] = {}
+    answered: dict[tuple[Any, Any], int] = {}  # position de la dernière réponse du pilote, par question
+    for index, event in enumerate(events):
+        if _pilot_answer(event):
+            p = event.payload
+            answered[(p.get("task_id") or event.entity_id, p.get("question_id"))] = index
+    earlier: dict[tuple[Any, Any], list[tuple[str, int]]] = {}
     out: dict[str, str] = {}
-    for event in events:
+    for index, event in enumerate(events):
         p = event.payload
         key = (p.get("task_id") or event.entity_id, p.get("question_id"))
         if event.event_type == DECIDED_EVENT:
-            earlier.setdefault(key, []).append(event.id)
+            earlier.setdefault(key, []).append((event.id, index))
         elif event.event_type == REVERTED_EVENT:
             named = p.get("decision_id")
-            for decision_id in [named] if named else earlier.get(key, []):
-                out[str(decision_id)] = event.created_at
+            for decision_id, at in (
+                [(str(named), _position(earlier.get(key, []), str(named)))] if named else earlier.get(key, [])
+            ):
+                if p.get("how") == "unanswered" and answered.get(key, -1) > at:
+                    continue
+                out[decision_id] = event.created_at
     return out
 
 
