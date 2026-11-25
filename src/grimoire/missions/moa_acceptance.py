@@ -200,18 +200,18 @@ def verdict_in(
 ) -> dict[str, Any] | None:
     """Le dernier verdict scellé qui vaut : ce projet, cette clé, le canal de la recette, l'origine humaine,
     l'empreinte *current* du texte et la MOA *moa* déclarée aujourd'hui."""
+    wanted = {
+        "type": ACCEPTED_ENTRY,
+        "project": project,
+        "requirement": key,
+        "origin": ORIGIN_HUMAN,
+        "channel": RECETTE_CHANNEL,
+        "fingerprint": current,
+        "moa": moa,
+    }
     for entry in reversed(list(entries)):
-        if (
-            entry.get("type") == ACCEPTED_ENTRY
-            and entry.get("project") == project
-            and entry.get("requirement") == key
-            and entry.get("origin") == ORIGIN_HUMAN
-            and entry.get("channel") == RECETTE_CHANNEL
-            and entry.get("fingerprint") == current
-            and entry.get("moa") == moa
-            and entry.get("verdict") in VERDICTS
-        ):
-            return entry
+        if all(entry.get(k) == v for k, v in wanted.items()) and entry.get("verdict") in VERDICTS:
+            return dict(entry)
     return None
 
 
