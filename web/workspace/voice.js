@@ -71,6 +71,18 @@ export function stillDictated(text, dictatedParts) {
   return dictatedParts.some((part) => words(part).some((word) => kept.has(word)));
 }
 
+/** Au plus ce nombre de jetons de transcription par envoi (le serveur n'en lit pas davantage). */
+export const MAX_DICTATION_TOKENS = 8;
+
+/**
+ * Les jetons de transcription à renvoyer avec le texte : ceux de la dictée, corrigée ou non, tant qu'elle
+ * est encore dans le texte (`pending`) ; aucun une fois le texte entièrement réécrit au clavier, ni sans jeton valide.
+ */
+export function tokensToSend(pending, tokens) {
+  if (!pending || !Array.isArray(tokens)) return [];
+  return tokens.filter((token) => typeof token === 'string' && token !== '').slice(-MAX_DICTATION_TOKENS);
+}
+
 export const MIC_CONSTRAINTS = {
   audio: { channelCount: 1, sampleRate: SAMPLE_RATE, echoCancellation: true, noiseSuppression: true },
 };
@@ -86,6 +98,7 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
   let config = null;
   let recording = null;
   let dictated = [];
+  let tokens = []; // jetons de transcription du serveur, un par dictée
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'btn chat-mic';
@@ -160,6 +173,7 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
       if (!text) { setStatus('Rien de reconnu : réessayez, ou tapez le message.'); return; }
       input.value = input.value.trim() ? `${input.value.trim()} ${text}` : text;
       dictated.push(text);
+      tokens.push(result.dictation_token);
       setStatus('Dictée transcrite : relisez et corrigez avant d’envoyer.');
       input.focus({ preventScroll: true });
     } catch (error) {
@@ -172,7 +186,7 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
 
   button.addEventListener('click', () => { (recording ? stop() : start()); });
   input.addEventListener('input', () => {
-    if (dictated.length && !stillDictated(input.value, dictated)) dictated = [];
+    if (dictated.length && !stillDictated(input.value, dictated)) { dictated = []; tokens = []; }
   });
 
   return {
@@ -190,8 +204,13 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
     dictationPending(text = input.value) {
       return dictated.length > 0 && stillDictated(text, dictated);
     },
+    /** Les jetons du serveur à envoyer avec ce texte (vide si la dictée est entièrement réécrite). */
+    dictationTokens(text = input.value) {
+      return tokensToSend(dictated.length > 0 && stillDictated(text, dictated), tokens);
+    },
     commitDictation() {
       dictated = [];
+      tokens = [];
     },
     /** Coupe le micro si l'onglet se ferme en plein enregistrement. */
     abort() {

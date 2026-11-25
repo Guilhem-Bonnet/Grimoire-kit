@@ -694,9 +694,10 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     text = body.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("text requis : le message ne peut pas être vide")
-    from grimoire.voice.safety import marked_dictation
+    from grimoire.voice.dictation import sent_as_dictation
 
-    dictation = marked_dictation(body)  # le texte corrigé par la personne part tel quel, la mention en plus
+    # Marqueur, jeton de transcription ou texte transcrit à l'instant (#1378) ; le texte part tel quel, mention en plus.
+    dictation = sent_as_dictation(root, body)
     task_id = body.get("task_id")
     target = body.get("answer_to")
     answer_to = None
@@ -714,9 +715,10 @@ def chat_permission(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     request_id, decision = body.get("request_id"), body.get("decision")
     if not isinstance(request_id, (str, int)) or not isinstance(decision, str):
         raise ValueError("request_id et decision requis")
-    from grimoire.voice.safety import VOICE_CANNOT_APPROVE, marked_dictation
+    from grimoire.voice.dictation import sent_as_dictation
+    from grimoire.voice.safety import VOICE_CANNOT_APPROVE
 
-    if marked_dictation(body):  # lot V5 : seul le clic à l'écran tranche
+    if sent_as_dictation(root, body):  # lot V5 : seul le clic à l'écran tranche
         raise ValueError(VOICE_CANNOT_APPROVE)
     return _conversation(root).decide(str(request_id), decision)
 

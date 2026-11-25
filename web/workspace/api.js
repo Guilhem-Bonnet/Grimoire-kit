@@ -283,8 +283,13 @@ export const api = {
   // l'URL vit ici, avec la même cible que toute lecture. Un message est un tour humain : le
   // cockpit le relaie à l'agent et n'écrit rien lui-même (ADR-007).
   chatStreamUrl: (resume) => withProject(WS + 'chat/stream' + (resume ? '?resume=1' : '')),
-  chatSend: (text, answerTo, { dictation = false } = {}) =>
-    post(WS + 'chat/send', { text, ...(answerTo ? { answer_to: answerTo } : {}), ...(dictation ? { dictation: true } : {}) }),
+  chatSend: (text, answerTo, { dictation = false, tokens = [] } = {}) =>
+    post(WS + 'chat/send', {
+      text,
+      ...(answerTo ? { answer_to: answerTo } : {}),
+      ...(dictation ? { dictation: true } : {}),
+      ...(tokens.length ? { dictation_tokens: tokens } : {}),
+    }),
   // Lot V2 : le message vocal. Le serveur local transcrit un WAV 16 kHz mono (base64) ; sans l'extra
   // `voice`, `voiceConfig` le dit (`available: false`, avec la raison) et le bouton n'existe pas.
   voiceConfig: () => get(WS + 'voice/config'),

@@ -524,10 +524,11 @@ export function createChat({ readOnly = () => false } = {}) {
     if (!text || busy || readOnly()) return;
     const answering = target;
     const dictation = voice.dictationPending(text); // consommée après un envoi réussi seulement
+    const tokens = voice.dictationTokens(text); // jetons de transcription : le serveur reconnaît la dictée sans se fier au seul marqueur
     input.value = '';
     if (answering) {
       try {
-        await api.chatSend(text, { task_id: answering.task_id, question_id: answering.question_id }, { dictation });
+        await api.chatSend(text, { task_id: answering.task_id, question_id: answering.question_id }, { dictation, tokens });
         voice.commitDictation();
         answering.state.textContent = 'Réponse transmise : tranchée par vous.';
         setTarget(null);
@@ -539,7 +540,7 @@ export function createChat({ readOnly = () => false } = {}) {
     }
     setBusy(true);
     try {
-      await api.chatSend(text, null, { dictation });
+      await api.chatSend(text, null, { dictation, tokens });
       voice.commitDictation();
     } catch (error) {
       setBusy(false);
