@@ -48,6 +48,7 @@ import fnmatch
 import hashlib
 import json
 import re
+import stat as stat_mod
 import threading
 from collections import OrderedDict, deque
 from collections.abc import Mapping
@@ -57,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.ansi import strip_ansi
+from grimoire.core.regular_file import open_regular
 from grimoire.memory.validation import redact_secrets
 from grimoire.missions.lease import parse_instant
 from grimoire.missions.liveness import DEFAULT_ACTIVE_WINDOW, TERMINE, VIVANT, liveness
@@ -280,6 +282,7 @@ class _FileState:
 
     signature: tuple[int, int] | None = None
     file_id: tuple[int, int] | None = None
+    refused: bool = False
     offset: int = 0
     session_id: str = ""
     entrypoint: str = ""
@@ -649,19 +652,32 @@ def _consume(state: _FileState, path: Path) -> None:
     le reliquat (écriture en cours) attend la passe suivante.
     """
     try:
-        stat = path.stat()
+        stat = path.lstat()
     except OSError:
+        return
+    if not stat_mod.S_ISREG(stat.st_mode):
+        # Lien (sortant ou non), tube nommé, périphérique : jamais ouvert, la session est ignorée.
+        _reset_state(state)
+        state.refused = True
         return
     signature = (stat.st_size, stat.st_mtime_ns)
     file_id = (stat.st_dev, stat.st_ino)
-    if state.signature == signature and state.file_id == file_id:
+    if state.signature == signature and state.file_id == file_id and not state.refused:
         return
+    state.refused = False
     if state.file_id is not None and (state.file_id != file_id or stat.st_size < state.offset):
         _reset_state(state)
     _STATS["opens"] += 1
     consumed = state.offset
     pending = b""
-    with path.open("rb") as handle:
+    try:
+        handle = open_regular(path)
+    except (OSError, ValueError):
+        # Devenu illisible ou non ordinaire entre le contrôle et l'ouverture : ignoré, sans exception.
+        _reset_state(state)
+        state.refused = True
+        return
+    with handle:
         handle.seek(state.offset)
         while chunk := handle.read(READ_CHUNK_BYTES):
             data = pending + chunk
@@ -705,8 +721,10 @@ def _state_for(path: Path) -> _FileState:
 def _meta_for(path: Path) -> _MetaState:
     key = str(path)
     try:
-        stat = path.stat()
+        stat = path.lstat()
     except OSError:
+        return _MetaState()
+    if not stat_mod.S_ISREG(stat.st_mode):
         return _MetaState()
     signature = (stat.st_size, stat.st_mtime_ns)
     meta = _METAS.get(key)
@@ -715,7 +733,8 @@ def _meta_for(path: Path) -> _MetaState:
     meta = _MetaState(signature=signature)
     try:
         _STATS["opens"] += 1
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        with open_regular(path) as handle:
+            data = json.loads(handle.read().decode("utf-8", errors="replace"))
     except (OSError, ValueError):
         return meta
     if not isinstance(data, dict):
@@ -1073,9 +1092,18 @@ def _project_dirs(base: Path, root: _Root, listing: list[Path]) -> list[Path]:
     return [directory for directory in found if directory.is_dir()]
 
 
-def _mtime(path: Path) -> float | None:
+def _real_dir(path: Path) -> bool:
+    """Vrai pour un vrai dossier ; un lien (sortant ou non) n'est jamais parcouru."""
     try:
-        return path.stat().st_mtime
+        return stat_mod.S_ISDIR(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _mtime(path: Path) -> float | None:
+    """La date de modification du fichier lui-même (``lstat`` : un lien n'est jamais suivi)."""
+    try:
+        return path.lstat().st_mtime
     except OSError:
         return None
 
@@ -1152,6 +1180,7 @@ def fleet_live_view(
 
         sessions: list[dict[str, Any]] = []
         edges: list[dict[str, Any]] = []
+        ignored = [0]
         per_root: dict[str, tuple[_Root, list[Path]]] = {}
         for directory, root in owner.items():
             per_root.setdefault(str(root.path), (root, []))[1].append(directory)
@@ -1166,6 +1195,9 @@ def fleet_live_view(
                         continue
                     session_id = journal.stem
                     state = _state_for(journal)
+                    if state.refused:
+                        ignored[0] += 1
+                        continue
                     payload = _assemble(
                         state,
                         session_id=session_id,
@@ -1185,6 +1217,7 @@ def fleet_live_view(
                         parent=payload,
                         parent_state=state,
                         directory=directory / session_id,
+                        ignored=ignored,
                         root=root,
                         ledger=ledger,
                         registry=registry,
@@ -1199,6 +1232,7 @@ def fleet_live_view(
         sessions.sort(key=lambda row: row["last_at"] or "", reverse=True)
         sessions.sort(key=lambda row: _LIVENESS_ORDER.get(row["liveness"], 9))
         totals = _totals(sessions)
+        totals["ignored"] = ignored[0]
         return {
             "schemaVersion": SCHEMA_VERSION,
             "generated_at": moment.isoformat(),
@@ -1232,10 +1266,14 @@ def _attach_subagents(
     now: datetime,
     cutoff: float,
     probe: Mapping[str, Mapping[str, Any]],
+    ignored: list[int],
 ) -> None:
     """Ajoute les sous-agents du dossier ``<session>/subagents`` et les arêtes ``spawned``."""
     subdir = directory / "subagents"
-    if not subdir.is_dir():
+    if not _real_dir(directory) or not _real_dir(subdir):
+        # Un lien (sortant ou non) à la place du dossier de session ou de ``subagents/`` n'est pas parcouru.
+        if directory.is_symlink() or subdir.is_symlink():
+            ignored[0] += 1
         return
     for journal in sorted(subdir.glob("agent-*.jsonl")):
         meta_path = journal.with_suffix(".meta.json")
@@ -1246,6 +1284,9 @@ def _attach_subagents(
         meta = _meta_for(meta_path)
         agent_id = journal.stem.removeprefix("agent-")
         state = _state_for(journal)
+        if state.refused:
+            ignored[0] += 1
+            continue
         payload = _assemble(
             state,
             session_id=agent_id,

@@ -683,3 +683,254 @@ def test_la_route_sert_la_fenetre_par_defaut_et_refuse_une_fenetre_invalide(
         fleet.fleet_live_route(project, {"window": ["abc"]})
     with pytest.raises(ValueError):
         fleet.fleet_live_route(project, {"window": ["0"]})
+
+
+# ── Journaux ordinaires seulement (liens sortants, tubes nommés) ───────────────
+
+FUITE = "FUITE-EXTERIEUR-NE-DOIT-PAS-FUIR"
+
+
+def _outside_journal(tmp_path: Path, session: str) -> Path:
+    """Un journal valide HORS du dossier des journaux, dont le contenu ne doit jamais sortir."""
+    outside = tmp_path / "dehors" / "journal.jsonl"
+    _write(outside, [_assistant(session, "m-out", "claude-sonnet-5-5", cwd=f"/{FUITE}")])
+    return outside
+
+
+def test_un_journal_lien_sortant_est_ignore_et_compte(project: Path, claude_home: Path, tmp_path: Path) -> None:
+    session = "70000000-0000-0000-0000-000000000001"
+    directory = _journal_dir(claude_home, project)
+    (directory / f"{session}.jsonl").symlink_to(_outside_journal(tmp_path, session))
+    _write(directory / "70000000-0000-0000-0000-000000000002.jsonl", [_assistant("ok", "m1", "claude-sonnet-5-5")])
+
+    view = fleet.fleet_live_view(project, now=NOW)
+
+    assert FUITE not in json.dumps(view)
+    assert [row["id"] for row in view["sessions"]] == ["70000000-0000-0000-0000-000000000002"]
+    assert view["totals"]["ignored"] == 1
+
+
+def test_un_journal_de_sous_agent_et_sa_meta_liens_sortants_sont_ignores(
+    project: Path, claude_home: Path, tmp_path: Path
+) -> None:
+    session = "70000000-0000-0000-0000-000000000003"
+    base = _journal_dir(claude_home, project)
+    _write(base / f"{session}.jsonl", [_assistant(session, "m1", "claude-sonnet-5-5")])
+    subdir = base / session / "subagents"
+    subdir.mkdir(parents=True)
+    (subdir / "agent-evil.jsonl").symlink_to(_outside_journal(tmp_path, session))
+    # Un sous-agent ordinaire dont la méta est un lien sortant : journal lu, méta ignorée.
+    _write(subdir / "agent-good.jsonl", [_assistant(session, "m2", "claude-sonnet-5-5")])
+    outside_meta = tmp_path / "dehors" / "meta.json"
+    outside_meta.write_text(json.dumps({"agentType": FUITE}), encoding="utf-8")
+    (subdir / "agent-good.meta.json").symlink_to(outside_meta)
+
+    view = fleet.fleet_live_view(project, now=NOW)
+
+    assert FUITE not in json.dumps(view)
+    assert sorted(row["id"] for row in view["sessions"]) == sorted([session, "good"])
+    assert view["totals"]["ignored"] >= 1
+
+
+def test_un_dossier_de_session_ou_subagents_lien_sortant_n_est_pas_parcouru(
+    project: Path, claude_home: Path, tmp_path: Path
+) -> None:
+    base = _journal_dir(claude_home, project)
+    s1, s2 = "70000000-0000-0000-0000-000000000004", "70000000-0000-0000-0000-000000000005"
+    for session in (s1, s2):
+        _write(base / f"{session}.jsonl", [_assistant(session, f"m-{session[-1]}", "claude-sonnet-5-5")])
+    outside = tmp_path / "dehors" / "sess"
+    _write(outside / "subagents" / "agent-x.jsonl", [_assistant(s1, "mx", "claude-sonnet-5-5", cwd=f"/{FUITE}")])
+    (base / s1).symlink_to(outside, target_is_directory=True)  # dossier de session sortant
+    (base / s2).mkdir()
+    (base / s2 / "subagents").symlink_to(outside / "subagents", target_is_directory=True)  # subagents/ sortant
+
+    view = fleet.fleet_live_view(project, now=NOW)
+
+    assert FUITE not in json.dumps(view)
+    assert sorted(row["id"] for row in view["sessions"]) == sorted([s1, s2])
+    assert view["totals"]["ignored"] == 2
+
+
+def test_un_tube_nomme_n_est_jamais_lu_ni_bloquant(project: Path, claude_home: Path) -> None:
+    import signal
+
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("pas de mkfifo")
+    base = _journal_dir(claude_home, project)
+    os.mkfifo(base / "70000000-0000-0000-0000-000000000006.jsonl")
+    subdir = base / "70000000-0000-0000-0000-000000000007" / "subagents"
+    subdir.mkdir(parents=True)
+    _write(base / "70000000-0000-0000-0000-000000000007.jsonl", [_assistant("p", "m1", "claude-sonnet-5-5")])
+    os.mkfifo(subdir / "agent-fifo.jsonl")
+    os.mkfifo(subdir / "agent-ok.meta.json")
+    _write(subdir / "agent-ok.jsonl", [_assistant("p", "m2", "claude-sonnet-5-5")])
+
+    def _boom(*_: object) -> None:
+        raise AssertionError("la lecture a bloqué sur un tube nommé")
+
+    previous = signal.signal(signal.SIGALRM, _boom)
+    signal.alarm(5)
+    try:
+        view = fleet.fleet_live_view(project, now=NOW)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+    assert sorted(row["id"] for row in view["sessions"]) == sorted(["70000000-0000-0000-0000-000000000007", "ok"])
+    assert view["totals"]["ignored"] >= 2
+
+
+def test_un_peripherique_n_est_pas_lu(project: Path, claude_home: Path) -> None:
+    base = _journal_dir(claude_home, project)
+    (base / "70000000-0000-0000-0000-000000000008.jsonl").symlink_to("/dev/zero")
+
+    view = fleet.fleet_live_view(project, now=NOW)
+
+    assert view["sessions"] == []
+    assert view["totals"]["ignored"] == 1
+
+
+def test_un_journal_illisible_est_ignore_sans_exception(project: Path, claude_home: Path) -> None:
+    session = "70000000-0000-0000-0000-000000000009"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    _write(path, [_assistant(session, "m1", "claude-sonnet-5-5")])
+    path.chmod(0)
+    try:
+        if os.access(path, os.R_OK):
+            pytest.skip("lecture permise malgré chmod 0 (root)")
+        view = fleet.fleet_live_view(project, now=NOW)
+    finally:
+        path.chmod(0o644)
+
+    assert view["sessions"] == []
+    assert view["totals"]["ignored"] == 1
+
+
+def test_un_journal_devenu_lien_apres_lecture_est_ignore(project: Path, claude_home: Path, tmp_path: Path) -> None:
+    session = "70000000-0000-0000-0000-00000000000a"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    _write(path, [_assistant(session, "m1", "claude-sonnet-5-5")])
+    assert len(fleet.fleet_live_view(project, now=NOW)["sessions"]) == 1
+    path.unlink()
+    path.symlink_to(_outside_journal(tmp_path, session))
+
+    view = fleet.fleet_live_view(project, now=NOW)
+
+    assert FUITE not in json.dumps(view)
+    assert view["sessions"] == []
+    assert view["totals"]["ignored"] == 1
+
+
+def test_un_journal_enorme_est_lu_par_blocs_bornes(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une ligne unique de plusieurs Mo : jamais plus d'un bloc + reliquat borné en mémoire, ligne sautée."""
+    session = "70000000-0000-0000-0000-00000000000b"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    with path.open("wb") as handle:
+        handle.write(b'{"x":"' + b"a" * (12 * 1024 * 1024) + b'"}')  # 12 Mo, sans saut
+        handle.write(b"\n" + json.dumps(_assistant(session, "m1", "claude-sonnet-5-5")).encode() + b"\n")
+    reads: list[int] = []
+    from grimoire.core.regular_file import open_regular as real_open
+
+    def _spy(target: Path) -> Any:
+        handle = real_open(target)
+        real_read = handle.read
+
+        def _read(size: int = -1) -> bytes:
+            data = real_read(size)
+            reads.append(size)
+            return data
+
+        handle.read = _read  # type: ignore[method-assign]
+        return handle
+
+    monkeypatch.setattr(fleet, "open_regular", _spy)
+    tracemalloc.start()
+    try:
+        state = fleet._state_for(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert reads and all(size == fleet.READ_CHUNK_BYTES for size in reads), "jamais de lecture non bornée"
+    assert peak < 4 * fleet._MAX_LINE_BYTES, f"pic mémoire {peak} octets : la ligne démesurée a été gardée"
+    assert state.offset == path.stat().st_size
+
+
+def test_les_lignes_se_decoupent_sur_lf_seulement_et_le_json_invalide_est_ignore(
+    project: Path, claude_home: Path
+) -> None:
+    session = "70000000-0000-0000-0000-00000000000c"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    good = json.dumps(_assistant(session, "m1", "claude-sonnet-5-5", cwd="/a b\x0bc\x1dd"), ensure_ascii=False)
+    path.write_bytes(b'pas du json\n[1,2]\n42\n"chaine"\nnull\n' + good.encode("utf-8") + b'\n{"type":"assistant"\n')
+
+    state = fleet._state_for(path)
+
+    assert state.cwd == "/a b\x0bc\x1dd", "U+2028, VT et GS ne coupent pas une ligne"
+    assert state.turn_count == 1
+
+
+def test_open_regular_refuse_et_distingue_l_absent(tmp_path: Path) -> None:
+    from grimoire.core.regular_file import open_regular
+
+    with pytest.raises(FileNotFoundError):
+        open_regular(tmp_path / "absent")
+    (tmp_path / "d").mkdir()
+    with pytest.raises(ValueError, match="ordinaire"):
+        open_regular(tmp_path / "d")
+    (tmp_path / "f").write_bytes(b"ok")
+    with open_regular(tmp_path / "f") as handle:
+        assert handle.read() == b"ok"
+
+
+def test_open_regular_refuse_les_erreurs_systeme_et_la_course_apres_lstat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stat as stat_mod
+
+    from grimoire.core import regular_file
+
+    with pytest.raises(ValueError, match="illisible"):
+        regular_file.open_regular(tmp_path / ("x" * 5000))  # ENAMETOOLONG, pas ENOENT
+
+    target = tmp_path / "f"
+    target.write_bytes(b"ok")
+    real_open = os.open
+
+    def _vanish(path: Any, flags: int, *args: Any) -> int:
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(os, "open", _vanish)
+    with pytest.raises(FileNotFoundError):
+        regular_file.open_regular(target)
+
+    def _eacces(path: Any, flags: int, *args: Any) -> int:
+        raise PermissionError(path)
+
+    monkeypatch.setattr(os, "open", _eacces)
+    with pytest.raises(ValueError, match="illisible"):
+        regular_file.open_regular(target)
+
+    # Course : le chemin était ordinaire au lstat, le descripteur ouvert ne l'est plus (FIFO substituée).
+    monkeypatch.setattr(os, "open", real_open)
+    real_fstat = os.fstat
+    closed: list[int] = []
+    real_close = os.close
+
+    class _Fifo:
+        st_mode = stat_mod.S_IFIFO
+
+    monkeypatch.setattr(os, "fstat", lambda fd: _Fifo())
+
+    def _close(fd: int) -> None:
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(os, "close", _close)
+    with pytest.raises(ValueError, match="ordinaire"):
+        regular_file.open_regular(target)
+    assert len(closed) == 1, "le descripteur est refermé"
+    monkeypatch.setattr(os, "fstat", real_fstat)

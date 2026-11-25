@@ -17,12 +17,12 @@ import contextlib
 import json
 import os
 import re
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.cadrage import PHASES, PLACEHOLDER, cadrage_dir
+from grimoire.core.regular_file import open_regular
 from grimoire.missions.request_kind import KIND_PROFILES, RequestKind, parse_kind
 
 __all__ = [
@@ -58,41 +58,83 @@ class Angle:
 
 
 ANGLES: tuple[Angle, ...] = (
-    Angle("utilisateurs", "Utilisateurs et usage réel",
-          "Savoir qui s'en sert, dans quelle situation, et ce qu'il fait aujourd'hui sans.",
-          ("Qui utilisera cela, et dans quelle situation concrète ?",
-           "Que fait cette personne aujourd'hui pour s'en passer, et qu'est-ce qui l'agace ?"),
-          "brief", "L'utilisateur"),
-    Angle("existant", "Existant à réutiliser",
-          "Éviter de reconstruire ce qui existe déjà dans le dépôt, le kit ou l'écosystème.",
-          ("Qu'existe-t-il déjà qui résout tout ou partie du besoin ?",
-           "Quelles briques du dépôt ou de l'écosystème peut-on étendre plutôt que remplacer ?"),
-          "comprehension", "Faits"),
-    Angle("criteres", "Critères de réussite",
-          "Rendre le succès observable : un verdict qu'un test ou une personne peut rendre.",
-          ("À quoi voit-on, concrètement, que c'est réussi ?",
-           "Quel verdict mesurable (test, commande, revue) le prouverait ?"),
-          "brief", "Un succès ressemble à"),
-    Angle("hors-perimetre", "Hors périmètre",
-          "Poser ce qu'on ne fera pas, pour borner l'effort et éviter la dérive.",
-          ("Qu'est-ce qui est explicitement exclu de cette livraison ?",
-           "Quelles demandes voisines refuse-t-on de traiter maintenant ?"),
-          "cahier-des-charges", "Hors périmètre"),
-    Angle("contraintes", "Contraintes",
-          "Lister les limites subies : techniques, de délai, de compatibilité, de conformité.",
-          ("Quelles contraintes techniques, de délai ou de compatibilité s'imposent ?",
-           "Qu'est-ce qui ne doit surtout pas casser ?"),
-          "comprehension", "Contraintes"),
-    Angle("risques", "Risques et pré-mortem",
-          "Imaginer l'échec pour en tirer les risques avant de construire.",
-          ("Si cela échoue dans six mois, quelle en sera la cause la plus probable ?",
-           "Quel risque est le plus coûteux s'il se réalise, et comment le détecte-t-on tôt ?"),
-          "cahier-des-charges", "Risques"),
-    Angle("alternatives", "Alternatives plus simples",
-          "Vérifier qu'une solution plus petite ne suffit pas.",
-          ("Quelle version plus simple, voire sans code, répondrait à 80 % du besoin ?",
-           "Qu'a-t-on envisagé puis écarté, et pourquoi ?"),
-          "brainstorm", "Écarté (et pourquoi)"),
+    Angle(
+        "utilisateurs",
+        "Utilisateurs et usage réel",
+        "Savoir qui s'en sert, dans quelle situation, et ce qu'il fait aujourd'hui sans.",
+        (
+            "Qui utilisera cela, et dans quelle situation concrète ?",
+            "Que fait cette personne aujourd'hui pour s'en passer, et qu'est-ce qui l'agace ?",
+        ),
+        "brief",
+        "L'utilisateur",
+    ),
+    Angle(
+        "existant",
+        "Existant à réutiliser",
+        "Éviter de reconstruire ce qui existe déjà dans le dépôt, le kit ou l'écosystème.",
+        (
+            "Qu'existe-t-il déjà qui résout tout ou partie du besoin ?",
+            "Quelles briques du dépôt ou de l'écosystème peut-on étendre plutôt que remplacer ?",
+        ),
+        "comprehension",
+        "Faits",
+    ),
+    Angle(
+        "criteres",
+        "Critères de réussite",
+        "Rendre le succès observable : un verdict qu'un test ou une personne peut rendre.",
+        (
+            "À quoi voit-on, concrètement, que c'est réussi ?",
+            "Quel verdict mesurable (test, commande, revue) le prouverait ?",
+        ),
+        "brief",
+        "Un succès ressemble à",
+    ),
+    Angle(
+        "hors-perimetre",
+        "Hors périmètre",
+        "Poser ce qu'on ne fera pas, pour borner l'effort et éviter la dérive.",
+        (
+            "Qu'est-ce qui est explicitement exclu de cette livraison ?",
+            "Quelles demandes voisines refuse-t-on de traiter maintenant ?",
+        ),
+        "cahier-des-charges",
+        "Hors périmètre",
+    ),
+    Angle(
+        "contraintes",
+        "Contraintes",
+        "Lister les limites subies : techniques, de délai, de compatibilité, de conformité.",
+        (
+            "Quelles contraintes techniques, de délai ou de compatibilité s'imposent ?",
+            "Qu'est-ce qui ne doit surtout pas casser ?",
+        ),
+        "comprehension",
+        "Contraintes",
+    ),
+    Angle(
+        "risques",
+        "Risques et pré-mortem",
+        "Imaginer l'échec pour en tirer les risques avant de construire.",
+        (
+            "Si cela échoue dans six mois, quelle en sera la cause la plus probable ?",
+            "Quel risque est le plus coûteux s'il se réalise, et comment le détecte-t-on tôt ?",
+        ),
+        "cahier-des-charges",
+        "Risques",
+    ),
+    Angle(
+        "alternatives",
+        "Alternatives plus simples",
+        "Vérifier qu'une solution plus petite ne suffit pas.",
+        (
+            "Quelle version plus simple, voire sans code, répondrait à 80 % du besoin ?",
+            "Qu'a-t-on envisagé puis écarté, et pourquoi ?",
+        ),
+        "brainstorm",
+        "Écarté (et pourquoi)",
+    ),
 )
 _BY_ID = {a.id: a for a in ANGLES}
 
@@ -134,22 +176,11 @@ def read_regular(path: Path, *, limit: int | None = None) -> str | None:
     bloquerait le tour). Ouvert sans suivre de lien et sans bloquer, puis revérifié sur le descripteur ouvert.
     """
     try:
-        before = path.lstat()
+        handle = open_regular(path)
     except FileNotFoundError:
         return None
-    except OSError as exc:
-        raise ValueError(f"{path.name} illisible ({exc.__class__.__name__})") from exc
-    if not stat.S_ISREG(before.st_mode):
-        raise ValueError(f"{path.name} n'est pas un fichier ordinaire : refusé")
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
-    except OSError as exc:
-        raise ValueError(f"{path.name} illisible ({exc.__class__.__name__})") from exc
-    with os.fdopen(fd, "rb") as handle:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError(f"{path.name} n'est pas un fichier ordinaire : refusé")
-        if limit is not None and info.st_size > limit:
+    with handle:
+        if limit is not None and os.fstat(handle.fileno()).st_size > limit:
             raise ValueError(f"{path.name} dépasse {limit // 1024} Kio : refusé")
         return handle.read().decode("utf-8", errors="replace")
 
@@ -216,7 +247,11 @@ def _request_text(root: Path, chantier: str | None) -> str:
 
 
 def interview_plan(
-    root: Path, chantier: str | None = None, *, depth: str | None = None, text: str | None = None,
+    root: Path,
+    chantier: str | None = None,
+    *,
+    depth: str | None = None,
+    text: str | None = None,
     kind: str | None = None,
 ) -> dict[str, Any]:
     """Le plan d'entretien : fige la profondeur au premier appel, puis rend l'état courant des angles.
@@ -283,11 +318,22 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
     profile = KIND_PROFILES[kind] if kind else None
     if kind is not None and profile is not None and not profile.interview:
         return {
-            "kind": kind.value, "kind_label": profile.label, "kind_source": kind_source,
-            "interview": False, "blocking": False, "postmortem_due": False, "depth": depth,
-            "depth_source": source, "questions_per_angle": 0,
-            "kind_questions": [], "deliverable": profile.deliverable, "acceptance": profile.acceptance,
-            "deferred": "", "angles": [], "open_required": [], "complete": True,
+            "kind": kind.value,
+            "kind_label": profile.label,
+            "kind_source": kind_source,
+            "interview": False,
+            "blocking": False,
+            "postmortem_due": False,
+            "depth": depth,
+            "depth_source": source,
+            "questions_per_angle": 0,
+            "kind_questions": [],
+            "deliverable": profile.deliverable,
+            "acceptance": profile.acceptance,
+            "deferred": "",
+            "angles": [],
+            "open_required": [],
+            "complete": True,
             "note": "Une question ne déclenche aucun entretien : répondre directement.",
         }
     non_blocking = profile is not None and not profile.blocking
@@ -295,24 +341,40 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
     angles: list[dict[str, Any]] = []
     for a in ANGLES:
         rec = recorded.get(a.id, {})
-        angles.append({
-            "id": a.id, "title": a.title, "intent": a.intent,
-            "required": a.id in required, "state": rec.get("state", "ouvert"),
-            "questions": [] if non_blocking else list(a.seeds[:per_angle]),
-            "answers": list(rec.get("answers", [])), "reason": rec.get("reason", ""),
-        })
+        angles.append(
+            {
+                "id": a.id,
+                "title": a.title,
+                "intent": a.intent,
+                "required": a.id in required,
+                "state": rec.get("state", "ouvert"),
+                "questions": [] if non_blocking else list(a.seeds[:per_angle]),
+                "answers": list(rec.get("answers", [])),
+                "reason": rec.get("reason", ""),
+            }
+        )
     open_required = _open_required(state)
     view: dict[str, Any] = {
-        "depth": depth, "depth_source": source, "questions_per_angle": 0 if non_blocking else per_angle,
-        "angles": angles, "open_required": open_required, "complete": not open_required,
-        "interview": True, "blocking": not non_blocking, "postmortem_due": non_blocking and bool(open_required),
+        "depth": depth,
+        "depth_source": source,
+        "questions_per_angle": 0 if non_blocking else per_angle,
+        "angles": angles,
+        "open_required": open_required,
+        "complete": not open_required,
+        "interview": True,
+        "blocking": not non_blocking,
+        "postmortem_due": non_blocking and bool(open_required),
         "deferred": "",
     }
     if profile is not None and kind is not None:
         questions = list(profile.questions[: profile.max_questions] if profile.max_questions else profile.questions)
         view.update(
-            kind=kind.value, kind_label=profile.label, kind_source=kind_source, kind_questions=questions,
-            deliverable=profile.deliverable, acceptance=profile.acceptance,
+            kind=kind.value,
+            kind_label=profile.label,
+            kind_source=kind_source,
+            kind_questions=questions,
+            deliverable=profile.deliverable,
+            acceptance=profile.acceptance,
         )
         if non_blocking:
             view["deferred"] = (
@@ -330,16 +392,21 @@ def _append_to_section(path: Path, section: str, line: str) -> None:
         lines += ["", head, "", line]
     else:
         end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-        body = [ln for ln in lines[start + 1:end] if not ln.strip().startswith(PLACEHOLDER)]
+        body = [ln for ln in lines[start + 1 : end] if not ln.strip().startswith(PLACEHOLDER)]
         while body and not body[-1].strip():
             body.pop()
-        lines[start + 1:end] = [*body, line, ""] if body else ["", line, ""]
+        lines[start + 1 : end] = [*body, line, ""] if body else ["", line, ""]
     path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
 
 
 def answer(
-    root: Path, chantier: str | None, angle_id: str, text: str,
-    *, unknown: bool = False, skip: bool = False,
+    root: Path,
+    chantier: str | None,
+    angle_id: str,
+    text: str,
+    *,
+    unknown: bool = False,
+    skip: bool = False,
 ) -> dict[str, Any]:
     """Consigne une réponse, un « je ne sais pas » (hypothèse) ou l'écart motivé d'un angle."""
     angle = _BY_ID.get(angle_id)
@@ -365,15 +432,19 @@ def answer(
     target = cadrage_dir(root, chantier)
     if skip:
         rec.update(state="ecarte", reason=text)
-        _append_to_section(target / next(p.filename for p in PHASES if p.id == "brainstorm"),
-                           "Écarté (et pourquoi)", f"- Angle « {angle.title} » écarté : {text}")
+        _append_to_section(
+            target / next(p.filename for p in PHASES if p.id == "brainstorm"),
+            "Écarté (et pourquoi)",
+            f"- Angle « {angle.title} » écarté : {text}",
+        )
     elif unknown:
         note = f"{UNKNOWN_PREFIX}{angle.title}" + (f" — {text}" if text else "")
         if note not in rec["answers"]:
             rec["answers"].append(note)
         rec["state"] = "couvert"
-        _append_to_section(target / next(p.filename for p in PHASES if p.id == "comprehension"),
-                           "Hypothèses", f"- {note}")
+        _append_to_section(
+            target / next(p.filename for p in PHASES if p.id == "comprehension"), "Hypothèses", f"- {note}"
+        )
     else:
         if text in rec["answers"]:  # même réponse redonnée : pas de doublon dans le cadrage
             return _render(state, "enregistrée")
@@ -397,7 +468,11 @@ def interview_states(root: Path) -> list[dict[str, Any]]:
     """
     base = cadrage_dir(root)
     if base.is_symlink() or not base.is_dir():
-        return [{"chantier": "principal", "error": "dossier de cadrage en lien symbolique : refusé"}] if base.is_symlink() else []
+        return (
+            [{"chantier": "principal", "error": "dossier de cadrage en lien symbolique : refusé"}]
+            if base.is_symlink()
+            else []
+        )
     try:
         if not base.resolve().is_relative_to(root.resolve()):
             return [{"chantier": "principal", "error": "dossier de cadrage hors du projet : refusé"}]
@@ -407,7 +482,8 @@ def interview_states(root: Path) -> list[dict[str, Any]]:
     with contextlib.suppress(OSError):
         # Ne comptent que les dossiers à nom de chantier sûr qui portent un état d'entretien.
         found = sorted(
-            d.name for d in base.iterdir()
+            d.name
+            for d in base.iterdir()
             if _SLUG_RE.fullmatch(d.name) and d.is_dir() and not d.is_symlink() and os.path.lexists(d / STATE_FILE)
         )
         names += found[:MAX_STATE_DIRS]
@@ -437,7 +513,11 @@ def check_interview(root: Path, chantier: str | None = None) -> list[str]:
     names = ", ".join(open_required)
     kind = parse_kind(str(state["kind"])) if state.get("kind") else None
     if kind is not None and not KIND_PROFILES[kind].blocking:
-        return [f"Post-mortem dû ({STATE_FILE}, nature {kind.value}, profondeur {state['depth']}) : "
-                f"l'action immédiate n'a pas été bloquée ; angle(s) obligatoire(s) à couvrir — {names}"]
-    return [f"Entretien de cadrage ({STATE_FILE}, profondeur {state['depth']}) : angle(s) obligatoire(s) "
-            f"encore ouvert(s) ou écarté(s) sans raison — {names}"]
+        return [
+            f"Post-mortem dû ({STATE_FILE}, nature {kind.value}, profondeur {state['depth']}) : "
+            f"l'action immédiate n'a pas été bloquée ; angle(s) obligatoire(s) à couvrir — {names}"
+        ]
+    return [
+        f"Entretien de cadrage ({STATE_FILE}, profondeur {state['depth']}) : angle(s) obligatoire(s) "
+        f"encore ouvert(s) ou écarté(s) sans raison — {names}"
+    ]
