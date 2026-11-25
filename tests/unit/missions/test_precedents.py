@@ -1165,3 +1165,25 @@ def test_le_jugement_assume_sur_une_decision_posterieure_ne_rouvre_pas_la_decisi
     assert not entries[second.id]["reverted_at"]  # D2 garde son propre état
     assert [e["option"] for e in review_entries(service)] == []  # un jugement assumé n'est pas une décision à revoir
     assert first.payload["option"] not in [e["option"] for e in review_entries(service)]
+
+def test_une_erreur_de_lecture_des_sessions_dans_le_tick_ne_plante_pas_et_ne_decide_rien(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = pilot(project, ON + "orchestrator:\n  roles:\n    orchestrator:\n      enabled: true\n      wip: 1\n")
+    ruled(service)
+    tid, _ = again(service)
+    tick = stage(service, project)
+    monkeypatch.setattr(tick, "_maybe_launch", lambda _status: None)  # le lancement n'est pas l'objet ici
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise OSError("lecture impossible")
+
+    monkeypatch.setattr(osess, "_read_agents", boom)
+    outcomes = tick()  # ne plante pas
+    assert not applied(service, tid), "aucune décision sur la foi d'un état inconnu"
+    assert [o.detail for o in outcomes] == ["lecture des sessions impossible (OSError)"]
+    assert "lecture impossible" not in repr(outcomes)  # le type seulement, jamais le message
+    monkeypatch.setattr(osess, "_read_agents", lambda *_a, **_k: [{"id": WORKER, "kind": "background", "status": "idle"}])
+    healthy = tick()
+    assert all("lecture des sessions" not in o.detail for o in healthy)
+    assert applied(service, tid), "contrôle : sur lecture saine, le même tick applique le précédent"

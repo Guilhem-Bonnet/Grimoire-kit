@@ -1,0 +1,1 @@
+- fix(autopilot): une erreur inattendue pendant la lecture de la liste des sessions dans le tick ne le fait plus planter : rien n'est décidé sur un état inconnu (workers considérés au travail), et le refus est journalisé avec le seul type de l'exception (#1255)

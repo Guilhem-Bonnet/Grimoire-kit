@@ -329,20 +329,28 @@ def worker_at_work(service: TaskService, task_id: str, states: dict[str, str] | 
     return not short or states.get(short) not in _AT_REST
 
 
+def read_states(exec_: Any, root: Path, claude_bin: str = "claude") -> tuple[dict[str, str] | None, str]:
+    """``(état des sessions de fond, type de l'erreur de lecture)``, lus sur l'hôte.
+
+    Une lecture qui échoue n'est pas une preuve d'arrêt : ``(None, type de l'exception)`` (le worker reste « au
+    travail » ; le type seulement, le message peut porter des chemins). Partagée par la session (:func:`_states`) et le
+    tick (:meth:`OrchestratorStage.__call__`).
+    """
+    try:
+        return session_states(_read_agents(exec_, root, claude_bin)), ""
+    except Exception as exc:
+        return None, type(exc).__name__
+
+
 def _states(service: TaskService, claude_bin: str = "claude") -> tuple[dict[str, str] | None, str]:
     """``(état des sessions de fond, type de l'erreur de lecture)``.
 
-    L'état est celui que le tick a déjà lu s'il est en train d'appliquer, sinon lu ici. Une lecture qui échoue n'est pas
-    une preuve d'arrêt : ``(None, type de l'exception)`` (le worker reste « au travail » ; le type seulement, le message
-    peut porter des chemins).
+    L'état est celui que le tick a déjà lu s'il est en train d'appliquer, sinon lu ici (:func:`read_states`).
     """
     held = _TICK_STATES.get()
     if held is not None:
         return held[0], ""
-    try:
-        return session_states(_read_agents(default_exec, service.home_root, claude_bin)), ""
-    except Exception as exc:
-        return None, type(exc).__name__
+    return read_states(default_exec, service.home_root, claude_bin)
 
 
 def _defaults_taken(events: list[LedgerEvent]) -> int:
@@ -903,8 +911,10 @@ class OrchestratorStage:
     def __call__(self) -> tuple[OrchestratorOutcome, ...]:
         if not self._policy.orchestrator.enabled:
             return ()
-        status = session_states(_read_agents(self._exec, self._root, self._claude))
+        status, failure = read_states(self._exec, self._root, self._claude)
         outcomes = self._sweep(status)
+        if failure:  # lecture impossible : rien ne se décide sur un état inconnu (workers « au travail »), le dire par son type
+            outcomes.append(OrchestratorOutcome("pilot", "skipped", f"lecture des sessions impossible ({failure})"))
         outcomes.extend(self._apply_recommendations(status))
         launched = self._maybe_launch(status)
         return (*outcomes, *((launched,) if launched is not None else ()))
