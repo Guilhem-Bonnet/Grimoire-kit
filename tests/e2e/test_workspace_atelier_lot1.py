@@ -181,6 +181,26 @@ def test_concurrent_write_is_409(browser: Browser, project_on: tuple[str, Path])
         assert path.read_bytes() == concurrent
 
 
+def test_block_with_an_active_link_scheme_has_no_clickable_link(browser: Browser, project_on: tuple[str, Path]) -> None:
+    """Un bloc passe par le rendu Markdown du cockpit : `javascript:` & co. ne donnent aucun lien cliquable."""
+    url, root = project_on
+    made = new_chantier(root, "Liens dans un bloc")
+    phase = root / "_grimoire" / "cadrage" / made.slug / BRAINSTORM
+    phase.write_text(
+        phase.read_text(encoding="utf-8").replace(
+            "> À compléter — pistes.",
+            "Piège [clic](javascript:alert(1)) et [données](data:text/html,x) et [sûr](https://example.com/ok).",
+        ),
+        encoding="utf-8",
+    )
+    for page in _open(browser, url, f"#atelier?chantier={made.slug}"):
+        block = page.locator(".at-blk", has_text="Piège").first
+        block.wait_for(timeout=APPEAR_MS)
+        hrefs = block.locator("a").evaluate_all("els => els.map(e => e.getAttribute('href'))")
+        assert hrefs == ["https://example.com/ok"], hrefs
+        assert "clic" in block.inner_text() and "données" in block.inner_text()
+
+
 @pytest.mark.parametrize("size", [(1440, 900), (1024, 768)])
 def test_captures(browser: Browser, project_on: tuple[str, Path], size: tuple[int, int]) -> None:
     out = os.environ.get("GRIMOIRE_E2E_CAPTURES")
