@@ -76,6 +76,8 @@ STREAM_HEADERS: tuple[tuple[str, str], ...] = (
 )
 
 _HEARTBEAT_SECONDS = 1.0
+#: Combien de temps un message attend que l'agent finisse de démarrer (le client ACP borne chaque requête à 120 s).
+_START_WAIT_SECONDS = 130.0
 _LOG_MAX = 4000
 _TEXT_MAX = 20_000
 
@@ -345,6 +347,11 @@ class Conversation:
         if mode == "kanban":
             return self._send_kanban(text, task_id, reason)
         with self._cond:
+            # Le cockpit rouvert relance l'agent (reprise de session) pendant que la personne tape déjà :
+            # le message attend la fin de ce démarrage au lieu d'être refusé comme « un tour en cours ».
+            deadline = time.monotonic() + _START_WAIT_SECONDS
+            while self._starting and not self._busy and time.monotonic() < deadline:
+                self._cond.wait(timeout=0.5)
             if self._busy or self._starting:
                 raise ValueError("un tour est déjà en cours : attendez sa fin ou arrêtez-le")
             self._busy = True

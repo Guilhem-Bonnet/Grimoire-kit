@@ -172,6 +172,41 @@ def test_an_empty_message_and_a_second_concurrent_turn_are_refused(root: Path) -
         feed.close()
 
 
+def test_a_message_typed_while_the_agent_is_resuming_waits_instead_of_being_refused(root: Path) -> None:
+    """Cockpit rouvert : l'agent redémarre (reprise de session) pendant que la personne tape déjà.
+
+    Le message attend la fin du démarrage ; avant, il était refusé comme « un tour est déjà en cours »,
+    à tort : aucun tour n'était lancé.
+    """
+    conv = workspace_chat._conversation(root)
+    with conv._cond:
+        conv._starting = True  # le démarrage de l'agent est en cours, comme pendant `session/load`
+    feed = Feed(root)
+    answers: list[dict[str, Any]] = []
+    errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            answers.append(workspace_chat.chat_send(root, {"text": "bonjour"}))
+        except BaseException as exc:  # remonté au thread principal ci-dessous
+            errors.append(exc)
+
+    sender = threading.Thread(target=send)
+    try:
+        sender.start()
+        time.sleep(0.3)
+        assert sender.is_alive() and not answers and not errors, "le message doit attendre, pas être refusé"
+        with conv._cond:
+            conv._starting = False
+            conv._cond.notify_all()
+        sender.join(timeout=10)
+        assert not errors and answers == [{"ok": True, "accepted": True}]
+        feed.until(_is("turn_ended"))
+    finally:
+        sender.join(timeout=10)
+        feed.close()
+
+
 # ── Permissions ─────────────────────────────────────────────────────────────
 
 
