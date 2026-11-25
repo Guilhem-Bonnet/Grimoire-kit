@@ -323,6 +323,7 @@ def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any], list[Any]]:
     from grimoire.missions.arbiter import ARBITRATED_EVENT
     from grimoire.missions.autopilot import DECIDED_EVENT
     from grimoire.missions.autopilot_view import REVERTED_EVENT
+    from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
 
     last: dict[str, str] = {}
     pilot: list[Any] = []
@@ -330,7 +331,9 @@ def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any], list[Any]]:
     for event in ledger.list_events():
         if event.created_at and event.created_at > last.get(event.entity_id, ""):
             last[event.entity_id] = event.created_at
-        if event.event_type in (DECIDED_EVENT, REVERTED_EVENT):
+        if event.event_type in (DECIDED_EVENT, REVERTED_EVENT) or (
+            event.event_type == HUMAN_ANSWERED_EVENT and event.payload.get("origin") == "orchestrator"
+        ):  # les réponses du pilote : une reprise « sans réponse » ne couvre pas une décision déjà suivie de la sienne
             pilot.append(event)
         elif event.event_type == ARBITRATED_EVENT:
             arbitrated.append(event)
@@ -389,14 +392,16 @@ def _review_decisions(read: _ProjectRead, pilot_events: list[Any], now: datetime
     def key(event: Any) -> tuple[str, str]:
         return str(event.payload.get("task_id") or event.entity_id or ""), str(event.payload.get("question_id") or "")
 
-    reverted = {key(event) for event in pilot_events if event.event_type != DECIDED_EVENT}
+    from grimoire.missions.autopilot_view import reverted_decisions
+
+    reverted = reverted_decisions(pilot_events)
     found: dict[tuple[str, str], dict[str, Any]] = {}
     for event in pilot_events:
         payload = event.payload
         source = payload.get("recommendation_source")
         if event.event_type != DECIDED_EVENT or source not in (DEFAULT_SOURCE, "recommended", PRECEDENT_SOURCE):
             continue
-        if key(event) in reverted:
+        if event.id in reverted:
             continue
         try:
             at = datetime.fromisoformat(str(event.created_at))
