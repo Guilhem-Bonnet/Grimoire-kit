@@ -14,10 +14,31 @@ from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError
 
 
-def moa_moe_verdict(project_root: Path) -> dict[str, Any] | None:
-    """Verdict du contrôle, ou ``None`` quand la configuration est absente ou illisible (d'autres contrôles le disent).
+def _governance_problem(config_path: Path) -> str:
+    """L'erreur de la section ``governance`` seule, quand c'est elle qui rend la configuration illisible ; sinon ``""``."""
+    import yaml
 
-    Jamais FAIL : une section absente est un avertissement, un projet existant ne casse pas.
+    from grimoire.core.config import GovernanceConfig
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return ""
+    if not isinstance(data, dict) or "governance" not in data:
+        return ""
+    try:
+        GovernanceConfig.from_dict(data.get("governance"))
+    except GrimoireConfigError as exc:
+        return str(exc)
+    return ""
+
+
+def moa_moe_verdict(project_root: Path) -> dict[str, Any] | None:
+    """Verdict du contrôle, ou ``None`` quand la configuration est absente ou illisible pour une autre raison.
+
+    Jamais FAIL : une section absente est un avertissement, un projet existant ne casse pas. Une section
+    ``governance`` mal formée reste visible ici (#1342, relecture de M1) au lieu de disparaître derrière l'erreur
+    générale de configuration : c'est elle qui fixe le gate d'exigence (lot M3).
     """
     config_path = project_root / "project-context.yaml"
     if not config_path.is_file():
@@ -25,7 +46,14 @@ def moa_moe_verdict(project_root: Path) -> dict[str, Any] | None:
     try:
         gov = GrimoireConfig.from_yaml(config_path).governance
     except GrimoireConfigError:
-        return None
+        problem = _governance_problem(config_path)
+        if not problem:
+            return None
+        return {
+            "name": "moa_moe", "passed": True, "level": "warn",
+            "detail": f"section governance mal formée : {problem} — la MOA n'est pas reconnue, aucune exigence "
+            "ne peut être validée",
+        }
     if not gov.declared:
         return {
             "name": "moa_moe", "passed": True, "level": "warn",
@@ -34,9 +62,11 @@ def moa_moe_verdict(project_root: Path) -> dict[str, Any] | None:
                 "besoin et prononce la recette) — governance: {roles: {moa: \"Prénom Nom\"}}"
             ),
         }
+    mode = gov.requirement_mode
     return {
         "name": "moa_moe", "passed": True, "level": "ok", "moa": gov.moa, "moe": gov.moe,
-        "detail": f"MOA : {gov.moa} — MOE : {gov.moe}",
+        "requirement_gate": mode,
+        "detail": f"MOA : {gov.moa} — MOE : {gov.moe} — gate d'exigence : {mode}",
     }
 
 

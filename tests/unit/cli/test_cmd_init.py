@@ -273,6 +273,28 @@ class TestExpressAsksNothing:
         text = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert 'archetype: "stack"' in text
 
+    @pytest.mark.parametrize(("git_name", "declared"), [("Ada Lovelace", True), ("github-actions[bot]", False)])
+    def test_yes_mode_moa_from_git_stays_warn(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, git_name: str, declared: bool,
+    ) -> None:
+        """#1342 : `-y` ne déclare pas MOA un nom git sans le dire — gate en `warn`, et jamais un bot."""
+        import yaml
+
+        from grimoire.cli.app import app
+
+        monkeypatch.setenv("GRIMOIRE_NO_COCKPIT", "1")
+        monkeypatch.setattr(cmd_init, "_git_user_name", lambda: git_name)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+        result = CliRunner().invoke(app, ["-y", "init", str(tmp_path), "--backend", "lexical"])
+        assert result.exit_code == 0, result.output
+        data = yaml.safe_load((tmp_path / "project-context.yaml").read_text(encoding="utf-8"))
+        if declared:
+            assert data["governance"]["roles"]["moa"] == git_name
+            assert data["governance"]["requirement_gate"] == "warn"
+            assert "non confirmée" in result.output
+        else:
+            assert "governance" not in data
+
 
 # ── Enregistrement de session : Python nu ─────────────────────────────────────
 

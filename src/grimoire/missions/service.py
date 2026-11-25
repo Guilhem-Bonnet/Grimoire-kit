@@ -112,6 +112,10 @@ DEFAULT_LEDGER_RELPATH = Path("_grimoire-runtime-output/ledger")
 BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 
 
+#: Les transitions que le gate d'exigence (#1342, M3) garde ; ``ready → claimed`` ne refuse qu'en mode bloquant.
+_REQUIREMENT_GATED = frozenset({(TaskState.PROPOSED, TaskState.READY), (TaskState.READY, TaskState.CLAIMED)})
+
+
 class TaskRefusedError(GrimoireMissionError):
     """Le gate de preuve refuse la transition. Porte le verdict, pour qu'un
     appelant puisse le rendre tel quel — le refus nomme la preuve et le remède."""
@@ -421,6 +425,14 @@ class TaskService:
             refusal = check_receipt(self.project_root, task)
             if refusal is not None:
                 return GateVerdict("review_receipt", "hard_fail", (refusal, *verdict.refusals))
+        if (task.status, target) in _REQUIREMENT_GATED:
+            # #1342 (M3) : l'exigence validée par la MOA, lue à la racine d'origine (jamais le worktree). En mode
+            # bloquant, aussi au claim : une transition `ready` forgée au ledger ou une exigence modifiée depuis.
+            from grimoire.missions.requirement_gate import gate_refusal
+
+            missing = gate_refusal(self.home_root, task)
+            if missing is not None:
+                return GateVerdict("requirement_validated", "hard_fail", (missing, *verdict.refusals))
         return verdict
 
     # ── Écriture ───────────────────────────────────────────────────────────
@@ -442,7 +454,7 @@ class TaskService:
         description: str = "",
         priority: str = "",
         extra: Mapping[str, Any] | None = None,
-        finition: str = "", data_class: str = "",
+        finition: str = "", data_class: str = "", requirement: str = "", nature: str = "",
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -461,8 +473,12 @@ class TaskService:
         :data:`PRIORITIES`) et *extra* (champs portés tels quels, ex. ``covers`` de ``cadrage plan``,
         W6-07b) sont posés à la création. *finition* (R24) : ``maquette`` ou ``peaufine`` ;
         vide, la tâche hérite de la phase de ``project-context.yaml`` (:mod:`grimoire.missions.finition`).
+        *requirement* (#1342, M3) : l'exigence servie (``REQ-001``, ``<chantier>/REQ-001``), que le gate ``ready``
+        oppose ; *nature* : la nature de la demande (``question`` et ``incident`` sont exemptées de ce gate).
         """
         from grimoire.missions.finition import finition_for
+        from grimoire.missions.request_kind import parse_kind
+        from grimoire.missions.requirement_gate import normalize_key
 
         finition = finition_for(self.project_root, finition)  # refuse une valeur inconnue avant toute écriture
         description = description.strip()
@@ -496,6 +512,13 @@ class TaskService:
         if _RISK_ORDER.index(risk) < _RISK_ORDER.index(RiskProfile.STANDARD):
             risk = RiskProfile.STANDARD
         fields: dict[str, Any] = dict(extra or {})
+        if requirement.strip():
+            fields["requirement"] = normalize_key(requirement)
+        if nature.strip():
+            try:
+                fields["nature"] = parse_kind(nature).value
+            except ValueError as exc:
+                raise GrimoireMissionError(str(exc)) from exc
         if any(x.strip() for x in files):
             fields["files"] = [f for f in (x.strip() for x in files) if f]
         task = ledger.create_task(
@@ -1291,6 +1314,10 @@ class TaskService:
             expected_from=task.status,
             lease_epoch=lease_epoch,
         )
+        if task.status is TaskState.PROPOSED and target is TaskState.READY:
+            from grimoire.missions.requirement_gate import record_ready
+
+            record_ready(self.ledger, self.home_root, moved, actor)
         self._consolidate(moved, target, actor=actor, reason=reason, lesson=lesson)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
 

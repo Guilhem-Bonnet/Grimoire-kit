@@ -103,6 +103,9 @@ KIT_BEHIND = "kit_behind"
 SERVICE_RESOLVED = "service_resolved"
 #: Une option que le pilote a appliquée sans jugement assumé : hors des sections, dans le bloc « Décisions à revoir ».
 REVIEW_DECISION = "review_decision"
+#: #1342 (M3) : des tâches passées ``ready`` sans exigence validée par la MOA (mode ``warn``), ou des incidents exemptés
+#: dont l'exigence reste à poser au post-mortem — un item par projet qui déclare une MOA.
+REQUIREMENT_UNVALIDATED = "requirement_unvalidated"
 REVIEW_DECISIONS_LABEL = "Décisions à revoir"
 #: Le bloc montre ces décisions récentes et non reprises, jamais un historique sans fin (le journal « Décidé par le
 #: pilote » les garde toutes).
@@ -120,7 +123,7 @@ SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("review", "PR à revoir", (PR_REVIEW,)),
     ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
-    ("maintain", "À entretenir", (DIRECTIVE_UNACKED, *HYGIENE_KINDS, KIT_BEHIND)),
+    ("maintain", "À entretenir", (DIRECTIVE_UNACKED, REQUIREMENT_UNVALIDATED, *HYGIENE_KINDS, KIT_BEHIND)),
     ("resolved", "Résolu automatiquement", (SERVICE_RESOLVED,)),
 )
 #: Un type que :data:`SECTIONS` ne connaît pas tombe ici : jamais perdu.
@@ -438,6 +441,29 @@ def _orphan_reason(task: Any, card: dict[str, Any], now: datetime) -> str:
     return ""
 
 
+def _requirement_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> None:
+    """L'item « exigence à faire valider » (#1342, M3) ; une lecture qui échoue n'efface pas le reste de la vue."""
+    from grimoire.missions.requirement_gate import pending_review
+
+    try:
+        pending = pending_review(service.home_root, tasks, service.ledger.list_events())
+    except Exception:
+        return
+    unvalidated, exempted = pending["unvalidated"], pending["exempted"]
+    if not unvalidated and not exempted:
+        return
+    parts = []
+    if unvalidated:
+        parts.append(f"{len(unvalidated)} tâche(s) passée(s) `ready` sans exigence validée par la MOA")
+    if exempted:
+        parts.append(f"{len(exempted)} incident(s) exempté(s), exigence à poser au post-mortem")
+    _item(
+        read, REQUIREMENT_UNVALIDATED, "requirements", " ; ".join(parts),
+        "`grimoire cadrage interview`, puis la MOA valide depuis son terminal : `grimoire cadrage approve <exigence>`",
+        task_ids=unvalidated, exempted=exempted,
+    )
+
+
 def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe | None) -> None:
     from grimoire.missions.autopilot_view import partition
     from grimoire.missions.decisions import pending_decisions
@@ -479,6 +505,7 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
         read.items[-1].update(_question_v2(service.ledger, decision.task_id, decision.question))
         if pilot is not None:
             read.items[-1]['pilot'] = pilot.to_dict()
+    _requirement_item(read, service, tasks)
     for task, card in zip(tasks, cards, strict=True):
         since = last.get(task.id) or str(task.created_at)
         session = card.get("session")
