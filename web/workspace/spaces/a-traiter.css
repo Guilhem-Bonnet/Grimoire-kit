@@ -54,6 +54,10 @@
 .at-kv { display: grid; grid-template-columns: 100px minmax(0, 1fr); margin: 0; }
 .at-kv dt, .at-kv dd { margin: 0; padding: var(--sp-2) 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
 .at-kv dt { color: var(--ink3); }
+.at-moa { display: flex; flex-direction: column; gap: var(--sp-2); }
+.at-moa-cmds { display: flex; flex-direction: column; gap: 6px; }
+.at-moa-cmd { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.at-moa-cmd .at-formula { white-space: normal; overflow-wrap: anywhere; }
 :where(.at-wrap) .at-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .at-equiv { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .at-refusals { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }

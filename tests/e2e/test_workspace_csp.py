@@ -32,6 +32,10 @@ from playwright.sync_api import Browser, Page, Route
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier
 
+from .test_workspace_a_traiter_moa import served_moa  # noqa: F401  (fixture réutilisée)
+from .test_workspace_chat_acp4 import pilot_project, pilot_url  # noqa: F401  (fixtures réutilisées)
+from .test_workspace_voice_question import _messages, _ref
+
 AGENT = Path(__file__).resolve().parents[1] / "fixtures" / "acp" / "chat_agent.py"
 APPEAR_MS = 30_000
 
@@ -342,5 +346,87 @@ def test_chaque_page_html_servie_sans_violation(browser: Browser, url: str, lega
             if seen:
                 failures[name] = seen
         assert failures == {}, failures
+    finally:
+        context.close()
+
+
+def test_a_traiter_avec_un_element_moa_sans_violation(browser: Browser, served_moa: str) -> None:  # noqa: F811
+    """L'écran À traiter avec des items MOA (exigence à valider, à recetter) : commandes copiables, aucun style en ligne."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context.add_init_script(_COLLECT)
+    page = context.new_page()
+    watched = _Watched(page)
+    try:
+        response = page.goto(f"{served_moa}/workspace/index.html#a-traiter", wait_until="domcontentloaded")
+        assert response is not None and "script-src 'self';" in response.headers["content-security-policy"]
+        page.wait_for_selector("body[data-ready='1']", timeout=APPEAR_MS)
+        page.wait_for_selector(".at-row[data-kind='requirement_recette']", timeout=APPEAR_MS)
+        for kind in ("requirement_recette",):
+            page.locator(f".at-row[data-kind='{kind}']").first.click()
+            page.locator(".at-detail [data-role='moa-guide']").wait_for(timeout=APPEAR_MS)
+            assert page.locator(".at-moa-cmd").count() >= 1
+            page.wait_for_timeout(300)
+        _assert_clean(watched, "À traiter (MOA)")
+    finally:
+        context.close()
+
+
+def test_boite_vocale_avec_question_et_lecture_sans_violation(
+    browser: Browser,
+    pilot_url: str,  # noqa: F811
+    pilot_project: tuple[Path, dict[str, str]],  # noqa: F811
+) -> None:
+    """Boîte vocale : question dépliée, lecture d'un message (`Audio` sur `data:`), connexions de l'API (`connect-src`)."""
+    messages = _messages(_ref(pilot_project))
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context.add_init_script(_COLLECT)
+    page = context.new_page()
+    watched = _Watched(page)
+
+    def outbox(route: Route) -> None:
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"enabled": True, "messages": messages, "older_questions": 0}),
+        )
+
+    def play(route: Route) -> None:
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "message": {**messages[0], "played": True},
+                    "client_side": False,
+                    "text": "Pousser ?",
+                    "sample_rate": 8000,
+                    "audio": _wav_base64(),
+                }
+            ),
+        )
+
+    try:
+        page.route(re.compile(r"/api/workspace/voice/outbox/play"), play)
+        page.route(re.compile(r"/api/workspace/voice/outbox(\?.*)?$"), outbox)
+        page.goto(f"{pilot_url}/workspace/index.html", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=APPEAR_MS)
+        page.evaluate("() => window.GrimoireWorkspace.setAtelier(true)")
+        page.wait_for_function("() => document.documentElement.dataset.atelier === 'on'")
+        page.locator("[data-dock-tab='orchestrateur']").click()
+        first = page.locator(".chat-voice-msg[data-kind='question']").first
+        first.wait_for(timeout=APPEAR_MS)
+        first.get_by_role("button", name="Tout afficher").click()
+        first.locator(".chat-voice-option").first.wait_for(state="visible")
+        first.locator(".chat-voice-option").first.click()
+        page.evaluate(
+            """() => { window.__audioSrc = []; const A = window.Audio;
+            window.Audio = function (src) { window.__audioSrc.push(String(src).slice(0, 20)); return new A(src); }; }"""
+        )
+        first.locator(".chat-voice-play").click()
+        page.wait_for_function("() => window.__audioSrc.length > 0", timeout=APPEAR_MS)
+        assert page.evaluate("window.__audioSrc[0]").startswith("data:audio/wav")
+        page.wait_for_timeout(600)
+        _assert_clean(watched, "boîte vocale avec question")
     finally:
         context.close()

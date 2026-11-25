@@ -80,7 +80,7 @@ from grimoire.tools import (
     workspace_since,
 )
 from grimoire.tools.project_registry import refuse_foreign_body
-from grimoire.voice import outbox_service, stt_service
+from grimoire.voice import interview, outbox_service, stt_service
 
 __all__ = [
     "CHAT_STREAM_PATH",
@@ -640,6 +640,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}chat/hosts": workspace_chat.chat_hosts,
     f"{PREFIX}voice/config": stt_service.voice_config,
     f"{PREFIX}voice/outbox": outbox_service.outbox_state,
+    f"{PREFIX}voice/interview": interview.interview_view,
 }
 
 

@@ -630,7 +630,7 @@ def _marker_seen(marker: str, tmp: Path) -> list[str]:
 
 def _read_log(log: Path) -> list[dict[str, Any]]:
     try:
-        lines = log.read_text(encoding="utf-8").splitlines()
+        lines = log.read_text(encoding="utf-8").split("\n")
     except OSError:
         return []
     calls: list[dict[str, Any]] = []

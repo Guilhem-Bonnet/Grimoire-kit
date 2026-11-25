@@ -87,6 +87,73 @@ def moa_moe_verdict(project_root: Path) -> dict[str, Any] | None:
     }
 
 
+#: Les états regroupés pour la ligne de synthèse : proposées, validées (en cours de réalisation), livrées en attente de
+#: recette, recettées ; le reste (non conforme, suite à créer) est à reprendre par la MOE.
+_PROPOSED = ("proposee",)
+_VALIDATED = ("validee", "recettee-en-cours")
+_DELIVERED = ("livree",)
+_ACCEPTED = ("recettee", "recettee-avec-reserve")
+
+
+def _chantiers(project_root: Path) -> list[str | None]:
+    """Le chantier principal, puis chaque sous-dossier de ``_grimoire/cadrage/`` qui porte un fichier d'exigences."""
+    from grimoire.core.cadrage import CADRAGE_DIR
+
+    base = project_root / CADRAGE_DIR
+    found: list[str | None] = [None]
+    try:
+        for entry in sorted(base.iterdir()):
+            if entry.is_dir() and (entry / "04-exigences.md").is_file():
+                found.append(entry.name)
+    except OSError:
+        pass
+    return found
+
+
+def requirement_journey(project_root: Path) -> dict[str, int] | None:
+    """Les exigences du projet par étape du parcours, ou ``None`` si l'état est illisible.
+
+    Appelée seulement quand une MOA est déclarée : un projet sans gouvernance ne paie aucune lecture.
+    """
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.moa_acceptance import requirement_views
+    from grimoire.missions.requirement_gate import origin_root
+    from grimoire.missions.service import TaskService
+
+    counts = {"proposed": 0, "validated": 0, "awaiting_recette": 0, "accepted": 0, "to_rework": 0}
+    try:
+        service = TaskService(origin_root(project_root))
+        for chantier in _chantiers(project_root):
+            for view in requirement_views(project_root, chantier, service=service):
+                if view.state in _PROPOSED:
+                    counts["proposed"] += 1
+                elif view.state in _VALIDATED:
+                    counts["validated"] += 1
+                elif view.state in _DELIVERED:
+                    counts["awaiting_recette"] += 1
+                elif view.state in _ACCEPTED:
+                    counts["accepted"] += 1
+                else:
+                    counts["to_rework"] += 1
+    except (ValueError, OSError, GrimoireError):
+        return None
+    return counts
+
+
+def journey_verdict(project_root: Path) -> dict[str, Any] | None:
+    """La ligne de synthèse du parcours MOA ; ``None`` sans exigence identifiée ou état illisible."""
+    counts = requirement_journey(project_root)
+    if counts is None or not sum(counts.values()):
+        return None
+    detail = (
+        f"Exigences : {counts['proposed']} proposée(s), {counts['validated']} validée(s), "
+        f"{counts['awaiting_recette']} en attente de recette, {counts['accepted']} recettée(s)"
+    )
+    if counts["to_rework"]:
+        detail += f", {counts['to_rework']} à reprendre (non conforme ou suite à créer)"
+    return {"name": "moa_journey", "passed": True, "level": "ok", "detail": detail, **counts}
+
+
 def apply_moa_moe_check(results: list[dict[str, Any]], project_root: Path, *, fmt: str, console: Console) -> None:
     verdict = moa_moe_verdict(project_root)
     if verdict is None:
@@ -95,3 +162,10 @@ def apply_moa_moe_check(results: list[dict[str, Any]], project_root: Path, *, fm
     if fmt != "json":
         tag = "[green]OK[/green]" if verdict["level"] == "ok" else "[yellow]WARN[/yellow]"
         console.print(f"  {tag}  {verdict['detail']}")
+    if "moa" not in verdict:  # sans MOA déclarée, le parcours n'a pas de synthèse : aucune lecture de plus
+        return
+    journey = journey_verdict(project_root)
+    if journey is not None:
+        results.append(journey)
+        if fmt != "json":
+            console.print(f"  [green]OK[/green]  {journey['detail']}")

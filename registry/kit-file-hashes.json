@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.109.0",
+ "generated_for": "3.110.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -93,6 +93,10 @@
   "05e20005e2fb2fad880b3e055d35bafdbfd51a226a01f735f3fde9cad7251295": {
    "version": "3.32.0",
    "path": "archetypes/infra-ops/agents/backup-dr-specialist.md"
+  },
+  "060ad458aaa9a22b7ea2ec25a7ad2ce98433a1896a3df8cad0145fac89084b39": {
+   "version": "3.108.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
   },
   "062aed0afb7f167d583be3966f07052793aa1046ad077ccdda91d50c4ba0f15a": {
    "version": "3.16.0",
@@ -1718,6 +1722,10 @@
    "version": "3.27.0",
    "path": "framework/tools/expert-tool-chain.py"
   },
+  "6b21d22d4c186c8c31f6117e9a2dea5299c84127cc08f1c5640977cbfe70d5e2": {
+   "version": "3.109.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
+  },
   "6b2fb62f579d879f6c93dfb9f900517c872ebf80658f6497617d2047c04dd2af": {
    "version": "3.4.2",
    "path": "archetypes/fix-loop/README.md"
@@ -2101,6 +2109,10 @@
   "83bae0090d2edc7e608527a506aec5d1e6df1e348fec3320255ff91c8aeb202d": {
    "version": "3.16.0",
    "path": "framework/tools/vision-judge.py"
+  },
+  "83c0b353e9b68d7583a0133e113e99042bb367292d62836e02a7defe5d7284dd": {
+   "version": "3.108.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
   },
   "83c7143d64fdadc1be7864d0796054d19f0ea740c9c1edffd25ded469d706386": {
    "version": "3.17.0",
