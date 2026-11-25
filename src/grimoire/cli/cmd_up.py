@@ -1182,6 +1182,9 @@ def _step_standard(
                     "(grimoire standard init --force to overwrite)"
                 )
 
+        if result.notices:
+            activation_note += "; " + " ; ".join(result.notices)
+
         if downgrade:
             # Explicit `--needs` may legitimately shrink the profile — honor
             # it, but never call a scope reduction "done": that word is what
