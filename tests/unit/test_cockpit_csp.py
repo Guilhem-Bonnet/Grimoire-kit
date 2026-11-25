@@ -15,6 +15,7 @@ import http.client
 import re
 import threading
 from functools import partial
+from html.parser import HTMLParser
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -114,8 +115,9 @@ def test_les_pages_historiques_et_vitrine_recoivent_un_nonce(port: int, page: st
     assert _directive(policy, "style-src") == f"style-src 'self' 'nonce-{nonce.group(1)}'"
     # Seuls les attributs style= restent permis ; jamais de style en ligne en balise sans nonce.
     assert _directive(policy, "style-src-attr") == "style-src-attr 'unsafe-inline'"
-    for tag in re.findall(rb"<(?:script|style)\b[^>]*>", body):
-        assert b'nonce="' + nonce.group(1).encode() + b'"' in tag, tag
+    for tag, attrs in _tags(body.decode("utf-8")):
+        if tag in {"script", "style"}:
+            assert attrs.get("nonce") == nonce.group(1), (tag, attrs)
     for directive in (*STRICT_DIRECTIVES[:1], *STRICT_DIRECTIVES[3:]):
         assert directive in policy
 
@@ -164,26 +166,47 @@ def _workspace_files(*suffixes: str) -> list[Path]:
     return sorted(p for p in WORKSPACE.rglob("*") if p.suffix in suffixes and "fonts" not in p.parts)
 
 
+class _Tags(HTMLParser):
+    """Les balises d'un document (commentaires ignorés) avec leurs attributs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.found: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.found.append((tag, dict(attrs)))
+
+
+def _tags(html: str) -> list[tuple[str, dict[str, str | None]]]:
+    parser = _Tags()
+    parser.feed(html)
+    return parser.found
+
+
 def test_la_page_de_la_coque_n_a_rien_d_en_ligne() -> None:
-    html = (WORKSPACE / "index.html").read_text(encoding="utf-8")
-    no_comments = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
-    assert not re.findall(r"<script\b(?![^>]*\bsrc=)", no_comments, re.IGNORECASE), "script en ligne"
-    assert not re.findall(r"<style\b", no_comments, re.IGNORECASE), "<style> en ligne"
-    assert not re.findall(r"\sstyle\s*=", no_comments, re.IGNORECASE), "attribut style="
-    assert not re.findall(r"\son[a-z]+\s*=", no_comments, re.IGNORECASE), "gestionnaire on*= en attribut"
-    assert not re.findall(r"javascript:", no_comments, re.IGNORECASE)
-    assert not re.findall(r"(?:src|href)=[\"']https?:", no_comments, re.IGNORECASE), "ressource externe"
-    first_script = re.search(r"<script\b[^>]*>", no_comments)
-    assert first_script and 'src="./theme-boot.js"' in first_script.group(0)
-    assert "defer" not in first_script.group(0) and "async" not in first_script.group(0), (
+    tags = _tags((WORKSPACE / "index.html").read_text(encoding="utf-8"))
+    scripts = [attrs for tag, attrs in tags if tag == "script"]
+    assert all(attrs.get("src") for attrs in scripts), "script en ligne"
+    assert not [t for t, _ in tags if t == "style"], "<style> en ligne"
+    for tag, attrs in tags:
+        assert "style" not in attrs, f"attribut style= sur <{tag}>"
+        assert not [name for name in attrs if name.startswith("on")], f"gestionnaire on*= sur <{tag}>"
+        for name in ("href", "src", "action"):
+            value = (attrs.get(name) or "").lower()
+            assert not value.startswith(("javascript:", "http:", "https:")), f"{name}={value} sur <{tag}>"
+    first = scripts[0]
+    assert first.get("src") == "./theme-boot.js"
+    assert "defer" not in first and "async" not in first and first.get("type") != "module", (
         "bloquant, avant le premier paint"
     )
 
 
 def test_chaque_feuille_de_la_coque_est_liee_par_la_page() -> None:
-    html = (WORKSPACE / "index.html").read_text(encoding="utf-8")
+    tags = _tags((WORKSPACE / "index.html").read_text(encoding="utf-8"))
     linked = {
-        Path(href).as_posix().removeprefix("./") for href in re.findall(r'<link rel="stylesheet" href="([^"]+)"', html)
+        Path(attrs["href"] or "").as_posix().removeprefix("./")
+        for tag, attrs in tags
+        if tag == "link" and attrs.get("rel") == "stylesheet"
     }
     on_disk = {p.relative_to(WORKSPACE).as_posix() for p in _workspace_files(".css")}
     # source.css est chargée à la demande par l'espace Source (`<link>` posé par JS : permis par `style-src 'self'`).
