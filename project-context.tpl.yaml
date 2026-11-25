@@ -248,13 +248,16 @@ installed_archetypes: []               # Rempli par grimoire-init.sh install
 # interrupteur, y compris pour une voix donnée par URL).
 # torch CPU d'abord, pour éviter les roues CUDA (~2 Go) :
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# qwen3-tts-clone (clonage de voix, ~6 Go de mémoire, ~6 s de calcul par seconde de parole) :
+#   pip install 'grimoire-kit[voice-qwen]'   # ou : pip install qwen-tts
 # `grimoire doctor` vérifie l'extra et la disponibilité des moteurs choisis.
 
 # interaction:
 #   mode: text                         # text | voice
 # voice:
 #   stt: faster-whisper                # faster-whisper | browser — ou {engine: faster-whisper, model: small}
-#   tts: pocket-tts                    # pocket-tts | browser — ou {engine: pocket-tts, voice: estelle}
+#   tts: pocket-tts                    # qwen3-tts-clone | pocket-tts | browser — défaut : le premier installé
+#                                      # ou {engine: qwen3-tts-clone, voice: /chemin/voix.wav, threads: 4}
 #   language: fr
 #   idle_unload_seconds: 300           # déchargement après inactivité (0 = jamais)
 #   allow_download: false              # true = vous acceptez le téléchargement des modèles

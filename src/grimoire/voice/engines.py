@@ -231,6 +231,15 @@ for _spec in (
         ("pocket_tts",),
         cache_probe="grimoire.voice.pocket_tts_engine:model_cached",
     ),
+    EngineSpec(
+        "qwen3-tts-clone",
+        "tts",
+        "Qwen3-TTS 0.6B (clonage de voix)",
+        "grimoire.voice.qwen_tts_engine:QwenCloneTextToSpeech",
+        ("qwen_tts",),
+        extra="voice-qwen",
+        cache_probe="grimoire.voice.qwen_tts_engine:model_cached",
+    ),
     EngineSpec("browser", "tts", "Voix du navigateur", f"{__name__}:BrowserTextToSpeech"),
 ):
     register_engine(_spec)

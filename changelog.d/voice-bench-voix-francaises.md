@@ -1,1 +1,0 @@
-- fix(vocal): `scripts/voice_bench.py` fait parler Pocket TTS avec son modèle français (voix `estelle`, premier son mesuré en flux) et ajoute Qwen3-TTS 1.7B VoiceDesign avec une voix décrite en français ; la première passe réelle lisait le français avec des voix étrangères (Refs #1343)

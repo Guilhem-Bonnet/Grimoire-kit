@@ -107,6 +107,9 @@ search = ["tantivy>=0.26"]
 # `get_state_for_audio_prompt` et `get_default_voice_for_language` relus sur
 # pocket-tts 4.0.0 et 4.0.1 — en deçà, non vérifié, donc non déclaré.
 voice = ["faster-whisper>=1.1", "pocket-tts>=4.0"]
+# Synthèse par clonage de voix (Qwen3-TTS 0.6B Base), hors de `voice` : qwen-tts épingle
+# `transformers==4.57.3`. Voir docs/voice-clone.md.
+voice-qwen = ["qwen-tts>=0.1"]
 all = ["grimoire-kit[mcp,qdrant,weaviate,neo4j,redis,mempalace,ollama,search]"]
 dev = [
     "grimoire-kit[all]",
@@ -224,6 +227,7 @@ module = [
     "tantivy.*",
 "faster_whisper.*",
 "pocket_tts.*",
+"qwen_tts.*",
 "torch.*",
 ]
 ignore_missing_imports = true

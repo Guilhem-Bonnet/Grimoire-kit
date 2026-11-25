@@ -1,0 +1,1 @@
+- feat(agents): skill livré `grimoire-cadrage` (posé par `grimoire up` pour Claude Code, Copilot et les autres hôtes à skills) : l'orchestrateur mène l'entretien de cadrage (une question à la fois, réponses consignées, challenge, arrêt quand les angles obligatoires sont couverts) sans jamais valider à la place de la MOA ; la persona d'entrée y renvoie (Refs #1342)
