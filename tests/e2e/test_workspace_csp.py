@@ -61,6 +61,37 @@ def _wait_ready(port: int, deadline: float) -> None:
 
 
 @pytest.fixture(scope="module")
+def blueprint(url: str, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = _ROOTS[url]
+    target = root / "_grimoire" / "blueprints" / "csp-demo.blueprint.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "grimoire",
+            "blueprint",
+            "new",
+            "csp-demo",
+            "--out",
+            str(target),
+            "--template",
+            "pipeline",
+        ],
+        cwd=str(root),
+        check=False,
+        capture_output=True,
+        timeout=60,
+    )
+    if not target.is_file():
+        pytest.skip("`grimoire blueprint new` indisponible ici")
+    return target
+
+
+_ROOTS: dict[str, Path] = {}
+
+
+@pytest.fixture(scope="module")
 def url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     root = tmp_path_factory.mktemp("csp") / "projet-csp"
     root.mkdir(parents=True)
@@ -97,6 +128,7 @@ def url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     )
     try:
         _wait_ready(port, time.monotonic() + 60)
+        _ROOTS[f"http://127.0.0.1:{port}"] = root
         yield f"http://127.0.0.1:{port}"
     finally:
         process.terminate()
@@ -184,6 +216,21 @@ def test_le_theme_initial_est_pose_par_le_script_externe(browser: Browser, url: 
         assert page.evaluate("window.__csp") == []
     finally:
         context.close()
+
+
+def test_concevoir_sans_violation(watched: _Watched, url: str, blueprint: Path) -> None:
+    """Le graphe d'un blueprint pose la position de ses nœuds : ils ne doivent pas se superposer."""
+    page = _open(watched, url)
+    page.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
+    page.locator(".cv-card").first.dblclick(timeout=APPEAR_MS)
+    page.wait_for_selector(".cv-node", timeout=APPEAR_MS)
+    boxes = page.locator(".cv-node").evaluate_all(
+        "(els) => els.map((e) => e.getBoundingClientRect().x + ':' + e.getBoundingClientRect().y)"
+    )
+    assert len(boxes) >= 2 and len(set(boxes)) == len(boxes), boxes
+    page.locator(".cv-node").first.dblclick()
+    page.wait_for_selector(".cv-tab", timeout=APPEAR_MS)
+    _assert_clean(watched, "concevoir")
 
 
 def test_l_atelier_sans_violation(watched: _Watched, url: str) -> None:

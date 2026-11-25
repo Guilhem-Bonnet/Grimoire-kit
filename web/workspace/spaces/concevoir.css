@@ -62,3 +62,7 @@
 .cv-msg { color: var(--ink2); font-size: var(--t-s); padding: var(--sp-2) 0; }
 .cv-json { font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap;
   background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2); }
+.cv-ins-h { margin: 0 0 8px; }
+.cv-ins-after { margin-top: 12px; }
+.cv-ins-open { margin-bottom: 10px; }
+.cv-grow { margin-right: auto; }

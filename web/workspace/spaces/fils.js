@@ -350,15 +350,17 @@ function renderThreads(ctx, data, state, rootWidth) {
     // Le tick : pointillé gris, comme sur l'artboard ; les fils de session
     // prennent la teinte de leur fournisseur.
     const tint = thread.tick ? 'var(--ink3)' : `var(${thread.label.token})`;
-    const dash = thread.tick ? '; stroke-dasharray: 5 5' : '';
     const segments = thread.segments.length ? thread.segments : [{ path: thread.path, pale: false }];
     for (const segment of segments) {
-      drawing.append(svg('path', {
+      const line = svg('path', {
         class: `fl-thread${thread.tick ? ' tick' : ''}${segment.pale ? ' pale' : ''}`,
         d: segment.path,
         'data-session': thread.id,
-        style: `stroke: ${tint}; stroke-width: ${thread.tick ? 1.5 : thread.label.stroke}${dash}`,
-      }));
+      });
+      line.style.stroke = tint;
+      line.style.strokeWidth = String(thread.tick ? 1.5 : thread.label.stroke);
+      if (thread.tick) line.style.strokeDasharray = '5 5';
+      drawing.append(line);
     }
     // Le losange au point de bascule et son étiquette directe.
     for (const change of thread.changes) {
@@ -390,7 +392,9 @@ function renderThreads(ctx, data, state, rootWidth) {
     } else if (thread.end.kind === 'ended') {
       drawing.append(svg('circle', { class: 'fl-end-ended', cx: thread.end.x, cy: thread.end.y, r: 3.5 }));
     } else {
-      drawing.append(svg('circle', { class: 'fl-end-live', cx: thread.end.x, cy: thread.end.y, r: 4, style: `fill: ${tint}` }));
+      const live = svg('circle', { class: 'fl-end-live', cx: thread.end.x, cy: thread.end.y, r: 4 });
+      live.style.fill = tint;
+      drawing.append(live);
     }
     // L'étiquette directe, au bout du fil : nom et modèle, sans légende.
     const name = svg('g', {
@@ -403,7 +407,8 @@ function renderThreads(ctx, data, state, rootWidth) {
     name.append(svg('rect', {
       class: 'fl-name-hit', x: layout.plot_right + 6, y: thread.y - 17, width: layout.width - layout.plot_right - 10, height: 34, rx: 6,
     }));
-    const ring = svg('circle', { class: 'fl-name-ring', cx: layout.plot_right - 5, cy: thread.y, r: 5, style: `stroke: ${tint}` });
+    const ring = svg('circle', { class: 'fl-name-ring', cx: layout.plot_right - 5, cy: thread.y, r: 5 });
+    ring.style.stroke = tint;
     const nameText = svg('text', { class: 'fl-name-text', x: layout.plot_right + 12, y: thread.y - 3 });
     nameText.textContent = thread.label.short;
     const modelText = svg('text', { class: 'fl-name-model', x: layout.plot_right + 12, y: thread.y + 11 });

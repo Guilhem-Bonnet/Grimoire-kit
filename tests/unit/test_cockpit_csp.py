@@ -218,6 +218,7 @@ _FORBIDDEN_JS = {
     "attribut style posé en texte": r"setAttribute\(\s*['\"]style['\"]",
     "cssText": r"\bcssText\b",
     "style= dans un gabarit HTML": r"\sstyle=[\"'\\]",
+    "clé style d'un helper d'éléments (setAttribute)": r"(?<![\w.$-])['\"]?style['\"]?\s*:",
     "eval": r"(?<![\w.])eval\s*\(",
     "new Function": r"new\s+Function\s*\(",
     "minuterie à chaîne": r"set(?:Timeout|Interval)\(\s*['\"`]",

@@ -463,9 +463,9 @@ export async function mount(root, ctx) {
     const open = el('button', { type: 'button', class: 'btn pri' }, 'Ouvrir le workflow →');
     open.addEventListener('click', () => zoomToWorkflow(container.id));
     ctx.inspector.replaceChildren(
-      el('h3', { style: 'margin:0 0 8px' }, container.name),
+      el('h3', { class: 'cv-ins-h' }, container.name),
       kv,
-      el('div', { style: 'margin-top:12px' }, open),
+      el('div', { class: 'cv-ins-after' }, open),
     );
   }
 
@@ -769,7 +769,7 @@ export async function mount(root, ctx) {
     if (state.dirty) {
       toolbar.append(dotWord('warn', 'modifié — non enregistré'));
     }
-    toolbar.append(el('span', { style: 'margin-right:auto' }));
+    toolbar.append(el('span', { class: 'cv-grow' }));
     const btnSave = el('button', {
       type: 'button', class: 'btn pri', 'data-action': 'save',
       text: state.dirty ? 'Enregistrer (modifié)' : 'Enregistrer',
@@ -791,7 +791,8 @@ export async function mount(root, ctx) {
     // Les nœuds sont placés en absolu : la scène qui les porte suit la barre
     // et le retour d'action dans le flux, qu'aucun message ne recouvre un nœud.
     const svg = renderEdgesSvg(bp.nodes || [], bp.edges || [], pos);
-    const stage = el('div', { class: 'cv-stage', style: `height:${svg.getAttribute('height')}px` }, svg);
+    const stage = el('div', { class: 'cv-stage' }, svg);
+    stage.style.height = `${svg.getAttribute('height')}px`;
     graph.append(stage);
     for (const node of bp.nodes || []) {
       const p = pos.get(node.id) || { x: 0, y: 0 };
@@ -800,13 +801,14 @@ export async function mount(root, ctx) {
         'div',
         {
           class: 'cv-node', tabindex: '0', 'aria-selected': String(node.id === state.selectedNodeId),
-          style: `left:${p.x}px; top:${p.y}px`,
         },
         el('div', { class: 'kind' }, term('noeud', node.role || node.kind || 'nœud')),
         el('div', { class: 'label', text: node.label || node.id }),
         el('div', { class: 'ref mono', text: node.ref || '(sans référence)' }),
         nodeLint.errors.length ? el('div', {}, dotWord('bad', `${nodeLint.errors.length} erreur(s)`)) : null,
       );
+      box.style.left = `${p.x}px`;
+      box.style.top = `${p.y}px`;
       box.addEventListener('click', () => { state.selectedNodeId = node.id; render(); });
       box.addEventListener('dblclick', () => zoomToNode(node.id));
       box.addEventListener('keydown', (event) => { if (event.key === 'Enter') zoomToNode(node.id); });
@@ -835,8 +837,8 @@ export async function mount(root, ctx) {
         const open = el('button', { type: 'button', class: 'btn pri' }, 'Ouvrir le nœud →');
         open.addEventListener('click', () => zoomToNode(node.id));
         ctx.inspector.replaceChildren(
-          el('h3', { style: 'margin:0 0 8px', text: node.label || node.id }),
-          el('div', { style: 'margin-bottom:10px' }, open),
+          el('h3', { class: 'cv-ins-h', text: node.label || node.id }),
+          el('div', { class: 'cv-ins-open' }, open),
         );
         return;
       }
@@ -851,7 +853,7 @@ export async function mount(root, ctx) {
         : '—'),
     );
     ctx.inspector.replaceChildren(
-      el('h3', { style: 'margin:0 0 8px', text: bp.name || bp.id }),
+      el('h3', { class: 'cv-ins-h', text: bp.name || bp.id }),
       el('p', { class: 'cv-msg', text: bp.description || '' }),
       kv,
     );
@@ -885,13 +887,16 @@ export async function mount(root, ctx) {
     graph.append(renderEdgesSvg(neighbors, neighborEdges, pos));
     for (const n of neighbors) {
       const p = pos.get(n.id) || { x: 0, y: 0 };
-      graph.append(el(
+      const box = el(
         'div',
-        { class: 'cv-node' + (n.id === node.id ? '' : ' dim'), 'aria-selected': String(n.id === node.id), style: `left:${p.x}px; top:${p.y}px` },
+        { class: 'cv-node' + (n.id === node.id ? '' : ' dim'), 'aria-selected': String(n.id === node.id) },
         el('div', { class: 'kind' }, n.role || n.kind || 'nœud'),
         el('div', { class: 'label', text: n.label || n.id }),
         el('div', { class: 'ref mono', text: n.ref || '(sans référence)' }),
-      ));
+      );
+      box.style.left = `${p.x}px`;
+      box.style.top = `${p.y}px`;
+      graph.append(box);
     }
     root.replaceChildren(el('div', { class: 'cv-noeud' }, graph));
     renderNodeInspector(node);
@@ -950,7 +955,7 @@ export async function mount(root, ctx) {
     }
 
     ctx.inspector.replaceChildren(
-      el('h3', { style: 'margin:0 0 8px', text: node.label || node.id }),
+      el('h3', { class: 'cv-ins-h', text: node.label || node.id }),
       tabsRow, body,
     );
   }
