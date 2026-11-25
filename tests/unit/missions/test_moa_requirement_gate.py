@@ -15,9 +15,10 @@ from typer.testing import CliRunner
 from grimoire.cli.app import app
 from grimoire.core.cadrage import CADRAGE_DIR
 from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.core.standard_state import AGENT_MARKER_ENVS, HOST_SESSION_ENVS, SESSION_ENV
 from grimoire.missions import requirement_gate as rg
 from grimoire.missions.mandate import AuthorityJournal, acting_as_orchestrator
-from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, ORIGIN_ORCHESTRATOR, ORIGIN_UNVERIFIED, TaskState
+from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
 
 pytestmark = pytest.mark.covers("cli:cadrage approve")
@@ -35,12 +36,20 @@ EXIGENCES = """# Exigences
 """
 
 
+_REAL_CONFIRM = rg._confirm_human_turn
+_AGENT_ENVS = ("GRIMOIRE_UNATTENDED", SESSION_ENV, *HOST_SESSION_ENVS, *AGENT_MARKER_ENVS)
+
+
 @pytest.fixture(autouse=True)
 def _own_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Un HOME par test : le journal d'autorité de l'un ne valide rien chez l'autre."""
+    """Un HOME par test (le journal d'autorité de l'un ne valide rien chez l'autre), sans signal d'agent hérité,
+    et un « oui » de la MOA simulé à l'écran : seuls les tests du canal remettent le vrai tour humain."""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    for name in _AGENT_ENVS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(rg, "_confirm_human_turn", lambda: True)
 
 
 def _project(
@@ -62,8 +71,8 @@ def _project(
     return root
 
 
-def _approve(root: Path, key: str = "REQ-001", origin: str = ORIGIN_HUMAN) -> dict[str, Any]:
-    return rg.approve_requirement(root, key, origin=origin, actor="ada")
+def _approve(root: Path, key: str = "REQ-001") -> dict[str, Any]:
+    return rg.approve_requirement(root, key, actor="ada")
 
 
 def _add(service: TaskService, **kwargs: Any) -> Any:
@@ -73,20 +82,95 @@ def _add(service: TaskService, **kwargs: Any) -> Any:
 # ── La validation : canal humain seulement, scellée ─────────────────────────
 
 
-@pytest.mark.parametrize("origin", [ORIGIN_AGENT, ORIGIN_UNVERIFIED, ORIGIN_ORCHESTRATOR, "mcp", ""])
-def test_moa_requirement_validation_refused_outside_human_channel(tmp_path: Path, origin: str) -> None:
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("CLAUDECODE", "1"),
+        ("GRIMOIRE_UNATTENDED", "1"),
+        ("CLAUDE_CODE_SESSION_ID", "sess"),
+        ("CODEX_SANDBOX", "1"),
+        (SESSION_ENV, "sess"),
+    ],
+)
+def test_moa_requirement_validation_refused_with_agent_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    """L'origine s'établit dans la fonction : un marqueur d'agent refuse, même si l'écran dirait « oui »."""
     root = _project(tmp_path)
+    monkeypatch.setenv(name, value)
     with pytest.raises(rg.RequirementRefusedError) as refused:
-        _approve(root, origin=origin)
+        _approve(root)
     assert refused.value.code == "human_required"
     assert AuthorityJournal().read() == []  # rien n'est scellé
 
 
+def test_moa_requirement_validation_refused_without_interactive_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _project(tmp_path)
+    monkeypatch.setattr(rg, "_confirm_human_turn", _REAL_CONFIRM)  # stdin de pytest : pas un terminal
+    with pytest.raises(rg.RequirementRefusedError, match="tour humain non attesté"):
+        _approve(root)
+    assert AuthorityJournal().read() == []
+
+
+def test_moa_requirement_validation_refused_when_screen_says_no(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import sys
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    root = _project(tmp_path)
+    monkeypatch.setattr(rg, "_confirm_human_turn", _REAL_CONFIRM)
+    monkeypatch.setattr(sys, "stdin", _Tty("n\n"))
+    monkeypatch.setattr(sys, "stderr", _Tty())
+    with pytest.raises(rg.RequirementRefusedError):
+        _approve(root)
+    monkeypatch.setattr(sys, "stdin", _Tty("oui\n"))
+    assert _approve(root)["requirement"] == "REQ-001"
+
+
 def test_moa_requirement_validation_refused_to_in_process_orchestrator(tmp_path: Path) -> None:
-    """Le tick (orchestrateur en processus, sous mandat) ne valide pas, même en se disant humain."""
+    """Le tick (orchestrateur en processus, sous mandat) ne valide pas."""
     root = _project(tmp_path)
     with acting_as_orchestrator(), pytest.raises(rg.RequirementRefusedError):
-        _approve(root, origin=ORIGIN_HUMAN)
+        _approve(root)
+
+
+def test_moa_requirement_python_api_refused_in_agent_subprocess(tmp_path: Path) -> None:
+    """Régression (relecture de #1362) : l'API Python appelée depuis un processus d'agent ne scelle rien."""
+    import os
+    import subprocess
+    import sys
+
+    root = _project(tmp_path)
+    env = {k: v for k, v in os.environ.items() if k not in _AGENT_ENVS}
+    env["CLAUDECODE"] = "1"
+    code = (
+        "import sys; from pathlib import Path; from grimoire.missions.requirement_gate import approve_requirement as a\n"
+        "try:\n    a(Path(sys.argv[1]), 'REQ-001', actor='moa')\nexcept Exception as e:\n"
+        "    print(type(e).__name__); sys.exit(3)\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code, str(root)],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 3, done.stdout + done.stderr
+    assert "RequirementRefusedError" in done.stdout
+    assert AuthorityJournal().read() == []
+    service = TaskService(root)
+    task = _add(service, requirement="REQ-001").task
+    with pytest.raises(TaskRefusedError):
+        service.transition(task.id, TaskState.READY, "agent")
 
 
 def test_moa_requirement_validation_sealed_with_fingerprint(tmp_path: Path) -> None:
@@ -118,7 +202,7 @@ def test_moa_requirement_validation_refused_for_unknown_requirement(tmp_path: Pa
 
 
 def test_moa_requirement_cli_refused_from_agent_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """La CLI prend l'origine du canal ``task comment`` : une session d'agent n'y passe pas."""
+    """La CLI passe par la même fonction : une session d'agent n'y passe pas, même avec un « oui » simulé."""
     root = _project(tmp_path)
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("GRIMOIRE_PRINCIPAL", "orchestrator")  # une revendication ne donne rien
@@ -128,11 +212,8 @@ def test_moa_requirement_cli_refused_from_agent_session(tmp_path: Path, monkeypa
     assert AuthorityJournal().read() == []
 
 
-def test_moa_requirement_cli_human_turn_seals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from grimoire.cli import cmd_task
-
+def test_moa_requirement_cli_human_turn_seals(tmp_path: Path) -> None:
     root = _project(tmp_path)
-    monkeypatch.setattr(cmd_task, "_comment_origin", lambda: ORIGIN_HUMAN)
     result = runner.invoke(app, ["cadrage", "approve", "req-002", "--path", str(root)])
     assert result.exit_code == 0, result.output
     assert "export CSV" in result.output  # la MOA lit ce qu'elle valide
@@ -285,15 +366,42 @@ def test_moa_requirement_warn_is_the_default_when_gate_absent(tmp_path: Path) ->
     assert _add(service, ready=True).task.status is TaskState.READY
 
 
+_TITLES = {"question": "pourquoi le lien expire-t-il ?", "incident": "incident : la production est en panne"}
+
+
 @pytest.mark.parametrize("nature", ["question", "incident", "Incident"])
 def test_moa_requirement_exempt_natures_pass_in_block(tmp_path: Path, nature: str) -> None:
     root = _project(tmp_path)
     service = TaskService(root)
-    task = _add(service, nature=nature, ready=True).task
+    task = service.add(_TITLES[nature.lower()], ("ok",), nature=nature, ready=True).task
     assert task.status is TaskState.READY
     assert [e.event_type for e in service.ledger.list_events(task.id) if e.event_type == rg.EXEMPTED_EVENT]
     pending = rg.pending_review(root, service.list_tasks(), service.ledger.list_events())
-    assert pending["exempted"] == ([task.id] if nature.lower() == "incident" else [])
+    if nature.lower() == "incident":
+        assert pending["postmortem"] == [task.id]
+        service.ledger.transition_task(task.id, TaskState.CLAIMED, actor_id="w")  # rien ne la retire avant l'exigence
+        assert rg.pending_review(root, service.list_tasks(), service.ledger.list_events())["postmortem"] == [task.id]
+    else:
+        assert pending["questions"] == [task.id]
+
+
+@pytest.mark.parametrize("nature", ["question", "incident"])
+def test_moa_requirement_declared_nature_not_matching_intake_not_exempt(tmp_path: Path, nature: str) -> None:
+    """Une nature exemptée ne se déclare pas seule : l'intake doit lire le titre de la même façon."""
+    service = TaskService(_project(tmp_path))
+    with pytest.raises(TaskRefusedError, match="pas d'exemption"):
+        service.add("refondre le module de paiement", ("ok",), nature=nature, ready=True)
+
+
+def test_moa_requirement_cadrage_anchor_exempt_in_block(tmp_path: Path) -> None:
+    """L'ancre des questions du cadrage produit les exigences : le gate ne la bloque pas."""
+    from grimoire.missions.cadrage_plan import ANCHOR
+
+    service = TaskService(_project(tmp_path))
+    anchor = service.add("questions du cadrage", ("ok",), extra={"cadrage": ANCHOR}, ready=True).task
+    assert anchor.status is TaskState.READY
+    with pytest.raises(TaskRefusedError):
+        service.add("pas une ancre", ("ok",), extra={"cadrage": "autre"}, ready=True)
 
 
 def test_moa_requirement_other_nature_not_exempt(tmp_path: Path) -> None:
@@ -370,3 +478,112 @@ def test_moa_requirement_key_normalisation() -> None:
     assert rg.normalize_key("req-7") == "REQ-7"
     assert rg.normalize_key("REQ-7", "alpha") == "alpha/REQ-7"
     assert rg.normalize_key("principal/REQ-7") == "REQ-7"
+
+
+# ── Relecture de #1362 : file, lanceur, cockpit, doctor ─────────────────────
+
+
+def _forged_ready(service: TaskService, title: str = "connexion par lien magique") -> str:
+    task = _add(service).task
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="worker")
+    return task.id
+
+
+def test_moa_requirement_block_excludes_unvalidated_task_from_queue(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    service = TaskService(root)
+    tid = _forged_ready(service)
+    plan = service.queue_plan(routes=False, probe_host=False)
+    assert tid not in {a.task_id for a in plan.admitted}
+    assert any(t == tid and "exigence non validée" in why for t, why in plan.excluded)
+    warn = TaskService(_project(tmp_path / "warn", gate="warn"))
+    other = _forged_ready(warn)
+    assert other in {a.task_id for a in warn.queue_plan(routes=False, probe_host=False).admitted}
+
+
+def test_moa_requirement_launcher_skips_before_creating_worktree(tmp_path: Path) -> None:
+    from lot2_doubles import FakeHost, make_repo
+
+    from grimoire.missions.admission import Admit
+    from grimoire.missions.launcher import WorkerLauncher
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+    from grimoire.missions.task_worktree import find_task_worktree
+
+    root = make_repo(tmp_path)
+    policy_file = root / "_grimoire/standard/orchestration-policy.yaml"
+    policy_file.parent.mkdir(parents=True, exist_ok=True)
+    policy_file.write_text(
+        "orchestrator:\n  roles:\n    worker:\n      enabled: true\n      wip: 3\n      sessions_per_day: 5\n"
+        "      permission_mode: acceptEdits\n",
+        encoding="utf-8",
+    )
+    _project(root)
+    service = TaskService(root)
+    tid = _forged_ready(service)
+    host = FakeHost()
+    policy = load_orchestrator_policy(root).policy
+    outcomes = WorkerLauncher(service, policy, exec_=host)((Admit(tid),))  # type: ignore[arg-type]
+    assert [o.status for o in outcomes] == ["skipped"]
+    assert "exigence non validée" in outcomes[0].detail
+    assert find_task_worktree(TaskService(root), tid) is None
+    assert not host.of("claude", "--bg")
+    assert TaskService(root).require(tid).status is TaskState.READY
+
+
+class _CountingLedger:
+    def __init__(self) -> None:
+        self.reads = 0
+
+    def list_events(self) -> list[Any]:
+        self.reads += 1
+        return []
+
+
+def test_moa_requirement_cockpit_reads_no_event_without_governance(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from grimoire.tools import workspace_attention as wa
+
+    bare = tmp_path / "nu"
+    bare.mkdir()
+    ledger = _CountingLedger()
+    wa._requirement_item(None, SimpleNamespace(home_root=bare, ledger=ledger), [])  # type: ignore[arg-type]
+    assert ledger.reads == 0
+    declared = _project(tmp_path / "gouverne", gate="warn")
+    wa._requirement_item(None, SimpleNamespace(home_root=declared, ledger=ledger), [])  # type: ignore[arg-type]
+    assert ledger.reads == 1
+
+
+def test_moa_requirement_cockpit_item_lists_pending(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from grimoire.tools import workspace_attention as wa
+
+    root = _project(tmp_path, gate="warn")
+    service = TaskService(root)
+    flagged = _add(service, ready=True).task
+    incident = service.add(_TITLES["incident"], ("ok",), nature="incident", ready=True).task
+    read = SimpleNamespace(row={"slug": "p", "name": "p"}, items=[])
+    wa._requirement_item(read, service, service.list_tasks())  # type: ignore[arg-type]
+    (item,) = read.items
+    assert item["kind"] == wa.REQUIREMENT_UNVALIDATED
+    assert item["ref"]["task_ids"] == [flagged.id] and item["ref"]["postmortem"] == [incident.id]
+    assert "post-mortem dû" in item["title"]
+
+
+def test_moa_requirement_doctor_warns_when_gate_disarmed_after_validation(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_moa_moe import moa_moe_verdict
+
+    root = _project(tmp_path)
+    _approve(root)
+    assert moa_moe_verdict(root)["level"] == "ok"  # type: ignore[index]
+    _project(root, gate="warn")
+    verdict = moa_moe_verdict(root)
+    assert (
+        verdict is not None
+        and verdict["level"] == "warn"
+        and "validation(s) d'exigence scellée(s)" in verdict["detail"]
+    )
+    _project(root, moa=None, gate="block")
+    assert "scellée" in moa_moe_verdict(root)["detail"]  # type: ignore[index]
+    assert rg.sealed_validations(root) == 1

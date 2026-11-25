@@ -129,6 +129,8 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/breaker.py", "src/grimoire/missions/launcher.py", "src/grimoire/missions/arbiter.py",
     "src/grimoire/missions/orchestrator_policy.py", "src/grimoire/hosts/decisions/*",
     "src/grimoire/flows/attestation.py",
+    # le gate d'exigence de la MOA (#1342, M3) : le lanceur le consulte, et un worker ne réécrit pas ce qui l'oppose
+    "src/grimoire/missions/requirement_gate.py", "src/grimoire/missions/requirement_gate/*",
     # … et ce qui le remplacerait sans le toucher : un paquet du même nom l'emporte sur le module à l'import, et
     # ``missions/__init__.py`` s'exécute avant chacun d'eux
     "src/grimoire/missions/__init__.py",

@@ -382,7 +382,21 @@ class TaskService:
             self.ledger, capacity, now=now or datetime.now(UTC), host=host,
             route_of=self._route_ref if routes else None, paused=paused, autonomous=unattended,
             pause=pause if pause is not None else read_pause(self.home_root),
+            refuse_of=self._requirement_refusal_of(),
         )
+
+    def _requirement_refusal_of(self) -> Callable[[MissionTask], str] | None:
+        """En mode bloquant (#1342, M3), la raison qui écarte une tâche ``ready`` de la file ; ``None`` sinon."""
+        from grimoire.missions.requirement_gate import gate_mode, gate_refusal
+
+        if not gate_mode(self.home_root).blocking:
+            return None
+
+        def refused(task: MissionTask) -> str:
+            found = gate_refusal(self.home_root, task)
+            return f"exigence non validée par la MOA : {found.reason}" if found is not None else ""
+
+        return refused
 
     def _route_ref(self, task: MissionTask) -> RouteRef:
         from grimoire.missions.route_dispatch import record_route

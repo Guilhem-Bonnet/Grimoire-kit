@@ -16,13 +16,14 @@ from grimoire.core.exceptions import GrimoireConfigError
 
 def _governance_problem(config_path: Path) -> str:
     """L'erreur de la section ``governance`` seule, quand c'est elle qui rend la configuration illisible ; sinon ``""``."""
-    import yaml
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
 
     from grimoire.core.config import GovernanceConfig
 
     try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        data = YAML(typ="safe").load(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, YAMLError):
         return ""
     if not isinstance(data, dict) or "governance" not in data:
         return ""
@@ -31,6 +32,24 @@ def _governance_problem(config_path: Path) -> str:
     except GrimoireConfigError as exc:
         return str(exc)
     return ""
+
+
+def _disarmed(project_root: Path, mode: str) -> str:
+    """#1342 (M3) : des validations scellées existent pour ce projet alors que le gate n'est plus bloquant."""
+    if mode == "block":
+        return ""
+    from grimoire.missions.requirement_gate import sealed_validations
+
+    try:
+        count = sealed_validations(project_root)
+    except Exception:
+        return ""
+    if not count:
+        return ""
+    return (
+        f" ; {count} validation(s) d'exigence scellée(s) pour ce projet alors que le gate est en {mode} : "
+        "repassé de block à warn ou section governance retirée ? Vérifiez que c'est voulu"
+    )
 
 
 def moa_moe_verdict(project_root: Path) -> dict[str, Any] | None:
@@ -54,19 +73,20 @@ def moa_moe_verdict(project_root: Path) -> dict[str, Any] | None:
             "detail": f"section governance mal formée : {problem} — la MOA n'est pas reconnue, aucune exigence "
             "ne peut être validée",
         }
+    mode = gov.requirement_mode
+    disarmed = _disarmed(project_root, mode)
     if not gov.declared:
         return {
             "name": "moa_moe", "passed": True, "level": "warn",
             "detail": (
                 "governance.roles absent de project-context.yaml : nommez la MOA (l'humain qui porte le "
                 "besoin et prononce la recette) — governance: {roles: {moa: \"Prénom Nom\"}}"
-            ),
+            ) + disarmed,
         }
-    mode = gov.requirement_mode
     return {
-        "name": "moa_moe", "passed": True, "level": "ok", "moa": gov.moa, "moe": gov.moe,
+        "name": "moa_moe", "passed": True, "level": "warn" if disarmed else "ok", "moa": gov.moa, "moe": gov.moe,
         "requirement_gate": mode,
-        "detail": f"MOA : {gov.moa} — MOE : {gov.moe} — gate d'exigence : {mode}",
+        "detail": f"MOA : {gov.moa} — MOE : {gov.moe} — gate d'exigence : {mode}" + disarmed,
     }
 
 

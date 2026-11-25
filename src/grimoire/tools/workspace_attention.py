@@ -442,25 +442,32 @@ def _orphan_reason(task: Any, card: dict[str, Any], now: datetime) -> str:
 
 
 def _requirement_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> None:
-    """L'item « exigence à faire valider » (#1342, M3) ; une lecture qui échoue n'efface pas le reste de la vue."""
-    from grimoire.missions.requirement_gate import pending_review
+    """L'item « exigence à faire valider » (#1342, M3) ; une lecture qui échoue n'efface pas le reste de la vue.
+
+    Le mode se lit d'abord : un projet sans MOA déclarée ne paie pas la lecture de tous les événements du ledger.
+    """
+    from grimoire.missions.requirement_gate import gate_mode, pending_review
 
     try:
+        if not gate_mode(service.home_root).declared:
+            return
         pending = pending_review(service.home_root, tasks, service.ledger.list_events())
     except Exception:
         return
-    unvalidated, exempted = pending["unvalidated"], pending["exempted"]
-    if not unvalidated and not exempted:
+    unvalidated, questions, postmortem = pending["unvalidated"], pending["questions"], pending["postmortem"]
+    if not (unvalidated or questions or postmortem):
         return
     parts = []
     if unvalidated:
         parts.append(f"{len(unvalidated)} tâche(s) passée(s) `ready` sans exigence validée par la MOA")
-    if exempted:
-        parts.append(f"{len(exempted)} incident(s) exempté(s), exigence à poser au post-mortem")
+    if questions:
+        parts.append(f"{len(questions)} question(s) exemptée(s)")
+    if postmortem:
+        parts.append(f"{len(postmortem)} incident(s) exempté(s), post-mortem dû (aucune exigence rattachée)")
     _item(
         read, REQUIREMENT_UNVALIDATED, "requirements", " ; ".join(parts),
         "`grimoire cadrage interview`, puis la MOA valide depuis son terminal : `grimoire cadrage approve <exigence>`",
-        task_ids=unvalidated, exempted=exempted,
+        task_ids=unvalidated, questions=questions, postmortem=postmortem,
     )
 
 

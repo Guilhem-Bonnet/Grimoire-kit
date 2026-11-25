@@ -234,12 +234,11 @@ def cadrage_approve(
     chantier: str | None = _chantier_opt,
     actor: str = typer.Option("cli", "--actor", help="Qui valide (journalisé avec la MOA déclarée)."),
 ) -> None:
-    """La MOA valide une exigence — depuis son terminal seulement (le canal humain de `task comment`/`task answer`).
+    """La MOA valide une exigence — depuis son terminal seulement (mêmes signaux que `task comment`/`task answer`).
 
     La validation est scellée au journal d'autorité, avec l'empreinte du texte validé : un agent ou l'orchestrateur,
     même sous mandat, ne peut pas la poser, et modifier l'exigence ensuite la retire (la MOA a validé ce texte-là).
     """
-    from grimoire.cli.cmd_task import _comment_origin
     from grimoire.missions.requirement_gate import approve_requirement, lookup, normalize_key, origin_root
 
     root = path.resolve()
@@ -249,8 +248,7 @@ def cadrage_approve(
         console.print(f"[bold]{key}[/bold] — {escape(found.title)}" + (f" [dim]({found.priority})[/dim]" if found.priority else ""))
         for criterion in found.criteria:
             console.print(f"  - {escape(criterion)}")
-    origin = _comment_origin()
-    entry = _guard(lambda: approve_requirement(root, key, origin=origin, actor=actor))
+    entry = _guard(lambda: approve_requirement(root, key, actor=actor))  # l'origine s'établit dedans
     console.print(
         f"[green]exigence validée[/green] — {entry['requirement']} par la MOA {escape(str(entry['moa']))} "
         f"[dim](journal d'autorité, entrée {entry['seq']})[/dim]"

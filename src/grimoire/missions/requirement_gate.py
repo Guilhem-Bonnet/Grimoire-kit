@@ -6,9 +6,10 @@ sert une exigence validée. Quatre pièces :
 - **la validation** (:func:`approve_requirement`), scellée au journal d'autorité (``~/.grimoire/control``, chaîné par
   hash, écrit par du code du kit) et pas au ledger du projet, que le worker écrit : une ligne forgée au ledger ou un
   statut écrit dans un fichier du cadrage ne compte pour rien. Comme le READY scellé (:mod:`.review_seal`) et la
-  dérogation de l'arbitre (:mod:`.arbiter`), elle se lit là où le worker n'écrit pas. Elle ne s'inscrit que depuis le
-  canal humain de ``task comment`` / ``task answer`` (:func:`grimoire.cli.cmd_task._comment_origin`) : jamais depuis
-  une session d'agent, jamais par l'orchestrateur, même sous mandat (le geste n'est pas de ceux qu'un mandat couvre) ;
+  dérogation de l'arbitre (:mod:`.arbiter`), elle se lit là où le worker n'écrit pas. La fonction établit elle-même
+  l'origine (aucun paramètre ne la porte), avec les signaux de ``task comment`` / ``task answer`` : un marqueur de
+  session ou de terminal d'agent, ``GRIMOIRE_UNATTENDED`` ou l'orchestrateur en processus refusent d'emblée ; sinon un
+  terminal interactif et un « oui » à l'écran sont exigés. Aucun mandat ne couvre ce geste ;
 - **le sceau** porte le projet (sa racine d'origine), la clé de l'exigence (``REQ-001`` ou ``<chantier>/REQ-001``),
   la MOA déclarée et l'**empreinte** du texte validé (formulation, priorité, critères, périmètre) : modifier
   l'exigence après coup, changer de MOA ou la citer depuis un autre projet retire la validation ;
@@ -16,15 +17,21 @@ sert une exigence validée. Quatre pièces :
   posé par ``cadrage plan``) ; une exigence d'un chantier lié à une autre mission que celle de la tâche ne compte pas ;
 - **le gate** ``proposed → ready`` (et, en mode bloquant, ``ready → claimed``, contre une transition forgée au
   ledger ou une exigence modifiée depuis) : refus en ``block``, événement et carte du cockpit en ``warn``. Les
-  natures ``question`` et ``incident`` sont exemptées — l'incident reçoit son exigence au post-mortem ; le passage
-  exempté laisse lui aussi un événement.
+  natures ``question`` et ``incident`` sont exemptées si l'intake déterministe lit le titre de la même façon (une
+  nature ne s'exempte pas sur simple déclaration) — l'incident reçoit son exigence au post-mortem ; le passage
+  exempté laisse lui aussi un événement. L'ancre des questions du cadrage (marqueur posé par ``cadrage plan``) est
+  exemptée : c'est elle qui produit les exigences.
 
 Le projet, la MOA et le mode se lisent à la **racine d'origine** du projet, jamais dans le worktree d'une tâche.
 
-**Limites** (celles du journal d'autorité, :class:`~grimoire.missions.mandate.AuthorityJournal`) : un script qui
-écrit le journal en recalculant la chaîne forge un sceau ; la garde de zone refuse les écritures d'agent par les
-outils et les voies shell reconnues. ``project-context.yaml`` est un fichier du dépôt : repasser le gate en ``warn``
-s'y voit dans le diff, pas ici.
+**Limites**, dites telles qu'elles sont : les signaux d'agent sont des variables d'environnement et un terminal ; un
+processus du même compte qui les efface, ou qui écrit lui-même au journal d'autorité en recalculant la chaîne, forge un
+sceau. Seule la garde de zone de l'hôte (qui refuse aux outils d'agent l'écriture dans la zone de contrôle) l'en
+empêche, pas ce module. ``project-context.yaml`` est un fichier du dépôt : repasser le gate en ``warn`` se voit dans
+le diff et dans ``grimoire doctor`` (validations scellées alors que le gate n'est plus bloquant). Le gate passe par
+:class:`~grimoire.missions.service.TaskService` : les adaptateurs qui transitent sans lui (task-flow, unification,
+pont A2A) ne sont rattrapés qu'au claim et à l'admission, en mode bloquant. Une exigence d'un chantier qui n'est lié à
+aucune mission se rattache à n'importe quelle tâche.
 """
 
 from __future__ import annotations
@@ -69,6 +76,7 @@ __all__ = [
     "pending_review",
     "record_ready",
     "requirement_of",
+    "sealed_validations",
     "validation_of",
 ]
 
@@ -166,15 +174,16 @@ def gate_mode(root: Path) -> GateMode:
     ``warn`` (aucun projet existant n'est bloqué). Une section ``governance`` mal formée **qui demandait** ``block``
     reste bloquante (échec fermé) : corrompre la MOA ne désarme pas le gate ; sans MOA lisible, rien ne se valide.
     """
-    import yaml
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
 
     from grimoire.core.config import REQUIREMENT_GATE_BLOCK, GovernanceConfig
     from grimoire.core.exceptions import GrimoireConfigError
 
     path = root / "project-context.yaml"
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        data = YAML(typ="safe").load(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except (OSError, UnicodeDecodeError, YAMLError):
         return GateMode("warn", problem="project-context.yaml illisible")
     section = data.get("governance") if isinstance(data, dict) else None
     try:
@@ -239,29 +248,71 @@ def origin_root(root: Path) -> Path:
 # ── Validation (le geste de la MOA) ─────────────────────────────────────────
 
 
+def _agent_signal() -> str:
+    """Le signal qui fait de l'appelant une exécution d'agent ou sans humain ; ``""`` s'il n'y en a aucun.
+
+    Les mêmes signaux que :func:`grimoire.cli.cmd_task._comment_origin` : ``GRIMOIRE_UNATTENDED=1``, une session
+    d'hôte identifiée, une variable de terminal d'agent, et l'orchestrateur en processus (le tick).
+    """
+    import os
+
+    from grimoire.core.standard_state import agent_marker, current_session_id
+    from grimoire.missions.mandate import acting_in_process
+
+    if os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1":
+        return "exécution déclarée sans humain (GRIMOIRE_UNATTENDED)"
+    if acting_in_process():
+        return "orchestrateur en processus"
+    if current_session_id():
+        return "session d'hôte identifiée"
+    marker = agent_marker()
+    return f"terminal d'agent ({marker})" if marker else ""
+
+
+def _confirm_human_turn() -> bool:
+    """Le tour humain : un terminal interactif (entrée et sortie d'erreur) et un « oui » donné à l'écran."""
+    import sys
+
+    try:
+        interactive = sys.stdin.isatty() and sys.stderr.isatty()
+    except (AttributeError, ValueError):
+        interactive = False
+    if not interactive:
+        return False
+    try:
+        sys.stderr.write("Cette validation sera enregistrée au nom de la MOA. Est-ce bien vous qui la donnez ? [o/N] ")
+        sys.stderr.flush()
+        answer = sys.stdin.readline().strip().lower()
+    except (OSError, ValueError):
+        return False
+    return answer in ("o", "oui", "y", "yes")
+
+
+def _refuse_origin(why: str) -> RequirementRefusedError:
+    return RequirementRefusedError(
+        "human_required",
+        f"validation refusée : {why}. Seule la MOA, un humain, valide une exigence depuis son terminal — ni un agent, "
+        "ni l'orchestrateur, même sous mandat. Lancez `grimoire cadrage approve` vous-même.",
+    )
+
+
 def approve_requirement(
     root: Path,
     key: str,
     *,
-    origin: str,
     actor: str,
     journal: AuthorityJournal | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Scelle la validation de l'exigence *key* par la MOA déclarée ; rend l'entrée du journal.
 
-    *origin* vient du canal d'appel (:func:`grimoire.cli.cmd_task._comment_origin`), jamais d'un champ libre : tout
-    ce qui n'est pas ``human`` est refusé — session d'agent, terminal non vérifié, orchestrateur (même sous mandat,
-    même par l'API en processus du tick).
+    L'origine n'est pas un paramètre : la fonction l'établit elle-même (:func:`_agent_signal`, puis
+    :func:`_confirm_human_turn`), que l'appel vienne de la CLI ou de l'API Python. Un marqueur d'agent refuse
+    d'emblée, avant toute lecture ; sans terminal interactif ni « oui » à l'écran, rien n'est scellé.
     """
-    from grimoire.missions.mandate import acting_in_process
-
-    if origin != ORIGIN_HUMAN or acting_in_process():
-        raise RequirementRefusedError(
-            "human_required",
-            f"validation refusée : origine {origin!r}. Seule la MOA, un humain, valide une exigence — ni un agent, "
-            "ni l'orchestrateur, même sous mandat. Lancez `grimoire cadrage approve` depuis votre terminal.",
-        )
+    why = _agent_signal()
+    if why:
+        raise _refuse_origin(why)
     key = normalize_key(key)
     project = origin_root(root)
     mode = gate_mode(project)
@@ -287,6 +338,8 @@ def approve_requirement(
         raise RequirementRefusedError("no_text", f"exigence {key} sans formulation : rien à valider.")
     if not requirement.planned:
         raise RequirementRefusedError("out_of_scope", f"exigence {key} hors périmètre (ou Won't) : rien à valider.")
+    if not _confirm_human_turn():
+        raise _refuse_origin("tour humain non attesté (pas de terminal interactif, ou pas de « oui » à l'écran)")
     return _journal(journal).append(
         {
             "type": VALIDATED_ENTRY,
@@ -350,6 +403,18 @@ def validation_of(
     return None, f"exigence {key} non validée par la MOA ({mode.moa})"
 
 
+def sealed_validations(root: Path, *, journal: AuthorityJournal | None = None) -> int:
+    """Le nombre de validations d'exigence scellées pour ce projet (journal illisible : 0, le doctor le dit ailleurs)."""
+    from grimoire.missions.mandate import JournalError
+
+    project = str(origin_root(root))
+    try:
+        entries = _journal(journal).read()
+    except JournalError:
+        return 0
+    return sum(1 for e in entries if e.get("type") == VALIDATED_ENTRY and e.get("project") == project)
+
+
 # ── Le contrôle d'une tâche ─────────────────────────────────────────────────
 
 
@@ -388,15 +453,38 @@ def _chantier_mismatch(home_root: Path, task: MissionTask, key: str) -> str:
     return ""
 
 
+def _is_cadrage_anchor(task: MissionTask) -> bool:
+    """La tâche ancre des questions du cadrage (``cadrage plan``) : marqueur posé par le kit à sa création."""
+    from grimoire.missions.cadrage_plan import is_anchor
+
+    return is_anchor(task)
+
+
+def _intake_nature(title: str) -> str:
+    """La nature que l'intake déterministe lit dans *title* (``""`` si illisible) : une exemption ne se déclare pas seule."""
+    from grimoire.missions.request_kind import classify_request_kind
+
+    try:
+        return str(classify_request_kind(title)["kind"])
+    except (ValueError, KeyError):
+        return ""
+
+
 def check_task(home_root: Path, task: MissionTask, *, journal: AuthorityJournal | None = None) -> RequirementCheck:
     """La tâche sert-elle une exigence validée par la MOA ? Sans écrire : le gate décide quoi en faire."""
     nature = nature_of(task)
+    if _is_cadrage_anchor(task):
+        return RequirementCheck("exempt", "ancre des questions du cadrage : elle produit les exigences", "cadrage")
+    exempt_detail = ""
     if nature in EXEMPT_NATURES:
-        later = " ; l'exigence se pose au post-mortem" if nature == "incident" else ""
-        return RequirementCheck("exempt", f"nature {nature!r} exemptée{later}", nature)
+        proposed = _intake_nature(task.title)
+        if proposed == nature:
+            later = " ; l'exigence se pose au post-mortem" if nature == "incident" else ""
+            return RequirementCheck("exempt", f"nature {nature!r} exemptée{later}", nature)
+        exempt_detail = f" (nature {nature!r} déclarée, mais l'intake lit le titre comme {proposed or 'illisible'!r} : pas d'exemption)"
     raw = requirement_of(task)
     if not raw:
-        return RequirementCheck("gap", f"{task.id} ne cite aucune exigence", nature)
+        return RequirementCheck("gap", f"{task.id} ne cite aucune exigence{exempt_detail}", nature)
     try:
         key = normalize_key(raw)
     except GrimoireMissionError as exc:
@@ -443,13 +531,18 @@ def record_ready(ledger: Any, home_root: Path, task: MissionTask, actor: str) ->
 
 
 def pending_review(home_root: Path, tasks: Iterable[MissionTask], events: Iterable[Any]) -> dict[str, list[str]]:
-    """Pour le cockpit : les tâches ouvertes passées ``ready`` sans exigence validée, et les incidents exemptés.
+    """Pour le cockpit : ce qui reste à faire valider ou à cadrer après coup.
 
-    ``{"unvalidated": [...], "exempted": [...]}`` ; vide quand le projet ne déclare pas de MOA (le doctor avertit
-    déjà de l'absence de section).
+    - ``unvalidated`` : tâches ouvertes passées ``ready`` sans exigence validée ;
+    - ``questions`` : tâches ouvertes exemptées comme question ;
+    - ``postmortem`` : incidents exemptés, ouverts ou clos, tant qu'aucune exigence ne leur est rattachée.
+
+    Vide quand le projet ne déclare pas de MOA (le doctor avertit déjà de l'absence de section). L'appelant teste
+    :func:`gate_mode` avant de lire les événements, qui coûtent sur un gros ledger.
     """
+    out: dict[str, list[str]] = {"unvalidated": [], "questions": [], "postmortem": []}
     if not gate_mode(home_root).declared:
-        return {"unvalidated": [], "exempted": []}
+        return out
     flagged: set[str] = set()
     exempted: set[str] = set()
     for event in events:
@@ -457,12 +550,16 @@ def pending_review(home_root: Path, tasks: Iterable[MissionTask], events: Iterab
             flagged.add(event.entity_id)
         elif event.event_type == EXEMPTED_EVENT:
             exempted.add(event.entity_id)
-    out: dict[str, list[str]] = {"unvalidated": [], "exempted": []}
     for task in tasks:
-        if task.status.value in ("closed", "cancelled"):
+        status = task.status.value
+        if status == "cancelled":
             continue
-        if task.id in flagged and check_task(home_root, task).gap:
+        if task.id in flagged and status != "closed" and check_task(home_root, task).gap:
             out["unvalidated"].append(task.id)
-        elif task.id in exempted and nature_of(task) == "incident":
-            out["exempted"].append(task.id)
+        elif task.id in exempted:
+            nature = nature_of(task)
+            if nature == "incident" and not requirement_of(task):
+                out["postmortem"].append(task.id)
+            elif nature == "question" and status != "closed":
+                out["questions"].append(task.id)
     return out
