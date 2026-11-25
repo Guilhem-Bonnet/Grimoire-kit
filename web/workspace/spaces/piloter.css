@@ -11,7 +11,7 @@
 .seg > button[aria-pressed="true"] .pl-seg-n { color: inherit; }
 .pl-fleet .tbl td { padding-top: 10px; padding-bottom: 10px; }
 .pl-name { font-weight: 500; }
-.pl-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.pl-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
 .pl-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .pl-fleet .tbl { table-layout: fixed; }
 .pl-fleet .tbl th:nth-child(2) { width: 30%; }

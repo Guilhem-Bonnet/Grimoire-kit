@@ -38,7 +38,7 @@
 .dc-label { font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .dc-opt[data-danger="true"] .dc-label { color: var(--bad); }
 .dc-conseq { font-size: 13px; line-height: 1.4; color: var(--ink2); overflow-wrap: anywhere; }
-.dc-tag { align-self: flex-start; padding: 0 8px; border-radius: var(--r-pill); background: var(--pri); color: var(--onpri); font-size: 12px; font-weight: 600; line-height: 18px; }
+.dc-tag { align-self: flex-start; padding: 0 8px; border-radius: var(--r-pill); background: var(--pri); color: var(--onpri); font-size: 11px; font-weight: 600; line-height: 18px; }
 .dc-tag[data-kind="done"] { background: var(--e2); color: var(--ink2); }
 .dc-key { flex: none; align-self: center; min-width: 20px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--e1); color: var(--ink3); font-family: var(--mono); font-size: 11px; text-align: center; }
 .dc-opts[data-grid="true"] .dc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }

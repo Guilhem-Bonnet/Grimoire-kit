@@ -24,14 +24,14 @@
 .dn-facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; font-size: 12px; }
 .dn-facts dt { color: var(--ink2); }
 .dn-facts dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
-.dn-facts .mono { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dn-facts .mono { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dn-shares { display: flex; flex-wrap: wrap; gap: 6px; }
 .dn-console { display: inline-flex; align-items: center; gap: 6px; color: var(--acc); font-size: 12.5px; font-weight: 500;
   text-decoration: none; align-self: flex-start; }
 .dn-console:hover { text-decoration: underline; }
 .dn-cmd { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); margin-top: auto; }
 .dn-cmd-label { color: var(--ink2); font-size: 12px; }
-.dn-cmd code { font-family: var(--mono); font-size: 12px; padding: 4px 8px; border-radius: var(--r); background: var(--hover);
+.dn-cmd code { font-family: var(--mono); font-size: 11.5px; padding: 4px 8px; border-radius: var(--r); background: var(--hover);
   color: var(--ink); overflow-wrap: anywhere; }
 .dn-cmd .btn { align-self: flex-start; }
 .dn-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow);
