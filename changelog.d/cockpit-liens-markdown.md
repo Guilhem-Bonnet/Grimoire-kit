@@ -1,0 +1,1 @@
+- fix(cockpit): le rendu Markdown du cockpit n'acceptait que par omission les schémas d'URL actifs dans les liens ; seuls http, https, mailto et les cibles sans schéma restent des liens, le reste n'affiche que le texte (aussi pour les liens de PR et de CI de Fils et Revue)

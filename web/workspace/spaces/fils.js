@@ -23,6 +23,7 @@ import {
   actionStatus, badge, copyText, failureText, icon, listNav, setActionStatus, spaceHead,
 } from '../shell.js';
 import { agoText, costText } from '../live.js';
+import { safeWebUrl } from '../markdown.js';
 import {
   WINDOW_CHOICES, WINDOW_DEFAULT_MINUTES, clockLabel, layoutFleetThreads, modelLabel, providerToken, threadName,
 } from './fils-geometry.js';
@@ -284,9 +285,9 @@ function renderDetail(ctx, session) {
   if (session.usage) add('Coût', costText(session.usage.cost_usd !== undefined ? { status: session.usage.cost_usd === null ? 'unknown' : 'exact', usd: session.usage.cost_usd } : null));
   if (session.branch) add('Branche', session.branch);
   if (session.worktree) add('Worktree', session.worktree);
-  if (session.pr && session.pr.url) {
+  if (session.pr && safeWebUrl(session.pr.url)) {
     const link = el('a', null, `#${session.pr.number || ''}`);
-    link.href = session.pr.url;
+    link.href = safeWebUrl(session.pr.url);
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
     add('PR', link);
