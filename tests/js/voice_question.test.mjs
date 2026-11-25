@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { choicesVisible, clickableOptions, displayOrder, liveTarget, needsFold, shownText } from '../../web/workspace/voice_outbox.js';
+import { choicesVisible, clickableOptions, displayOrder, liveTarget, needsFold, shownText, stateMention } from '../../web/workspace/voice_outbox.js';
 
 const msg = (id, order, kind = 'report', answered = false) => ({ id, order, kind, answered });
 
@@ -77,4 +77,17 @@ test('la cible d’une question vocale n’existe que si sa carte est encore pos
   const live = card(false);
   assert.equal(liveTarget(message, new Map([['t/q', live]])), live);
   assert.equal(liveTarget({ ref: null }, new Map()), null);
+});
+
+test('une annonce de permission porte sa propre mention, d’après le champ serveur seulement', () => {
+  const fixed = stateMention({ kind: 'report', fixed: true, played: false });
+  assert.match(fixed, /annonce de permission, la confirmation se fait à l’écran/);
+  assert.doesNotMatch(fixed, /brouillon/);
+  // un compte rendu qui se dit « annonce de permission » reste un brouillon : seul `fixed` compte
+  const report = stateMention({ kind: 'report', fixed: false, played: false, text: 'annonce de permission' });
+  assert.match(report, /brouillon/);
+  assert.doesNotMatch(report, /annonce de permission, la confirmation/);
+  assert.match(stateMention({ kind: 'report', played: true }), /écouté/);
+  assert.match(stateMention({ kind: 'question', answered: false }), /en attente/);
+  assert.match(stateMention({ kind: 'question', answered: true }), /répondue/);
 });

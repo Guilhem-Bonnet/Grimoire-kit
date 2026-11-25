@@ -74,15 +74,38 @@ _KIND_LABEL = {
 }
 _DEFAULT_LABEL = "utiliser un outil"
 _TARGET_KEYS = ("file_path", "path", "notebook_path", "filePath")
-#: Seul le nom du programme se dit, et seulement s'il a la forme d'un nom d'exécutable (pas de chemin, pas de phrase).
-#: En minuscules seulement : une majuscule trahit une phrase déguisée (« Dites-oui ») ; sinon « un programme ».
-_BINARY = re.compile(r"[a-z0-9][a-z0-9_.+-]{0,23}")
-#: D'un fichier, seule l'extension se dit, courte et en minuscules ; sinon « un fichier ».
-_EXTENSION = re.compile(r"\.[a-z0-9]{1,5}")
+#: Liste fermée des programmes courants dont le nom se dit ; tout autre nom (même bien formé, il peut être choisi
+#: par l'agent) devient « un programme ».
+KNOWN_PROGRAMS = frozenset(
+    {
+        "git", "gh", "uv", "pip", "pipx", "python", "python3", "node", "bash", "sh", "zsh", "perl", "ruby", "npm", "npx", "pnpm", "yarn", "cargo",
+        "rustc", "go", "make", "cmake", "docker", "ls", "cat", "rm", "mv", "cp", "mkdir", "touch", "grep", "rg",
+        "sed", "awk", "find", "curl", "wget", "tar", "unzip", "pytest", "ruff", "mypy", "grimoire", "terraform",
+        "kubectl", "echo", "cd", "head", "tail", "chmod", "ssh", "scp", "rsync", "java", "mvn", "gradle", "dotnet",
+    }
+)  # fmt: skip
+#: Liste fermée des extensions de fichier qui se disent ; toute autre devient « un fichier ».
+KNOWN_EXTENSIONS = frozenset(
+    {
+        ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml", ".toml", ".md", ".txt", ".html", ".css",
+        ".sh", ".rs", ".go", ".java", ".c", ".h", ".cpp", ".sql", ".ini", ".cfg", ".csv", ".xml", ".lock",
+    }
+)  # fmt: skip
 #: Les enveloppes connues : on dit « par l'intermédiaire de sudo », jamais le mot suivant (choisi par l'agent).
-#: ``bash``/``sh`` ne sont une enveloppe que suivis de ``-c`` ; seuls, ils sont le programme.
-_WRAPPERS = frozenset({"sudo", "env", "nohup", "time", "xargs"})
-_SHELLS = frozenset({"bash", "sh"})
+#: Les shells ne sont une enveloppe que suivis d'un drapeau court contenant ``c`` (``-c``, ``-lc``) ; les
+#: interpréteurs que suivis de leur drapeau de code en ligne ; seuls, ils sont le programme.
+_WRAPPERS = frozenset({"sudo", "doas", "env", "nohup", "time", "xargs", "timeout", "nice", "stdbuf", "command", "exec"})
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "fish"})
+_INLINE_CODE = {
+    "python": ("-c",),
+    "python3": ("-c",),
+    "node": ("-e", "-p", "--eval", "--print"),
+    "perl": ("-e", "-E"),
+    "ruby": ("-e",),
+}
+#: Au plus ce nombre de mots de la commande sont lus pour reconnaître une enveloppe.
+_MAX_WORDS = 8
+_SHELL_FLAG = re.compile(r"-[a-z]*c[a-z]*")
 #: Les natures de question qu'une dictée ne tranche jamais.
 _VOICE_FORBIDDEN_KINDS = frozenset({"permission", "merge"})
 
@@ -178,33 +201,89 @@ def _file_label(call: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             name = PureWindowsPath(value).name if "\\" in value else PurePosixPath(value).name
             suffix = PurePosixPath(name).suffix
-            return f"un fichier {suffix}" if _EXTENSION.fullmatch(suffix) else "un fichier"
+            return f"un fichier {suffix}" if suffix in KNOWN_EXTENSIONS else "un fichier"
     return ""
+
+
+def _background_or_and(command: str, i: int) -> bool:
+    """Le ``&`` en position ``i`` enchaîne-t-il une autre commande (``&&``, ``a & b``) ? Non dans une redirection
+    (``>&``, ``&>``, ``2>&1``) ni en dernier (``nohup x &`` : l'enveloppe reste lue)."""
+    before, after = command[i - 1 : i] if i else "", command[i + 1 : i + 2]
+    if before == ">" or after == ">":
+        return False
+    return after == "&" or bool(command[i + 1 :].strip())
+
+
+def _chained(command: str) -> bool:
+    """Vrai si la commande (forme chaîne) enchaîne plusieurs commandes hors guillemets : ``|`` (donc ``||``),
+    ``;``, ``&`` (hors redirection et ``&`` final), saut de ligne, substitution de processus ``<(`` ``>(``, ``$(`` ou apostrophe inverse (ces deux-là aussi entre guillemets doubles)."""
+    quote = ""
+    skip = False
+    for i, ch in enumerate(command):
+        if skip:  # le caractère protégé par une barre oblique inverse
+            skip = False
+            continue
+        if quote == "'":
+            quote = "" if ch == "'" else quote
+            continue
+        if ch == "\\":
+            skip = True
+            continue
+        if ch == "`" or (ch == "$" and command[i + 1 : i + 2] == "("):
+            return True
+        if quote == '"':
+            quote = "" if ch == '"' else quote
+        elif ch in "'\"":
+            quote = ch
+        elif (
+            ch in "|;\n"
+            or (ch in "<>" and command[i + 1 : i + 2] == "(")
+            or (ch == "&" and _background_or_and(command, i))
+        ):  # substitution de processus
+            return True
+    return False
+
+
+def _inline_code(words: list[str]) -> bool:
+    """Le programme ``words[0]`` reçoit-il du code en ligne ? Le drapeau est cherché dans toute la suite d'options
+    qui suit (jusqu'au premier mot qui ne commence pas par ``-``) : ``bash --norc -c x`` en est un."""
+    first = words[0]
+    options: list[str] = []
+    for word in words[1:]:
+        if not word.startswith("-"):
+            break
+        options.append(word)
+    if first in _SHELLS:
+        return any(_SHELL_FLAG.fullmatch(o) for o in options)
+    return any(o in _INLINE_CODE.get(first, ()) for o in options)
 
 
 def _program(call: dict[str, Any]) -> str:
     """Ce qui se dit du programme lancé : « programme git », « un programme lancé par l'intermédiaire de sudo »,
-    « un programme » (nom à une autre forme qu'un exécutable en minuscules), ou rien sans commande."""
+    « une suite de commandes » (enchaînement shell : aucun nom), « un programme » (nom hors de
+    :data:`KNOWN_PROGRAMS`), ou rien sans commande."""
     raw = call.get("rawInput")
     value = raw.get("command") if isinstance(raw, dict) else None
     words: list[str] = []
     if isinstance(value, list):
-        words = [str(w) for w in value[:2]]
+        words = [str(w) for w in value[:_MAX_WORDS]]
     elif isinstance(value, str):
-        words = value.split(maxsplit=2)[:2]
+        if _chained(value):
+            return "une suite de commandes"
+        words = value.split(maxsplit=_MAX_WORDS)[:_MAX_WORDS]
     if not words:
         return ""
     first = words[0]
-    if first in _WRAPPERS or (first in _SHELLS and words[1:] == ["-c"]):
+    if first in _WRAPPERS or _inline_code(words):
         return f"un programme lancé par l'intermédiaire de {first}"
-    return f"programme {first}" if _BINARY.fullmatch(first) else "un programme"
+    return f"programme {first}" if first in KNOWN_PROGRAMS else "un programme"
 
 
 def permission_spoken(tool_call: Any) -> str:
     """Le message parlé d'une demande de permission : gabarit fixe, sans texte libre de l'agent.
 
-    Lit ``kind`` (liste fermée), le nom du programme lancé (premier mot de ``rawInput.command``, s'il a la forme
-    d'un nom d'exécutable en minuscules ; une enveloppe connue est nommée comme telle) et l'extension du fichier visé ; ignore le reste de la commande, le nom du fichier,
+    Lit ``kind`` (liste fermée), le nom du programme lancé (premier mot de ``rawInput.command``, s'il figure dans
+    :data:`KNOWN_PROGRAMS` ; une enveloppe connue est nommée comme telle) et l'extension du fichier visé ; ignore le reste de la commande, le nom du fichier,
     ``title``, ``content`` et tout autre champ rédigé par l'agent. La consigne de l'écran ouvre et clôt le message ;
     le détail complet est à l'écran.
     """
