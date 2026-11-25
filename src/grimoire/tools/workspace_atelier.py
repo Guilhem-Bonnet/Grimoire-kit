@@ -123,8 +123,8 @@ def _phase_path(root: Path, slug: str, filename: str) -> Path:
     """Chemin d'un fichier de phase, confiné au dossier des cadrages.
 
     Le slug sert seulement à retrouver un chantier existant ; le chemin est
-    construit depuis le slug que rend :func:`list_chantiers`, puis vérifié sous
-    ``cadrage_dir`` une fois résolu (un lien symbolique ne le fait pas sortir).
+    construit depuis le slug que rend :func:`list_chantiers`, puis refusé si un maillon entre la racine du
+    projet et le fichier est un lien symbolique.
     """
     from grimoire.core.chantiers import list_chantiers
 
@@ -134,15 +134,19 @@ def _phase_path(root: Path, slug: str, filename: str) -> Path:
         known = next((c.slug for c in list_chantiers(root) if c.slug == slug), None)
         if known is None:
             raise FileNotFoundError(f"chantier inconnu : {slug!r}")
-    base = cadrage_dir(root, None).resolve()
     raw = cadrage_dir(root, known) / filename
-    # Même garde que `cadrage_interview._load` : ni le fichier ni son dossier ne sont des liens symboliques.
-    if raw.is_symlink() or raw.parent.is_symlink():
-        raise FileNotFoundError(f"chantier inconnu : {slug!r}")
-    path = raw.resolve()
-    if not path.is_relative_to(base):
-        raise FileNotFoundError(f"chantier inconnu : {slug!r}")
-    return path
+    # Même garde que `cadrage_interview._load`, étendue à toute la chaîne : aucun maillon entre la racine du
+    # projet et le fichier n'est un lien symbolique (la base n'est pas résolue : un parent en lien sort du projet).
+    try:
+        parts = raw.relative_to(root).parts
+    except ValueError as exc:
+        raise FileNotFoundError(f"chantier inconnu : {slug!r}") from exc
+    walk = root
+    for part in parts:
+        walk = walk / part
+        if walk.is_symlink():
+            raise FileNotFoundError(f"chantier inconnu : {slug!r}")
+    return raw
 
 
 def _chantier_row(root: Path, chantier: Any) -> dict[str, Any]:
@@ -222,17 +226,38 @@ def document(root: Path, slug: str) -> dict[str, Any]:
 
 # ── Édition d'un bloc ───────────────────────────────────────────────────────
 
-_STRUCTURE = re.compile(r"^\s{0,3}(?:#{1,6}\s|---\s*$)", re.MULTILINE)
+_HEADING = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
+_RULE = re.compile(r"^\s{0,3}---\s*$")
+_FENCE = re.compile(r"^\s{0,3}(```|~~~)")
 
 
 def _refuse_structure(text: str) -> None:
     """Un bloc ne réécrit pas la structure du fichier (même règle que `cadrage_interview._fold`).
 
-    Une ligne de titre ``#`` ou un filet ``---`` ferait naître une rubrique ou un front matter : refusé,
-    comme l'entretien le neutralise en repliant la saisie sur une ligne.
+    Refusés : les caractères de contrôle (sauf saut de ligne et tabulation) et les séparateurs de ligne
+    Unicode ; un bloc de code resté ouvert (il avalerait la suite du fichier) ; hors des blocs de code
+    fermés, toute ligne de titre ``#`` ou filet ``---`` (elle ferait naître une rubrique ou un front matter).
     """
-    if _STRUCTURE.search(text):
-        raise ValueError("un bloc ne peut pas contenir de titre (#) ni de filet (---) : il structurerait le fichier")
+    import unicodedata
+
+    for char in text:
+        if char not in "\n\t" and unicodedata.category(char) in {"Cc", "Zl", "Zp"}:
+            raise ValueError(f"caractère de contrôle refusé (U+{ord(char):04X}) : un bloc reste du texte simple")
+    fence: str | None = None
+    for line in text.split("\n"):
+        if fence is not None:
+            if line.strip().startswith(fence):
+                fence = None
+            continue
+        opened = _FENCE.match(line)
+        if opened:
+            fence = opened.group(1)
+        elif _HEADING.match(line) or _RULE.match(line):
+            raise ValueError(
+                "un bloc ne peut pas contenir de titre (#) ni de filet (---) : il structurerait le fichier"
+            )
+    if fence is not None:
+        raise ValueError("bloc de code non fermé : il avalerait la suite du fichier")
 
 
 def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -267,8 +292,7 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
             raise ConflictError(f"le bloc {block_id!r} n'existe plus dans {phase.filename}") from exc
         if not block.editable:
             raise PermissionError(f"le bloc {block.kind} ne se modifie pas d'ici : il structure le fichier")
-        if block.kind != "paragraphe" or not text.lstrip().startswith(("```", "~~~")):
-            _refuse_structure(text)
+        _refuse_structure(text.replace("\r\n", "\n"))
         updated = atelier_blocs.replace_block(current, block, text)
         if updated != current:
             atomic_write(path, updated.encode("utf-8"))

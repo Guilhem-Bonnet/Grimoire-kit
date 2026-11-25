@@ -166,6 +166,62 @@ def test_block_edit_cannot_rewrite_the_structure(project: Path) -> None:
         assert code == 400 and path.read_bytes() == before
 
 
+def _block_and_fp(project: Path) -> tuple[dict, str, Path]:
+    _on(project)
+    workspace_post(project, f"{P}atelier/chantiers", {"titre": "Un"})
+    path = project / "_grimoire/cadrage/un/02-brainstorm.md"
+    path.write_text(path.read_text(encoding="utf-8") + "\n- Une piste\n", encoding="utf-8")
+    phase = workspace_get(project, f"{P}atelier/chantiers/un", {})["phases"][1]
+    block = next(b for b in phase["blocks"] if b["text"] == "- Une piste")
+    return block, phase["fingerprint"], path
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "```\nx\n```\n## Injecte\n---\nfin",  # clôture fermée puis vraies rubriques
+        "```\navale la suite",  # clôture jamais fermée
+        "~~~\nx\n```\n",  # la clôture ne se ferme pas par un autre marqueur
+    ],
+)
+def test_block_edit_fence_does_not_bypass_the_structure_rule(project: Path, text: str) -> None:
+    block, fp, path = _block_and_fp(project)
+    before = path.read_bytes()
+    assert _put(project, "un", block["id"], {"text": text, "expected": fp})[0] == 400
+    assert path.read_bytes() == before
+
+
+def test_block_edit_keeps_a_closed_code_block_with_hashes_inside(project: Path) -> None:
+    block, fp, _ = _block_and_fp(project)
+    code, _out = _put(project, "un", block["id"], {"text": "```\n## pas un titre\n```", "expected": fp})
+    assert code == 200
+
+
+@pytest.mark.parametrize("char", ["\u2028", "\u2029", "\r", "\x0c", "\x00", "\x85", "\x1b"])
+def test_block_edit_refuses_control_and_line_separator_characters(project: Path, char: str) -> None:
+    block, fp, path = _block_and_fp(project)
+    before = path.read_bytes()
+    code, _ = _put(project, "un", block["id"], {"text": f"a{char}## Injecte", "expected": fp})
+    assert code == 400 and path.read_bytes() == before
+
+
+def test_block_edit_accepts_crlf_and_tabs(project: Path) -> None:
+    block, fp, _ = _block_and_fp(project)
+    assert _put(project, "un", block["id"], {"text": "- a\r\n\t- b", "expected": fp})[0] == 200
+
+
+def test_block_edit_refuses_a_symlinked_parent_folder(project: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """`_grimoire/cadrage` lui-même en lien vers l'extérieur : rien n'est lu ni écrit hors du projet."""
+    block, fp, _ = _block_and_fp(project)
+    outside = tmp_path_factory.mktemp("dehors")
+    cad = project / "_grimoire/cadrage"
+    cad.rename(outside / "cad")
+    cad.symlink_to(outside / "cad", target_is_directory=True)
+    before = {f.name: f.read_bytes() for f in (outside / "cad/un").iterdir()}
+    assert _put(project, "un", block["id"], {"text": "- via le lien", "expected": fp})[0] == 404
+    assert {f.name: f.read_bytes() for f in (outside / "cad/un").iterdir()} == before
+
+
 def test_block_edit_refuses_a_symlinked_phase_file(project: Path) -> None:
     _on(project)
     workspace_post(project, f"{P}atelier/chantiers", {"titre": "Un"})
