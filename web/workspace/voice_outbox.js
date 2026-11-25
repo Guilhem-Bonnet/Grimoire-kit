@@ -10,6 +10,30 @@ export function formatDuration(seconds) {
   return `${Math.floor(total / 60)} min ${String(total % 60).padStart(2, '0')} s`;
 }
 
+/**
+ * Le fil du chat sans la balise parlée du tour : `<voix-JETON>…</voix-JETON>` (le message parlé a sa place
+ * dans la boîte vocale). `token` vient du serveur (`turn_started.spoken_token`) : un contenu cité ne peut
+ * pas le connaître, donc rien d'autre n'est masqué. Seule la QUEUE du texte est retirée — la balise finale,
+ * ou en cours de flux une balise ouverte (ou son début) qui termine le texte ; une balise suivie d'autre
+ * contenu reste affichée telle quelle.
+ */
+export function withoutSpokenTag(text, token) {
+  if (typeof token !== 'string' || !/^[0-9a-f]{8}$/.test(token)) return text;
+  const open = `<voix-${token}>`;
+  const close = `</voix-${token}>`;
+  const at = text.lastIndexOf(open);
+  if (at >= 0) {
+    const rest = text.slice(at + open.length);
+    const end = rest.indexOf(close);
+    if (end < 0) return text.slice(0, at); // en cours de flux : la balise ouverte est la queue
+    return rest.slice(end + close.length).trim() === '' ? text.slice(0, at) : text;
+  }
+  for (let n = Math.min(open.length - 1, text.length); n > 0; n -= 1) {
+    if (text.endsWith(open.slice(0, n))) return text.slice(0, text.length - n); // début de balise en queue
+  }
+  return text;
+}
+
 /** Un `Audio` jouant un WAV en base64. */
 function playWav(base64) {
   const audio = new window.Audio(`data:audio/wav;base64,${base64}`);

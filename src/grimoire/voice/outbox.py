@@ -48,17 +48,24 @@ DETAIL_ON_SCREEN = "Le détail est à l'écran."
 _FENCE_RE = re.compile(r"```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|<pre\b.*?(?:</pre>|\Z)", re.DOTALL | re.IGNORECASE)
 _COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
 #: Un élément ``<nom …>…</nom>`` et son contenu ; non fermé, il court jusqu'à la fin (on ne lit pas un contenu balisé).
-_ELEMENT_RE = re.compile(r"<\s*([^\W\d_][^\s<>/]*)[^<>]*>.*?(?:<\s*/\s*\1\s*>|\Z)", re.DOTALL | re.IGNORECASE)
-_RESIDUAL_TAG_RE = re.compile(r"<[^<>]*>|<\s*/?\s*[^\W\d_][^\s<>]*")
+#: Comme en HTML, ``<`` suivi d'une lettre (ou ``</`` d'une lettre) : « a < b » reste de la prose.
+_ELEMENT_RE = re.compile(r"<([^\W\d_][^\s<>/]*)[^<>]*>.*?(?:</\1\s*>|\Z)", re.DOTALL | re.IGNORECASE)
+_RESIDUAL_TAG_RE = re.compile(r"</?[^\W\d_][^<>\n]{0,200}>|</?[^\W\d_][^\s<>]*")
 _QUOTE_LINE_RE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+)*>")
-_TOKEN_RE = re.compile(r"[0-9a-f]{8}")
+_TOKEN_CHARS = frozenset("0123456789abcdef")
+#: Le repli ne garde qu'une poignée de phrases (~112 mots) : il ne lit jamais plus que ce début de réponse.
+#: Borne aussi le coût des expressions rationnelles, quel que soit le contenu (une réponse peut faire des Mo).
+CLEAN_MAX_CHARS = 8000
 #: Au plus deux resynthèses si le texte est révisé pendant la synthèse ; ensuite on lit la dernière synthèse.
 MAX_RESYNTHESES = 2
-_INLINE_CODE_RE = re.compile(r"(`+)[^`\n]*?\1")
-_LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+_INLINE_CODE_RE = re.compile(r"(`+)[^`\n]{0,500}?\1")
+_LINK_RE = re.compile(r"!?\[([^\]\n]{0,300})\]\([^)\n]{0,1000}\)")
 _URL_RE = re.compile(r"https?://\S+")
+#: Un chemin ne commence qu'en bord de mot (pas de départ à chaque caractère d'une longue suite) et ses
+#: segments sont possessifs : aucun retour arrière, coût linéaire.
 _PATH_RE = re.compile(
-    r"(?<![\w])(?:~|\.{1,2})?/?(?:[\w.@-]+/)+[\w.@-]*|\b[\w-]+\.(?:py|js|mjs|ts|md|json|ya?ml|toml|sh|css|html|rs|txt)\b"
+    r"(?<![\w.@/~-])(?:~|\.{1,2})?/?(?:[\w.@-]++/)++[\w.@-]*+"
+    r"|\b[\w-]+\.(?:py|js|mjs|ts|md|json|ya?ml|toml|sh|css|html|rs|txt)\b"
 )
 _SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
 
@@ -104,6 +111,8 @@ def _clean(text: str) -> tuple[str, bool]:
         removed = removed or n > 0
         return out
 
+    if len(text) > CLEAN_MAX_CHARS:  # avant toute expression rationnelle
+        text, removed = text[:CLEAN_MAX_CHARS], True
     text = html.unescape(text.replace("\r\n", "\n").replace("\r", "\n"))
     text = drop(_FENCE_RE, text)
     text = drop(_COMMENT_RE, text)
@@ -151,22 +160,22 @@ def _cap(text: str, max_seconds: float) -> tuple[str, bool]:
 def _final_tag(reply: str, token: str | None) -> tuple[str | None, bool]:
     """Le contenu de la balise au jeton du tour, et s'il y a ambiguïté.
 
-    Acceptée seulement si ``<voix-JETON>`` et ``</voix-JETON>`` apparaissent chacune une seule fois et que la
+    Acceptée seulement si ``<voix-JETON>`` et ``</voix-JETON>`` (casse exacte) apparaissent chacune une seule fois et que la
     réponse (espaces finaux retirés) se termine par la balise fermante. Toute autre balise (``<voix>``, un autre
     jeton) n'est que du texte. Le jeton présent mais hors de cette forme (recopié, doublé) : ambiguïté, repli.
     """
-    if not token or not _TOKEN_RE.fullmatch(token):
+    if not token or len(token) != 8 or not _TOKEN_CHARS.issuperset(token):
         return None, False
+    # Casse exacte, positions prises sur le texte lui-même (jamais sur une copie transformée), sans regex.
     opening, closing = f"<{SPOKEN_TAG}-{token}>", f"</{SPOKEN_TAG}-{token}>"
-    lowered = reply.lower()
-    n_open, n_close = lowered.count(opening), lowered.count(closing)
+    n_open, n_close = reply.count(opening), reply.count(closing)
     if not n_open and not n_close:
         return None, False
-    body = lowered.rstrip()
+    body = reply.rstrip()
     if n_open != 1 or n_close != 1 or not body.endswith(closing):
         return None, True
-    start = lowered.index(opening) + len(opening)
-    return reply[start : len(body) - len(closing)], False
+    start = body.find(opening) + len(opening)
+    return body[start : len(body) - len(closing)], False
 
 
 def spoken_from_reply(reply: str, max_seconds: float, token: str | None = None) -> tuple[str, str]:

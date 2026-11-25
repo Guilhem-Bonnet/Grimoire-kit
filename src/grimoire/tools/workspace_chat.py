@@ -427,7 +427,10 @@ class Conversation:
             if client is None:
                 return
             prompt = self._with_spoken_brief(text)  # avant turn_started : un arrêt annoncé trouve le tour envoyé
-            self._emit({"type": "turn_started"})
+            started: dict[str, Any] = {"type": "turn_started"}
+            if self._spoken_token:  # le navigateur masque cette balise-là, et elle seule
+                started["spoken_token"] = self._spoken_token
+            self._emit(started)
             self._turn_text = []
             for event in client.prompt(prompt, on_permission=self._ask):
                 if event["type"] == "turn_ended":

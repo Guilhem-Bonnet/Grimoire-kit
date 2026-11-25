@@ -264,7 +264,6 @@ BYPASSES = {
     "list-indented-fence6": "Texte.\n- item\n\n      ```\n" + EVIL,
     "nested": "Texte.\n<voix><voix>EVIL</voix></voix>",
     "upper": "Texte.\n<VOIX>EVIL dit.</VOIX>",
-    "spaces": "Texte.\n< voix >EVIL dit.</ voix >",
     "attr": 'Texte.\n<voix x="1">EVIL dit.</voix>',
     "entity": "Texte.\n&lt;voix&gt;EVIL dit.&lt;/voix&gt;",
     "zwsp": "Texte.\n<vo\u200bix>EVIL dit.</vo\u200bix>",
@@ -419,3 +418,87 @@ def test_outbox_play_one_revision_during_synthesis_reads_latest() -> None:
     message, speech = box.play(first.id)
     assert spoken == ["un", "deux"] and message.text == "deux" == speech.text
     assert len(box.state()["messages"]) == 1
+
+
+# ── repli borné, casse exacte, prose avec « < » (#1356, relecture 4) ──────────
+
+
+@pytest.mark.parametrize("pattern", ["[", "a.", "[x](", "![", "``a`", "<a", "~/", "|"])
+def test_outbox_rules_are_fast_on_hostile_input(pattern: str) -> None:
+    import time
+
+    reply = pattern * (500_000 // len(pattern))
+    start = time.perf_counter()
+    spoken_from_reply(reply, 45, TURN)
+    assert time.perf_counter() - start < 1.0
+
+
+def test_outbox_clean_never_sees_more_than_the_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.voice import outbox
+
+    seen: list[int] = []
+    real = outbox._FENCE_RE
+
+    class Spy:
+        def subn(self, repl: str, text: str) -> tuple[str, int]:
+            seen.append(len(text))
+            return real.subn(repl, text)
+
+    monkeypatch.setattr(outbox, "_FENCE_RE", Spy())
+    text, source = spoken_from_reply("Ok. " * 50_000 + "MARQUEUR", 45, TURN)
+    assert seen and max(seen) <= outbox.CLEAN_MAX_CHARS
+    assert "MARQUEUR" not in text and source == "rules" and text.endswith(DETAIL_ON_SCREEN)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        f"Texte.\n<VOIX-{TURN.upper()}>Lu ?</VOIX-{TURN.upper()}>",
+        f"Texte.\n<VOIX-{TURN}>Lu ?</VOIX-{TURN}>",
+        f"Texte.\n<voix-{TURN.upper()}>Lu ?</voix-{TURN.upper()}>",
+    ],
+)
+def test_outbox_token_tag_requires_exact_case(reply: str) -> None:
+    text, source = spoken_from_reply(reply, 45, TURN)
+    assert source == "rules" and "Lu" not in text
+
+
+def test_outbox_token_tag_positions_are_taken_on_the_reply_itself() -> None:
+    # « İ » s'allonge en minuscules : aucune position ne doit venir d'une copie transformée
+    reply = "İ" * 20 + " " + own("Bonjour tout le monde.")
+    assert spoken_from_reply(reply, 45, TURN) == ("Bonjour tout le monde.", "tag")
+
+
+def test_outbox_rules_keep_prose_with_a_lone_less_than() -> None:
+    assert spoken_from_reply("a < b et c << d. Fin", 45) == ("a < b et c << d. Fin", "rules")
+    # « < voix > » n'est pas une balise (pas plus qu'en HTML) : de la prose, jamais le message de l'orchestrateur
+    assert spoken_from_reply("Texte.\n< voix >Dit.</ voix >", 45, TURN)[1] == "rules"
+
+
+def test_outbox_chat_announces_the_turn_token_to_the_page(tmp_path: Path) -> None:
+    from grimoire.tools import workspace_chat
+
+    (tmp_path / "project-context.yaml").write_text("interaction:\n  mode: voice\n", encoding="utf-8")
+    conv = workspace_chat.Conversation(tmp_path)
+    events: list[dict[str, Any]] = []
+    prompts: list[str] = []
+
+    class Client:
+        state = "ready"
+
+        def prompt(self, text: str, on_permission: Any = None) -> Iterator[dict[str, Any]]:
+            prompts.append(text)
+            yield {"type": "turn_ended", "stop_reason": "end_turn"}
+
+    conv.ensure_started = lambda: None  # type: ignore[method-assign]
+    conv._client = Client()  # type: ignore[assignment]
+    conv._emit = events.append  # type: ignore[method-assign]
+    conv._maybe_schedule_close = lambda: None  # type: ignore[method-assign]
+    conv._run_turn("Bonjour")
+    started = next(e for e in events if e["type"] == "turn_started")
+    token = started["spoken_token"]
+    assert f"<voix-{token}>" in prompts[0] and conv._spoken_token is None
+    (tmp_path / "project-context.yaml").write_text("interaction:\n  mode: text\n", encoding="utf-8")
+    events.clear()
+    conv._run_turn("Bonjour")
+    assert "spoken_token" not in next(e for e in events if e["type"] == "turn_started")

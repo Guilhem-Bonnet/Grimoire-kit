@@ -17,7 +17,7 @@
 import { api, host, projectName } from './api.js';
 import { renderMarkdown } from './markdown.js';
 import { createVoiceInput } from './voice.js';
-import { createVoiceOutbox } from './voice_outbox.js';
+import { createVoiceOutbox, withoutSpokenTag } from './voice_outbox.js';
 
 function mk(tag, attrs, ...children) {
   const node = document.createElement(tag);
@@ -136,12 +136,7 @@ export function createChat({ readOnly = () => false } = {}) {
   }
 
   // ── Messages : le texte arrive par morceaux, le markdown se rend sur le tout ─
-  // Le message parlé (balise au jeton du tour) a sa place dans la boîte vocale : le fil ne le montre pas,
-  // même en cours de flux (balise ouvrante encore incomplète).
-  const SPOKEN_TAG_RE = /<voix-[0-9a-f]{8}>[\s\S]*?(?:<\/voix-[0-9a-f]{8}>|$)|<(?:v(?:o(?:i(?:x(?:-[0-9a-f]{0,8})?)?)?)?)?$/g;
-  function withoutSpokenTag(text) {
-    return text.replace(SPOKEN_TAG_RE, '');
-  }
+  let spokenToken = null; // jeton de la balise parlée du tour en cours (donné par le serveur)
 
   function addText(role, text) {
     const follow = nearBottom();
@@ -160,7 +155,7 @@ export function createChat({ readOnly = () => false } = {}) {
     current.text += text;
     if (role === 'agent') current.text = current.text.replace(/\[\[pilote:(on|off)\]\]/g, '');
     if (role === 'user') current.body.textContent = current.text;
-    else markdownInto(current.body, role === 'agent' ? withoutSpokenTag(current.text) : current.text);
+    else markdownInto(current.body, role === 'agent' ? withoutSpokenTag(current.text, spokenToken) : current.text);
     if (follow) scrollDown();
   }
 
@@ -430,6 +425,7 @@ export function createChat({ readOnly = () => false } = {}) {
         current = null;
         break;
       case 'turn_started':
+        spokenToken = event.spoken_token || null; // jeton du message parlé de ce tour
         setBusy(true);
         break;
       case 'update': {
