@@ -1,0 +1,23 @@
+{
+  "skill_name": "grimoire-cadrage",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Je voudrais un tableau de bord pour suivre l'avancement des équipes.",
+      "expected_output": "Lance `grimoire cadrage interview --json`, montre la nature proposée, pose une seule question adaptée à la demande puis la reformule, consigne la réponse par `grimoire cadrage interview answer`, challenge (plus simple ? pré-mortem), s'arrête quand `grimoire cadrage check` est satisfait, rédige des exigences avec critères d'acceptation et les soumet à la MOA sans les valider elle-même.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Le service de paiement est en panne depuis dix minutes.",
+      "expected_output": "Ne mène pas l'entretien complet : trois questions au plus, rétablit le service d'abord, renvoie le post-mortem après.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Corrige la faute dans le titre de README.md : « Grimiore » doit être « Grimoire ».",
+      "expected_output": "Fait la correction directement, sans entretien de cadrage.",
+      "files": []
+    }
+  ]
+}

@@ -3730,6 +3730,10 @@
    "version": "3.4.2",
    "path": "framework/memory/mem0-bridge.py"
   },
+  "d9c0fcf16b9bf1bb43abb57a3e14f0f3de0f197d39f558da518710441cc4fa94": {
+   "version": "3.105.0",
+   "path": "archetypes/meta/agents/concierge.md"
+  },
   "da43e73863741d46d59b1c17a2ec4a2d0c3f8531076b4d7831e6f3ca0aba6074": {
    "version": "3.61.1",
    "path": "archetypes/meta/agents/concierge.md"
