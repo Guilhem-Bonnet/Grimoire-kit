@@ -1145,3 +1145,23 @@ def test_une_reponse_humaine_apres_l_arret_n_est_plus_une_decision_sans_reponse(
     human(service, tid, qid, "reprendre")
     (entry,) = [e for e in journal(service) if e["task_id"] == tid]
     assert entry["revert"] != "unanswered"
+
+
+def test_le_jugement_assume_sur_une_decision_posterieure_ne_rouvre_pas_la_decision_reprise(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1 (précédent) inscrite sans réponse, reprise par l'humain ; une session tranche ensuite par jugement assumé (D2)."""
+    service = pilot(project, ON)
+    tid, qid = decided_without_answer(service, project, monkeypatch)
+    (first,) = events(service, tid, DECIDED_EVENT)
+    assert first.payload["recommendation_source"] == "precedent"
+    revert(service, tid, qid, "guilhem")
+    answer(service, tid, qid, "abandonner", confidence="high", justification="la couverture manquante est un oubli mineur")
+    second = events(service, tid, DECIDED_EVENT)[-1]
+    assert second.id != first.id and second.payload["option"] != first.payload["option"]
+    assert len(applied(service, tid)) == 1
+    entries = {e["id"]: e for e in journal(service) if e["task_id"] == tid}
+    assert entries[first.id]["reverted_at"] and entries[first.id]["revert"] == ""  # D1 reste reprise
+    assert not entries[second.id]["reverted_at"]  # D2 garde son propre état
+    assert [e["option"] for e in review_entries(service)] == []  # un jugement assumé n'est pas une décision à revoir
+    assert first.payload["option"] not in [e["option"] for e in review_entries(service)]

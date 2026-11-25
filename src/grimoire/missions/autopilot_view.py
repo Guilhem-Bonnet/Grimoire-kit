@@ -9,7 +9,9 @@ Lecture et gestes de relecture seulement : l'activation reste dans :class:`~grim
   avec ce que « Revenir » ferait.
 - :func:`revert` — « Revenir » quand le geste l'est : une tâche abandonnée par le pilote est réouverte, une tâche rendue
   prête (réponse pas encore reprise par un worker) est bloquée pour que l'humain tranche ; une décision dont la réponse
-  n'a jamais été inscrite est seulement close (la question reste à l'humain) ; sinon refus, rien d'écrit.
+  n'a jamais été inscrite est seulement close : le tick ne retranche plus la question (ni précédent ni défaut,
+  elle est reportée à l'humain) ; une session pilote peut encore la trancher par jugement assumé (#1255, point 1,
+  décision du propriétaire) ; sinon refus, rien d'écrit.
 """
 
 from __future__ import annotations
@@ -187,8 +189,9 @@ def _pilot_answer(event: Any) -> bool:
     return bool(event.event_type == HUMAN_ANSWERED_EVENT and event.payload.get("origin") == ORIGIN_ORCHESTRATOR)
 
 
-def _position(decisions: list[tuple[str, int]], decision_id: str) -> int:
-    return next((at for known, at in decisions if known == decision_id), -1)
+def _question_key(event: Any) -> tuple[Any, Any]:
+    p = event.payload
+    return p.get("task_id") or event.entity_id, p.get("question_id")
 
 
 def reverted_decisions(events: list[Any]) -> dict[str, str]:
@@ -199,29 +202,34 @@ def reverted_decisions(events: list[Any]) -> dict[str, str]:
     l'ordre du ledger.
 
     Règle de lecture, insensible à l'ordre d'écriture entre « Revenir » et la réponse : une reprise ``unanswered`` ne
-    couvre sa décision que si aucune réponse du pilote à cette question ne la suit au ledger. Sinon la réponse est
-    appliquée : la reprise est sans effet, la décision reste visible et se défait par le chemin normal.
+    couvre sa décision D que si aucune réponse du pilote ne suit D **avant la décision suivante** de la même question
+    (une réponse appartient à la décision qui la précède immédiatement). Sinon la réponse est appliquée : la reprise est
+    sans effet, la décision reste visible et se défait par le chemin normal. La réponse à une décision postérieure ne
+    rouvre donc pas une décision que l'humain a reprise sans qu'elle ait été appliquée.
     """
-    answered: dict[tuple[Any, Any], int] = {}  # position de la dernière réponse du pilote, par question
+    decisions: dict[tuple[Any, Any], list[tuple[str, int]]] = {}
+    answers: dict[tuple[Any, Any], list[int]] = {}
     for index, event in enumerate(events):
-        if _pilot_answer(event):
-            p = event.payload
-            answered[(p.get("task_id") or event.entity_id, p.get("question_id"))] = index
-    earlier: dict[tuple[Any, Any], list[tuple[str, int]]] = {}
+        if event.event_type == DECIDED_EVENT:
+            decisions.setdefault(_question_key(event), []).append((event.id, index))
+        elif _pilot_answer(event):
+            answers.setdefault(_question_key(event), []).append(index)
+
+    def answered(key: tuple[Any, Any], at: int) -> bool:
+        following = min((i for _id, i in decisions.get(key, []) if i > at), default=len(events))
+        return any(at < i < following for i in answers.get(key, []))
+
     out: dict[str, str] = {}
     for index, event in enumerate(events):
-        p = event.payload
-        key = (p.get("task_id") or event.entity_id, p.get("question_id"))
-        if event.event_type == DECIDED_EVENT:
-            earlier.setdefault(key, []).append((event.id, index))
-        elif event.event_type == REVERTED_EVENT:
-            named = p.get("decision_id")
-            for decision_id, at in (
-                [(str(named), _position(earlier.get(key, []), str(named)))] if named else earlier.get(key, [])
-            ):
-                if p.get("how") == "unanswered" and answered.get(key, -1) > at:
-                    continue
-                out[decision_id] = event.created_at
+        if event.event_type != REVERTED_EVENT:
+            continue
+        key = _question_key(event)
+        named = event.payload.get("decision_id")
+        known = [(i, at) for i, at in decisions.get(key, []) if at < index]
+        for decision_id, at in [(i, at) for i, at in known if i == str(named)] if named else known:
+            if event.payload.get("how") == "unanswered" and answered(key, at):
+                continue
+            out[decision_id] = event.created_at
     return out
 
 
