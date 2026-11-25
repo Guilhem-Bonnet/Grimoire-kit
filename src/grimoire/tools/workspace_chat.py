@@ -363,20 +363,7 @@ class Conversation:
         """
         from grimoire.tools import workspace_chat_pilot
 
-        if dictation:
-            from grimoire.voice.safety import VOICE_RESERVED_ANSWER, voice_may_answer
-
-            row = next(
-                (
-                    r
-                    for r in workspace_chat_pilot.pending_questions(self.root)
-                    if r["task_id"] == task_id and r["question_id"] == question_id
-                ),
-                None,
-            )
-            if row is not None and not voice_may_answer(row):
-                raise ValueError(VOICE_RESERVED_ANSWER)
-        result = workspace_chat_pilot.answer(self.root, task_id, question_id, text)
+        result = workspace_chat_pilot.answer(self.root, task_id, question_id, text, dictation=dictation)
         self._emit({"type": "user", "text": text, **({"dictation": True} if dictation else {})})
         self.pull_questions(interval=0.0)
         return result
@@ -663,7 +650,9 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     text = body.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("text requis : le message ne peut pas être vide")
-    dictation = body.get("dictation") is True  # le texte corrigé par la personne part tel quel, la mention en plus
+    from grimoire.voice.safety import marked_dictation
+
+    dictation = marked_dictation(body)  # le texte corrigé par la personne part tel quel, la mention en plus
     task_id = body.get("task_id")
     target = body.get("answer_to")
     answer_to = None
@@ -681,9 +670,9 @@ def chat_permission(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     request_id, decision = body.get("request_id"), body.get("decision")
     if not isinstance(request_id, (str, int)) or not isinstance(decision, str):
         raise ValueError("request_id et decision requis")
-    if body.get("dictation") or body.get("source") == "voice":  # lot V5 : seul le clic à l'écran tranche
-        from grimoire.voice.safety import VOICE_CANNOT_APPROVE
+    from grimoire.voice.safety import VOICE_CANNOT_APPROVE, marked_dictation
 
+    if marked_dictation(body):  # lot V5 : seul le clic à l'écran tranche
         raise ValueError(VOICE_CANNOT_APPROVE)
     return _conversation(root).decide(str(request_id), decision)
 

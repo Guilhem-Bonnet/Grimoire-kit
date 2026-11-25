@@ -6,8 +6,10 @@ Deux entrées pour les routes du cockpit (``voice/config`` en lecture, ``voice/t
   mode ``text`` ou avec un moteur client (navigateur), la réponse est ``available: false`` et sa raison.
 - :func:`transcribe` décode l'audio (WAV en base64, JSON comme toute écriture du cockpit), contrôle son
   en-tête et sa durée (:func:`grimoire.voice.safety.check_wav`), le confie au moteur choisi (lot V1) avec une
-  amorce tirée du projet, puis supprime le fichier temporaire — y compris en cas d'échec. Le texte rendu est
-  celui du moteur, tel quel : aucun LLM ne le réécrit. Seules des métadonnées (texte, langue, durée) en sortent.
+  amorce tirée du projet, puis supprime le fichier (0600, sous le dossier d'exécution du projet,
+  :mod:`grimoire.voice.incoming`) — y compris en cas d'échec ; les orphelins d'un arrêt brutal sont purgés passé
+  ``voice.incoming_ttl_seconds``. Le texte rendu est celui du moteur, tel quel : aucun LLM ne le réécrit. Seules
+  des métadonnées (texte, langue, durée) en sortent.
 
 Les moteurs sont ceux du pool du processus (:mod:`grimoire.voice.engine_pool`) : un seul modèle de
 reconnaissance chargé pour tous les projets enrôlés.
@@ -21,12 +23,12 @@ import base64
 import binascii
 import contextlib
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from grimoire.voice.engine_pool import PooledEngines, pool
 from grimoire.voice.engines import VoiceError, availability, get_spec
+from grimoire.voice.incoming import purge, recording
 from grimoire.voice.safety import ALLOWED_SAMPLE_RATES, check_wav
 from grimoire.voice.settings import MAX_RECORD_CEILING_S, VoiceSettings, load_voice_settings
 
@@ -95,6 +97,7 @@ def voice_config(root: Path, _query: Any = None) -> dict[str, Any]:
     """Ce que la page doit savoir pour montrer (ou non) le bouton d'enregistrement."""
     settings = load_voice_settings(root)
     reason = _unavailable_reason(settings)
+    purge(root, settings.incoming_ttl_s)  # démarrage du service vocal : les orphelins d'un arrêt brutal partent
     return {
         "available": reason is None,
         "reason": reason or "",
@@ -167,18 +170,13 @@ def transcribe(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     data = _decode(body, max_audio_bytes(settings))
     check_wav(data, settings.max_record_s)
     engines = _engines_for(root, settings)
-    handle = tempfile.NamedTemporaryFile(prefix="grimoire-stt-", suffix=".wav", delete=False)  # noqa: SIM115
-    path = Path(handle.name)
-    try:
-        with handle:
-            handle.write(data)
+    purge(root, settings.incoming_ttl_s)
+    with recording(root, data) as path:  # sous le dossier d'exécution du projet, 0600, supprimé quoi qu'il arrive
         del data
         try:
             transcript = engines.transcribe(path, vocabulary=project_vocabulary(root))
         except VoiceError as exc:
             raise ValueError(f"transcription impossible : {exc.reason}") from None
-    finally:
-        path.unlink(missing_ok=True)
     return {
         "ok": True,
         "text": transcript.text,

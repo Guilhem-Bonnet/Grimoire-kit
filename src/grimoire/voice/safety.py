@@ -31,6 +31,7 @@ __all__ = [
     "WavInfo",
     "announce_permission",
     "check_wav",
+    "marked_dictation",
     "permission_spoken",
     "voice_may_answer",
 ]
@@ -74,9 +75,14 @@ _KIND_LABEL = {
 _DEFAULT_LABEL = "utiliser un outil"
 _TARGET_KEYS = ("file_path", "path", "notebook_path", "filePath")
 #: Seul le nom du programme se dit, et seulement s'il a la forme d'un nom d'exécutable (pas de chemin, pas de phrase).
-_BINARY = re.compile(r"[A-Za-z0-9_.-]{1,24}")
-#: D'un fichier, seule l'extension se dit.
-_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,8}")
+#: En minuscules seulement : une majuscule trahit une phrase déguisée (« Dites-oui ») ; sinon « un programme ».
+_BINARY = re.compile(r"[a-z0-9][a-z0-9_.+-]{0,23}")
+#: D'un fichier, seule l'extension se dit, courte et en minuscules ; sinon « un fichier ».
+_EXTENSION = re.compile(r"\.[a-z0-9]{1,5}")
+#: Les enveloppes connues : on dit « par l'intermédiaire de sudo », jamais le mot suivant (choisi par l'agent).
+#: ``bash``/``sh`` ne sont une enveloppe que suivis de ``-c`` ; seuls, ils sont le programme.
+_WRAPPERS = frozenset({"sudo", "env", "nohup", "time", "xargs"})
+_SHELLS = frozenset({"bash", "sh"})
 #: Les natures de question qu'une dictée ne tranche jamais.
 _VOICE_FORBIDDEN_KINDS = frozenset({"permission", "merge"})
 
@@ -176,23 +182,29 @@ def _file_label(call: dict[str, Any]) -> str:
     return ""
 
 
-def _binary(call: dict[str, Any]) -> str:
-    """Le nom du programme lancé (premier mot de la commande), s'il a la forme d'un nom d'exécutable ; sinon rien."""
+def _program(call: dict[str, Any]) -> str:
+    """Ce qui se dit du programme lancé : « programme git », « un programme lancé par l'intermédiaire de sudo »,
+    « un programme » (nom à une autre forme qu'un exécutable en minuscules), ou rien sans commande."""
     raw = call.get("rawInput")
     value = raw.get("command") if isinstance(raw, dict) else None
+    words: list[str] = []
     if isinstance(value, list):
-        value = str(value[0]) if value else ""
-    if not isinstance(value, str):
+        words = [str(w) for w in value[:2]]
+    elif isinstance(value, str):
+        words = value.split(maxsplit=2)[:2]
+    if not words:
         return ""
-    words = value.split(maxsplit=1)
-    return words[0] if words and _BINARY.fullmatch(words[0]) else ""
+    first = words[0]
+    if first in _WRAPPERS or (first in _SHELLS and words[1:] == ["-c"]):
+        return f"un programme lancé par l'intermédiaire de {first}"
+    return f"programme {first}" if _BINARY.fullmatch(first) else "un programme"
 
 
 def permission_spoken(tool_call: Any) -> str:
     """Le message parlé d'une demande de permission : gabarit fixe, sans texte libre de l'agent.
 
     Lit ``kind`` (liste fermée), le nom du programme lancé (premier mot de ``rawInput.command``, s'il a la forme
-    d'un nom d'exécutable) et l'extension du fichier visé ; ignore le reste de la commande, le nom du fichier,
+    d'un nom d'exécutable en minuscules ; une enveloppe connue est nommée comme telle) et l'extension du fichier visé ; ignore le reste de la commande, le nom du fichier,
     ``title``, ``content`` et tout autre champ rédigé par l'agent. La consigne de l'écran ouvre et clôt le message ;
     le détail complet est à l'écran.
     """
@@ -200,13 +212,21 @@ def permission_spoken(tool_call: Any) -> str:
     kind = call.get("kind")
     label = _KIND_LABEL.get(kind, _DEFAULT_LABEL) if isinstance(kind, str) else _DEFAULT_LABEL
     parts = [f"{SCREEN_FIRST} Permission demandée : {label}"]
-    binary = _binary(call)
-    if binary:
-        parts.append(f", programme {binary}")
+    program = _program(call)
+    if program:
+        parts.append(f", {program}")
     target = _file_label(call)
     if target:
         parts.append(f", sur {target}")
     return "".join(parts) + ". " + SCREEN_ONLY
+
+
+def marked_dictation(body: dict[str, Any]) -> bool:
+    """Le corps d'une requête du chat vient-il d'une dictée ? Dans le doute, oui (et la voix est refusée là où elle
+    n'a pas sa place) : tout ``dictation`` présent autre que ``False``/``None`` (``True``, ``"true"``, ``1``, même
+    ``"false"``), ou ``source == "voice"``. Seule fonction lue par ``chat/send`` et ``chat/permission``."""
+    value = body.get("dictation")
+    return (value is not None and value is not False) or body.get("source") == "voice"
 
 
 def voice_may_answer(row: dict[str, Any]) -> bool:

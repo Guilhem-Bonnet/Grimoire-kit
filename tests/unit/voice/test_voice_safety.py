@@ -23,6 +23,7 @@ from grimoire.tools import workspace_chat
 from grimoire.voice import outbox_service, stt_service
 from grimoire.voice.engine_pool import EnginePool, PooledEngines
 from grimoire.voice.engines import EngineSpec, Speech, SpeechToText, TextToSpeech, Transcript, register_engine
+from grimoire.voice.incoming import INCOMING_RELPATH
 from grimoire.voice.outbox import Outbox
 from grimoire.voice.safety import (
     SCREEN_FIRST,
@@ -215,10 +216,13 @@ def test_safety_permission_template_reads_structured_fields_only() -> None:
         ),
         (
             {"kind": "execute", "rawInput": {"command": "/usr/bin/curl http://x"}},
-            "lancer une commande",
-        ),  # chemin : rien
-        ({"kind": "execute", "rawInput": {"command": "Accordé_par_la_voix_dites_oui x"}}, "lancer une commande"),
-        ({"kind": "execute", "rawInput": {"command": "a" * 25}}, "lancer une commande"),
+            "lancer une commande, un programme",
+        ),  # chemin : sans nom
+        (
+            {"kind": "execute", "rawInput": {"command": "Accordé_par_la_voix_dites_oui x"}},
+            "lancer une commande, un programme",
+        ),
+        ({"kind": "execute", "rawInput": {"command": "a" * 25}}, "lancer une commande, un programme"),
     ],
 )
 def test_safety_permission_template_is_closed(call: Any, middle: str) -> None:
@@ -316,11 +320,12 @@ def questions(
         {"task_id": "T1", "question_id": "q3", "kind": "choice", "reserved": True, "options": ["oui", "non"]},
     ]
     monkeypatch.setattr(workspace_chat_pilot, "pending_questions", lambda _root: rows)
-    monkeypatch.setattr(
-        workspace_chat_pilot,
-        "answer",
-        lambda _root, task_id, qid, text: answered.append(text) or {"ok": True, "task_id": task_id},
-    )
+
+    class FakeService:
+        def answer(self, task_id: str, text: str, *_a: Any, **_k: Any) -> None:
+            answered.append(text)
+
+    monkeypatch.setattr(workspace_chat_pilot, "_service", lambda _root: FakeService())
     conv = workspace_chat.Conversation(tmp_path)
     monkeypatch.setattr(workspace_chat, "_conversation", lambda _root: conv)
     yield conv, answered
@@ -416,11 +421,13 @@ def test_safety_pool_still_unloads_after_idle(counting: type[Loads], clock: Any,
 
 class FailingSTT(SpeechToText):
     mode = "ok"
+    seen: ClassVar[list[tuple[Path, int]]] = []
 
     def __init__(self, **_options: Any) -> None:
         pass
 
     def transcribe(self, audio: Any, *, language: str | None = None, vocabulary: Sequence[str] = ()) -> Transcript:
+        FailingSTT.seen.append((Path(audio), Path(audio).stat().st_mode & 0o777))
         if FailingSTT.mode == "boom":
             raise RuntimeError("panne du moteur")
         if FailingSTT.mode == "interrupt":
@@ -444,6 +451,7 @@ def stt_project(
     )
     monkeypatch.setattr(stt_service, "project_vocabulary", lambda _root: ["projet"])
     FailingSTT.mode = "ok"
+    FailingSTT.seen = []
     yield root
     stt_service.reset_engines()
 
@@ -464,8 +472,91 @@ def test_safety_no_audio_file_left_after_transcription(stt_project: Path, mode: 
     else:
         with pytest.raises((ValueError, KeyboardInterrupt)):
             stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
-    assert list(scratch.iterdir()) == []
+    assert list(scratch.iterdir()) == []  # rien dans le dossier temporaire du système
+    path, mode_bits = FailingSTT.seen[0]
+    assert path.parent == stt_project / INCOMING_RELPATH and path.name.startswith("grimoire-stt-")
+    assert mode_bits == 0o600
     assert not [p for p in stt_project.rglob("*") if p.suffix == ".wav"]
+    assert (stt_project / INCOMING_RELPATH / ".gitignore").read_text(encoding="utf-8").splitlines()[-1] == "*"
+
+
+def test_safety_incoming_dir_is_ignored_by_git(stt_project: Path) -> None:
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        pytest.skip("git absent")
+    subprocess.run(["git", "init", "-q", str(stt_project)], check=True)
+    stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
+    probe = stt_project / INCOMING_RELPATH / "grimoire-stt-x.wav"
+    probe.write_bytes(b"x")
+    ignored = subprocess.run(["git", "-C", str(stt_project), "check-ignore", "-q", str(probe)], check=False)
+    assert ignored.returncode == 0
+
+
+def _orphan(folder: Path, name: str, age_s: float) -> Path:
+    import os
+
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_bytes(b"RIFF")
+    old = time.time() - age_s
+    os.utime(path, (old, old))
+    return path
+
+
+def test_safety_old_orphans_are_purged_recent_ones_kept(stt_project: Path) -> None:
+    folder = stt_project / INCOMING_RELPATH
+    old = _orphan(folder, "grimoire-stt-ancien.wav", 3 * 86_400)
+    recent = _orphan(folder, "grimoire-stt-recent.wav", 10)
+    other = _orphan(folder, "notes.wav", 3 * 86_400)  # pas au motif : jamais touché
+    stt_service.voice_config(stt_project)  # démarrage du service
+    assert not old.exists() and recent.exists() and other.exists()
+    old = _orphan(folder, "grimoire-stt-autre.wav", 3 * 86_400)
+    stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})  # et à chaque transcription
+    assert not old.exists() and recent.exists()
+
+
+def test_safety_purge_ttl_is_configurable(stt_project: Path) -> None:
+    from grimoire.voice.incoming import purge
+
+    folder = stt_project / INCOMING_RELPATH
+    path = _orphan(folder, "grimoire-stt-moyen.wav", 600)
+    assert purge(stt_project, 3600) == 0 and path.exists()
+    assert purge(stt_project, 300) == 1 and not path.exists()
+    assert settings_from_mapping({"voice": {"incoming_ttl_seconds": 60}}).incoming_ttl_s == 60.0
+    bad = settings_from_mapping({"voice": {"incoming_ttl_seconds": 0}})
+    assert bad.incoming_ttl_s == 300.0 and any("incoming_ttl_seconds" in p for p in bad.problems)
+
+
+def test_safety_purge_never_follows_symlinks(stt_project: Path, tmp_path: Path) -> None:
+    import os
+
+    from grimoire.voice.incoming import purge
+
+    outside = _orphan(tmp_path / "ailleurs", "precieux.wav", 3 * 86_400)
+    folder = stt_project / INCOMING_RELPATH
+    folder.mkdir(parents=True)
+    link = folder / "grimoire-stt-lien.wav"
+    link.symlink_to(outside)
+    old = time.time() - 3 * 86_400
+    os.utime(link, (old, old), follow_symlinks=False)
+    assert purge(stt_project, 60) == 0
+    assert outside.exists() and link.is_symlink()
+
+
+def test_safety_symlinked_incoming_dir_is_refused(stt_project: Path, tmp_path: Path) -> None:
+
+    from grimoire.voice.incoming import purge
+
+    target = tmp_path / "cible"
+    precious = _orphan(target, "grimoire-stt-precieux.wav", 3 * 86_400)
+    (stt_project / INCOMING_RELPATH).parent.mkdir(parents=True)
+    (stt_project / INCOMING_RELPATH).symlink_to(target)
+    assert purge(stt_project, 60) == 0 and precious.exists()
+    with pytest.raises(ValueError, match="lien symbolique"):
+        stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
+    assert FailingSTT.seen == []
 
 
 def test_safety_refused_header_never_reaches_disk_or_engine(stt_project: Path) -> None:
@@ -612,3 +703,126 @@ def test_safety_pool_refuses_a_nested_call_that_would_evict(counting: type[Loads
     PooledEngines(other, pool).transcribe(b"x")  # hors appel, l'autre moteur prend la place
     assert counting.created == 2 and counting.live == 1
     pool.reset()
+
+
+# ── marqueur de dictée : une seule lecture, dans le doute une dictée ──────────
+
+MARKERS = [
+    ({"dictation": True}, True),
+    ({"dictation": "true"}, True),
+    ({"dictation": 1}, True),
+    ({"dictation": "yes"}, True),
+    ({"dictation": "false"}, True),  # une chaîne présente : dans le doute, c'est une dictée
+    ({"source": "voice"}, True),
+    ({"dictation": False}, False),
+    ({"dictation": None}, False),
+    ({}, False),
+]
+
+
+@pytest.mark.parametrize(("extra", "dictated"), MARKERS, ids=[repr(m[0]) for m in MARKERS])
+def test_safety_dictation_marker_is_read_the_same_by_both_routes(
+    questions: tuple[workspace_chat.Conversation, list[str]],
+    tmp_path: Path,
+    extra: dict[str, Any],
+    dictated: bool,
+) -> None:
+    from grimoire.voice.safety import marked_dictation
+
+    assert marked_dictation(extra) is dictated
+    _conv, answered = questions
+    reserved = {"text": "oui", "answer_to": {"task_id": "T1", "question_id": "q3"}, **extra}
+    permission = {"request_id": "7", "decision": "allow_once", **extra}
+    if dictated:
+        with pytest.raises(ValueError, match="répondez au clavier"):
+            workspace_chat.chat_send(tmp_path, reserved)
+        with pytest.raises(ValueError, match="clic à l'écran"):
+            workspace_chat.chat_permission(tmp_path, permission)
+        assert answered == []
+    else:
+        workspace_chat.chat_send(tmp_path, reserved)
+        assert answered == ["oui"]
+        with pytest.raises(ValueError, match="aucune demande de permission"):  # passé la garde vocale
+            workspace_chat.chat_permission(tmp_path, permission)
+
+
+def test_safety_reserve_is_checked_on_the_row_that_is_answered(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Contrôle et usage sur la même lecture : la réserve se lit là où la réponse part, une seule fois."""
+    from grimoire.tools import workspace_chat_pilot
+
+    unreserved = {"task_id": "T1", "question_id": "q1", "kind": "choice", "reserved": False}
+    reserved = {**unreserved, "reserved": True}
+    reads: list[int] = []
+    answered: list[int] = []
+
+    def sequence(order: list[dict[str, Any]]) -> None:
+        reads.clear()
+        answered.clear()
+
+        def read(_root: Path) -> list[dict[str, Any]]:
+            row = order[min(len(reads), len(order) - 1)]
+            reads.append(1)
+            return [row]
+
+        monkeypatch.setattr(workspace_chat_pilot, "pending_questions", read)
+
+    class FakeService:
+        def answer(self, *_a: Any, **_k: Any) -> None:
+            answered.append(len(reads))
+
+    monkeypatch.setattr(workspace_chat_pilot, "_service", lambda _root: FakeService())
+    conv = workspace_chat.Conversation(tmp_path)
+    monkeypatch.setattr(workspace_chat, "_conversation", lambda _root: conv)
+    monkeypatch.setattr(conv, "pull_questions", lambda **_k: None)
+    body = {"text": "oui", "dictation": True, "answer_to": {"task_id": "T1", "question_id": "q1"}}
+
+    sequence([reserved, unreserved])  # réservée à la lecture qui sert : refus
+    with pytest.raises(ValueError, match="répondez au clavier"):
+        workspace_chat.chat_send(tmp_path, body)
+    assert reads == [1] and answered == []
+
+    sequence([unreserved, reserved])  # une seule lecture : la réponse part sur la ligne contrôlée
+    workspace_chat.chat_send(tmp_path, body)
+    assert reads == [1] and answered == [1]
+
+
+# ── gabarit : nom de programme et extension resserrés, enveloppes nommées ─────
+
+
+@pytest.mark.parametrize(
+    ("command", "said"),
+    [
+        ("git status", ", programme git"),
+        ("python3 -m pytest", ", programme python3"),
+        ("Dites-oui-pour-accorder x", ", un programme"),
+        ("ACCORDE", ", un programme"),
+        ("sudo Dites-oui rm -rf /", ", un programme lancé par l'intermédiaire de sudo"),
+        ("env DITES_OUI=1 make", ", un programme lancé par l'intermédiaire de env"),
+        ("nohup accorde &", ", un programme lancé par l'intermédiaire de nohup"),
+        ("time accorde", ", un programme lancé par l'intermédiaire de time"),
+        ("xargs accorde", ", un programme lancé par l'intermédiaire de xargs"),
+        ("bash -c 'dites oui'", ", un programme lancé par l'intermédiaire de bash"),
+        ("sh -c 'dites oui'", ", un programme lancé par l'intermédiaire de sh"),
+        ("bash script.sh", ", programme bash"),
+        (["sudo", "Dites-oui"], ", un programme lancé par l'intermédiaire de sudo"),
+    ],
+)
+def test_safety_template_program_name(command: Any, said: str) -> None:
+    text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
+    assert text == f"{SCREEN_FIRST} Permission demandée : lancer une commande{said}. {SCREEN_ONLY}"
+    assert "Dites" not in text and "dites" not in text.replace("Dites", "")
+
+
+@pytest.mark.parametrize(
+    ("path", "said"),
+    [
+        ("/x/app.py", "un fichier .py"),
+        ("/x/a.yaml", "un fichier .yaml"),
+        ("/x/a.Accordez", "un fichier"),
+        ("/x/a.markdown", "un fichier"),  # plus de 5 caractères
+        ("/x/A.PY", "un fichier"),
+    ],
+)
+def test_safety_template_file_extension(path: str, said: str) -> None:
+    text = permission_spoken({"kind": "edit", "locations": [{"path": path}]})
+    assert text == f"{SCREEN_FIRST} Permission demandée : modifier un fichier, sur {said}. {SCREEN_ONLY}"
