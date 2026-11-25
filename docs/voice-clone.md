@@ -34,3 +34,5 @@ voice:
 - La synthèse limite les threads de torch le temps du calcul, puis les rétablit.
 
 La voix livrée est entièrement synthétique (voir `src/grimoire/data/voice/README.md`).
+
+Ce que la voix peut et ne peut pas faire (aucune approbation), limites et données gardées : [Mode vocal](voice.md).

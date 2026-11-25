@@ -11,8 +11,9 @@
                             # (voix = WAV local avec un .txt voisin ; sinon la voix livrée)
       idle_unload_seconds: 300
       language: fr
-      max_record_seconds: 120 # plafond d'un enregistrement (1 à 600)
+      max_record_seconds: 120 # plafond d'un enregistrement (1 à 300)
       spoken_max_seconds: 45  # durée plafond du message parlé (5 à 300)
+      incoming_ttl_seconds: 300 # délai de purge d'un enregistrement orphelin (30 à 86400)
       allow_download: false # true = l'utilisateur accepte le téléchargement des modèles
                             # (le seul interrupteur : il prime sur toute option d'un moteur)
 
@@ -62,7 +63,12 @@ def default_tts() -> str:
 
 #: Plafond d'un enregistrement : deux minutes tiennent dans un message, et bornent le poids de l'audio.
 DEFAULT_MAX_RECORD_S = 120.0
-MAX_RECORD_CEILING_S = 600.0
+#: Cinq minutes au plus : 300 s de WAV 16 kHz mono 16 bits, en base64, tiennent sous le plafond du corps HTTP
+#: de la transcription (16 Mio, ``stt_service.MAX_BODY_BYTES``) ; 600 s ne tenaient pas (~25,6 Mo).
+MAX_RECORD_CEILING_S = 300.0
+#: Un enregistrement entrant laissé par un arrêt brutal est purgé passé ce délai (il n'en reste aucun sinon).
+DEFAULT_INCOMING_TTL_S = 300.0
+INCOMING_TTL_RANGE_S = (30.0, 86_400.0)
 #: Durée cible du message parlé de l'orchestrateur : au-delà, on n'écoute plus, on lit.
 DEFAULT_SPOKEN_MAX_S = 45.0
 SPOKEN_MAX_RANGE_S = (5.0, 300.0)
@@ -88,6 +94,7 @@ class VoiceSettings:
     allow_download: bool = False
     max_record_s: float = DEFAULT_MAX_RECORD_S
     spoken_max_s: float = DEFAULT_SPOKEN_MAX_S
+    incoming_ttl_s: float = DEFAULT_INCOMING_TTL_S
     problems: tuple[str, ...] = ()
 
     @property
@@ -183,6 +190,15 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         )
         spoken = DEFAULT_SPOKEN_MAX_S
 
+    ttl = voice.get("incoming_ttl_seconds", DEFAULT_INCOMING_TTL_S)
+    low, high = INCOMING_TTL_RANGE_S
+    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not low <= ttl <= high:
+        problems.append(
+            f"voice.incoming_ttl_seconds={ttl!r} invalide (entre {low:g} et {high:g}) : "
+            f"{DEFAULT_INCOMING_TTL_S:g} retenu"
+        )
+        ttl = DEFAULT_INCOMING_TTL_S
+
     return VoiceSettings(
         mode=mode,
         stt=stt,
@@ -192,6 +208,7 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         allow_download=allow,
         max_record_s=float(max_record),
         spoken_max_s=float(spoken),
+        incoming_ttl_s=float(ttl),
         problems=tuple(problems),
     )
 
