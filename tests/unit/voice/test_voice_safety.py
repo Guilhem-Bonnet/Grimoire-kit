@@ -1258,6 +1258,8 @@ def test_safety_engine_gets_the_bytes_written_even_if_a_parent_is_replaced_after
 
 # ── jeton de transcription : la dictée est reconnue côté serveur (#1378) ──────
 
+RESERVED = "Quel mot de passe utiliser pour le serveur ?"
+
 
 def _target(tid: str, qid: str) -> dict[str, str]:
     return {"task_id": tid, "question_id": qid}
@@ -1273,38 +1275,79 @@ def test_safety_transcribe_returns_an_opaque_token_bound_to_the_text(stt_project
     result = stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
     token = result["dictation_token"]
     assert isinstance(token, str) and len(token) >= 24 and "bonjour" not in token
-    assert dictation.sent_as_dictation(stt_project, {"text": "Bonjour !"}) is True  # égalité normalisée
-    assert dictation.sent_as_dictation(stt_project, {"text": "Bonjour !"}) is False  # transcription consommée
+    recognized = dictation.recognize(stt_project, {"text": "Bonjour !"})  # égalité normalisée
+    assert recognized.dictated is True and len(recognized.keys) == 1
+    assert dictation.recognize(stt_project, {"text": "Bonjour !"}).dictated is True  # reconnaître ne consomme pas
+    dictation.consume(recognized.keys)
+    assert dictation.recognize(stt_project, {"text": "Bonjour !"}).dictated is False
 
 
-def test_safety_unmarked_text_just_transcribed_is_refused_on_a_reserved_question(pilot_project: Path) -> None:
+def test_safety_a_refused_send_does_not_consume_the_transcription(pilot_project: Path) -> None:
     from grimoire.voice import dictation
 
-    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    service, tid, qid = _pose(pilot_project, RESERVED)
     dictation.issue(pilot_project, "Utilise le mot de passe du coffre")
     sent = {"text": "utilise le mot de passe du coffre.", "answer_to": _target(tid, qid)}  # ni marqueur ni jeton
-    with pytest.raises(ValueError, match="répondez au clavier"):
-        workspace_chat.chat_send(pilot_project, sent)
+    for _ in range(4):  # renvoyer le même texte sans marqueur reste refusé, autant de fois qu'on veut
+        with pytest.raises(ValueError, match="répondez au clavier"):
+            workspace_chat.chat_send(pilot_project, sent)
     assert not _answered(service, tid)
-    workspace_chat.chat_send(pilot_project, sent)  # retapé au clavier, la transcription est consommée : acceptée
+    workspace_chat.chat_send(pilot_project, {**sent, "text": "garder le coffre fermé"})  # formulé autrement : accepté
     assert _answered(service, tid)
+
+
+def test_safety_the_refusal_explains_the_wait_in_one_sentence() -> None:
+    from grimoire.voice.safety import VOICE_RESERVED_ANSWER
+
+    assert "identique à une dictée récente reste refusé quelques minutes" in VOICE_RESERVED_ANSWER
+    assert "formulez-le autrement" in VOICE_RESERVED_ANSWER
+
+
+def test_safety_a_refused_token_stays_alive_until_it_expires(
+    pilot_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import dictation
+
+    clock = [1000.0]
+    monkeypatch.setattr(dictation, "_clock", lambda: clock[0])
+    service, tid, qid = _pose(pilot_project, RESERVED)
+    token = dictation.issue(pilot_project, "utilise le mot de passe du coffre")
+    sent = {"text": "autre chose", "dictation_tokens": [token], "answer_to": _target(tid, qid)}
+    for _ in range(3):
+        with pytest.raises(ValueError, match="répondez au clavier"):
+            workspace_chat.chat_send(pilot_project, sent)
+    clock[0] += dictation.TTL_S + 1
+    workspace_chat.chat_send(pilot_project, sent)  # expiré : une saisie au clavier
+    assert _answered(service, tid)
+
+
+def test_safety_an_accepted_send_consumes_the_transcription_and_the_token(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    service, tid, qid = _pose(pilot_project, "Quelle voie pour le correctif ?", deferred=True)  # non réservée
+    dictation.issue(pilot_project, "la voie courte")
+    token = dictation.issue(pilot_project, "une autre dictée entière")
+    sent = {"text": "la voie courte", "dictation_tokens": [token], "answer_to": _target(tid, qid)}
+    workspace_chat.chat_send(pilot_project, sent)
+    assert _answered(service, tid)
+    assert dictation.recognize(pilot_project, {"text": "la voie courte"}).dictated is False  # consommée
+    assert dictation.recognize(pilot_project, {"text": "x", "dictation_tokens": [token]}).dictated is False  # rejeu
 
 
 def test_safety_short_dictated_answers_count_by_equality_only(pilot_project: Path) -> None:
     from grimoire.voice import dictation
 
-    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    service, tid, qid = _pose(pilot_project, RESERVED)
     target = _target(tid, qid)
     dictation.issue(pilot_project, "Oui.")
     with pytest.raises(ValueError, match="répondez au clavier"):
         workspace_chat.chat_send(pilot_project, {"text": "oui", "answer_to": target})  # « oui » dicté, sans marqueur
-    dictation.issue(pilot_project, "oui")
     workspace_chat.chat_send(pilot_project, {"text": "oui, je confirme la suite", "answer_to": target})
     assert _answered(service, tid)  # une transcription courte incluse dans un texte plus long ne compte pas
 
 
 def test_safety_typed_yes_without_any_transcription_is_accepted(pilot_project: Path) -> None:
-    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    service, tid, qid = _pose(pilot_project, RESERVED)
     workspace_chat.chat_send(pilot_project, {"text": "oui", "answer_to": _target(tid, qid)})
     assert _answered(service, tid)
 
@@ -1312,7 +1355,7 @@ def test_safety_typed_yes_without_any_transcription_is_accepted(pilot_project: P
 def test_safety_a_long_transcription_included_in_a_longer_text_is_recognised(pilot_project: Path) -> None:
     from grimoire.voice import dictation
 
-    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    service, tid, qid = _pose(pilot_project, RESERVED)
     dictation.issue(pilot_project, "fusionne la branche maintenant")
     sent = {"text": "Ok : Fusionne la branche, maintenant ! merci", "answer_to": _target(tid, qid)}
     with pytest.raises(ValueError, match="répondez au clavier"):
@@ -1323,7 +1366,7 @@ def test_safety_a_long_transcription_included_in_a_longer_text_is_recognised(pil
 def test_safety_a_dictation_fully_rewritten_at_the_keyboard_is_not_a_dictation(pilot_project: Path) -> None:
     from grimoire.voice import dictation
 
-    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    service, tid, qid = _pose(pilot_project, RESERVED)
     dictation.issue(pilot_project, "supprime toute la base")
     workspace_chat.chat_send(pilot_project, {"text": "garder la base", "answer_to": _target(tid, qid)})
     assert _answered(service, tid)
@@ -1335,8 +1378,6 @@ def test_safety_expired_or_foreign_transcriptions_are_forgotten(
     from grimoire.tools import request_guard
     from grimoire.voice import dictation
 
-    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
-    target = _target(tid, qid)
     text = "utilise le mot de passe du coffre"
     clock = [1000.0]
     monkeypatch.setattr(dictation, "_clock", lambda: clock[0])
@@ -1347,29 +1388,11 @@ def test_safety_expired_or_foreign_transcriptions_are_forgotten(
     with monkeypatch.context() as other_session:
         other_session.setattr(request_guard, "_session_token", "autre-session-" + "x" * 20)
         assert dictation.sent_as_dictation(pilot_project, {"text": text}) is False
-    dictation.reset()  # la transcription de l'autre session n'a plus lieu d'être
+    dictation.reset()
     other = tmp_path / "autre-projet"
     other.mkdir()
     dictation.issue(other, text)  # un autre projet
     assert dictation.sent_as_dictation(pilot_project, {"text": text}) is False
-    workspace_chat.chat_send(pilot_project, {"text": text, "answer_to": target})
-    assert _answered(service, tid)
-
-
-def test_safety_token_is_single_use_and_replay_has_no_effect(pilot_project: Path) -> None:
-    from grimoire.voice import dictation
-
-    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
-    token = dictation.issue(pilot_project, "utilise le mot de passe du coffre")
-    target = _target(tid, qid)
-    with pytest.raises(ValueError, match="répondez au clavier"):  # le jeton seul suffit, même texte réécrit
-        workspace_chat.chat_send(
-            pilot_project, {"text": "autre chose", "dictation_tokens": [token], "answer_to": target}
-        )
-    workspace_chat.chat_send(  # rejeu : sans effet, le texte est une saisie au clavier
-        pilot_project, {"text": "autre chose", "dictation_tokens": [token], "answer_to": target}
-    )
-    assert _answered(service, tid)
 
 
 def test_safety_a_token_of_another_project_is_ignored(pilot_project: Path, tmp_path: Path) -> None:
@@ -1388,23 +1411,103 @@ def test_safety_permission_refuses_a_token_but_not_a_plain_click(pilot_project: 
     from grimoire.voice import dictation
 
     token = dictation.issue(pilot_project, "autorise tout")
-    with pytest.raises(ValueError, match="clic à l'écran"):
-        workspace_chat.chat_permission(
-            pilot_project, {"request_id": "7", "decision": "allow_once", "dictation_tokens": [token]}
-        )
+    for _ in range(2):  # un refus ne consomme rien
+        with pytest.raises(ValueError, match="clic à l'écran"):
+            workspace_chat.chat_permission(
+                pilot_project, {"request_id": "7", "decision": "allow_once", "dictation_tokens": [token]}
+            )
     with pytest.raises(ValueError, match="aucune demande de permission"):  # un clic passe la garde vocale
         workspace_chat.chat_permission(pilot_project, {"request_id": "7", "decision": "allow_once"})
 
 
-def test_safety_token_memory_is_bounded(pilot_project: Path) -> None:
+def test_safety_the_key_is_the_resolved_project_and_each_scope_has_its_own_cap(
+    pilot_project: Path, tmp_path: Path
+) -> None:
     from grimoire.voice import dictation
 
+    other = tmp_path / "autre-projet"
+    other.mkdir()
+    kept = dictation.issue(other, "transcription de l'autre projet")
     first = dictation.issue(pilot_project, "premier texte transcrit")
-    for i in range(dictation.MAX_ENTRIES * 3):
+    for i in range(dictation.MAX_PER_SCOPE * 3):  # un projet qui inonde ne chasse pas l'autre
         dictation.issue(pilot_project, f"texte transcrit numéro {i}")
-    assert len(dictation._entries) <= dictation.MAX_ENTRIES
-    assert first not in dictation._entries
+    mine = [e for e in dictation._entries.values() if e.scope.startswith(str(pilot_project.resolve()))]
+    assert len(mine) == dictation.MAX_PER_SCOPE
+    assert first not in dictation._entries and kept in dictation._entries
     assert dictation.issue(pilot_project, "  ...  ") == ""  # sans mot, rien n'est retenu
+    link = tmp_path / "lien"
+    link.symlink_to(other, target_is_directory=True)  # le même projet par un autre chemin : même portée
+    assert dictation.sent_as_dictation(link, {"text": "x", "dictation_tokens": [kept]}) is True
+
+
+def test_safety_the_total_is_capped_across_scopes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.voice import dictation
+
+    monkeypatch.setattr(dictation, "MAX_TOTAL", 5)
+    for i in range(12):
+        project = tmp_path / f"p{i}"
+        project.mkdir()
+        dictation.issue(project, f"texte numéro {i}")
+    assert len(dictation._entries) == 5
+
+
+def test_safety_expiry_runs_on_reads_and_when_the_voice_service_opens(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import dictation
+
+    clock = [1000.0]
+    monkeypatch.setattr(dictation, "_clock", lambda: clock[0])
+    dictation.issue(stt_project, "texte à oublier")
+    clock[0] += dictation.TTL_S + 1
+    assert len(dictation._entries) == 1  # aucun appel n'a encore déclenché l'expiration
+    stt_service.voice_config(stt_project)  # ouverture du service vocal
+    assert not dictation._entries
+    dictation.issue(stt_project, "autre texte")
+    clock[0] += dictation.TTL_S + 1
+    dictation.recognize(stt_project, {"text": "x"})  # toute lecture expire aussi
+    assert not dictation._entries
+    dictation.issue(stt_project, "encore un")
+    clock[0] += dictation.TTL_S + 1
+    dictation.expire()
+    assert not dictation._entries
+
+
+@pytest.mark.parametrize(
+    "sent",
+    [
+        "o\u200bui",  # espace sans chasse au milieu
+        "\u202eoui\u202c",  # marques bidi
+        "O\u2060U\u00adI",  # joint de mots, trait d'union conditionnel
+        "OUI.",
+    ],
+)
+def test_safety_format_characters_do_not_hide_a_dictated_word(pilot_project: Path, sent: str) -> None:
+    from grimoire.voice import dictation
+
+    dictation.issue(pilot_project, "oui")
+    assert dictation.sent_as_dictation(pilot_project, {"text": sent}) is True
+
+
+def test_safety_padding_before_the_dictated_text_does_not_hide_it(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    dictation.issue(pilot_project, "fusionne la branche maintenant")
+    padded = "remplissage " * 700 + "fusionne la branche maintenant"  # bien au-delà de MAX_TEXT
+    assert len(padded) > dictation.MAX_TEXT
+    assert dictation.sent_as_dictation(pilot_project, {"text": padded}) is True
+    assert dictation.sent_as_dictation(pilot_project, {"text": "remplissage " * 700}) is False
+
+
+def test_safety_a_text_too_long_to_search_is_dictated_only_if_a_transcription_is_alive(
+    pilot_project: Path,
+) -> None:
+    from grimoire.voice import dictation
+
+    huge = "a" * (dictation.MAX_SEARCHED + 10)
+    assert dictation.sent_as_dictation(pilot_project, {"text": huge}) is False  # rien de vivant : un clavier
+    dictation.issue(pilot_project, "oui")
+    assert dictation.sent_as_dictation(pilot_project, {"text": huge}) is True  # échec fermé
 
 
 def test_safety_no_transcribed_text_or_token_is_written_anywhere(

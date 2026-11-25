@@ -55,7 +55,8 @@ SCREEN_FIRST = "La confirmation se fait à l'écran."
 SCREEN_ONLY = "Pour l'accorder ou la refuser, cliquez à l'écran : la voix ne confirme rien."
 #: Le refus d'une réponse dictée à une question réservée à l'humain.
 VOICE_RESERVED_ANSWER = (
-    "réponse dictée refusée : cette question est réservée à l'humain, répondez au clavier ou par un clic"
+    "réponse dictée refusée : cette question est réservée à l'humain, répondez au clavier ou par un clic "
+    "(un texte identique à une dictée récente reste refusé quelques minutes : formulez-le autrement)"
 )
 #: Source des messages parlés de permission dans la boîte d'envoi vocale.
 PERMISSION_SPOKEN_SOURCE = "permission"

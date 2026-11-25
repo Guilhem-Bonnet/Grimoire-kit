@@ -98,6 +98,7 @@ def voice_config(root: Path, _query: Any = None) -> dict[str, Any]:
     """Ce que la page doit savoir pour montrer (ou non) le bouton d'enregistrement."""
     settings = load_voice_settings(root)
     reason = _unavailable_reason(settings)
+    dictation.expire()  # les transcriptions échues ne restent pas en mémoire
     purge(root, settings.incoming_ttl_s)  # démarrage du service vocal : les orphelins d'un arrêt brutal partent
     return {
         "available": reason is None,
