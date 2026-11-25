@@ -780,7 +780,7 @@ class TraceLedger:
         records: list[TraceRecord] = []
         if not self._traces_path.exists():
             return records
-        for line in self._traces_path.read_text(encoding="utf-8").splitlines():
+        for line in self._traces_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue
@@ -789,8 +789,21 @@ class TraceLedger:
         return records
 
     def _next_id(self, run_id: str) -> str:
-        existing = [t for t in self._load_all() if t.run_id == run_id]
-        return f"TRC-{run_id}-{len(existing) + 1:03d}"
+        """Prochain identifiant de *run_id*, compté sans désérialiser le journal.
+
+        Chaque hook ``PreToolUse`` passe ici sous le verrou du journal : relire et
+        reconstruire toutes les traces (88 000 lignes sur un poste réel) prenait
+        5 s par appel, et les hooks concurrents s'empilaient derrière le verrou.
+        ``run_id`` n'existe qu'au premier niveau d'une trace, et chaque ligne est
+        écrite par :meth:`_write_line` (``json.dumps`` par défaut) : compter la
+        clé sérialisée suffit. Une même clé citée dans une valeur texte y est
+        échappée (``\\"run_id\\"``) et ne compte pas.
+        """
+        if not self._traces_path.exists():
+            return f"TRC-{run_id}-001"
+        needle = f'"run_id": {json.dumps(run_id, ensure_ascii=False)}'.encode()
+        count = self._traces_path.read_bytes().count(needle)
+        return f"TRC-{run_id}-{count + 1:03d}"
 
     # ── Public write API ───────────────────────────────────────────────────
 
@@ -818,7 +831,10 @@ class TraceLedger:
         token_usage: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         trace_id: str | None = None,
+        lock_timeout: float = 30.0,
     ) -> TraceRecord:
+        """Ajouter une trace. *lock_timeout* borne l'attente du verrou du journal :
+        au-delà, ``TimeoutError`` et rien n'est écrit (un hook passe un délai court)."""
         trace = TraceRecord(
             id=trace_id or "",
             run_id=run_id,
@@ -843,11 +859,12 @@ class TraceLedger:
             tags=tuple(tags or []),
         )
         if trace_id:
-            self._append(trace.to_dict())
+            with locked(self._traces_path, timeout=lock_timeout):
+                self._write_line(trace.to_dict())
             return trace
         # Identifiant dérivé du décompte : lecture, calcul et ajout dans la même section
         # critique, sinon deux processus lisent le même décompte et écrivent le même id.
-        with locked(self._traces_path):
+        with locked(self._traces_path, timeout=lock_timeout):
             trace = replace(trace, id=self._next_id(run_id))
             self._write_line(trace.to_dict())
         return trace
@@ -874,7 +891,7 @@ class TraceLedger:
         ids: set[str] = set()
         if not self._traces_path.exists():
             return ids
-        for line in self._traces_path.read_text(encoding="utf-8").splitlines():
+        for line in self._traces_path.read_text(encoding="utf-8").split("\n"):
             with contextlib.suppress(json.JSONDecodeError, AttributeError):
                 found = json.loads(line).get("id")
                 if isinstance(found, str):

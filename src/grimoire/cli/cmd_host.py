@@ -16,20 +16,23 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from grimoire.bridges.host import HostBridge
 from grimoire.bridges.schemas import HostId
-from grimoire.hosts import gemini_wire
+from grimoire.hosts import capability_probe, gemini_wire
 from grimoire.hosts.capabilities import (
     GOVERNANCE_FUNCTIONS,
     GOVERNANCE_LABELS,
+    HostProfile,
     ParityLevel,
     all_profiles,
     gaps_for,
     profile_for,
     resolve_host,
 )
+from grimoire.hosts.capability_probe import local_probes_for
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.detection import alias_for_host, enabled_host_ids
 from grimoire.hosts.emitters import (
@@ -43,6 +46,8 @@ from grimoire.hosts.emitters import (
 from grimoire.hosts.matrix import build_matrix
 from grimoire.hosts.probe import probe_hosts
 from grimoire.hosts.runtime import (
+    cursor_fail_closed_output,
+    cursor_fail_closed_reason,
     decode_hook_payload,
     gemini_fail_closed_reason,
     parse_event,
@@ -50,13 +55,15 @@ from grimoire.hosts.runtime import (
     run_hook,
 )
 from grimoire.hosts.surface import Enforcement
+from grimoire.hosts.sync import selected_host_ids
 
 host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes et hooks par hôte.")
 console = Console()
+_err_console = Console(stderr=True)
 
 _PROJECT_ROOT_OPTION = typer.Option(Path.cwd(), "--project-root", help="Racine du projet.", show_default=False)
-_HOST_ALL_OPTION = typer.Option("all", "--host", help="claude | copilot | codex | cursor | gemini | opencode | all | auto.")
-_HOST_OPTION = typer.Option("auto", "--host", help="claude | copilot | codex | cursor | gemini | opencode | all | auto.")
+_HOST_ALL_OPTION = typer.Option("all", "--host", help="claude | copilot | codex | cursor | gemini | opencode | kimi | zed | all | auto.")
+_HOST_OPTION = typer.Option("auto", "--host", help="claude | copilot | codex | cursor | gemini | opencode | kimi | zed | all | auto.")
 _DRY_RUN_OPTION = typer.Option(False, "--dry-run", help="Montrer sans écrire.")
 _FORCE_OPTION = typer.Option(False, "--force", help="Écraser un fichier non généré occupant un chemin géré.")
 _FORCE_HOST_OPTION = typer.Option(
@@ -99,7 +106,10 @@ class _HostStatus:
     #: Cause de chaque conflit : ``edited`` (fichier du kit modifié depuis son émission),
     #: ``foreign`` (jamais écrit par le kit) ou ``unreadable``.
     conflict_causes: dict[str, str] = field(default_factory=dict)
+    #: Hooks bloquants du projet que l'hôte refuse réellement (capture à l'appui).
     blocking_hooks: list[str] = field(default_factory=list)
+    #: Hooks bloquants du projet que l'hôte déclenche sans refus prouvé (#1281) : écrits, consultatifs.
+    advisory_blocking_hooks: list[str] = field(default_factory=list)
     unsupported_events: list[str] = field(default_factory=list)
     degradations: list[dict[str, str]] = field(default_factory=list)
     capability_gaps: list[str] = field(default_factory=list)
@@ -112,6 +122,13 @@ class _HostStatus:
     #: Version d'hôte installée et preuve du frein qui la couvre (#876) ; vides si l'hôte n'est pas sondable.
     host_version: str = ""
     brake_proof: dict[str, Any] = field(default_factory=dict)
+    #: Ce que l'utilisateur doit faire pour que l'hôte exécute les hooks du projet
+    #: (Codex : approbation via /hooks) ; vide si l'hôte n'en demande pas ou si
+    #: aucun hook n'est émis. Le kit ne lit pas cette approbation : il la rappelle.
+    hook_approval: str = ""
+    #: Dernières sondes de capacités locales (#1281, L7) : date, version, verdict. Informatif :
+    #: seule une capture versée sous ``tests/fixtures/hosts/`` change une annonce.
+    local_probes: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +139,7 @@ class _HostStatus:
             "conflicts": self.conflicts,
             "conflict_causes": self.conflict_causes,
             "blocking_hooks": self.blocking_hooks,
+            "advisory_blocking_hooks": self.advisory_blocking_hooks,
             "unsupported_events": self.unsupported_events,
             "degradations": self.degradations,
             "capability_gaps": self.capability_gaps,
@@ -130,6 +148,8 @@ class _HostStatus:
             "entry_agent_declared": self.entry_agent_declared,
             "host_version": self.host_version,
             "brake_proof": self.brake_proof,
+            "hook_approval": self.hook_approval,
+            "local_probes": self.local_probes,
         }
 
 
@@ -177,13 +197,12 @@ def _resolve_targets(host: str, project_root: Path) -> list[HostId]:
     """
     key = host.strip().lower()
     if key == "all":
-        enabled = enabled_host_ids(project_root)
-        return [h for h in supported_hosts() if h in enabled]
+        return selected_host_ids(project_root)
     if key == "auto":
         detected = _detected_host()
         if emitter_for(detected) is None:
             console.print(
-                "[yellow]Hôte non détecté[/yellow] — précisez `--host claude|copilot|codex|cursor|gemini|opencode|all`."
+                "[yellow]Hôte non détecté[/yellow] — précisez `--host claude|copilot|codex|cursor|gemini|opencode|kimi|zed|all`."
             )
             raise typer.Exit(code=1)
         return [detected]
@@ -215,6 +234,13 @@ def host_list(ctx: typer.Context) -> None:
     def mark(value: bool) -> str:
         return "[green]oui[/green]" if value else "[yellow]non[/yellow]"
 
+    def mark_blocking(profile: HostProfile) -> str:
+        # Un hôte qui documente des refus sans qu'aucune capture ne les prouve
+        # (Codex, Cursor, Gemini, Copilot) est consultatif, pas « oui » (#1281).
+        if not profile.enforces_blocking and profile.documented_blocking_events:
+            return "[yellow]consultatif[/yellow]"
+        return mark(profile.enforces_blocking)
+
     for profile in profiles:
         name = profile.display_name + (" [cyan](détecté)[/cyan]" if profile.host_id == detected else "")
         table.add_row(
@@ -222,7 +248,7 @@ def host_list(ctx: typer.Context) -> None:
             mark(profile.subagents_native),
             mark(profile.skills_native),
             mark(profile.commands_native),
-            mark(profile.blocking_hooks),
+            mark_blocking(profile),
             mark(profile.permissions_native),
         )
     console.print(table)
@@ -356,6 +382,7 @@ def host_status(
         plan = emitter.plan(surface, project_root)
         pending = apply_plan(plan, project_root, dry_run=True)
         host_version, brake_proof = _brake_status(host_id, probe=probe, project_root=project_root)
+        blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         payload.append(
             _HostStatus(
                 host=host_id.value,
@@ -364,7 +391,10 @@ def host_status(
                 pending=[*pending.written, *pending.removed],
                 conflicts=list(pending.skipped),
                 conflict_causes=dict(pending.conflicts),
-                blocking_hooks=[h.event.value for h in surface.hooks if h.enforcement is Enforcement.BLOCKING],
+                blocking_hooks=[h.event.value for h in blocking if profile.blocks(h.event)],
+                advisory_blocking_hooks=[
+                    h.event.value for h in blocking if profile.supports_event(h.event) and not profile.blocks(h.event)
+                ],
                 unsupported_events=[h.event.value for h in surface.hooks if not profile.supports_event(h.event)],
                 degradations=[d.to_dict() for d in plan.degradations],
                 capability_gaps=[g.surface for g in gaps_for(profile)],
@@ -373,6 +403,8 @@ def host_status(
                 entry_agent_declared=entry_agent_name(project_root),
                 host_version=host_version,
                 brake_proof=brake_proof,
+                hook_approval=profile.hook_approval if plan.merges and surface.hooks else "",
+                local_probes=local_probes_for(project_root, host_id),
             )
         )
 
@@ -425,8 +457,17 @@ def host_status(
             when = f", sondé le {proof['probed_at']}" if proof.get("probed_at") else ""
             label = {"verified": "prouvé", "failed": "[red]sonde échouée[/red]", "unverified": "[yellow]non prouvé[/yellow]"}[proof["status"]]
             console.print(f"  frein PreToolUse {label} pour la version {proof['version']}{when}")
+        for probe_line in _local_probe_lines(item.local_probes):
+            console.print(f"  {probe_line}")
+        if item.hook_approval:
+            console.print(f"  [yellow]hooks non exécutés sans approbation[/yellow] — {item.hook_approval} (non vérifiable par le kit)")
         if item.blocking_hooks:
             console.print(f"  hooks bloquants : {', '.join(item.blocking_hooks)}")
+        if item.advisory_blocking_hooks:
+            console.print(
+                "  [yellow]hooks consultatifs[/yellow] (refus non prouvé sur cet hôte) : "
+                + ", ".join(item.advisory_blocking_hooks)
+            )
         if item.unsupported_events:
             console.print(f"  [yellow]non supporté par cet hôte[/yellow] : {', '.join(item.unsupported_events)}")
         for degradation in item.degradations:
@@ -467,8 +508,9 @@ def host_matrix(
     """
     targets = tuple(_resolve_targets(host, project_root))
     matrix = build_matrix(project_root, targets)
+    probes = {h.value: found for h in matrix.hosts if (found := local_probes_for(project_root, h))}
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps(matrix.to_dict(), indent=2, ensure_ascii=False))
+        typer.echo(json.dumps({**matrix.to_dict(), "local_probes": probes}, indent=2, ensure_ascii=False))
         raise typer.Exit(0 if matrix.ok and matrix.hosts else 1)
     if not matrix.hosts:
         console.print("[red]Aucun hôte activé[/red] : rien n'a été calculé.")
@@ -512,7 +554,147 @@ def host_matrix(
             console.print(
                 f"  [dim]{field_cell.host} {field_cell.label} — {field_cell.state} : {field_cell.reason}[/dim]"
             )
+    for host_value, found in probes.items():
+        for probe_line in _local_probe_lines(found):
+            console.print(f"  [dim]{host_value}[/dim] {probe_line}")
     raise typer.Exit(0 if matrix.ok else 1)
+
+
+def _local_probe_lines(probes: list[dict[str, Any]]) -> list[str]:
+    """Une ligne par sonde locale : date, version, verdict ; jamais une annonce. Champs échappés (markup rich)."""
+    return [
+        f"[dim]dernière sonde locale ({escape(str(p['host']))}) : {escape(str(p['probed_at']))}, "
+        f"version {escape(str(p['host_version'] or 'inconnue'))}, verdict {escape(str(p['verdict']))} "
+        "— non versée, ne change aucune annonce[/dim]"
+        for p in probes
+    ]
+
+
+_CAPABILITIES_OPTION = typer.Option(
+    False, "--capabilities", help="Détecter les hôtes installés (binaire, version) au lieu de sonder le disque."
+)
+_RUN_OPTION = typer.Option(
+    False, "--run", help="Avec --capabilities : lancer UNE session par hôte (appels modèle payants) avec un hook témoin."
+)
+_YES_OPTION = typer.Option(False, "--yes", help="Avec --run : ne pas demander de confirmation (exigé hors terminal).")
+_PROMOTE_OPTION = typer.Option(
+    None, "--promote", help="Verser une capture vérifiée sous tests/fixtures/hosts/ (geste humain, clone du kit)."
+)
+_REPLACE_OPTION = typer.Option(
+    False, "--replace", help="Avec --promote : remplacer une preuve pretooluse_deny d'une autre version."
+)
+_FIXTURES_ROOT_OPTION = typer.Option(
+    None, "--fixtures-root", help="Dossier des fixtures d'hôte (défaut : <projet>/tests/fixtures/hosts)."
+)
+_TIMEOUT_OPTION = typer.Option(
+    capability_probe.DEFAULT_TIMEOUT, "--timeout", help=f"Délai d'une session, en secondes (plafond {capability_probe.MAX_TIMEOUT})."
+)
+
+
+def _interactive() -> bool:
+    """Un humain peut-il répondre à une confirmation ? (stdin et stdout reliés à un terminal)"""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _probe_promote(ctx: typer.Context, capture: Path, project_root: Path, fixtures_root: Path | None, *, replace: bool) -> None:
+    root = fixtures_root or project_root / "tests" / "fixtures" / "hosts"
+    try:
+        result = capability_probe.promote(capture, root, replace=replace)
+    except capability_probe.PromotionRefusedError as exc:
+        if _get_fmt(ctx) == "json":
+            typer.echo(json.dumps({"promoted": False, "reason": str(exc)}, ensure_ascii=False))
+        else:
+            console.print(f"[red]Promotion refusée[/red] : {escape(str(exc))}")
+        raise typer.Exit(1) from exc
+    if _get_fmt(ctx) == "json":
+        payload = {
+            "promoted": True,
+            "fixture": result.relpath,
+            "manifest": str(result.manifest),
+            "todo": list(result.instructions),
+            "content": json.loads(result.content),
+        }
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    console.print(f"[green]Capture versée[/green] : {escape(result.relpath)} ; manifeste mis à jour ({escape(str(result.manifest))})")
+    console.print("Contenu versé, à relire avant tout commit :")
+    console.print(result.content, markup=False, highlight=False)
+    console.print("Rien n'est encore annoncé : reste à faire à la main, puis relire le diff :")
+    for line in result.instructions:
+        console.print(f"  - {escape(line)}")
+
+
+def _confirm_run(plans: list[dict[str, Any]], *, yes: bool, timeout: int) -> None:
+    """Montre ce que ``--run`` va faire et demande confirmation ; refuse hors terminal sans ``--yes``.
+
+    Le plan part sur stderr : la sortie JSON de ``-o json`` reste lisible.
+    """
+    console = _err_console
+    console.print(
+        f"[bold]--run[/bold] lance {len(plans)} session(s) réelle(s), une par hôte : appels modèle payants, "
+        f"avec vos identifiants, {timeout} s au plus chacune."
+    )
+    for plan in plans:
+        flags = ", ".join(plan["auto_approve"]) or "aucun"
+        model = plan["model"] or "défaut de l'hôte"
+        console.print(f"  {escape(plan['display_name'])} : modèle {escape(model)} ; auto-approbation : {escape(flags)}")
+        console.print(f"    variables transmises : {escape(', '.join(plan['env']) or 'aucune')}")
+    console.print(
+        "[dim]Les drapeaux ne valent que pour le projet jetable ; l'hôte garde votre HOME (lecture et écriture) "
+        "et charge vos configurations globales.[/dim]"
+    )
+    if yes:
+        return
+    if not _interactive():
+        console.print("[red]Confirmation impossible hors terminal[/red] : relancez avec --yes pour accepter ces sessions.")
+        raise typer.Exit(2)
+    if not typer.confirm("Lancer ces sessions ?", default=False):
+        console.print("Rien n'a été lancé.")
+        raise typer.Exit(1)
+
+
+def _probe_capabilities(ctx: typer.Context, host: str, project_root: Path, *, run: bool, timeout: int, yes: bool) -> None:
+    targets = capability_probe.select_targets(host)
+    if not targets:
+        known = ", ".join(t.key for t in capability_probe.TARGETS)
+        reason = capability_probe.unprobeable_reason(host)
+        detail = f" — {escape(reason)}" if reason else ""
+        console.print(f"[red]Hôte non sondable : {escape(host)}[/red]{detail} (sondables : {known})")
+        raise typer.Exit(1)
+    detections = capability_probe.detect(targets, project_root)
+    captures: list[dict[str, Any]] = []
+    runnable = [d for d in detections if d.installed and d.version]
+    if run and runnable:
+        _confirm_run([capability_probe.session_plan(d.target, project_root) for d in runnable], yes=yes, timeout=timeout)
+        for found in runnable:
+            capture, path = capability_probe.run_probe(
+                found.target, project_root, binary=found.binary, version=found.version, timeout=timeout
+            )
+            captures.append({"host": found.target.key, "path": str(path), "verdict": capture["verdict"], "reason": capture["reason"]})
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps({"hosts": [d.to_dict() for d in detections], "captures": captures}, indent=2, ensure_ascii=False))
+        return
+    table = Table(title="Capacités des hôtes installés")
+    for column in ("Hôte", "Binaire", "Version", "Mode non interactif", "Dernière sonde locale"):
+        table.add_column(column)
+    for found in detections:
+        last = found.to_dict()["last_probe"]
+        summary = f"{last['probed_at']} ({last['host_version'] or '?'}, {last['verdict']})" if last else ""
+        table.add_row(
+            found.target.display_name,
+            escape(Path(found.binary).name) if found.binary else "[dim]absent[/dim]",
+            escape(found.version) if found.version else "[dim]—[/dim]",
+            found.target.source,
+            escape(summary) if last else "[dim]aucune[/dim]",
+        )
+    console.print(table)
+    for item in captures:
+        why = f" — {escape(str(item['reason']))}" if item["reason"] else ""
+        console.print(f"  {item['host']} : verdict [bold]{escape(str(item['verdict']))}[/bold]{why} → {escape(item['path'])}")
+    if not run:
+        console.print("[dim]`--run` lance une session par hôte installé (appels modèle payants) ; rien n'est annoncé sans promotion.[/dim]")
+    elif captures:
+        console.print("Une capture `refused` se verse à la main : `grimoire host probe --promote <fichier>` depuis un clone du kit.")
 
 
 @host_app.command("probe")
@@ -520,12 +702,33 @@ def host_probe(
     ctx: typer.Context,
     project_root: Path = _PROJECT_ROOT_OPTION,
     host: str = _HOST_ALL_OPTION,
+    capabilities: bool = _CAPABILITIES_OPTION,
+    run: bool = _RUN_OPTION,
+    yes: bool = _YES_OPTION,
+    promote: Path | None = _PROMOTE_OPTION,
+    replace: bool = _REPLACE_OPTION,
+    fixtures_root: Path | None = _FIXTURES_ROOT_OPTION,
+    timeout: int = _TIMEOUT_OPTION,
 ) -> None:
     """Vérifier sur le disque que ce que chaque hôte doit appliquer l'est, à jour. N'écrit rien.
 
     Sort en 1 si un fichier émis manque, est périmé ou modifié à la main, si une règle n'est
     plus dans le fichier de l'hôte, ou si aucun hôte n'a pu être sondé (inconnu n'est pas OK).
+
+    ``--capabilities`` détecte les hôtes installés (binaire, version) ; avec ``--run``, lance une
+    session minimale par hôte avec un hook témoin qui refuse, après confirmation (``--yes`` hors
+    terminal), et écrit la capture dans ``_grimoire-output/host-probes/<hôte>/``.
+    ``--promote <fichier>`` verse une capture vérifiée.
     """
+    if promote is not None:
+        _probe_promote(ctx, promote, project_root, fixtures_root, replace=replace)
+        return
+    if run and not capabilities:
+        console.print("[red]--run exige --capabilities[/red] (la sonde de disque ne lance rien).")
+        raise typer.Exit(2)
+    if capabilities:
+        _probe_capabilities(ctx, host, project_root, run=run, timeout=timeout, yes=yes)
+        return
     targets = tuple(_resolve_targets(host, project_root))
     report = probe_hosts(project_root, targets)
     if _get_fmt(ctx) == "json":
@@ -585,9 +788,14 @@ def host_hook(
     parsed = parse_event(event, host_id=host_id)
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     payload, payload_problem = decode_hook_payload(raw)
-    wire_event = payload_event_name(payload)
+    wire_event = payload_event_name(payload, host_id)
     if parsed is None and wire_event:
         parsed = parse_event(wire_event, host_id=host_id)
+    if refusal := cursor_fail_closed_reason(host_id, parsed, payload_problem):
+        output = cursor_fail_closed_output(refusal, event or wire_event or "événement inconnu")
+        typer.echo(json.dumps(output, ensure_ascii=False), nl=False)
+        typer.echo(output["user_message"], err=True)
+        raise typer.Exit(code=2)
     if refusal := gemini_fail_closed_reason(host_id, parsed, payload_problem):
         typer.echo(f"[Grimoire] hook Gemini en échec sur {event} ({refusal}) : action refusée par défaut.", err=True)
         raise typer.Exit(code=2)
@@ -609,3 +817,47 @@ def host_hook(
             raise typer.Exit(code=2) from exc
         result = {}
     typer.echo(json.dumps(result, ensure_ascii=False), nl=False)
+
+
+@host_app.command("handoff")
+def host_handoff(
+    project_root: Path = _PROJECT_ROOT_OPTION,
+    task: str = typer.Option("", "--task", help="Tâche à reprendre (défaut : la tâche active du projet)."),
+    session_id: str = typer.Option("", "--session-id", help="Session dont lire le dernier message (défaut : GRIMOIRE_SESSION_ID, sinon la plus récente)."),
+) -> None:
+    """Écrire la capsule de reprise maintenant et imprimer la ligne pour repartir en session neuve.
+
+    La capsule (~1 500 caractères : objectif, fichiers touchés, dernier test, branche et PR,
+    prochaine étape) est celle que le hook PreCompact écrit ; une session neuve ouverte sur
+    la même tâche la reçoit au démarrage, dans les 24 h.
+    """
+    import shlex
+
+    from grimoire.core.standard_state import current_session_id, is_standard_enrolled, resolve_active_task
+    from grimoire.hosts.decisions.resume_capsule import capsule_path, latest_memory_session, write_capsule
+    from grimoire.hosts.events import HookEvent
+
+    if not is_standard_enrolled(project_root):
+        console.print("[red]Projet non gouverné : pas de capsule de reprise (grimoire standard init).[/red]")
+        raise typer.Exit(code=1)
+    sid = session_id.strip() or current_session_id() or latest_memory_session(project_root)
+    task_id = task.strip() or resolve_active_task(project_root, session_id=sid).task_id
+    from grimoire.hosts.decisions._shared import HookInput
+    from grimoire.hosts.decisions.context_capsule import decide_context_capsule
+
+    decision = decide_context_capsule(
+        HookInput(event=HookEvent.PRE_COMPACT, project_root=project_root, session_id=sid)
+    )
+    if not decision.context:
+        console.print("[red]Rien à écrire : aucune capsule n'a pu être assemblée.[/red]")
+        raise typer.Exit(code=1)
+    try:
+        dest = write_capsule(project_root, task_id, decision.context, session_id=sid)
+    except OSError as exc:
+        console.print(f"[red]Capsule non écrite : {type(exc).__name__}: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    rel = capsule_path(project_root, task_id).relative_to(project_root).as_posix()
+    typer.echo(f"Capsule écrite : {dest} ({dest.stat().st_size} octets)")
+    prompt = f"Reprise de la tâche {task_id} : lis {rel} (état de reprise) puis continue sans refaire ce qui est fait."
+    typer.echo("Pour repartir dans une session neuve :")
+    typer.echo(f"claude {shlex.quote(prompt)}")

@@ -12,7 +12,7 @@ from grimoire.core.claude_activation import activation_context_text
 from grimoire.core.standard_state import TASK_ENV, resolve_active_task
 from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
-from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
+from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, PROMPT_TASK_KEY, link_session, no_task_context
 from grimoire.hosts.decisions.profile_floor import session_profile
 from grimoire.hosts.decisions.record import _record_agent_dispatch
 
@@ -117,14 +117,15 @@ def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...]) 
     inventaire, passé une fois par :func:`decide_activation` plutôt que
     recollecté ici (#662).
     """
-    from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, _model_for
+    from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, _model_for, claude_models
 
     routable = [agent for agent in agents if not agent.entry_point]
     if not routable:
         return ""
-    roster = "\n".join(f"- `{agent.name}` → {_model_for(agent)}" for agent in routable)
+    models = claude_models(project_root)
+    roster = "\n".join(f"- `{agent.name}` → {_model_for(agent, models)}" for agent in routable)
     return (
-        f"{_dispatch_policy_section()}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
+        f"{_dispatch_policy_section(models)}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
         "Ce modèle n'est que le défaut de la persona, appliqué si tu omets `model=` ; la classe "
         "de la sous-tâche déléguée prime : passe toujours `model=` selon la politique ci-dessus.\n"
     )
@@ -416,6 +417,10 @@ def decide_activation(hook: HookInput) -> Decision:
             # Une source illisible se dit quel que soit le profil : ce n'est pas « aucune tâche ».
             if profile in BLOCKING_PROFILES or active.unreadable:
                 enrolment = no_task_context(profile, active.candidates, active.expired, active.unreadable)
+                # « Dire une fois » : le premier prompt ne redit pas ce que le démarrage vient de dire.
+                from grimoire.policies.session_state import say_once
+
+                say_once(hook.project_root, hook.session_id, PROMPT_TASK_KEY, enrolment)
         else:
             link = link_session(hook, active)
     directive = (
@@ -429,12 +434,24 @@ def decide_activation(hook: HookInput) -> Decision:
         agents = collect_agents(hook.project_root)
     except OSError:
         agents = ()
+    # Reprise : la capsule écrite au PreCompact ou par `grimoire host handoff`.
+    # Sans capsule, rien ne change : aucune ligne n'est retirée ci-dessous.
+    source = str(hook.raw.get("source") or "")
+    resumed = source in ("compact", "resume")
+    live_flow = resumed and bool(active_flow_lines(hook.project_root))
+    resume_part = _resume_capsule(
+        hook.project_root, task_id, source, session_id=hook.session_id, task_is_real=not active.is_fallback, live_flow=live_flow
+    )
     # Issue #716 : une session ouverte dans un agent nommé (``claude --agent
     # <nom>``, clé ``agent``) l'a déjà pour identité — lui remettre en plus la
     # persona d'entrée et la politique de dispatch de la boucle principale,
     # c'est deux identités pour une session. La substitution par persona reste
     # pour les sessions démarrées sans ``--agent`` (``agent_type`` vide).
-    if hook.agent_type:
+    # Sur `resume` d'un hôte qui restaure le transcript (Claude Code), la persona et la
+    # politique de dispatch y sont déjà : les redonner serait payer ~900 tokens pour rien.
+    # Tout autre hôte garde le préambule complet.
+    transcript_restored = bool(resume_part) and source == "resume" and hook.host == HostId.CLAUDE_CODE_CLI.value
+    if hook.agent_type or transcript_restored:
         persona, entry_name = "", ""
         dispatch_context = ""
     else:
@@ -449,9 +466,7 @@ def decide_activation(hook: HookInput) -> Decision:
     # W2-05 : après une compaction, la fenêtre repart de zéro ; le run de flow
     # en vol (run_id, nœud) n'est plus nulle part dans le contexte. Seule cette
     # source le réinjecte : une session neuve n'a rien à reprendre.
-    flow_part = (
-        "\n".join(active_flow_lines(hook.project_root)) if str(hook.raw.get("source") or "") == "compact" else ""
-    )
+    flow_part = "\n".join(active_flow_lines(hook.project_root)) if resumed else ""
     steering, steering_detail = _steering(hook, task_id)
     # GAO-hook-session-001 : une session de worker (``GRIMOIRE_TASK_ID`` posé)
     # ne peut rien faire des fournisseurs disponibles ni des propositions
@@ -476,6 +491,7 @@ def decide_activation(hook: HookInput) -> Decision:
             dispatch_context,
             recall,
             stigmergy_part,
+            resume_part,
             flow_part,
             enrolment,
             steering,
@@ -499,6 +515,7 @@ def decide_activation(hook: HookInput) -> Decision:
             "recall_injected": bool(recall),
             "stigmergy_injected": bool(stigmergy_part),
             "flow_lines_injected": bool(flow_part),
+            "resume_capsule_injected": bool(resume_part),
             "dispatch_context_injected": bool(dispatch_context),
             "governed": governed,
             **scaffold_detail,
@@ -507,6 +524,20 @@ def decide_activation(hook: HookInput) -> Decision:
             **scan_detail,
         },
     )
+
+
+def _resume_capsule(
+    project_root: Path, task_id: str, source: str, *, session_id: str, task_is_real: bool, live_flow: bool
+) -> str:
+    """La capsule de reprise de la tâche (voir :func:`read_resume_capsule` pour la règle), best-effort."""
+    try:
+        from grimoire.hosts.decisions.resume_capsule import read_resume_capsule
+
+        return read_resume_capsule(
+            project_root, task_id, source=source, session_id=session_id, task_is_real=task_is_real, live_flow=live_flow
+        )
+    except Exception:
+        return ""
 
 
 def _stigmergy_context(project_root: Path) -> str:

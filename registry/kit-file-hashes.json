@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.85.0",
+ "generated_for": "3.105.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -657,6 +657,10 @@
   "28c032844ab056ab3847f3c4694c4da1c4b9d46156efd67af5405b2a8f11f53a": {
    "version": "3.16.0",
    "path": "framework/tools/orchestrator.py"
+  },
+  "28d1eb2a8f7011432e4498f796f8e734593dc75181e7596ea5fa69bd0f3a300d": {
+   "version": "3.99.0",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
   },
   "29e91fee7a37a66dddc99671ab690604ebbe02dbe08d065c46a661416dc0bc1d": {
    "version": "3.36.0",
@@ -1985,6 +1989,10 @@
   "7b28c28e3c94190a1bbabffe65ec703f0aeff3f4f1f67050809597cdff5ed010": {
    "version": "3.4.2",
    "path": "framework/tools/agent-darwinism.py"
+  },
+  "7bbccc93692ae4617c21d0195a0311bad13f8c24405b1b304b8a4f0183c4487d": {
+   "version": "3.100.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
   },
   "7c4450af96dae1cf3ef8c24988ab87c85af2366f5856c049b08b0cf451c65690": {
    "version": "3.32.0",
@@ -3597,6 +3605,10 @@
   "d3946adf7164c450a80ceb1623b642fd527c143b881869a81ce257766bf16ac4": {
    "version": "3.4.2",
    "path": "framework/hooks/.pre-commit-config.tpl.yaml"
+  },
+  "d3a44dc2e641c328f38fb9873f3ce361b55b367ea5b09beaf3a515e6095c255b": {
+   "version": "3.92.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
   },
   "d3be1f7812edd4d4f7a43671da2edcdb2aa9064b58288d4a83602540e4cfbe79": {
    "version": "3.64.0",

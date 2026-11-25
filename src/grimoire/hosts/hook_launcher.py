@@ -48,9 +48,14 @@ class HookLauncher:
     windows: str | None = None
     project_relative: bool = False
     machine_specific: bool = False
+    found: bool = True
+    """Faux quand rien n'a été trouvé et que le nom nu est écrit faute de mieux :
+    l'hôte ne saura sans doute pas lancer le hook (``grimoire doctor`` le signale)."""
 
 
 BARE = HookLauncher(posix=HOOK_SCRIPT)
+#: Le nom nu écrit faute de mieux : ni dans le PATH ni à côté de l'interpréteur.
+UNRESOLVED = HookLauncher(posix=HOOK_SCRIPT, found=False)
 
 
 def _venv_script_dirs(prefix: str, base_prefix: str, environ: Mapping[str, str]) -> set[str]:
@@ -118,7 +123,8 @@ def resolve_hook_launcher(
         return bare
     found = _script_next_to(sys.executable if executable is None else executable, script)
     if found is None:
-        return bare  # rien de mieux à écrire ; ``grimoire doctor`` le signale
+        # rien de mieux à écrire ; ``grimoire doctor`` le signale
+        return UNRESOLVED if script == HOOK_SCRIPT else HookLauncher(posix=script, found=False)
     venv_root = found.parent.parent
     try:
         rel = venv_root.resolve().relative_to(project_root.resolve())
@@ -183,14 +189,27 @@ def expand_project_dir(command: str, project_root: Path) -> str:
     return command
 
 
+def strip_call_operator(command: str) -> str:
+    """Retirer l'opérateur d'appel PowerShell ``& `` de tête (#1280).
+
+    La variante ``powershell`` d'un hook Copilot lance un chemin entre
+    guillemets par ``& "C:\\…\\grimoire-hook.exe" …`` ; le programme est ce qui suit.
+    """
+    text = command.strip()
+    if text.startswith("&") and text[1:2].isspace():
+        return text[1:].lstrip()
+    return text
+
+
 def command_program(command: str) -> str:
     """Le programme d'une ligne de commande de hook, sans ses arguments.
 
     Un programme entre guillemets (ou ``"$CLAUDE_PROJECT_DIR"/chemin``) peut
     contenir des espaces ; hors guillemets, le programme s'arrête au premier
-    blanc. Les antislashs sont conservés (chemins Windows).
+    blanc. Les antislashs sont conservés (chemins Windows). Un opérateur
+    d'appel PowerShell de tête (``& ``) n'est pas le programme.
     """
-    text = command.strip()
+    text = strip_call_operator(command)
     quote = ""
     end = len(text)
     for index, char in enumerate(text):
@@ -216,7 +235,7 @@ def hook_program_problem(program: str, project_root: Path, *, environ: Mapping[s
     racine du projet.
     """
     env = os.environ if environ is None else environ
-    program = expand_project_dir(program.strip().strip("\"'"), project_root)
+    program = expand_project_dir(strip_call_operator(program).strip("\"'"), project_root)
     if "/" not in program and "\\" not in program:
         found = shutil.which(program, path=path_without_active_venv(env)) is not None
         return None if found else "not found"

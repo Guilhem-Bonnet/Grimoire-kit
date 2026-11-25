@@ -14,9 +14,9 @@
     "grimoire task add \"Ecrire la doc du CLI\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
     "grimoire task recall GAO-ecrire-la-do-002"
   ],
-  "kit_version": "3.84.0",
-  "recorded_at": "2026-11-13T00:35:28Z",
-  "output_sha256": "9e0cc8314d85eadaf67fe6de790dca3f1c2d486971362983dfe60fbb893a9d29",
+  "kit_version": "3.104.0",
+  "recorded_at": "2026-11-23T18:52:42Z",
+  "output_sha256": "bb5733b464881e775e701d937b50abcfb6ccbbc95057c931cc87cb4b455d69ba",
   "frames": [
     {
       "kind": "run",
@@ -52,7 +52,7 @@
       "kind": "run",
       "command": "grimoire task verify GAO-ecrire-la-do-001",
       "exit_code": 0,
-      "output": "OK GAO-ecrire-la-do-001 — verdict passed (EVD-GAO-ecrire-la-do-001-001,\nver-GAO-ecrire-la-do-001-001)"
+      "output": "OK GAO-ecrire-la-do-001 — verdict passed (EVD-GAO-ecrire-la-do-001-001,\nver-GAO-ecrire-la-do-001-001)\n  - verified-head : <hex>"
     },
     {
       "kind": "run",
@@ -70,7 +70,7 @@
       "kind": "run",
       "command": "grimoire task recall GAO-ecrire-la-do-002",
       "exit_code": 0,
-      "output": "[Grimoire — rappel de tâche] GAO-ecrire-la-do-002 :\nTâches voisines :\n  - GAO-ecrire-la-do-001 (même mission, closed) — clôturée\nMémoire du projet :\n  -  Tâche GAO-ecrire-la-do-001 clôturée : Ecrire la doc de l API. Critères : le test passe."
+      "output": "[Grimoire — rappel de tâche] GAO-ecrire-la-do-002 :\nTâches voisines :\n  - GAO-ecrire-la-do-001 (même mission, closed) — clôturée"
     }
   ]
 }

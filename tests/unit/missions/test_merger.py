@@ -20,7 +20,13 @@ from pathlib import Path
 import pytest
 from lot2_doubles import FakeHost, git, make_repo
 
-from grimoire.evidence.schemas import EvidenceItem, EvidenceKind, EvidenceProfile
+from grimoire.evidence.schemas import (
+    EvidenceItem,
+    EvidenceKind,
+    EvidenceProfile,
+    VerdictResult,
+    VerificationCheck,
+)
 from grimoire.evidence.service import EvidenceService
 from grimoire.missions import mandate as md
 from grimoire.missions.breaker import read_breaker, trip
@@ -36,9 +42,11 @@ from grimoire.missions.merger import (
 )
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+from grimoire.missions.orchestrator_session import kit_written
+from grimoire.missions.precedents import question_class
 from grimoire.missions.review_receipt import write_receipt
 from grimoire.missions.reviewer import REVIEW_LAUNCHED_EVENT
-from grimoire.missions.schemas import TaskState
+from grimoire.missions.schemas import TaskCheck, TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.task_worktree import MERGED_EVENT
 
@@ -127,12 +135,14 @@ def reviewer_sid(host: FakeHost) -> str:
 
 
 def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (), edit: tuple[str, str] = ("src/app/route.py", "404\n"),
-                    changelog: str = "") -> tuple[str, Path]:
+                    changelog: str = "",
+                    checks: tuple[str, ...] = ()) -> tuple[str, Path]:
     """Une tâche lancée par le tick, dont le worker a commité, poussé et ouvert la PR, remise en revue."""
     service = TaskService(projet)
     mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(title="Lot 4", origin="test")
     task = service.ledger.create_task(mission.id, f"tâche {edit[0]}", acceptance=CRITERIA, owner="amelia",
-                                      extra={"labels": list(labels)} if labels else None)
+                                      extra={"labels": list(labels)} if labels else None,
+                                      checks=tuple(TaskCheck(cmd=c) for c in checks))
     service.ledger.transition_task(task.id, TaskState.READY)
     if host.real is None:  # GitHub : la remote d'origine, quoi que le worker écrive ensuite dans la configuration locale
         host.real = Path(git(projet, "remote", "get-url", "origin"))
@@ -246,6 +256,138 @@ def red_after_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: 
     ready_judged(projet, host, tid, wt)
     host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
     return tick(projet, host)
+
+
+# ── #1257 : --check sans verdict verify vert ───────────────────────────────────
+
+
+def _ready_with_pack(projet: Path, host: FakeHost, tid: str, wt: Path, *, mode: str) -> None:
+    """*mode* : ``none`` (aucun pack), ``unverified`` (pack sans verdict), ``verified`` (pack et verdict passed), ``failed`` (verdict failed)."""
+    tick(projet, host)  # lance le relecteur
+    item = EvidenceItem.from_text("check-01", EvidenceKind.TEST, "pytest -> exit 0", uri="check:pytest", summary="pytest -> exit 0")
+    service = EvidenceService(wt / EVIDENCE)
+    if mode != "none":
+        pack = service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA)
+        if mode == "failed":
+            service.verify(pack, extra_checks=(VerificationCheck("command-01", VerdictResult.FAILED, "exit 1"),))
+        elif mode == "bare":  # verdict vert, mais sans aucun contrôle de commande
+            service.verify(pack)
+        elif mode != "unverified":
+            head = git(wt, "rev-parse", "HEAD").strip()
+            service.verify(pack, extra_checks=(VerificationCheck("command-01", VerdictResult.PASSED, ""),
+                                               VerificationCheck("verified-head", VerdictResult.PASSED, head)))
+    write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
+
+
+def _refused_why(projet: Path, host: FakeHost, tid: str) -> str:
+    tick(projet, host)  # CI vue une première fois
+    report = tick(projet, host)
+    assert not host.of("gh", "pr", "merge"), report.merges
+    [escalated] = events(projet, tid, MERGE_ESCALATED_EVENT)
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+    return str(escalated.payload["why"])
+
+
+@pytest.mark.parametrize(("mode", "expected"), [
+    ("none", "aucun pack de preuve"),
+    ("unverified", "verdict : absent"),
+    ("failed", "verdict : failed"),
+])
+def test_une_tache_a_check_sans_preuve_tenue_n_est_pas_fusionnee(projet: Path, host: FakeHost, mode: str, expected: str) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    _ready_with_pack(projet, host, tid, wt, mode=mode)
+    assert expected in _refused_why(projet, host, tid)
+
+
+def test_une_tache_a_check_avec_verdict_vert_sur_son_pack_fusionne(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    _ready_with_pack(projet, host, tid, wt, mode="verified")
+    tick(projet, host)
+    tick(projet, host)
+    assert host.of("gh", "pr", "merge")
+    assert not events(projet, tid, MERGE_ESCALATED_EVENT)
+
+
+def _ready_by_review(projet: Path, host: FakeHost, tid: str, wt: Path) -> None:
+    """Le chemin réel : le relecteur rend READY par ``record_review`` (qui recopie les commandes du dernier verdict)."""
+    from grimoire.missions.review_verdict import CriterionVerdict, StructuredVerdict, record_review
+
+    svc = TaskService(wt)
+    verdict = StructuredVerdict("READY", tuple(
+        CriterionVerdict(index=i, criterion=c, status="met", evidence_cmd="true", note="ok")
+        for i, c in enumerate(CRITERIA, start=1)))
+    record_review(svc, svc.require(tid), verdict, reviewer_id="reviewer", reviewer_session=reviewer_sid(host), human=True)
+
+
+def test_une_relecture_sans_task_verify_ne_fusionne_pas(projet: Path, host: FakeHost) -> None:
+    """Aucune commande exécutée : le verdict de relecture seul (``review-verdict`` vert) ne vaut pas preuve des --check."""
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    tick(projet, host)
+    _ready_by_review(projet, host, tid, wt)
+    assert "task verify" in _refused_why(projet, host, tid)
+
+
+def test_le_verdict_d_un_ancien_pack_ne_couvre_pas_le_dernier_pack(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    tick(projet, host)
+    item = EvidenceItem.from_text("check-01", EvidenceKind.TEST, "pytest -> exit 0", uri="check:pytest", summary="x")
+    service = EvidenceService(wt / EVIDENCE)
+    service.verify(service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA))
+    service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA)
+    write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
+    assert "autre pack" in _refused_why(projet, host, tid)
+
+
+def test_une_ligne_de_verdict_illisible_ferme_l_acces(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    tick(projet, host)
+    item = EvidenceItem.from_text("check-01", EvidenceKind.TEST, "pytest -> exit 0", uri="check:pytest", summary="x")
+    service = EvidenceService(wt / EVIDENCE)
+    service.verify(service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA),
+                   extra_checks=(VerificationCheck("command-01", VerdictResult.PASSED, ""),))
+    with (wt / EVIDENCE / "verdicts.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(f'{{"task_id": "{tid}", "verdict": "failed"}}\n')
+    write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
+    assert "illisible" in _refused_why(projet, host, tid)
+
+
+def test_un_verdict_vert_sans_commande_ne_suffit_pas(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    _ready_with_pack(projet, host, tid, wt, mode="bare")  # verdict passed, aucun command-NN
+    assert "command-01" in _refused_why(projet, host, tid)
+
+
+def test_des_commandes_vertes_d_une_tete_anterieure_ne_valent_pas(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.verify import verify_task
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("true",))
+    assert verify_task(TaskService(wt).require(tid), wt, wt / EVIDENCE).passed
+    (wt / "src/app/route.py").write_text("500\n", encoding="utf-8")
+    git(wt, "commit", "-qam", "change après verify")
+    git(wt, "push", "-q", "origin", f"task/{tid}")
+    tick(projet, host)
+    _ready_by_review(projet, host, tid, wt)
+    assert "pas sur" in _refused_why(projet, host, tid)
+
+
+def test_task_verify_sur_la_tete_relue_puis_relecture_fusionne(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.verify import verify_task
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("true",))
+    assert verify_task(TaskService(wt).require(tid), wt, wt / EVIDENCE).passed
+    tick(projet, host)
+    _ready_by_review(projet, host, tid, wt)
+    tick(projet, host)
+    tick(projet, host)
+    assert host.of("gh", "pr", "merge")
 
 
 # ── Chemin vert, sous mandat ───────────────────────────────────────────────────
@@ -1133,6 +1275,11 @@ def test_ci_rouge_a_repetition_escalade_a_l_humain(projet: Path, host: FakeHost)
     v2 = task.waiting.question  # type: ignore[union-attr]
     assert v2.title == "Reprendre la tâche ou l'abandonner ?" and tid not in v2.title + v2.context
     assert [c.value for c in v2.choices] == ["reprendre", "abandonner"] and v2.options == ("reprendre", "abandonner")
+    # GAO-pilote-appli-001 : l'escalade porte son option par défaut, et le ledger établit que le kit l'a écrite.
+    assert v2.recommended == "reprendre" and kit_written(TaskService(projet).ledger.events_for(tid), v2)
+    # GAO-jurisprudenc-001 : l'escalade écrit sa cause codée, d'où le kit calcule la classe de la question.
+    assert [e.payload["cause"] for e in events(projet, tid, MERGE_ESCALATED_EVENT)] == ["ci_red"]
+    assert question_class(TaskService(projet).ledger.events_for(tid), v2) == "merge:ci_red"
     assert len(host.of("claude", "--bg", "--resume")) == 1
     assert [e.payload.get("escalated", False) for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == [False, True]
     assert len(events(projet, tid, MERGE_ESCALATED_EVENT)) == 1

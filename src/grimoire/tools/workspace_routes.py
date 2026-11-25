@@ -80,6 +80,7 @@ from grimoire.tools import (
     workspace_since,
 )
 from grimoire.tools.project_registry import refuse_foreign_body
+from grimoire.voice import stt_service
 
 __all__ = [
     "CHAT_STREAM_PATH",
@@ -637,6 +638,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
     f"{PREFIX}chat/state": workspace_chat.chat_state,
     f"{PREFIX}chat/hosts": workspace_chat.chat_hosts,
+    f"{PREFIX}voice/config": stt_service.voice_config,
 }
 
 
@@ -877,7 +879,9 @@ def _task_action(project_root: Path, task_id: str, action: str, body: dict[str, 
     if action == "claim":
         move = service.claim(task_id, actor, str(body.get("host") or "workspace"))
     elif action == "close":
-        move = service.transition(task_id, TaskState.CLOSED, actor, str(body.get("reason") or ""))
+        move = service.transition(
+            task_id, TaskState.CLOSED, actor, str(body.get("reason") or ""), lesson=str(body.get("lesson") or ""),
+        )
     elif action == "block":
         reason = str(body.get("reason") or "")
         if not reason:
@@ -894,7 +898,7 @@ def _task_action(project_root: Path, task_id: str, action: str, body: dict[str, 
         move = service.transition(task_id, state, actor, str(body.get("reason") or ""))
     else:  # pragma: no cover — garde de complétude
         raise ValueError(f"action inconnue : {action}")
-    return move.to_dict()
+    return move.to_dict(service.home_root)
 
 
 def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:
@@ -1015,6 +1019,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}chat/cancel": workspace_chat.chat_cancel,
     f"{PREFIX}chat/stop": workspace_chat.chat_stop,
     f"{PREFIX}chat/host": workspace_chat.chat_host,
+    f"{PREFIX}voice/transcribe": stt_service.transcribe,
     f"{PREFIX}autonomy/mandate/grant": _mandate_grant,
     f"{PREFIX}autonomy/mandate/revoke": _mandate_revoke,
     f"{PREFIX}file/override": _create_override,

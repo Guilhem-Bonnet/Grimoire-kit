@@ -21,6 +21,7 @@ variable dans son ``os.environ``.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,7 +39,29 @@ def _index_file() -> Path:
     return store_dir() / "index.json"
 
 
+#: Identifiant de fournisseur admis pour nommer un fichier du magasin ou dériver un nom de
+#: variable : ASCII minuscule strict. Un id hors de cette forme pourrait sortir du magasin
+#: (``../``) ou, après ``upper()``, tomber sur la variable d'un autre fournisseur.
+_PROVIDER_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}", re.ASCII)
+
+
+def is_valid_provider_id(provider_id: str) -> bool:
+    """Vrai si *provider_id* est un identifiant ASCII strict (``[a-z0-9][a-z0-9-]{0,63}``)."""
+    return isinstance(provider_id, str) and _PROVIDER_ID_RE.fullmatch(provider_id) is not None
+
+
+def provider_key_var(provider_id: str) -> str:
+    """``<ID>_API_KEY`` dérivé d'un id valide ; vide pour un id invalide (rien n'est dérivé)."""
+    if not is_valid_provider_id(provider_id):
+        return ""
+    return f"{provider_id.upper().replace('-', '_')}_API_KEY"
+
+
 def _provider_file(provider_id: str) -> Path:
+    """Fichier du magasin pour *provider_id* ; ``ValueError`` si l'id n'est pas admis."""
+    if not is_valid_provider_id(provider_id):
+        msg = f"identifiant de fournisseur invalide {provider_id!r} (attendu : [a-z0-9][a-z0-9-]{{0,63}})."
+        raise ValueError(msg)
     return store_dir() / f"{provider_id}.env"
 
 
@@ -97,13 +120,13 @@ def set_secret(provider_id: str, env_var: str, value: str) -> Path:
     """Pose *value* pour *env_var* du fournisseur *provider_id* ; rend le fichier écrit.
 
     Lève ``ValueError`` sur une valeur vide — un magasin qui accepterait une
-    clé vide masquerait l'absence réelle de configuration.
+    clé vide masquerait l'absence réelle de configuration — ou sur un id invalide.
     """
     if not value.strip():
         msg = "valeur vide refusée."
         raise ValueError(msg)
-    _ensure_store()
     path = _provider_file(provider_id)
+    _ensure_store()
     values = _read_env_file(path)
     values[env_var] = value.strip()
     _write_env_file(path, values)
@@ -129,7 +152,10 @@ def list_secrets() -> tuple[SecretEntry, ...]:
 
 
 def remove_secret(provider_id: str, env_var: str | None = None) -> None:
-    """Retire une variable, ou tout le fichier de *provider_id* si *env_var* est ``None``."""
+    """Retire une variable, ou tout le fichier de *provider_id* si *env_var* est ``None``.
+
+    Lève ``ValueError`` sur un id invalide.
+    """
     path = _provider_file(provider_id)
     values = _read_env_file(path)
     if env_var is None:
@@ -147,5 +173,7 @@ def remove_secret(provider_id: str, env_var: str | None = None) -> None:
 
 
 def env_for_provider(provider_id: str) -> dict[str, str]:
-    """Variables déjà posées pour *provider_id* — ``{}`` si rien n'est enregistré."""
+    """Variables déjà posées pour *provider_id* — ``{}`` si rien n'est enregistré ou si l'id est invalide."""
+    if not is_valid_provider_id(provider_id):
+        return {}
     return _read_env_file(_provider_file(provider_id))

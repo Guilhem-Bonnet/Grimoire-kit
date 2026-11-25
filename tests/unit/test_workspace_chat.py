@@ -50,6 +50,17 @@ def _received(log: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
 
 
+def _response_to(log: Path, request_id: int, timeout: float = 10.0) -> dict[str, Any]:
+    """La réponse reçue par l'agent factice : l'événement SSE part avant que l'agent n'ait journalisé son entrée."""
+    deadline = time.monotonic() + timeout
+    while True:
+        found = [m for m in _received(log) if m.get("id") == request_id]
+        if found or time.monotonic() > deadline:
+            assert found, f"l'agent n'a jamais reçu de réponse à la demande {request_id}"
+            return found[0]
+        time.sleep(0.02)
+
+
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
     path = tmp_path / "projet"
@@ -194,7 +205,7 @@ def test_allow_once_and_always_are_sent_as_the_matching_option(
         feed.until(_is("turn_ended"))
     finally:
         feed.close()
-    assert next(m for m in _received(agent_log) if m.get("id") == 900)["result"]["outcome"]["optionId"] == option
+    assert _response_to(agent_log, 900)["result"]["outcome"]["optionId"] == option
 
 
 def test_an_unknown_decision_or_request_grants_nothing(root: Path) -> None:
@@ -241,7 +252,7 @@ def test_stop_during_a_pending_permission_cancels_it_and_never_grants(root: Path
     finally:
         feed.close()
     assert resolved["outcome"] == "cancelled" and resolved["option_id"] is None
-    assert next(m for m in _received(agent_log) if m.get("id") == 900)["result"]["outcome"] == {"outcome": "cancelled"}
+    assert _response_to(agent_log, 900)["result"]["outcome"] == {"outcome": "cancelled"}
 
 
 def test_stop_without_a_running_turn_is_a_no_op(root: Path) -> None:

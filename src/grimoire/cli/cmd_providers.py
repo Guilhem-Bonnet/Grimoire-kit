@@ -26,6 +26,14 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.providers.audit import audit_providers
+from grimoire.providers.capabilities import (
+    MODEL_CAPABILITIES,
+    Capability,
+    CapabilityProbe,
+    ModelCapabilities,
+    ProviderCapabilities,
+)
+from grimoire.providers.capability_probe import capabilities_for, load_probes, probe_capabilities, read_capabilities
 from grimoire.providers.registry import (
     SUPPORTED_CURRENCIES,
     SUPPORTED_MODEL_TIERS,
@@ -96,7 +104,13 @@ def _models_by_tier(provider: ProviderSpec) -> str:
     return " · ".join(parts) if parts else "—"
 
 
-def _provider_json(provider: ProviderSpec, state: dict[str, ProviderRuntimeState], *, now: datetime) -> dict[str, Any]:
+def _provider_json(
+    provider: ProviderSpec,
+    state: dict[str, ProviderRuntimeState],
+    *,
+    now: datetime,
+    probe: CapabilityProbe | None = None,
+) -> dict[str, Any]:
     entry = state.get(provider.id)
     cooling_down = entry is not None and entry.is_cooling_down(now=now)
     return {
@@ -123,6 +137,8 @@ def _provider_json(provider: ProviderSpec, state: dict[str, ProviderRuntimeState
         "probed_at": entry.probed_at if entry is not None else None,
         "models_seen": list(entry.models_seen) if entry is not None else [],
         "probe_note": entry.probe_note if entry is not None else None,
+        # #1281 L3 : capacités avec leur provenance (declared / probed / documented / unknown).
+        "capabilities": capabilities_for(provider, probe).to_dict(),
     }
 
 
@@ -142,11 +158,14 @@ def providers_status(
 
     now = datetime.now(UTC)
     state = load_state(root)
+    probes = load_probes(root)
     next_choice = {tier: choose(root, tier, now=now) for tier in SUPPORTED_MODEL_TIERS}
 
     if json_output or _get_fmt(ctx) == "json":
         payload = {
-            "providers": [_provider_json(provider, state, now=now) for provider in providers],
+            "providers": [
+                _provider_json(provider, state, now=now, probe=probes.get(provider.id)) for provider in providers
+            ],
             "next_choice": {tier: (spec.id if spec else None) for tier, spec in next_choice.items()},
         }
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -320,26 +339,113 @@ def providers_probe(
     provider_id: Annotated[str | None, typer.Argument(help="Un seul fournisseur (défaut : tous).")] = None,
     project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
     json_output: Annotated[bool, _JSON_OPTION] = False,
+    with_capabilities: Annotated[
+        bool,
+        typer.Option(
+            "--capabilities",
+            help="Lire aussi les capacités (liste des modèles, contexte) sur l'API du fournisseur, sans génération.",
+        ),
+    ] = False,
 ) -> None:
     """Sonder (comme `audit`) puis rouvrir ce qu'une date illisible avait fermé.
 
-    Une suspension à date n'est jamais levée ici : la date fait foi.
+    Une suspension à date n'est jamais levée ici : la date fait foi. Avec ``--capabilities``,
+    la liste des modèles de chaque fournisseur activé est lue sans appel de génération ; sans
+    clé ou sans réseau, la capacité reste « non mesurée ».
     """
     root = project_root.resolve()
     try:
         results = audit_providers(root)
+        probes = probe_capabilities(root, provider_id) if with_capabilities else ()
+        resolved = read_capabilities(root, provider_id) if with_capabilities else ()
     except ProviderRegistryError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
     cleared = clear_unknown_suspensions(root, provider_id)
     if json_output or _get_fmt(ctx) == "json":
-        payload = {
+        payload: dict[str, Any] = {
             "probed": [r.provider_id for r in results if provider_id in (None, r.provider_id)],
             "reopened": list(cleared),
         }
+        if with_capabilities:
+            payload["capabilities"] = [{"id": item.provider_id, **item.to_dict()} for item in resolved]
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"Sondés : {len(results)} ; rouverts (date illisible) : {', '.join(cleared) or 'aucun'}")
+    if with_capabilities:
+        for probe in probes:
+            mark = "[green]mesuré[/green]" if probe.measured else "[yellow]non mesuré[/yellow]"
+            console.print(f"  {probe.provider_id} : {mark} — {probe.note}")
+        _print_capabilities(resolved)
+
+
+_PROVENANCE_LABELS = {"declared": "déclaré", "probed": "sondé", "documented": "doc", "unknown": ""}
+
+
+def _capability_cell(capability: Capability) -> str:
+    """``oui (doc)``, ``128000 (sondé)``, ``inconnu`` — la provenance toujours visible."""
+    if capability.value is None:
+        return "[dim]inconnu[/dim]"
+    value = capability.value
+    text = ("oui" if value else "non") if isinstance(value, bool) else str(value)
+    return f"{text} [dim]({_PROVENANCE_LABELS[capability.provenance]})[/dim]"
+
+
+def _capability_rows(item: ProviderCapabilities) -> list[tuple[str, ModelCapabilities]]:
+    rows: list[tuple[str, ModelCapabilities]] = [("(fournisseur)", item.defaults)]
+    rows.extend((model.model_id, model) for model in item.models)
+    return rows
+
+
+def _print_capabilities(items: tuple[ProviderCapabilities, ...]) -> None:
+    if not items:
+        console.print("[dim]Aucun fournisseur dans le registre (`grimoire standard init`).[/dim]")
+        return
+    table = Table(title="Capacités des fournisseurs")
+    for column in ("Fournisseur", "API OpenAI", "API Anthropic", "Modèle", *MODEL_CAPABILITIES):
+        table.add_column(column)
+    for item in items:
+        for index, (label, model) in enumerate(_capability_rows(item)):
+            head = (
+                (
+                    item.provider_id,
+                    _capability_cell(item.openai_compatible),
+                    _capability_cell(item.anthropic_compatible),
+                )
+                if index == 0
+                else ("", "", "")
+            )
+            table.add_row(*head, label, *(_capability_cell(model.get(name)) for name in MODEL_CAPABILITIES))
+    console.print(table)
+    console.print(
+        "[dim]Provenance : déclaré (registre) > sondé (providers probe --capabilities) > doc (URL citée).[/dim]"
+    )
+
+
+@providers_app.command("capabilities")
+def providers_capabilities(
+    ctx: typer.Context,
+    provider_id: Annotated[str | None, typer.Argument(help="Un seul fournisseur (défaut : tous).")] = None,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Capacités connues de chaque fournisseur et modèle, avec leur provenance — sans réseau.
+
+    Fusionne le registre (``declared``), la dernière ``providers probe --capabilities``
+    (``probed``) et la doc du fournisseur (``documented``, URL citée). Une capacité absente
+    vaut « inconnue », jamais « oui ».
+    """
+    root = project_root.resolve()
+    try:
+        items = read_capabilities(root, provider_id)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if json_output or _get_fmt(ctx) == "json":
+        payload = {"providers": [{"id": item.provider_id, **item.to_dict()} for item in items]}
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    _print_capabilities(items)
 
 
 def _escalation_label(stats: Any | None) -> str:
@@ -520,8 +626,14 @@ def providers_remove_key(
     ] = None,
 ) -> None:
     """Retirer une clé (ou toutes celles d'un fournisseur) du magasin de secrets."""
-    remove_secret(provider_id, env_var)
-    console.print(f"[yellow]●[/yellow] retiré : {provider_id!r}" + (f" / {env_var}" if env_var else " (toutes les clés)"))
+    try:
+        remove_secret(provider_id, env_var)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[yellow]●[/yellow] retiré : {provider_id!r}" + (f" / {env_var}" if env_var else " (toutes les clés)")
+    )
 
 
 @providers_app.command("secrets")

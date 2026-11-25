@@ -1,0 +1,33 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "copilot",
+  "capability": "pretooluse_deny",
+  "captured_on": "2026-06-10..2026-06-16",
+  "read_on": "2026-11-20",
+  "source": "journal de session de Copilot dans VS Code (events.jsonl, `hook.start`, `data.input`). Sur 396 entrées preToolUse : 239 portent un seul appel, 157 en portent plusieurs (jusqu'à 10) dans une même invocation de hook.",
+  "version_note": "Version de l'hôte non établie (copilotVersion=\"unknown\", journaux VS Code de la période non conservés).",
+  "wire_caveat": "Hooks déclarés en PascalCase : la charge reçue sur stdin peut différer de celle journalisée (voir pretooluse-single.json).",
+  "observed": {
+    "hook_end_success": true,
+    "hook_output": "non journalisée",
+    "deny_observed": false,
+    "calls_per_invocation": {"1": 239, "2": 104, "3": 31, "4": 10, "5": 8, "6": 3, "10": 1}
+  },
+  "redaction": "identifiants, chemins et contenus remplacés ; clés, types et noms d'outils conservés.",
+  "payloads": [
+    {
+      "hookType": "preToolUse",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "cwd": "<PROJECT>",
+        "toolCalls": [
+          {"id": "toolu_REDACTED_11", "name": "report_intent", "args": "{\"intent\":\"<INTENT>\"}"},
+          {"id": "toolu_REDACTED_12", "name": "view", "args": "{\"path\":\"<PROJECT>/docs\"}"},
+          {"id": "toolu_REDACTED_13", "name": "view", "args": "{\"path\":\"<PROJECT>/README.md\"}"}
+        ]
+      },
+      "expect": {"event": "pre_tool_use", "tool_calls": ["report_intent", "view", "view"]}
+    }
+  ]
+}

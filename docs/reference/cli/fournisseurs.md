@@ -16,7 +16,8 @@ appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
 | `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité (refroidissement + dernier audit), prochain choix |
 | `grimoire providers audit [--json]` | Sonder chaque fournisseur activé sans dépenser (PATH, `--version`, modèles Ollama) et journaliser `available`/`models_seen`/`probe_note` dans l'état |
 | `grimoire providers cooldown <id> --reason rate_limit\|timeout\|overloaded` | Enregistrer un échec à la main (429, timeout, 529) |
-| `grimoire providers probe [<id>] [--json]` | Sonder (comme `audit`) puis rouvrir les fournisseurs fermés par une date de forfait illisible (`unknown`) ; une suspension à date n'est jamais levée |
+| `grimoire providers probe [<id>] [--capabilities] [--json]` | Sonder (comme `audit`) puis rouvrir les fournisseurs fermés par une date de forfait illisible (`unknown`) ; une suspension à date n'est jamais levée. Avec `--capabilities`, lire aussi les capacités sur l'API du fournisseur, sans génération |
+| `grimoire providers capabilities [<id>] [--json]` | Capacités connues de chaque fournisseur et modèle, avec leur provenance, sans réseau |
 | `grimoire providers quota [--json]` | Fenêtre de forfait lue dans les flux d'appel : `lower_bound` (minorant daté) ou `unknown`, jamais 0 |
 | `grimoire providers history [--ledger-root <chemin>] [--json]` | Historique des dispatchs par couple (type de tâche, classe) et palier de départ recommandé |
 
@@ -42,6 +43,243 @@ observations à ce palier n'ont plus escaladé, et qui n'a pas retenté
 (re-sondage) — jamais sous le plancher qu'impose la classe (`mid` reste le
 plancher d'une tâche V1). La colonne « départ recommandé » est exactement
 ce que `grimoire task dispatch` retient par défaut pour ce couple.
+
+## Capacités des fournisseurs
+
+Le registre peut dire ce que chaque fournisseur et chaque modèle sait faire.
+`grimoire providers capabilities` l'affiche, `providers status --json`, l'outil
+MCP `grimoire_providers_status` et l'API du cockpit (`GET /api/workspace/providers`)
+le portent sous `capabilities`. Le routage ne s'en sert pas encore.
+
+| Capacité | Niveau | Valeur |
+| --- | --- | --- |
+| `openai_compatible` | fournisseur | l'API accepte le format OpenAI (chat completions) |
+| `anthropic_compatible` | fournisseur | l'API accepte le format Anthropic (Messages) |
+| `tools` | modèle | appel d'outils |
+| `structured_output` | modèle | sortie structurée ou mode JSON |
+| `vision` | modèle | images en entrée |
+| `context_window` | modèle | fenêtre de contexte, en tokens (entier) |
+| `thinking` | modèle | raisonnement (« thinking ») |
+| `prompt_cache` | modèle | cache de prompt |
+
+Chaque valeur porte sa **provenance**, de la plus forte à la plus faible :
+
+- `declared` : écrite dans le registre, sous `capabilities:` du fournisseur ou
+  d'un modèle. Celle du modèle l'emporte.
+- `probed` : mesurée par `grimoire providers probe --capabilities`. La source
+  cite l'URL interrogée et la date.
+- `documented` : valeur par défaut du kit, tirée de la doc du fournisseur. La
+  source est l'URL de cette doc. Elle décrit l'API entière, pas chaque modèle :
+  ce qui dépend du modèle (vision, raisonnement, contexte) n'y figure pas.
+- `unknown` : rien de ce qui précède. Une capacité absente vaut « inconnue »,
+  jamais « oui ».
+
+```yaml
+providers:
+  - id: "deepseek"
+    enabled: true
+    capabilities:            # facultatif, vaut pour tous les modèles du fournisseur
+      vision: false
+    models:
+      - id: "deepseek-flash"
+        tier: "cheap"
+        capabilities:        # facultatif, prime sur le niveau fournisseur
+          vision: true
+          context_window: 1048576
+```
+
+Un registre sans `capabilities:` se lit comme avant. Une valeur du mauvais type
+(`context_window: true`, `tools: "yes"`) est ignorée et reste inconnue.
+
+Valeurs documentées livrées par le kit (lues le 2026-11-22) :
+
+| Fournisseur (id du registre) | Documenté |
+| --- | --- |
+| `anthropic` (`claude`) | API Anthropic et OpenAI, outils, cache de prompt |
+| `openai` (`codex`) | API OpenAI, outils, sortie structurée, cache de prompt |
+| `google-gemini` (`gemini`, `google`) | API OpenAI, outils, sortie structurée, cache |
+| `deepseek` | API OpenAI et Anthropic, outils, mode JSON, raisonnement, cache |
+| `moonshot` (`kimi`) | API OpenAI et Anthropic, outils, mode JSON |
+| `local` (`ollama`, ou tout `provider_type: local`) | API OpenAI et Anthropic d'Ollama ; pas de cache de prompt |
+| `litellm` (tout `provider_type: litellm`) | API OpenAI (`/chat/completions`, `/models`) et Anthropic (`/v1/messages`) du proxy LiteLLM |
+
+Les URL exactes sont dans `grimoire providers capabilities --json` (champ
+`source`) et dans `src/grimoire/providers/capabilities.py`. Le kit ne
+documente ni ne sonde `github-copilot` : ses capacités restent inconnues tant
+qu'elles ne sont pas déclarées.
+
+**La sonde ne dépense rien.** `providers probe --capabilities` lit la liste des
+modèles du fournisseur (`GET /models`, ou `GET /api/tags` puis `POST /api/show`
+par modèle déclaré pour Ollama) et en tire ce qu'elle porte : contexte, vision,
+raisonnement, sortie structurée selon le fournisseur. Elle ne fait aucun appel
+de génération, et aucune option ne l'y autorise : ce qu'une génération seule
+prouverait reste documenté ou inconnu. Un fournisseur sans point d'entrée connu
+est sondé sur `<anthropic_base_url>/v1/models` si cette URL est en `https://`.
+
+- **Clé d'un fournisseur documenté** : lue dans le magasin de secrets
+  (`grimoire providers set-key`), puis dans l'environnement, sous
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY` ou
+  `MOONSHOT_API_KEY`, et envoyée uniquement à l'hôte officiel du fournisseur.
+- **Clé d'un autre fournisseur** (hôte lu dans le registre) : lue dans le
+  magasin seulement, sous `<ID>_API_KEY`, jamais dans l'environnement. Un nom
+  qui serait celui d'un fournisseur documenté est refusé : une clé ne peut pas
+  partir vers un hôte choisi par le registre.
+- **Identifiant** : ASCII strict, `[a-z0-9][a-z0-9-]{0,63}`. Un autre
+  identifiant n'est pas sondé (« non mesuré : id invalide ») et n'a pas de
+  fichier dans le magasin.
+- **Transport** : la clé part en en-tête seulement, jamais dans l'URL, la
+  sortie, les notes ni le fichier écrit. Aucune redirection n'est suivie
+  (« redirection refusée »).
+- **Contenu borné** : une réponse de plus de 2 Mio est refusée, au plus 2000
+  modèles sont lus, et un identifiant de modèle hors de
+  `[A-Za-z0-9._:/@+-]{1,128}` est ignoré, à la sonde comme à la relecture du
+  fichier.
+- **Sans clé, sans réseau, ou réponse illisible** : le fournisseur est « non
+  mesuré », avec son motif (clé absente, clé refusée, injoignable). Ce n'est
+  pas une erreur : la commande sort en 0.
+- **Résultat** : `_grimoire-output/providers-capabilities.json`, état runtime.
+  Le registre n'est jamais écrit. Une nouvelle sonde remplace la précédente du
+  même fournisseur : une valeur qu'on ne mesure plus ne reste pas « sondée ».
+
+## Passerelle LiteLLM
+
+Un proxy LiteLLM se déclare comme un fournisseur de type `litellm`. `base_url`
+est la racine du proxy, avec ou sans `/v1` :
+
+```yaml
+providers:
+  - id: "proxy"
+    enabled: true
+    provider_type: "litellm"
+    base_url: "https://llm.example.com"   # ou http://127.0.0.1:4000 en boucle locale
+    allowed_capabilities: ["chat", "code"]
+    default_models: ["claude-haiku"]
+    models:
+      - id: "claude-haiku"               # un model_name du proxy
+        tier: "cheap"
+    data_policy:
+      allowed_data_classes: ["public-docs", "project-source"]
+      forbidden_data_classes: ["secrets", "credentials"]
+```
+
+- **Format.** Le proxy sert le format OpenAI (`/chat/completions`, `/models`,
+  [quick start](https://docs.litellm.ai/docs/proxy/quick_start)) et le format
+  Anthropic sur `/v1/messages`, celui que Claude Code utilise
+  ([Claude Code](https://docs.litellm.ai/docs/proxy/client_setup/claude_code)).
+  Les deux sont documentés pour tout le fournisseur. Le reste dépend du modèle
+  derrière le proxy et reste inconnu tant qu'il n'est ni sondé ni déclaré.
+- **Clé.** Une clé virtuelle ou la clé maître du proxy, rangée dans le magasin
+  sous `<ID>_API_KEY` (`grimoire providers set-key`). Elle n'est jamais lue
+  dans l'environnement et part en en-tête `Authorization: Bearer`. Un `id`
+  dont la variable serait celle d'un fournisseur documenté (`openai`) n'est
+  pas sondé.
+- **URL admise.** `https://`, ou `http://` vers `127.0.0.1`, `localhost` ou
+  `::1`. Une URL qui porte des identifiants, une requête ou un fragment n'est
+  jamais contactée.
+- **Sonde.** `providers probe --capabilities` lit `GET <base_url>/v1/models`
+  ([model discovery](https://docs.litellm.ai/docs/proxy/model_discovery)),
+  puis `GET <base_url>/v1/model/info`. De cette seconde route, seuls
+  `max_input_tokens` (contexte), `supports_function_calling` (outils) et
+  `supports_vision` sont lus, et seulement à `true` : la doc prévient qu'un
+  champ non renseigné vaut `null`. Si le proxy refuse `/model/info` à une clé
+  virtuelle (la doc ne la montre qu'avec la clé maître), les modèles restent
+  listés, sans détail. Aucune génération, aucune redirection suivie, et les
+  bornes de la section précédente s'appliquent (2 Mio, 2000 modèles,
+  identifiants filtrés).
+- **Vérification.** `grimoire standard verify` exige `base_url` et des
+  `forbidden_data_classes` : le proxy transmet les prompts à ses propres
+  fournisseurs, il est traité comme un hébergé par la politique de données.
+- **Table des modèles.** L'`id` du fournisseur sert de clé sous
+  `dispatch.models.<hôte>` comme pour tout fournisseur (voir la section
+  suivante). Le worker du tick ne passe pas encore par `base_url` : il route
+  vers `anthropic_base_url`, qui peut viser le même proxy en `https://`.
+
+## Table palier → modèle : hôte × fournisseur
+
+Le kit raisonne en paliers : `cheap`, `mid` et `strong`. Une tâche V0 part au
+palier `cheap`, une V1 au palier `mid`, une V2 reste sur le modèle de la
+session. Un palier ne nomme aucun modèle : une table le traduit pour un hôte et
+un fournisseur donnés. Elle sert au hook `dispatch-model`, à la politique de
+dispatch injectée au `SessionStart`, au `model:` des personas émises, au worker
+(`tier`, `model_by_class`) et à la route forte (`sensitive_route: strong`).
+
+La classe V0, V1 ou V2 d'une tâche ne change pas : seule la traduction du palier
+en nom de modèle passe par la table.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire dispatch models [--json]` | Table résolue pour le projet : hôte, fournisseur, palier, modèle et provenance du choix |
+
+**Défauts livrés par le kit.** Seulement là où le nom est connu de l'hôte :
+
+| Hôte | Fournisseur | `cheap` | `mid` | `strong` |
+| --- | --- | --- | --- | --- |
+| Claude Code | `anthropic` | `haiku` | `sonnet` | `opus` |
+
+Sous Claude Code, sans surcharge, le comportement est celui d'avant la table, à
+l'octet près : un test compare la sortie du hook et les fiches émises à celles
+de la version précédente.
+
+**Surcharge par projet.** Elle se déclare dans la politique d'orchestration du
+standard :
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+dispatch:
+  impose_model: on
+  models:
+    claude:                    # hôte : claude, copilot, cursor, codex, gemini, opencode
+      anthropic:               # fournisseur du registre, ou "*" pour tout fournisseur
+        cheap: claude-haiku-4-5
+    copilot:
+      cheap: claude-haiku-4.5  # un palier posé sous l'hôte vaut pour tout fournisseur
+      mid: gpt-5.4
+```
+
+**Ordre de résolution**, du plus fort au plus faible :
+
+1. `dispatch.models.<hôte>.<fournisseur>.<palier>` (provenance `project`) ;
+2. `dispatch.models.<hôte>.<palier>` ou `dispatch.models.<hôte>."*".<palier>`
+   (`project`) ;
+3. les alias historiques `dispatch.copilot_models` et `dispatch.cursor_models`,
+   toujours lus, avec les clés `haiku`, `sonnet` et `opus` ou les noms de
+   paliers (`legacy`) ;
+4. les défauts du kit (`kit`).
+
+**Aucune correspondance inventée.** Un palier qu'aucune couche ne nomme pour cet
+hôte et ce fournisseur n'a pas de modèle. L'appelant omet alors `model` : le
+modèle de la session, de l'agent parent ou du sélecteur s'applique. C'est le cas
+de Copilot, de Cursor, de Gemini CLI et d'opencode tant que le projet ne déclare
+rien. Les fiches de sous-agent de Cursor (`.cursor/agents/`), de Gemini CLI
+(`.gemini/agents/`) et d'opencode (`.opencode/agent/`) reçoivent `model` pour le
+seul palier que la table traduit ; opencode exige la forme `provider/model-id`
+(un nom sans `/` est écarté et signalé par la dégradation `model affinity`).
+
+**Capacités.** Le worker et le relecteur exigent l'appel d'outils (`tools`). Un
+modèle du projet dont cette capacité est connue à « non » dans le registre
+(déclarée ou sondée, voir la section précédente) est écarté, et la couche
+suivante prend le relais. Une capacité inconnue n'écarte jamais un modèle, et un
+défaut du kit n'est jamais écarté : ni la sonde ni le registre ne peuvent vider
+la table.
+
+**Ce que la table ne peut pas faire descendre.**
+
+- La route sensible (`sensitive_route: strong`) garde le défaut fort du kit,
+  `opus` sous Claude Code, quelle que soit la surcharge du projet.
+- Le relecteur prend, dans l'ordre, le palier du rôle, `mid`, puis `strong`,
+  `mid` et `cheap`. Il retient le premier modèle que la double relecture tient
+  pour distinct de celui du worker. Si aucun ne l'est, la relecture n'est pas
+  lancée et la tâche revient à l'humain avec ce motif.
+- Un palier demandé au worker que la table ne traduit pas ne lance rien : la
+  tâche attend, avec le motif, au lieu de tourner sur le modèle de la session.
+- `orchestrator.roles.worker.tier` n'accepte que `cheap`, `mid` ou `strong`.
+
+**Valeurs illisibles.** Un hôte inconnu, un palier hors `cheap`, `mid` ou
+`strong`, un nom de modèle hors `[A-Za-z0-9._:[]/@-]`, ou un nom que YAML
+relirait comme un autre type (`null`, `true`, `1.5`) sont ignorés. Ils
+apparaissent sous la table de `grimoire dispatch models` et dans `errors` de la
+sortie `--json`. Le hook ne lève jamais : une politique illisible vaut une table
+vide.
 
 ## Politique de données : ce qui peut partir chez un fournisseur
 

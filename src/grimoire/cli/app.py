@@ -699,6 +699,9 @@ def doctor(
             from grimoire.cli.doctor_memory import apply_memory_checks
 
             apply_memory_checks(cfg, results, fmt=fmt, console=console)
+        with _timed_phase("voice"):  # Vocal (#1343) : réglages, extra voice, moteurs — rien n'est chargé.
+            from grimoire.cli.doctor_voice import apply_voice_check
+            apply_voice_check(cfg.extra, results, fmt=fmt, console=console)
 
     # 6. Optional dependencies
     with _timed_phase("dependency_scan"):

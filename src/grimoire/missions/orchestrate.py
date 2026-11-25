@@ -32,6 +32,12 @@ relue READY (CI verte, branche réalignée, sous mandat seulement) puis l'accept
 workers (geste ``answer``) ou des reprises (geste ``resume``), l'étape orchestrateur (:mod:`.orchestrator_session`)
 lance une session de fond qui les tranche dans le périmètre des critères, ou les laisse à l'humain.
 
+GAO-r-le-arbitre-001 : entre le merger et l'orchestrateur, si le rôle ``arbiter`` est activé, l'étape arbitre
+(:mod:`.arbiter`) reprend les escalades que le relecteur et le merger viennent de demander au lieu de les poser à
+l'humain : elle lance une session en lecture seule, relit son vote JSON (validé par du code) et applique la décision
+au tick suivant. Un JSON invalide, une confiance basse ou une session muette rendent la question à l'humain, avec
+l'analyse de l'arbitre jointe.
+
 K12 — **idempotent et rejouable** :
 
 - un seul tick écrit à la fois : ``_grimoire-output/control/.tick.lock`` (:func:`grimoire.core.fsio.locked`,
@@ -75,8 +81,10 @@ if TYPE_CHECKING:
     from grimoire.missions.janitor import JanitorOutcome
     from grimoire.missions.launcher import Exec, LaunchOutcome
     from grimoire.missions.merger import MergerOutcome
+    from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.orchestrator_session import OrchestratorOutcome
     from grimoire.missions.reviewer import ReviewOutcome
+    from grimoire.missions.sensitive_route import SensitiveRoute
     from grimoire.missions.service import TaskService, WakeDecision
 
 __all__ = ["TICK_LOCK_RELPATH", "TickReport", "run_tick"]
@@ -112,6 +120,11 @@ class TickReport:
     orchestrator: tuple[OrchestratorOutcome, ...] = ()
     usage: tuple[Any, ...] = ()  # GAO-i12 : les journaux repliés à ce tick (FoldOutcome)
     external_merges: tuple[ExternalMergeOutcome, ...] = ()  # #1162 : les PR fusionnées hors merger, soldées
+    #: En plan, sous ``worker.sensitive_route: strong`` : ``(tâche, décision)`` pour chaque tâche admise.
+    routes: tuple[tuple[str, SensitiveRoute], ...] = ()
+    #: GAO-r-le-arbitre-001 : les arbitrages lancés, appliqués ou rendus à l'humain à ce tick (en dernier :
+    #: tous les appels positionnels existants gardent leur place).
+    arbitrations: tuple[Any, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -140,10 +153,14 @@ class TickReport:
             payload["merges"] = [o.to_dict() for o in self.merges]
         if self.orchestrator:  # #962 : même règle
             payload["orchestrator"] = [o.to_dict() for o in self.orchestrator]
+        if self.arbitrations:  # GAO-r-le-arbitre-001 : même règle
+            payload["arbitrations"] = [o.to_dict() for o in self.arbitrations]
         if self.usage:  # GAO-i12 : même règle
             payload["usage"] = [o.to_dict() for o in self.usage]
         if self.external_merges:  # #1162 : même règle
             payload["external_merges"] = [o.to_dict() for o in self.external_merges]
+        if self.routes:  # sensitive_route : même règle
+            payload["routes"] = [{"task_id": tid, **decision.to_dict()} for tid, decision in self.routes]
         return payload
 
 
@@ -293,8 +310,9 @@ def _one_pass(
         result = dispatcher(plan.admitted)
         launches = tuple(result) if isinstance(result, (tuple, list)) else ()
         dispatched = tuple(o.task_id for o in launches if o.status == "launched") if launches else tuple(a.task_id for a in plan.admitted)
+    routes = _planned_routes(service, policy, plan.admitted) if mode == "plan" else ()
     reviews: tuple[ReviewOutcome, ...] = ()
-    if mode == "apply" and policy is not None and policy.reviewer.enabled:
+    if mode == "apply" and policy is not None and policy.reviewer.enabled and not _host_refused(policy, "relecteur", attention):
         from grimoire.missions.launcher import default_exec
         from grimoire.missions.reviewer import ReviewStage
 
@@ -303,6 +321,7 @@ def _one_pass(
         except Exception as exc:  # une étape en erreur ne casse pas le tick : récolte, admission et lancements sont faits
             attention.append(f"relecteur : étape en erreur, rien n'est jugé à ce tick ({type(exc).__name__}: {exc})")
     merges = _merger_stage(service, policy, mode, exec_, now, attention)
+    arbitrations = _arbiter_stage(service, policy, mode, exec_, now, attention)
     usage = _usage_stage(service, mode, attention)
     answers = _orchestrator_session_stage(service, policy, mode, exec_, now, attention)
     from grimoire.missions.breaker import read_breaker
@@ -329,6 +348,9 @@ def _one_pass(
     for answer in answers:
         if answer.status == "failed" or "laissées à l'humain" in answer.detail:
             attention.append(f"orchestrateur : {answer.action} {answer.status} ({answer.detail})")
+    for arbitration in arbitrations:
+        if arbitration.status == "failed" or arbitration.action == "fallback":
+            attention.append(f"arbitre : {arbitration.task_id} {arbitration.action} {arbitration.status} ({arbitration.detail})")
     if report.clock == "unknown":
         attention.append("horloge incohérente (plus tôt que le dernier événement du ledger) : rien n'est récolté")
     if unreadable := service.ledger.unreadable_lines():
@@ -344,8 +366,25 @@ def _one_pass(
     notes = tuple(f"{t} : en pause ({state.mode_for(t)})" for t in sorted({tid for f in state.flags for tid in f.tasks}))
     return TickReport(
         "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci,
-        launches, cleanup, breaker, reviews, merges, answers, usage, external_merges,
+        launches, cleanup, breaker, reviews, merges, answers, usage, external_merges, routes=routes,
+        arbitrations=arbitrations,
     )
+
+
+def _planned_routes(
+    service: TaskService, policy: OrchestratorPolicy | None, admitted: tuple[Admit, ...],
+) -> tuple[tuple[str, SensitiveRoute], ...]:
+    """Le routage que le lanceur appliquerait aux tâches admises (``sensitive_route``), rendu par le plan."""
+    from grimoire.missions.sensitive_route import SENSITIVE_ROUTE_STRONG, sensitive_route_for
+
+    if policy is None or policy.worker.sensitive_route != SENSITIVE_ROUTE_STRONG:
+        return ()
+    routes: list[tuple[str, SensitiveRoute]] = []
+    for admit in admitted:
+        task = service.ledger.get_task(admit.task_id)
+        if task is not None:
+            routes.append((admit.task_id, sensitive_route_for(task, policy)))
+    return tuple(routes)
 
 
 def _usage_stage(service: TaskService, mode: str, attention: list[str]) -> tuple[Any, ...]:
@@ -376,6 +415,7 @@ def _autonomous(service: TaskService) -> bool:
     policy = load_orchestrator_policy(service.home_root).policy
     if policy is not None and (
         policy.worker.enabled or policy.reviewer.enabled or policy.merger.enabled or policy.orchestrator.enabled
+        or policy.arbiter.enabled
     ):
         return True
     return bool(launched_sessions(service))
@@ -397,11 +437,39 @@ def _merger_stage(
         return ()
 
 
+def _host_refused(policy: Any, role: str, attention: list[str]) -> bool:
+    """Vrai (et la raison en note d'attention) si *role* n'est pas outillé sur l'hôte du projet (``orchestrator.host``)."""
+    from grimoire.missions.orchestrator_policy import claude_only_refusal
+
+    if refusal := claude_only_refusal(policy, role):
+        attention.append(refusal)
+        return True
+    return False
+
+
+def _arbiter_stage(
+    service: TaskService, policy: Any, mode: str, exec_: Exec | None, now: datetime | None, attention: list[str]
+) -> tuple[Any, ...]:
+    """L'arbitre (GAO-r-le-arbitre-001), appliqué seulement ; une étape en erreur ne casse pas le tick."""
+    if mode != "apply" or policy is None or not policy.arbiter.enabled or _host_refused(policy, "arbitre", attention):
+        return ()
+    from grimoire.missions.arbiter import ArbiterStage
+    from grimoire.missions.launcher import default_exec
+
+    try:
+        return ArbiterStage(service, policy, exec_=exec_ or default_exec, now=now)()
+    except Exception as exc:  # récolte, admission, lancements, relectures et fusions sont faits
+        attention.append(f"arbitre : étape en erreur, aucun arbitrage à ce tick ({type(exc).__name__}: {exc})")
+        return ()
+
+
 def _orchestrator_session_stage(
     service: TaskService, policy: Any, mode: str, exec_: Exec | None, now: datetime | None, attention: list[str]
 ) -> tuple[OrchestratorOutcome, ...]:
     """La session orchestrateur (#962), appliquée seulement ; une étape en erreur ne casse pas le tick."""
-    if mode != "apply" or policy is None or not policy.orchestrator.enabled:
+    if mode != "apply" or policy is None or not policy.orchestrator.enabled or _host_refused(
+        policy, "orchestrateur", attention
+    ):
         return ()
     from grimoire.missions.launcher import default_exec
     from grimoire.missions.orchestrator_session import OrchestratorStage

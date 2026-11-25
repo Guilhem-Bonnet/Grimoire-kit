@@ -84,6 +84,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.standard_checks.evidence_journal import (
+    TRUNCATION_MARKER,
     append_guard_event,
     evidence_log_relpath,
     read_evidence_log,
@@ -231,6 +232,8 @@ _ABS_PATH_TOKEN_RE = re.compile(r"(?<!\S)(/\S+)")
 #: reuse :func:`grimoire.hosts.decisions.tool_facts.command_surface`'s own
 #: heredoc stripping, which requires real newlines this text no longer has.
 _FLATTENED_HEREDOC_RE = re.compile(r"(<<-?\s*(['\"]?)(\w+)\2\s)(.*?)\s\3\b", re.DOTALL)
+#: Un ``#`` en début de mot dans une commande aplatie : là où le shell lisait un commentaire d'une ligne.
+_FLATTENED_COMMENT_RE = re.compile(r"(?:^|\s)#")
 
 
 def _strip_flattened_heredoc_bodies(command: str) -> str:
@@ -356,14 +359,16 @@ def _is_mutation_candidate(entry: dict[str, Any], project_root: Path) -> bool:
     here — never excluded).
 
     A ``bash`` event is one when its command is not classified read-only —
-    reusing :func:`grimoire.hosts.decisions.tool_facts.is_read_only_command`
-    on the stored command string rather than storing a redundant flag at
-    write time: the journal already carries the one thing that
-    classification needs (the full command line), and a second copy of the
-    verdict could drift from it if the classifier ever changes — *and* when
-    it is not a command whose only identifiable targets sit outside
-    *project_root* (:func:`_bash_targets_all_outside_root`, the 2026-09-29
-    false positive this reads).
+    *and* when it is not a command whose only identifiable targets sit
+    outside *project_root* (:func:`_bash_targets_all_outside_root`, the
+    2026-09-29 false positive this reads).
+
+    Le classement fait foi tel que le hook l'a consigné (``read_only``), sur la
+    commande entière. Le texte du journal n'est pas cette commande : il est
+    aplati sur une ligne et coupé à 240 caractères, donc deux commandes que
+    séparait un saut de ligne s'y lisent comme une seule, et la fin d'une
+    longue commande n'y est plus. Une entrée sans ce champ (écrite avant lui)
+    est reclassée sur son texte, marqueur de coupure retiré.
 
     A ``test_run`` event is never a mutation candidate, deliberately: running
     a recognised test/lint command is not read-only under
@@ -383,9 +388,15 @@ def _is_mutation_candidate(entry: dict[str, Any], project_root: Path) -> bool:
         return bool(path) and not _file_write_target_outside_root(path, project_root)
     if kind == "bash":
         command = str(entry.get("command") or "")
-        if not command or is_read_only_command(command):
+        if not command:
             return False
-        return not _bash_targets_all_outside_root(command, project_root)
+        recorded = entry.get("read_only")
+        if not isinstance(recorded, bool):
+            # Entrée d'avant ce champ. Aplati, un commentaire avale tout ce qui le suivait sur les lignes
+            # d'après : une commande qui en porte un ne se relit pas, elle reste une mutation possible.
+            text = command.removesuffix(TRUNCATION_MARKER)
+            recorded = not _FLATTENED_COMMENT_RE.search(text) and is_read_only_command(text)
+        return not recorded and not _bash_targets_all_outside_root(command, project_root)
     return False
 
 

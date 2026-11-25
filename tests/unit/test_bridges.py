@@ -19,9 +19,13 @@ def test_detect_with_override():
 
 
 def test_codex_manifest_hooks():
-    assert CODEX_MANIFEST.hooks.subagent_start is True
-    assert CODEX_MANIFEST.hooks.user_prompt_submit is False
-    assert CODEX_MANIFEST.hooks.pre_tool_use is False
+    """Événements documentés par Codex (learn.chatgpt.com/docs/hooks) : déclenchés, pas prouvés bloquants."""
+    hooks = CODEX_MANIFEST.hooks
+    assert hooks.subagent_start is True and hooks.subagent_stop is True
+    assert hooks.user_prompt_submit is True
+    assert hooks.pre_tool_use is True and hooks.post_tool_use is True
+    assert hooks.session_start is True and hooks.pre_compact is True and hooks.stop is True
+    assert hooks.post_tool_use_failure is False
 
 
 def test_github_copilot_manifest_full_hooks():
@@ -58,8 +62,7 @@ def test_detect_unknown_env_var_returns_unknown(monkeypatch):
         "CLAUDE_CODE_ENTRYPOINT",
         "CODEX_ENV",
         "CODEX_SANDBOX",
-        "COPILOT_AGENT",
-        "GITHUB_COPILOT_AGENT",
+        "COPILOT_AGENT_PROMPT",
         "CURSOR_AGENT",
         "CURSOR_TRACE_ID",
         "GEMINI_CLI",
@@ -74,7 +77,7 @@ def test_detect_unknown_env_var_returns_unknown(monkeypatch):
 def test_supports_hook():
     bridge = HostBridge(override_host_id=HostId.GITHUB_COPILOT)
     assert bridge.supports_hook("user_prompt_submit", HostId.GITHUB_COPILOT) is True
-    assert bridge.supports_hook("user_prompt_submit", HostId.CODEX) is False
+    assert bridge.supports_hook("user_prompt_submit", HostId.OPENCODE) is False
 
 
 def test_all_manifests_cover_the_registry():
@@ -87,6 +90,8 @@ def test_all_manifests_cover_the_registry():
         HostId.CURSOR,
         HostId.GEMINI_CLI,
         HostId.OPENCODE,
+        HostId.KIMI_CODE,
+        HostId.ZED,
     }
 
 
@@ -94,7 +99,7 @@ def test_api_key_alone_does_not_identify_a_host(monkeypatch):
     """A vendor key says who pays for the tokens, not which host is running."""
     monkeypatch.delenv("GRIMOIRE_HOST_ID", raising=False)
     for var in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CODEX_ENV", "CODEX_SANDBOX",
-                "COPILOT_AGENT", "GITHUB_COPILOT_AGENT", "CURSOR_AGENT", "CURSOR_TRACE_ID",
+                "COPILOT_AGENT_PROMPT", "CURSOR_AGENT", "CURSOR_TRACE_ID",
                 "GEMINI_CLI", "GEMINI_CLI_VERSION"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")

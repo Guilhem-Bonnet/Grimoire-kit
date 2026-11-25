@@ -175,7 +175,11 @@ def test_decide_activation_resets_temporal_session(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"schema_version": 1, "rules": {"x": {"calls": 5}}}', encoding="utf-8")
     decide_activation(HookInput(event=HookEvent.SESSION_START, project_root=tmp_path, session_id="sess-1"))
-    assert not path.exists()
+    # Le journal repart de zéro : aucun compteur hérité. Il peut déjà porter la marque « dire une
+    # fois » du rappel que ce démarrage vient de rendre (sans tâche, profil governed).
+    state = load_session_state(tmp_path, "sess-1", now_iso="2026-01-01T00:00:00+00:00")
+    assert state.rules == {}
+    assert set(state.said) <= {"prompt.task"}
 
 
 # ── temporal: pure decision ───────────────────────────────────────────────────

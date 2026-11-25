@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -113,6 +114,10 @@ class SessionState:
     #: (issue #1126). Le rappel n'est relancé que si le compteur dépasse cette valeur :
     #: une session qui a répondu au rappel sans écrire de nouveau n'est pas relancée à chaque tour.
     acknowledged_mutations: int = 0
+    #: Compteur ``mutations`` au dernier refus COMPLET « Clôture hors tâche ». Entre deux refus,
+    #: les écritures sont signalées sans bloquer ; le refus revient quand l'écart dépasse le seuil
+    #: (:func:`grimoire.hosts.decisions.evidence_gate._no_task_closure`).
+    no_task_blocked_at: int = 0
     #: Approbations en attente, par identifiant d'appel d'outil de l'hôte :
     #: ``{"fingerprint": ..., "rules": [...]}`` posé au PreToolUse, repris au
     #: PostToolUse (W1-09). Le PostToolUse peut recevoir une entrée réécrite par
@@ -130,6 +135,10 @@ class SessionState:
     #: Des chemins, des tailles, des digests et des codes de motif — jamais un
     #: extrait de contenu.
     instruction_scan: dict[str, Any] = field(default_factory=dict)
+    #: Rappels déjà rendus dans cette session (« dire une fois ») : ``{clé: empreinte}``.
+    #: Un rappel n'est rendu de nouveau que si son empreinte change (l'état qu'il décrit
+    #: a changé). Des clés et des hachages courts — jamais le texte du rappel.
+    said: dict[str, str] = field(default_factory=dict)
 
     def rule_state(self, rule_id: str) -> RuleState:
         return self.rules.setdefault(rule_id, RuleState())
@@ -146,9 +155,11 @@ class SessionState:
             "unattached_work": dict(self.unattached_work),
             "mutations": self.mutations,
             "acknowledged_mutations": self.acknowledged_mutations,
+            "no_task_blocked_at": self.no_task_blocked_at,
             "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
             "armed": dict(self.armed),
             "instruction_scan": dict(self.instruction_scan),
+            "said": dict(self.said),
         }
 
     @classmethod
@@ -161,6 +172,7 @@ class SessionState:
         } if isinstance(rules_raw, dict) else {}
         mutations = d.get("mutations", 0)
         acked = d.get("acknowledged_mutations", 0)
+        blocked_at = d.get("no_task_blocked_at", 0)
         pending_raw = d.get("pending_approvals", {})
         pending: dict[str, dict[str, Any]] = {}
         if isinstance(pending_raw, dict):
@@ -176,6 +188,8 @@ class SessionState:
         armed = (
             {str(k): v for k, v in armed_raw.items() if isinstance(v, str)} if isinstance(armed_raw, dict) else {}
         )
+        said_raw = d.get("said", {})
+        said = {str(k): v for k, v in said_raw.items() if isinstance(v, str)} if isinstance(said_raw, dict) else {}
         return cls(
             session_id=session_id,
             started_at=str(d.get("started_at") or started_at),
@@ -186,9 +200,13 @@ class SessionState:
             unattached_work=dict(d["unattached_work"]) if isinstance(d.get("unattached_work"), dict) else {},
             mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
             acknowledged_mutations=int(acked) if isinstance(acked, int | float) and not isinstance(acked, bool) else 0,
+            no_task_blocked_at=(
+                int(blocked_at) if isinstance(blocked_at, int | float) and not isinstance(blocked_at, bool) else 0
+            ),
             pending_approvals=pending,
             armed=armed,
             instruction_scan=dict(d["instruction_scan"]) if isinstance(d.get("instruction_scan"), dict) else {},
+            said=said,
         )
 
     @classmethod
@@ -199,6 +217,24 @@ class SessionState:
 def _epoch_of(value: Any) -> int:
     """Un epoch lu du journal : entier >= 0, sinon ``0`` (illisible = aucun bail connu)."""
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+@contextlib.contextmanager
+def _session_lock(project_root: Path, session_id: str) -> Iterator[bool]:
+    """Verrou inter-processus sur le journal de *session_id* (:func:`grimoire.core.fsio.locked`).
+
+    Rend ``True`` sous verrou, ``False`` s'il n'a pas été obtenu à temps ou ne peut pas l'être :
+    l'appelant continue sans exclusion (un hook ne se bloque jamais sur son journal), comme avant.
+    """
+    from grimoire.core.fsio import locked
+
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(locked(session_state_path(project_root, session_id), timeout=2.0))
+        except (OSError, TimeoutError):
+            yield False
+            return
+        yield True
 
 
 def load_session_state(project_root: Path, session_id: str, *, now_iso: str) -> SessionState:
@@ -264,13 +300,14 @@ def note_session_mutation(project_root: Path, session_id: str, *, task_id: str, 
     """
     if not session_id:
         return
-    state = load_session_state(project_root, session_id, now_iso=now_iso)
-    state.mutations += 1
-    if task_id and task_id != "bootstrap":
-        if state.task_id != task_id:
-            state.lease_epoch = 0  # l'epoch tenu portait une autre tâche
-        state.task_id = task_id
-    save_session_state(project_root, state, now_iso=now_iso)
+    with _session_lock(project_root, session_id):  # deux PostToolUse parallèles ne perdent pas un incrément
+        state = load_session_state(project_root, session_id, now_iso=now_iso)
+        state.mutations += 1
+        if task_id and task_id != "bootstrap":
+            if state.task_id != task_id:
+                state.lease_epoch = 0  # l'epoch tenu portait une autre tâche
+            state.task_id = task_id
+        save_session_state(project_root, state, now_iso=now_iso)
 
 
 def note_session_task(
@@ -330,3 +367,49 @@ def note_acknowledged_mutations(project_root: Path, session_id: str, mutations: 
         return
     state.acknowledged_mutations = mutations
     save_session_state(project_root, state, now_iso=now_iso)
+
+
+def say_once(project_root: Path, session_id: str, key: str, state: str, *, now_iso: str | None = None) -> bool:
+    """« Dire une fois » : ``True`` si le rappel *key* doit être rendu pour l'état *state*.
+
+    Le premier appel d'une session pour *key* rend ``True`` et retient l'empreinte de
+    *state* ; les suivants rendent ``False`` tant que *state* ne change pas. *state* est ce
+    que le rappel décrit (le texte du rappel lui-même, ou la tâche qu'il nomme) : un rappel
+    dont l'état a changé est dit de nouveau. Sans ``session_id`` (hôte qui n'en envoie pas),
+    rien ne peut être retenu : toujours ``True``, comme avant. ``SessionStart`` remet le
+    journal à zéro (:func:`reset_session_state`) : après une compaction, chaque rappel est
+    redit une fois. Jamais une exception : le journal est best-effort dans les deux sens
+    (illisible, le rappel est redit ; non inscriptible, il le sera au prochain appel).
+    """
+    if not session_id:
+        return True
+    if now_iso is None:
+        from datetime import UTC, datetime
+
+        now_iso = datetime.now(UTC).isoformat()
+    digest = hashlib.sha256(state.encode("utf-8")).hexdigest()[:16]
+    with _session_lock(project_root, session_id):
+        loaded = load_session_state(project_root, session_id, now_iso=now_iso)
+        if loaded.said.get(key) == digest:
+            return False
+        loaded.said[key] = digest
+        save_session_state(project_root, loaded, now_iso=now_iso)
+    return True
+
+
+def note_no_task_block(project_root: Path, session_id: str, mutations: int, *, now_iso: str) -> None:
+    """Mémorise le compteur au refus complet « Clôture hors tâche » (et l'acquitte)."""
+    if not session_id:
+        return
+    with _session_lock(project_root, session_id):
+        state = load_session_state(project_root, session_id, now_iso=now_iso)
+        state.no_task_blocked_at = mutations
+        state.acknowledged_mutations = max(state.acknowledged_mutations, mutations)
+        save_session_state(project_root, state, now_iso=now_iso)
+
+
+def session_no_task_blocked_at(project_root: Path, session_id: str) -> int:
+    """Le compteur au dernier refus complet hors tâche — ``0`` sans journal ou sans id."""
+    if not session_id:
+        return 0
+    return load_session_state(project_root, session_id, now_iso="").no_task_blocked_at

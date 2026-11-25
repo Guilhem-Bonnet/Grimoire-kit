@@ -50,6 +50,15 @@ lit la PR (``gh pr view``, ``gh pr diff``). Sans PR rattachée (``no_pr``) ou PR
 relu, jamais la cible entière, et la tâche n'est regardée de nouveau qu'une heure plus tard. Un ``NOT-READY`` escalade
 (aucune session à reprendre). Le READY scellé passe au merger. Sans mandat, rien ne change.
 
+**Seconde relecture (``orchestrator.roles.merger.protected_gate: dual_review``, :mod:`.dual_review`).** Hors de ce
+réglage, rien de ce paragraphe n'existe. Avec lui, quand le merger a inscrit au **journal d'autorité** la demande de
+seconde relecture d'un premier READY qui couvre encore la tête, une seconde session est lancée par le même chemin (WIP,
+disjoncteur, CI, mandat). Son modèle est choisi ici, au lancement
+(:func:`~grimoire.missions.dual_review.choose_second_reviewer` : registre de fournisseurs, sceau du premier relecteur,
+lancement scellé du worker) et scellé avec le lancement ; aucune demande n'est lue au ledger d'événements, que le worker
+écrit. Sans candidat, rien n'est lancé et le merger rend la PR à l'humain. Un ``NOT-READY`` annule la demande au
+journal : les deux relectures seront refaites. Une tâche faite à la main n'a jamais de seconde relecture.
+
 Chaque étape est notée au ledger (``task.review_launched``, ``task.review_judged``, ``task.review_forged``) : le tick
 est rejouable. Disjoncteur ouvert : rien n'est lancé ni repris. Les binaires sont injectables (*exec_*).
 
@@ -63,6 +72,7 @@ impossible ; seule une isolation par utilisateur du système la fermerait.
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -71,9 +81,15 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
 from grimoire.missions.breaker import read_breaker, record_failure, trip
+from grimoire.missions.dual_review import (
+    PROTECTED_GATE_DUAL_REVIEW,
+    choose_second_reviewer,
+    models_distinct,
+    pending_second_review,
+    worker_models,
+)
 from grimoire.missions.launcher import (
     _BG_ID,
-    _TIER_ALIAS,
     LEAN_SESSION_ARGS,
     _halt,
     _read_agents,
@@ -84,14 +100,16 @@ from grimoire.missions.launcher import (
     resolve_background_session,
     resume_worker,
     session_env,
+    tier_model,
 )
 from grimoire.missions.manual_review import MANUAL_KEY, claim_sessions, manual_reviews, manual_tasks
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
 from grimoire.missions.schemas import TaskState
-from grimoire.missions.task_worktree import find_task_worktree
+from grimoire.missions.task_worktree import find_task_worktree, tick_worktree_path
 from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT, Choice, clip_context, new_question_id
 
 if TYPE_CHECKING:
+    from grimoire.missions.dual_review import DualReviewChoice
     from grimoire.missions.launcher import Exec
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.review_receipt import ReviewReceipt
@@ -151,8 +169,14 @@ SILENT = "silent"
 
 _RELAUNCH = frozenset({"timeout", "stale", CI_PENDING, SILENT})
 #: Un autre modèle que celui du worker, quand la politique ne l'impose pas.
-_ALTERNATE = {"opus": "sonnet", "sonnet": "opus", "haiku": "sonnet"}
-_DEFAULT_MODEL = "sonnet"
+#: Le palier du relecteur quand la politique n'en nomme pas.
+_DEFAULT_TIER = "mid"
+#: Paliers essayés, du plus fort au plus faible, quand ni le palier du rôle ni le défaut ne diffèrent du worker.
+_FALLBACK_TIERS = ("strong", "mid", "cheap")
+#: Motif d'escalade : aucun modèle de la table ne diffère de celui du worker.
+NO_DISTINCT_MODEL = "review_model_not_distinct"
+#: Un dépôt GitHub ``owner/repo`` : ce que la consigne de la seconde relecture accepte du journal d'autorité.
+_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+")
 
 
 def session_digest(session_id: str) -> str:
@@ -191,11 +215,6 @@ def entered_review_at(service: TaskService, task_id: str) -> str:
         or e.event_type == MERGE_REQUEUED_EVENT
     ]
     return moves[-1] if moves else ""
-
-
-def _family(model: str) -> str:
-    lowered = model.lower()
-    return next((alias for alias in _ALTERNATE if alias in lowered), lowered)
 
 
 def _parse(stamp: str) -> datetime | None:
@@ -296,7 +315,24 @@ class ReviewStage:
                 outcomes.append(outcome)
         return tuple(outcomes)
 
+    def _grant_current(self, tid: str, grant: LedgerEvent) -> bool:
+        """La dérogation couvre-t-elle encore la tête de la branche ? Une tête poussée depuis la dérogation est relue."""
+        from grimoire.missions.review_seal import branch_head
+
+        head = branch_head(self._service.home_root, tid)
+        sealed = str(grant.payload.get("head") or "")
+        return bool(head and sealed and head == sealed)
+
     def _step(self, task: MissionTask, launch: dict[str, Any]) -> ReviewOutcome | None:
+        # GAO-r-le-arbitre-001 : une tâche confiée à l'arbitre attend sa décision ; un critère dérogé laisse la fusion
+        # suivre son cours (le merger lit la dérogation, pas un reçu). Rien n'est relancé tant que l'un des deux tient.
+        from grimoire.missions import arbiter
+
+        if arbiter.open_request(self._service, task.id) is not None:
+            return ReviewOutcome(task.id, "arbitrate", "skipped", "arbitrage en cours : la relecture attend la décision")
+        grant = arbiter.merge_grant(self._service, task.id)
+        if grant is not None and self._grant_current(task.id, grant):
+            return ReviewOutcome(task.id, "arbitrate", "skipped", "critère dérogé par arbitrage : la fusion suit son cours")
         entered = self._entered_review_at(task.id)
         reviews = [e for e in self._events(task.id, REVIEW_LAUNCHED_EVENT) if e.created_at >= entered]
         failures = [e for e in self._events(task.id, REVIEW_LAUNCH_FAILED_EVENT) if e.created_at >= entered]
@@ -304,7 +340,10 @@ class ReviewStage:
         last = reviews[-1] if reviews else None
         if last is not None and last.id not in verdicts:
             return self._judge(task, launch, last)
-        if last is not None and verdicts[last.id] not in _RELAUNCH:
+        # Double relecture : le premier READY dont le merger a demandé la seconde relecture, lu au journal d'autorité
+        # (jamais au ledger) et seulement en ``dual_review`` ; ``None`` sinon, et tout ce qui suit est le chemin de main.
+        second = self._second_due(task, launch)
+        if second is None and last is not None and verdicts[last.id] not in _RELAUNCH:
             return None  # jugée : READY (lots suivants), forgée ou refusée — rien de plus à faire ici
         if pending := self._unhalted(task.id):
             shorts = ", ".join(str(e.payload.get("session")) for e in pending)
@@ -312,24 +351,123 @@ class ReviewStage:
                                  "aucune relance tant que l'arrêt n'est pas confirmé")
         if refused := [e for e in failures if e.payload.get("reason") == "refused"]:
             why = f"relecteur non inscrit au journal d'autorité ({str(refused[-1].payload.get('detail') or '')[:300]})"
-            return self._escalate(task, why, "")
+            return self._escalate(task, why, "", cause="reviewer_unregistered")
         relaunched = sum(1 for r in reviews if verdicts.get(r.id) in _RELAUNCH and verdicts[r.id] != CI_PENDING) + len(failures)
         if relaunched > MAX_RELAUNCHES:
-            return self._escalate(task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "")
-        return self._launch(task, launch)
+            return self._escalate(
+                task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "",
+                cause="unjudgeable_reviews",
+            )
+        return self._launch(task, launch, second=second)
+
+    # -- double relecture (``protected_gate: dual_review``) --------------------
+
+    def _dual(self) -> bool:
+        """La double relecture est réglée : hors de ce réglage, aucune demande de seconde relecture n'est lue nulle part."""
+        return self._policy.merger.enabled and self._policy.merger.protected_gate == PROTECTED_GATE_DUAL_REVIEW
+
+    def _second_due(self, task: MissionTask, launch: dict[str, Any]) -> dict[str, Any] | None:
+        """Le sceau du premier READY dont une seconde relecture est due, ou ``None``.
+
+        La demande est celle que le merger a inscrite au journal d'autorité : un événement du ledger qui y ressemble
+        n'est lu par personne. Journal illisible : rien n'est dû, rien n'est lancé (échec fermé). Une tâche faite à la
+        main (#994) n'a pas de worker scellé : jamais de seconde relecture, sa PR reste à l'humain.
+        """
+        if not self._dual() or launch.get(MANUAL_KEY):
+            return None
+        from grimoire.missions.review_seal import branch_head
+
+        root = self._service.home_root
+        try:
+            return pending_second_review(root, task.id, branch_head(root, task.id))
+        except Exception:  # journal d'autorité illisible : aucune seconde relecture n'est lancée (échec fermé)
+            return None
+
+    def _second_model(self, tid: str, first: dict[str, Any]) -> tuple[DualReviewChoice | None, str]:
+        """Le modèle de la seconde relecture, choisi ici, au lancement : politique, registre de fournisseurs et sceaux du
+        journal d'autorité. Aucune valeur du ledger d'événements n'y entre."""
+        root = self._service.home_root
+        try:
+            return choose_second_reviewer(
+                root, first_model=str(first.get("model") or ""), worker_models=worker_models(root, tid),
+                min_tier=self._policy.merger.second_reviewer_min_tier,
+            )
+        except Exception as exc:  # journal ou registre illisible : rien n'est lancé
+            return None, f"choix du second relecteur en erreur ({type(exc).__name__}: {str(exc)[:160]})"
+
+    def _void_second(self, tid: str, reason: str) -> bool:
+        """Un NOT-READY défait les relectures scellées de la tâche (:func:`.review_seal.void_task_reviews`, le même
+        mécanisme que le merger) : aucune ne fonde plus de paire, les deux relectures seront refaites.
+
+        ``True`` : l'annulation est au journal d'autorité, ou il n'y avait rien à annuler (toujours le cas en ``human``,
+        où rien n'est lu ni écrit). ``False`` : le journal a refusé l'écriture deux fois de suite — l'appelant
+        n'applique alors pas le NOT-READY (échec fermé)."""
+        if not self._dual():
+            return True
+        from grimoire.missions.review_seal import void_task_reviews
+
+        def void() -> bool:
+            try:
+                void_task_reviews(self._service.home_root, tid, reason)
+            except Exception:  # journal rompu ou verrou tenu : l'appelant s'arrête (échec fermé)
+                return False
+            return True
+
+        # Un verrou du journal tenu un instant par un autre projet : une seconde tentative, pas plus.
+        return void() or void()
+
+    def _frozen_slug(self, tid: str) -> str:
+        """Le dépôt GitHub de la tâche, figé au journal d'autorité à son lancement ; ``""`` s'il n'y est pas ou ne
+        ressemble pas à ``owner/repo`` (la consigne s'en passe alors, le merger refusera de toute façon)."""
+        from grimoire.missions.review_seal import frozen_repository
+
+        try:
+            slug = str((frozen_repository(self._service.home_root, tid) or {}).get("repo") or "")
+        except Exception:  # journal illisible : aucune valeur n'en est tirée
+            return ""
+        return slug if _SLUG.fullmatch(slug) else ""
+
+    @staticmethod
+    def _second_prompt(tid: str, model: str, slug: str) -> str:
+        """La consigne de la seconde relecture. Rien n'y vient du ledger d'événements : ni la cible ni la base du
+        worktree, qu'un worker peut y réécrire. Le diff est celui que GitHub rend pour la PR de ``task/<id>``, sur le
+        dépôt figé au journal d'autorité (*slug*)."""
+        repo = f" -R {slug}" if slug else ""
+        return (
+            f"Tu es la SECONDE relecture indépendante de la tâche {tid} : sa PR touche un chemin réservé et ne sera "
+            "fusionnée que si deux relectures indépendantes la jugent READY. Tu ne vois pas le raisonnement du worker "
+            "et tu ne le cherches pas : tu juges le résultat. Ne lis ni le verdict ni le reçu d'une relecture précédente "
+            f"(`_grimoire-output/reviews/{tid}/`), et ne tiens pas pour montré ce qu'un pack de preuve déjà présent "
+            f"affirme : rejoue toi-même. Lis les critères d'acceptation (`grimoire task show {tid}`) et le diff de la "
+            f"PR tel que GitHub le rend (`gh pr diff task/{tid}{repo}`, `gh pr view task/{tid}{repo}`), puis rejoue les "
+            "commandes qui montrent chaque critère. " + _verdict_steps(tid, model, f"task/{tid}")
+        )
 
     # -- lancement -----------------------------------------------------------
 
     def _model(self, worker_model: str) -> str:
+        """Le modèle du relecteur, ou ``""`` si aucun modèle de la table ne diffère sûrement de celui du worker.
+
+        ``reviewer.model`` l'emporte. Sinon, dans l'ordre : le palier du rôle, le palier ``mid``, puis les paliers du
+        plus fort au plus faible, chacun traduit par la table (lot L5) ; le premier que
+        :func:`~grimoire.missions.dual_review.models_distinct` tient pour un autre modèle que celui du worker est
+        retenu. Sans modèle du worker connu, le premier qui existe.
+        """
         role = self._policy.reviewer
         if role.model:
             return role.model
-        chosen = _TIER_ALIAS.get(role.tier, "")
-        if worker_model and (not chosen or _family(chosen) == _family(worker_model)):
-            return _ALTERNATE.get(_family(worker_model), _DEFAULT_MODEL)
-        return chosen or _DEFAULT_MODEL
+        root = self._service.home_root
+        for tier in (role.tier, _DEFAULT_TIER, *_FALLBACK_TIERS):
+            candidate = tier_model(root, tier)
+            if candidate and (not worker_model or models_distinct(candidate, worker_model)):
+                return candidate
+        return ""
 
-    def _launch(self, task: MissionTask, launch: dict[str, Any]) -> ReviewOutcome:
+    def _launch(
+        self, task: MissionTask, launch: dict[str, Any], *, second: dict[str, Any] | None = None,
+    ) -> ReviewOutcome:
+        """Lance un relecteur ; *second* : le sceau du premier READY dont cette session est la seconde relecture
+        (:meth:`_second_due`), son modèle est alors choisi ici (:meth:`_second_model`)."""
         from grimoire.missions.mandate import MandateStore
 
         tid, role = task.id, self._policy.reviewer
@@ -350,6 +488,17 @@ class ReviewStage:
             if isinstance(target, ReviewOutcome):
                 return target
             manual, cwd = target, Path(str(target["cwd"]))
+        elif second is not None:
+            # Double relecture : le dossier de la seconde session est celui où le tick crée le worktree de la tâche,
+            # calculé depuis le dépôt. Ni le lancement ni le worktree notés au ledger d'événements n'y entrent.
+            try:
+                place: Path | None = tick_worktree_path(root, tid)
+            except Exception:  # dépôt illisible : rien n'est lancé
+                place = None
+            if place is None or not place.is_dir():
+                return ReviewOutcome(tid, "launch", "failed", "worktree de la tâche introuvable là où le tick le crée : "
+                                     "seconde relecture non lancée")
+            cwd = place
         else:
             cwd = Path(str(launch.get("cwd") or ""))
             try:
@@ -369,11 +518,31 @@ class ReviewStage:
         if blocked := mandate_precheck(self._service, REVIEWER_ACTOR):
             return ReviewOutcome(tid, "launch", "skipped", blocked)
         under_mandate = MandateStore(root).state().active
-        model = self._model(str(launch.get("model") or ""))
-        prompt = self._manual_prompt(tid, manual, model) if manual else self._prompt(tid, into, base_sha, model)
+        choice: DualReviewChoice | None = None
+        if second is None:
+            worker_model = str(launch.get("model") or "")
+            model = self._model(worker_model)
+            if not model:  # la relecture ne serait pas indépendante : l'humain tranche, rien n'est lancé
+                return self._escalate(
+                    task,
+                    f"aucun modèle de relecture distinct de celui du worker ({worker_model or 'inconnu'}) dans la table "
+                    "palier → modèle (`grimoire dispatch models`)",
+                    "",
+                    cause=NO_DISTINCT_MODEL,
+                )
+        else:
+            choice, why = self._second_model(tid, second)
+            if choice is None:  # aucun candidat : rien n'est lancé, le merger rend la PR à l'humain avec cette raison
+                return ReviewOutcome(tid, "launch", "skipped", f"seconde relecture non lancée : {why}")
+            model = choice.model
+        if second is not None:  # rien du ledger d'événements dans la consigne : ni cible ni base du worktree
+            prompt = self._second_prompt(tid, model, self._frozen_slug(tid))
+        else:
+            prompt = self._manual_prompt(tid, manual, model) if manual else self._prompt(tid, into, base_sha, model)
         # #994 : les réglages, hooks et serveurs MCP que la PR apporte (.claude/, .mcp.json) ne s'appliquent pas au
         # relecteur d'une tâche faite à la main ; il garde son dossier dans le worktree pour rejouer les preuves.
-        isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual else []
+        # Double relecture : la seconde session non plus ne charge rien de ce que le worktree du worker règle.
+        isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual or second is not None else []
         if role.lean:
             isolate += [arg for arg in LEAN_SESSION_ARGS if arg not in isolate]
         argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--model", model,
@@ -396,9 +565,12 @@ class ReviewStage:
         if refused:
             return self._abandon(tid, short, cwd, "refused", refused)
         try:  # la tête relue, au journal d'autorité : un commit posé pendant la relecture ne sera pas scellé
+            # Avec elle, le modèle que ce tick vient de lancer et, pour une seconde relecture, le premier READY doublé :
+            # c'est ce que la décision de fusion compare (:mod:`.dual_review`), jamais ce que la session déclare.
             seal_review_launch(root, tid, session_digest(session_id), head, target={
                 "pr": manual["pr"], "base": manual["into"], "branch": manual["branch"], "repo": manual["repo"],
-                "origin_url": manual["origin_url"], "cwd": manual["cwd"]} if manual else None)
+                "origin_url": manual["origin_url"], "cwd": manual["cwd"]} if manual else None,
+                model=model, second_of=second.get("seq") if second is not None else None)
             launch_sealed = True
         except Exception:  # journal rompu : le jugement refusera de sceller (échec fermé)
             launch_sealed = False
@@ -407,6 +579,9 @@ class ReviewStage:
             {"task_id": tid, "session": short, "session_sha256": session_digest(session_id), "model": model,
              "worker_model": str(launch.get("model") or ""), "cwd": str(cwd), "under_mandate": under_mandate,
              "head": head, "launch_sealed": launch_sealed,
+             # Pour qui lit le ledger seulement : aucune décision ne relit ces champs.
+             **({"dual_review": True, "dual_first_seal": second.get("seq"), **choice.to_dict()}
+                if second is not None and choice is not None else {}),
              **({MANUAL_KEY: True, "pr": manual["pr"], "branch": manual["branch"], "into": manual["into"]} if manual else {})},
         )
         return ReviewOutcome(tid, "launch", "launched", f"relecteur {short} dans {cwd}", short, model)
@@ -785,11 +960,27 @@ class ReviewStage:
         breaker = read_breaker(self._service.home_root)
         if breaker.open:
             return ReviewOutcome(tid, "bounce", "skipped", f"disjoncteur ouvert : {breaker.reason}")
+        # Double relecture : ce NOT-READY défait le premier READY en attente de son second, au journal d'autorité, AVANT
+        # tout effet. Une annulation non inscrite ne laisse rien passer : ni retour au worker ni verdict noté, le
+        # jugement est refait au tick suivant — sinon une remise en revue sans nouveau commit rejouerait une seconde
+        # relecture sur un premier READY que ce NOT-READY contredit.
+        if not self._void_second(tid, f"relecture {review.id} jugée NOT-READY"):
+            return ReviewOutcome(tid, "bounce", "failed", "NOT-READY non appliqué : l'annulation de la seconde relecture "
+                                 "n'a pas pu être inscrite au journal d'autorité, jugement refait au tick suivant")
         cycle, notes = self._cycle(tid), notes or (_findings_text(receipt) if receipt is not None else "aucun reçu")
         worker_session = str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker_session:
             why = f"{cycle} relecture(s) NOT-READY" if worker_session else "aucune session de worker à reprendre"
-            escalated = self._escalate(task, why, notes)
+            cause = "not_ready_cycles" if worker_session else "no_worker_session"
+            if cause == "not_ready_cycles" and self._arbitrate(
+                task, why, notes, str(review.payload.get("head") or ""), receipt,
+            ):
+                # Le jugement et l'arrêt du relecteur suivent, comme pour l'escalade : le cycle compte, la session
+                # ne reste pas ouverte à côté d'un arbitrage en cours.
+                self._record_judged(task, review, NOT_READY, cycle, extra)
+                self._stop(review)
+                return ReviewOutcome(tid, "arbitrate", "done", f"arbitrage demandé ({why})")
+            escalated = self._escalate(task, why, notes, cause=cause)
             if escalated.status == "done":
                 self._record_judged(task, review, NOT_READY, cycle, extra)
                 self._stop(review)
@@ -817,8 +1008,44 @@ class ReviewStage:
         self._service.comment(tid, f"Relecture NOT-READY (cycle {cycle}/{max_cycles}) : {notes}", REVIEWER_ACTOR)
         return ReviewOutcome(tid, "bounce", "done", f"retour au worker (cycle {cycle}/{max_cycles})")
 
-    def _escalate(self, task: MissionTask, why: str, notes: str) -> ReviewOutcome:
-        """``needs_verification → running → waiting(human)`` avec la question ; une question non posée remet en revue."""
+    def _arbitrate(
+        self, task: MissionTask, why: str, notes: str, head: str, receipt: ReviewReceipt | None = None,
+    ) -> bool:
+        """GAO-r-le-arbitre-001 : confie l'escalade à l'arbitre quand le rôle l'accepte ; ``False`` : à l'humain.
+
+        La question de repli est exactement celle que :meth:`_escalate` poserait : si l'arbitrage échoue (JSON
+        invalide, confiance basse, session muette), l'humain la reçoit avec l'analyse de l'arbitre jointe.
+
+        Les critères **refusés** par le relecteur (``unmet``/``unverifiable`` du reçu) sont scellés avec la demande :
+        seule une dérogation sur l'un d'eux a un objet, le reste de la tâche doit tenir.
+        """
+        from grimoire.missions import arbiter
+
+        tid = task.id
+        detail = f" : {notes[:600]}" if notes else ""
+        refused = tuple(c.criterion for c in receipt.criteria if c.status != CRITERION_MET) if receipt is not None else ()
+        return bool(arbiter.request_arbitration(
+            self._service, task, "reviewer", "not_ready_cycles", why, notes, head=head, refused=refused,
+            text=f"Désaccord persistant sur {tid} ({why}){detail} — reprendre la tâche ou l'abandonner ?",
+            title="Reprendre la tâche ou l'abandonner ?",
+            context=clip_context(
+                f"Le relecteur refuse encore le travail rendu, malgré les reprises ({why}){detail}"
+            ),
+            options=("reprendre", "abandonner"), recommended="reprendre",
+            choices=(
+                Choice("reprendre", "Reprendre la tâche", "Relance une session sur la branche existante"),
+                Choice("abandonner", "Abandonner", "Annule la tâche : plus aucune reprise", danger=True),
+            ),
+            policy=self._policy,
+        ))
+
+    def _escalate(self, task: MissionTask, why: str, notes: str, *, cause: str = "") -> ReviewOutcome:
+        """``needs_verification → running → waiting(human)`` avec la question ; une question non posée remet en revue.
+
+        *cause* : le code de l'escalade, écrit dans l'événement — la classe de la question pour la jurisprudence
+        (:func:`grimoire.missions.precedents.question_class`), que ni le texte ni les constats du relecteur ne choisissent.
+        Sans cause, la question n'a pas de classe : aucun précédent ne s'y applique.
+        """
         tid, ledger = task.id, self._service.ledger
         try:
             ledger.transition_task(tid, TaskState.RUNNING, actor_id=REVIEWER_ACTOR, reason=f"escalade : {why}")
@@ -829,7 +1056,8 @@ class ReviewStage:
         # Avant la question, comme le merger : un tick tué entre les deux ne laisse pas une question du relecteur que
         # l'étape orchestrateur (#962) prendrait pour celle du worker.
         self._service.ledger.append_event(
-            REVIEW_ESCALATED_EVENT, tid, "task", REVIEWER_ACTOR, {"task_id": tid, "question_id": qid, "why": why[:300]}
+            REVIEW_ESCALATED_EVENT, tid, "task", REVIEWER_ACTOR,
+            {"task_id": tid, "question_id": qid, "why": why[:300], "cause": cause},
         )
         try:
             self._service.ask(
@@ -838,6 +1066,7 @@ class ReviewStage:
                 REVIEWER_ACTOR,
                 kind="choice",
                 options=("reprendre", "abandonner"),
+                recommended="reprendre",  # l'option par défaut : réversible, là où abandonner annule la tâche
                 question_id=qid,
                 title="Reprendre la tâche ou l'abandonner ?",
                 context=clip_context(

@@ -93,6 +93,15 @@ class EmittedFile:
     legacy_pattern: str = ""
 
 
+class MergeRefusedError(ValueError):
+    """Une fusion qui refuse d'écrire : la structure du fichier existant n'est pas celle qu'elle sait fusionner.
+
+    Levée par la fonction ``merge`` d'un :class:`JsonMerge` ; :func:`apply_plan` préserve alors
+    le fichier et le signale (conflit ``unreadable``) au lieu de l'écraser. Les fusions qui ne
+    la lèvent pas gardent leur comportement.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class JsonMerge:
     """A surgical merge into a JSON file the project also owns.
@@ -104,6 +113,54 @@ class JsonMerge:
 
     relpath: Path
     merge: Callable[[dict[str, Any]], dict[str, Any]]
+    label: str = ""
+    #: Refuser un fichier dont un objet répète une clé : ``json.loads`` garderait la dernière en
+    #: silence, et la fusion réécrirait le fichier sans les autres. Le fichier est alors préservé.
+    unique_keys: bool = False
+
+
+def load_json_unique(text: str) -> Any:
+    """``json.loads`` qui lève :class:`MergeRefusedError` sur une clé répétée dans un même objet."""
+
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        seen: dict[str, Any] = {}
+        for key, value in items:
+            if key in seen:
+                msg = f"clé `{key}` répétée dans un même objet"
+                raise MergeRefusedError(msg)
+            seen[key] = value
+        return seen
+
+    return json.loads(text, object_pairs_hook=pairs)
+
+
+def inline_text(text: str) -> str:
+    """*text* sur une seule ligne, ``|`` échappé : une cellule de tableau ou une puce Markdown sûre."""
+    return " ".join(text.split()).replace("|", "\\|")
+
+
+def escapes_root(project_root: Path, relpath: Path) -> bool:
+    """*relpath*, liens symboliques résolus, sort-il de *project_root* ?"""
+    try:
+        target = (project_root / relpath).resolve()
+        return not target.is_relative_to(project_root.resolve())
+    except (OSError, RuntimeError):
+        return True
+
+
+@dataclass(frozen=True, slots=True)
+class TextMerge:
+    """A surgical edit of a text file the project also owns, when JSON does not apply.
+
+    ``.codex/config.toml`` carries the user's settings, comments included; parsing
+    and re-serialising it would drop them. *merge* receives the current text
+    (``None`` when the file does not exist) and returns the new text, touching
+    only what it is about. It raises ``ValueError`` on a file it cannot read
+    safely: the file is then preserved and reported as unreadable.
+    """
+
+    relpath: Path
+    merge: Callable[[str | None], str]
     label: str = ""
 
 
@@ -118,9 +175,17 @@ class EmitPlan:
     #: correspond à un motif sans être dans ``files`` est périmé (règle retirée,
     #: portée renommée) et ``apply_plan`` le supprime. Jamais un fichier sans marqueur.
     owned_globs: tuple[str, ...] = ()
+    #: Fusions dans un fichier texte non JSON (``.codex/config.toml``), voir :class:`TextMerge`.
+    text_merges: tuple[TextMerge, ...] = ()
+
+    def labels_paths(self) -> list[Path]:
+        """Chemins relatifs que le plan écrit : fichiers, fusions JSON et fusions texte."""
+        return (
+            [f.relpath for f in self.files] + [m.relpath for m in self.merges] + [m.relpath for m in self.text_merges]
+        )
 
     def labels(self) -> list[str]:
-        return [f.relpath.as_posix() for f in self.files] + [m.relpath.as_posix() for m in self.merges]
+        return [path.as_posix() for path in self.labels_paths()]
 
 
 @dataclass
@@ -413,15 +478,51 @@ def _decide_merges(
             continue
         try:
             text = _read(dest, overlay)
-            loaded = json.loads(text) if text is not None else {}
+            parse = load_json_unique if merge.unique_keys else json.loads
+            loaded = parse(text) if text is not None else {}
+        except MergeRefusedError as exc:
+            result.skip(f"{label} ({exc} — fichier préservé)", CONFLICT_UNREADABLE)
+            continue
         except (OSError, ValueError):
             result.skip(f"{label} (JSON illisible — fichier préservé)", CONFLICT_UNREADABLE)
             continue
         if not isinstance(loaded, dict):
             result.skip(f"{label} (racine JSON inattendue — fichier préservé)", CONFLICT_UNREADABLE)
             continue
-        merged = merge.merge(json.loads(json.dumps(loaded)))
+        try:
+            merged = merge.merge(json.loads(json.dumps(loaded)))
+        except MergeRefusedError as exc:
+            result.skip(f"{label} ({exc} — fichier préservé)", CONFLICT_UNREADABLE)
+            continue
         rendered = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
+        if text is not None and text == rendered:
+            result.unchanged.append(label)
+            continue
+        overlay[dest] = rendered
+        writes.append((dest, rendered))
+        result.written.append(label)
+
+
+def _decide_text_merges(
+    plan: EmitPlan,
+    root: Path,
+    result: EmitResult,
+    overlay: dict[Path, str],
+    writes: list[tuple[Path, str]],
+    preserved: frozenset[str] = frozenset(),
+) -> None:
+    for merge in plan.text_merges:
+        dest = _target(root / merge.relpath)
+        label = merge.label or merge.relpath.as_posix()
+        if merge.relpath.as_posix() in preserved:
+            result.preserved.append(merge.relpath.as_posix())
+            continue
+        try:
+            text = _read(dest, overlay)
+            rendered = merge.merge(text)
+        except (OSError, ValueError) as exc:
+            result.skip(f"{label} (fichier illisible ou non fusionnable : {exc} — préservé)", CONFLICT_UNREADABLE)
+            continue
         if text is not None and text == rendered:
             result.unchanged.append(label)
             continue
@@ -497,6 +598,27 @@ def _commit(writes: list[tuple[Path, str]]) -> None:
         raise
 
 
+class UnsafePlanPathError(ValueError):
+    """Un plan nomme un chemin qui sortirait de la racine du projet (absolu, ou avec ``..``)."""
+
+
+def _escapes_root(relpath: Path) -> bool:
+    """Lecture lexicale : un chemin absolu, ancré (``C:``) ou qui remonte (``..``) sort du projet.
+
+    Un lien symbolique *existant* dans le projet reste suivi (:func:`_target`) : c'est un choix
+    de l'utilisateur, alors qu'un ``..`` dans un plan est une faute de l'émetteur.
+    """
+    return relpath.is_absolute() or bool(relpath.anchor) or ".." in relpath.parts
+
+
+def _refuse_escaping_paths(plans: Sequence[EmitPlan]) -> None:
+    for plan in plans:
+        for relpath in plan.labels_paths():
+            if _escapes_root(relpath):
+                msg = f"{plan.host_id.value} : chemin hors du projet refusé ({relpath.as_posix()})"
+                raise UnsafePlanPathError(msg)
+
+
 def apply_plans(
     plans: Sequence[EmitPlan],
     project_root: Path,
@@ -522,6 +644,8 @@ def apply_plans(
     """
     from grimoire.hosts.detection import preserved_paths
 
+    # Avant toute décision : un chemin qui sort du projet est refusé, rien n'est écrit.
+    _refuse_escaping_paths(plans)
     root = project_root.resolve()
     kept = preserve if preserve is not None else preserved_paths(root)
     overlay: dict[Path, str] = {}
@@ -532,6 +656,7 @@ def apply_plans(
         result = EmitResult(host_id=plan.host_id, degradations=list(plan.degradations), dry_run=dry_run)
         _decide_files(plan, root, result, overlay, writes, force, kept)
         _decide_merges(plan, root, result, overlay, writes, kept)
+        _decide_text_merges(plan, root, result, overlay, writes, kept)
         for path in _stale_files(plan, root):
             if path.relative_to(root).as_posix() in kept:
                 continue
@@ -602,6 +727,11 @@ class Emitter:
         sinon un chemin vers le venv.
         """
         return f"{program} --host {host_alias} --event {wire_event}"
+
+    @staticmethod
+    def hook_command_for_decision(host_alias: str, wire_event: str, program: str, decision: str) -> str:
+        """:meth:`hook_command` qui nomme sa décision (``--decision``), pour un hook dont la décision n'est pas celle par défaut de l'événement."""
+        return f"{Emitter.hook_command(host_alias, wire_event, program)} --decision {decision}"
 
     @staticmethod
     def quoted_program(program: str) -> str:

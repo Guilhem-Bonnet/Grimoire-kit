@@ -309,20 +309,44 @@ def test_recall_d_une_tache_neuve_est_honnetement_vide(projet: Path) -> None:
 
 
 def test_la_cloture_consolide_la_memoire_et_le_rappel_suivant_le_voit(projet: Path, tmp_path: Path) -> None:
-    """C'est la boucle complète : clôturer une tâche écrit en mémoire, et une
-    tâche voisine ouverte ensuite — dans une session suivante, donc un service
-    neuf — le voit dans son propre rappel."""
+    """C'est la boucle complète : clôturer une tâche avec sa leçon l'écrit en
+    mémoire, et une tâche voisine ouverte ensuite — dans une session suivante,
+    donc un service neuf — la voit dans son propre rappel. La leçon est aussi
+    tracée au ledger, qui reste la source des faits (levier 6)."""
     memoire = MemoryManager.from_backend(LocalMemoryBackend(tmp_path / "memoire.json"))
     service, tid = ouvre_avec_memoire(projet, "Migrer le service de facturation", memoire)
     _amene_a_needs_verification(projet, service, tid)
 
-    service.transition(tid, TaskState.CLOSED, "a")
+    service.transition(tid, TaskState.CLOSED, "a", lesson="la facturation exige un gel des écritures pendant la bascule")
 
     assert memoire.count() == 1, "la clôture doit avoir consolidé un souvenir, et un seul"
+    closed = [e for e in service.ledger.list_events(tid) if e.payload.get("to_state") == TaskState.CLOSED.value]
+    assert closed[-1].payload["lesson"] == "la facturation exige un gel des écritures pendant la bascule"
 
     suivante, autre_tid = ouvre_avec_memoire(projet, "Réparer le service de facturation en urgence", memoire)
     rappel = suivante.recall(autre_tid)
     assert rappel.memory_hits, "la mémoire consolidée à la clôture doit nourrir le rappel d'une tâche voisine"
+
+
+def test_la_cloture_sans_lecon_n_ecrit_rien_en_memoire(projet: Path, tmp_path: Path) -> None:
+    """Levier 6 : sans leçon, la clôture ne recopie pas le ledger en mémoire."""
+    memoire = MemoryManager.from_backend(LocalMemoryBackend(tmp_path / "memoire.json"))
+    service, tid = ouvre_avec_memoire(projet, "Migrer le service de facturation", memoire)
+    _amene_a_needs_verification(projet, service, tid)
+
+    service.transition(tid, TaskState.CLOSED, "a", "relu")
+
+    assert memoire.count() == 0
+
+
+def test_l_abandon_avec_lecon_la_garde(projet: Path, tmp_path: Path) -> None:
+    memoire = MemoryManager.from_backend(LocalMemoryBackend(tmp_path / "memoire.json"))
+    service, tid = ouvre_avec_memoire(projet, "Migrer vers Weaviate", memoire)
+
+    service.cancel(tid, "abandon", "a", lesson="pas de mode embarqué, Qdrant retenu")
+
+    assert [e.metadata.get("type") for e in memoire.get_all()] == ["failures"]
+    assert "Qdrant retenu" in memoire.get_all()[0].text
 
 
 def test_le_blocage_consolide_aussi_la_memoire(projet: Path, tmp_path: Path) -> None:

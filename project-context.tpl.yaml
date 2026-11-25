@@ -240,3 +240,22 @@ installed_archetypes: []               # Rempli par grimoire-init.sh install
 #   model: "claude-opus-4"             # claude-opus-4 (200K) | gpt-4o (128K) | gemini-1.5-pro (1M)
 #   warn_threshold_pct: 40
 #   critical_threshold_pct: 70
+
+# ── Messages vocaux (#1343) — désactivés par défaut ──────────────────────────
+# Moteurs locaux : pip install 'grimoire-kit[voice]'. Sans l'extra, rien d'audio
+# n'est chargé ; le repli « browser » (voix et dictée du navigateur) reste
+# possible. Aucun modèle n'est téléchargé sans allow_download: true (seul
+# interrupteur, y compris pour une voix donnée par URL).
+# torch CPU d'abord, pour éviter les roues CUDA (~2 Go) :
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# `grimoire doctor` vérifie l'extra et la disponibilité des moteurs choisis.
+
+# interaction:
+#   mode: text                         # text | voice
+# voice:
+#   stt: faster-whisper                # faster-whisper | browser — ou {engine: faster-whisper, model: small}
+#   tts: pocket-tts                    # pocket-tts | browser — ou {engine: pocket-tts, voice: estelle}
+#   language: fr
+#   idle_unload_seconds: 300           # déchargement après inactivité (0 = jamais)
+#   allow_download: false              # true = vous acceptez le téléchargement des modèles
+#   max_record_seconds: 120            # plafond d'un enregistrement vocal (1 à 600)

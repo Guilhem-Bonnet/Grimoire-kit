@@ -105,7 +105,9 @@ def test_venv_outside_the_project_gives_a_machine_specific_path(tmp_path: Path) 
 
 def test_nothing_found_falls_back_to_the_bare_name(tmp_path: Path) -> None:
     launcher = resolve_hook_launcher(tmp_path, environ={"PATH": ""}, executable=str(tmp_path / "python"))
-    assert launcher is BARE
+    # Le même nom nu, marqué introuvable : la garde ne passe pas en échec fermé sur un lanceur absent.
+    assert launcher.posix == BARE.posix
+    assert not launcher.found
     assert Emitter.launcher_degradations(launcher) == ()
 
 
@@ -115,17 +117,22 @@ _RELATIVE = HookLauncher(
 
 
 def test_copilot_hook_file_carries_a_windows_variant_and_cwd() -> None:
+    # #1280 : la forme Windows du lanceur (#760) passe par `powershell`, que les
+    # harness Copilot et Local lisent tous deux ; `windows` n'est plus écrit.
     payload = json.loads(_hook_file(HookSpec(event=HookEvent.PRE_TOOL_USE, decision="grimoire.tool-policy", timeout=10), _RELATIVE).content)
     (entry,) = payload["hooks"]["PreToolUse"]
     assert entry["command"] == "./.venv/bin/grimoire-hook --host copilot --event PreToolUse"
-    assert entry["windows"] == ".\\.venv\\Scripts\\grimoire-hook.exe --host copilot --event PreToolUse"
+    assert entry["bash"] == entry["command"]
+    assert entry["powershell"] == ".\\.venv\\Scripts\\grimoire-hook.exe --host copilot --event PreToolUse"
+    assert "windows" not in entry
     assert entry["cwd"] == "."
 
 
 def test_copilot_hook_file_unchanged_for_a_global_install() -> None:
     payload = json.loads(_hook_file(HookSpec(event=HookEvent.PRE_TOOL_USE, decision="grimoire.tool-policy", timeout=10), BARE).content)
     (entry,) = payload["hooks"]["PreToolUse"]
-    assert entry == {"type": "command", "command": "grimoire-hook --host copilot --event PreToolUse", "timeout": 10}
+    command = "grimoire-hook --host copilot --event PreToolUse"
+    assert entry == {"type": "command", "command": command, "bash": command, "powershell": command, "timeoutSec": 10}
 
 
 def test_claude_hook_entry_starts_from_the_project_dir() -> None:
@@ -340,3 +347,25 @@ def test_doctor_ignores_a_custom_hook_that_only_names_grimoire_hook(tmp_path: Pa
         encoding="utf-8",
     )
     assert check_hook_commands(tmp_path) == []
+
+
+def test_powershell_call_operator_is_not_the_program(tmp_path: Path) -> None:
+    """#1280 : la variante ``powershell`` lance un chemin à espace par ``& "…"`` ; le programme est le chemin."""
+    script = _make_script(tmp_path / "Jean Dupont" / "kit")
+    assert hook_program_resolves(f'& "{script}"', tmp_path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="la variante powershell n'est lue que sous Windows")
+def test_doctor_accepts_an_emitted_powershell_hook_under_a_spaced_profile(  # pragma: no cover - Windows
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", "")
+    script = _make_script(tmp_path / "Jean Dupont" / "kit")
+    launcher = HookLauncher(posix=str(script), machine_specific=True)
+    hook_file = _hook_file(HookSpec(event=HookEvent.PRE_TOOL_USE, decision="grimoire.tool-policy"), launcher)
+    assert json.loads(hook_file.content)["hooks"]["PreToolUse"][0]["powershell"].startswith('& "')
+    target = tmp_path / "project" / hook_file.relpath
+    target.parent.mkdir(parents=True)
+    target.write_text(hook_file.content, encoding="utf-8")
+    (check,) = check_hook_commands(tmp_path / "project")
+    assert check.passed, check.detail

@@ -9,6 +9,10 @@ janitor :
     orchestrator:
       base: main                  # branche de départ des worktrees ET cible de fusion ; vide : la branche par défaut du remote
                                   # (``origin/HEAD``), jamais la branche extraite du poste qui lance le tick
+      host: claude-code           # l'hôte du projet : claude-code (défaut, absent = comportement d'avant) | gemini
+                                  # (worker sur Gemini CLI, missions/gemini_host.py ; relecteur, arbitre et session
+                                  # orchestrateur pas encore outillés sur Gemini : non lancés, la raison est dite) ;
+                                  # toute autre valeur, vide comprise, rend la politique illisible
       roles:
         worker:
           enabled: false          # défaut : rien n'est lancé, le comportement actuel est inchangé
@@ -16,11 +20,17 @@ janitor :
           provider: ""            # fournisseur du registre avec anthropic_base_url : route ses tâches V0/V1
           lean: false             # session allégée : outils de fichiers et Bash seuls, sans MCP ni skills
           model_by_class: false   # une tâche V0 part au palier cheap, le reste au palier du rôle
+          sensitive_route: off    # strong : une tâche qui cite un chemin sensible part sur l'hôte au palier fort
+                                  # (opus), sans route de fournisseur (missions/sensitive_route.py) ; off : inchangé
+          sensitive_paths: []     # motifs sensibles en plus des chemins réservés du merger et de la double relecture
           tier: ""                # cheap | mid | strong (repli quand ni model ni route ne donnent de modèle)
           wip: 1                  # sessions de worker en même temps
           sessions_per_day: 5     # plafond de lancements par jour (UTC)
           permission_mode: ""     # OBLIGATOIRE quand enabled: true (acceptEdits, plan, bypassPermissions…) ; transmis à
-                                  # claude --permission-mode
+                                  # claude --permission-mode (opencode : traduit, missions/worker_host.py)
+          host: claude-code       # #1281 L4 : claude-code (défaut, absent = orchestrator.host) | opencode (exige
+                                  # provider ; route sensible et tâches V2 restent sur Claude Code) | gemini (ni
+                                  # provider ni lean ; route sensible : palier strong de Gemini)
         reviewer:                 # lot 3 : relit chaque tâche lancée qui arrive en needs_verification
           enabled: false
           model: ""               # vide : le palier, sinon un autre modèle que celui du worker
@@ -28,6 +38,7 @@ janitor :
           wip: 1                  # relectures en même temps
           max_cycles: 2           # désaccords relecteur/checks avant l'escalade à l'humain
           permission_mode: ""     # OBLIGATOIRE quand enabled: true
+          host: claude-code       # seule valeur admise dans ce lot : le relecteur reste sur Claude Code
         merger:                   # lot 4 : fusionne en série les tâches relues READY dont la PR est ouverte
           enabled: false
           realign_max: 1          # PR réalignées sur la cible (main fusionnée dans la branche) à la fois : le débit CI
@@ -36,12 +47,26 @@ janitor :
           max_cycles: 2           # retours au worker (CI rouge, conflit) avant l'escalade à l'humain
           protected_paths: []     # chemins qui reviennent à l'humain, en plus des défauts (code des gardes, politique,
                                   # workflows et hooks, pyproject, fichiers compilés) ; comparaison en casefold()
-        orchestrator:             # #962 : une session qui répond sous mandat aux questions des workers lancés
+          protected_gate: human   # human (défaut) : tout chemin réservé escalade ; dual_review : une seconde relecture
+                                  # indépendante remplace l'humain sur une partie d'entre eux (missions/dual_review.py) ;
+                                  # toute autre valeur rend la politique illisible
+          human_only_paths: []    # chemins qui restent à l'humain quel que soit protected_gate, en plus de
+                                  # HUMAN_ONLY_PATHS : la liste s'étend, elle ne se réduit pas
+          second_reviewer_min_tier: strong  # dual_review : palier minimal du second relecteur (cheap, mid, strong),
+                                  # lu au registre de fournisseurs ; aucun candidat à ce palier : l'humain tranche,
+                                  # sans repli ; toute autre valeur rend la politique illisible
+        orchestrator:           # #962 : une session qui répond sous mandat aux questions des workers lancés
           enabled: false
           model: sonnet           # vide : sonnet
           wip: 1                  # sessions orchestrateur en même temps
           sessions_per_day: 12    # plafond de lancements par jour (UTC)
           permission_mode: dontAsk  # imposé : toute autre valeur rend la politique illisible (liste blanche d'outils)
+        arbiter:                # GAO-r-le-arbitre-001 : un modèle fort tranche un désaccord avant l'humain
+          enabled: false          # défaut : les escalades posent leur question à l'humain, comme avant
+          tier: strong            # cheap | mid | strong : palier du modèle, lu à la table palier x hôte x fournisseur
+          provider: ""            # fournisseur du registre (optionnel) ; vide : l'hôte, au palier
+          sessions_per_day: 5     # plafond de lancements par jour (UTC)
+          permission_mode: dontAsk  # imposé : lecture seule + un seul canal de vote (`task arbitrate`)
       probe_host: false           # P86 : sonder le frein de la version d'hôte à la récolte d'un bail perdu (deux appels
                                   # modèle payants, une seule fois par version) ; faux : jamais, la reprise reste humaine
       breaker:
@@ -71,6 +96,15 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.hosts.model_table import kit_model
+from grimoire.missions.dual_review import (
+    DEFAULT_SECOND_REVIEWER_MIN_TIER,
+    PROTECTED_GATE_HUMAN,
+    PROTECTED_GATES,
+    SECOND_REVIEWER_TIERS,
+)
+from grimoire.missions.sensitive_route import SENSITIVE_ROUTE_OFF, SENSITIVE_ROUTES
+from grimoire.missions.worker_host import CLAUDE_CODE_HOST, GEMINI_HOST, OPENCODE_HOST, PROJECT_HOSTS, WORKER_HOSTS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,12 +112,14 @@ if TYPE_CHECKING:
 __all__ = [
     "DEFAULT_BREAKER_THRESHOLD",
     "ORCHESTRATION_FILE",
+    "ArbiterRole",
     "MergerRole",
     "OrchestratorPolicy",
     "OrchestratorRole",
     "PolicyRead",
     "ReviewerRole",
     "WorkerRole",
+    "claude_only_refusal",
     "load_orchestrator_policy",
 ]
 
@@ -93,17 +129,30 @@ TIERS = ("cheap", "mid", "strong")
 _BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _MODE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
+_PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _WORKER_KEYS = frozenset(
-    {"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode", "lean", "model_by_class"}
+    {"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode", "lean", "model_by_class",
+     "sensitive_route", "sensitive_paths", "host"}
 )
-_REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean"})
+_REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean", "host"})
+#: Les hôtes du relecteur dans ce lot : Claude Code seul (la relecture opencode n'est pas encore outillée).
+REVIEWER_HOSTS: tuple[str, ...] = (CLAUDE_CODE_HOST,)
 DEFAULT_MAX_CYCLES = 2
-_MERGER_KEYS = frozenset({"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths"})
+_MERGER_KEYS = frozenset(
+    {"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths", "protected_gate", "human_only_paths",
+     "second_reviewer_min_tier"}
+)
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
-#: Le modèle de la session orchestrateur quand la politique n'en nomme pas.
-DEFAULT_ORCHESTRATOR_MODEL = "sonnet"
+_ARBITER_KEYS = frozenset({"enabled", "tier", "provider", "sessions_per_day", "permission_mode"})
+#: Le modèle de la session orchestrateur quand la politique n'en nomme pas : le palier ``mid`` de Claude Code
+#: (défaut du kit de la table palier x hôte x fournisseur, ``sonnet``).
+DEFAULT_ORCHESTRATOR_MODEL = kit_model("mid")
 #: Le seul mode de permission de la session orchestrateur (``orchestrator_session.PERMISSION_MODE``).
 ORCHESTRATOR_PERMISSION_MODE = "dontAsk"
+#: Le palier de l'arbitre quand la politique n'en nomme pas (``strong`` : c'est un arbitrage, pas une revue).
+DEFAULT_ARBITER_TIER = "strong"
+#: Le seul mode de permission de la session arbitre (``arbiter.PERMISSION_MODE``) : lecture seule + un canal de vote.
+ARBITER_PERMISSION_MODE = "dontAsk"
 #: Les checks qui ne disent rien du code (couverture rapportée par un service tiers) : hors du verdict par défaut.
 DEFAULT_IGNORED_CHECKS: tuple[str, ...] = ("codecov/*",)
 
@@ -121,12 +170,17 @@ class WorkerRole:
     provider: str = ""
     lean: bool = False
     model_by_class: bool = False
+    sensitive_route: str = SENSITIVE_ROUTE_OFF
+    sensitive_paths: tuple[str, ...] = ()
+    host: str = CLAUDE_CODE_HOST
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled, "model": self.model, "tier": self.tier, "wip": self.wip,
             "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode,
             "provider": self.provider, "lean": self.lean, "model_by_class": self.model_by_class,
+            "sensitive_route": self.sensitive_route, "sensitive_paths": list(self.sensitive_paths),
+            "host": self.host,
         }
 
 
@@ -141,11 +195,13 @@ class ReviewerRole:
     max_cycles: int = DEFAULT_MAX_CYCLES
     permission_mode: str = ""
     lean: bool = False
+    host: str = CLAUDE_CODE_HOST
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled, "model": self.model, "tier": self.tier, "wip": self.wip,
             "max_cycles": self.max_cycles, "permission_mode": self.permission_mode, "lean": self.lean,
+            "host": self.host,
         }
 
 
@@ -158,10 +214,34 @@ class MergerRole:
     ignored_checks: tuple[str, ...] = DEFAULT_IGNORED_CHECKS
     max_cycles: int = DEFAULT_MAX_CYCLES
     protected_paths: tuple[str, ...] = ()
+    protected_gate: str = PROTECTED_GATE_HUMAN
+    human_only_paths: tuple[str, ...] = ()
+    second_reviewer_min_tier: str = DEFAULT_SECOND_REVIEWER_MIN_TIER
 
     def to_dict(self) -> dict[str, Any]:
         return {"enabled": self.enabled, "realign_max": self.realign_max, "ignored_checks": list(self.ignored_checks),
-                "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths)}
+                "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths),
+                "protected_gate": self.protected_gate, "human_only_paths": list(self.human_only_paths),
+                "second_reviewer_min_tier": self.second_reviewer_min_tier}
+
+
+@dataclass(frozen=True, slots=True)
+class ArbiterRole:
+    """Le rôle ``arbiter`` : un modèle fort tranche un désaccord avant toute question à l'humain.
+
+    Désactivé par défaut. Son mode de permission est imposé (``dontAsk`` : tout outil hors de sa liste blanche est
+    refusé sans demander) ; la politique ne peut pas le changer, encore moins en ``bypassPermissions``.
+    """
+
+    enabled: bool = False
+    tier: str = DEFAULT_ARBITER_TIER
+    provider: str = ""
+    sessions_per_day: int = 5
+    permission_mode: str = ARBITER_PERMISSION_MODE
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"enabled": self.enabled, "tier": self.tier, "provider": self.provider,
+                "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode}
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,15 +273,29 @@ class OrchestratorPolicy:
     reviewer: ReviewerRole = field(default_factory=ReviewerRole)
     merger: MergerRole = field(default_factory=MergerRole)
     orchestrator: OrchestratorRole = field(default_factory=OrchestratorRole)
+    arbiter: ArbiterRole = field(default_factory=ArbiterRole)
+    host: str = CLAUDE_CODE_HOST
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "worker": self.worker.to_dict(), "reviewer": self.reviewer.to_dict(), "merger": self.merger.to_dict(),
-            "orchestrator": self.orchestrator.to_dict(),
-            "base": self.base,
+            "orchestrator": self.orchestrator.to_dict(), "arbiter": self.arbiter.to_dict(),
+            "base": self.base, "host": self.host,
             "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue,
             "probe_host": self.probe_host,
         }
+
+
+def claude_only_refusal(policy: OrchestratorPolicy, role: str) -> str:
+    """``""`` si le rôle *role* (relecteur, arbitre, session orchestrateur) peut partir sur l'hôte du projet ; sinon
+    pourquoi il n'est pas lancé. Ces rôles ne sont outillés que pour Claude Code : sur un projet Gemini, rien ne
+    retombe en silence sur ``claude``, la sortie du tick le dit."""
+    if policy.host == CLAUDE_CODE_HOST:
+        return ""
+    return (
+        f"{role} non lancé : orchestrator.host vaut {policy.host!r} et ce rôle n'est outillé que pour Claude Code "
+        "(aucun repli silencieux sur claude)"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,9 +366,45 @@ def _flag(data: dict[str, Any], key: str, where: str) -> bool:
     return value
 
 
-def _parse_worker(raw: Any) -> WorkerRole:
+def _host(data: dict[str, Any], role: str, admitted: tuple[str, ...], default: str = CLAUDE_CODE_HOST) -> str:
+    where = f"orchestrator.roles.{role}.host"
+    host = _text(data.get("host", default), where)
+    if not host:
+        raise _InvalidPolicyError(f"{where} : vide (admis : {', '.join(admitted)} ; omettre la clé pour {default})")
+    if host not in admitted:
+        raise _InvalidPolicyError(f"{where} : {host!r} inconnu ou non pris en charge (admis : {', '.join(admitted)})")
+    return host
+
+
+def _parse_worker(raw: Any, project_host: str = CLAUDE_CODE_HOST) -> WorkerRole:
     data = _table(raw, "orchestrator.roles.worker", _WORKER_KEYS)
     enabled, model, tier, mode = _session_role(data, "worker")
+    host = _host(data, "worker", WORKER_HOSTS, project_host)
+    provider = _text(data.get("provider", ""), "orchestrator.roles.worker.provider")
+    if host == OPENCODE_HOST and not provider:
+        raise _InvalidPolicyError(
+            "orchestrator.roles.worker.provider est obligatoire avec host: opencode (fournisseur du registre : "
+            "deepseek, moonshot ou un fournisseur local)"
+        )
+    if host == GEMINI_HOST and provider:
+        raise _InvalidPolicyError(
+            "orchestrator.roles.worker.provider ne s'applique pas à host: gemini (le worker prend le modèle de "
+            "Gemini CLI, `dispatch.models.gemini`) : retirer provider ou changer d'hôte"
+        )
+    if host == GEMINI_HOST and data.get("lean") is True:
+        raise _InvalidPolicyError(
+            "orchestrator.roles.worker.lean n'a pas d'équivalent sur host: gemini (options propres à Claude Code)"
+        )
+    route = _text(data.get("sensitive_route", SENSITIVE_ROUTE_OFF), "orchestrator.roles.worker.sensitive_route")
+    if route not in SENSITIVE_ROUTES:
+        raise _InvalidPolicyError(
+            f"orchestrator.roles.worker.sensitive_route : {route!r} inconnu (admis : {', '.join(SENSITIVE_ROUTES)})"
+        )
+    raw_paths = data.get("sensitive_paths", [])
+    if not isinstance(raw_paths, list) or not all(isinstance(g, str) and g.strip() for g in raw_paths):
+        raise _InvalidPolicyError(
+            f"orchestrator.roles.worker.sensitive_paths doit être une liste de motifs non vides, pas {raw_paths!r}"
+        )
     return WorkerRole(
         enabled=enabled,
         model=model,
@@ -282,9 +412,12 @@ def _parse_worker(raw: Any) -> WorkerRole:
         wip=_positive(data.get("wip", 1), "orchestrator.roles.worker.wip"),
         sessions_per_day=_positive(data.get("sessions_per_day", 5), "orchestrator.roles.worker.sessions_per_day"),
         permission_mode=mode,
-        provider=_text(data.get("provider", ""), "orchestrator.roles.worker.provider"),
+        provider=provider,
         lean=_flag(data, "lean", "orchestrator.roles.worker"),
         model_by_class=_flag(data, "model_by_class", "orchestrator.roles.worker"),
+        sensitive_route=route,
+        sensitive_paths=tuple(g.strip() for g in raw_paths),
+        host=host,
     )
 
 
@@ -299,6 +432,7 @@ def _parse_reviewer(raw: Any) -> ReviewerRole:
         max_cycles=_positive(data.get("max_cycles", DEFAULT_MAX_CYCLES), "orchestrator.roles.reviewer.max_cycles"),
         permission_mode=mode,
         lean=_flag(data, "lean", "orchestrator.roles.reviewer"),
+        host=_host(data, "reviewer", REVIEWER_HOSTS),
     )
 
 
@@ -309,17 +443,30 @@ def _parse_merger(raw: Any) -> MergerRole:
     if not isinstance(enabled, bool):
         raise _InvalidPolicyError(f"{where}.enabled doit être un booléen, pas {enabled!r}")
     globs: dict[str, tuple[str, ...]] = {}
-    for key, default in (("ignored_checks", DEFAULT_IGNORED_CHECKS), ("protected_paths", ())):
+    for key, default in (("ignored_checks", DEFAULT_IGNORED_CHECKS), ("protected_paths", ()), ("human_only_paths", ())):
         raw_globs = data.get(key, list(default))
         if not isinstance(raw_globs, list) or not all(isinstance(g, str) and g.strip() for g in raw_globs):
             raise _InvalidPolicyError(f"{where}.{key} doit être une liste de motifs non vides, pas {raw_globs!r}")
         globs[key] = tuple(g.strip() for g in raw_globs)
+    gate = _text(data.get("protected_gate", PROTECTED_GATE_HUMAN), f"{where}.protected_gate")
+    if gate not in PROTECTED_GATES:
+        raise _InvalidPolicyError(
+            f"{where}.protected_gate : {gate!r} inconnu (admis : {', '.join(PROTECTED_GATES)})"
+        )
+    min_tier = _text(data.get("second_reviewer_min_tier", DEFAULT_SECOND_REVIEWER_MIN_TIER), f"{where}.second_reviewer_min_tier")
+    if min_tier not in SECOND_REVIEWER_TIERS:
+        raise _InvalidPolicyError(
+            f"{where}.second_reviewer_min_tier : {min_tier!r} inconnu (admis : {', '.join(SECOND_REVIEWER_TIERS)})"
+        )
     return MergerRole(
         enabled=enabled,
         realign_max=_positive(data.get("realign_max", 1), f"{where}.realign_max"),
         ignored_checks=globs["ignored_checks"],
         max_cycles=_positive(data.get("max_cycles", DEFAULT_MAX_CYCLES), f"{where}.max_cycles"),
         protected_paths=globs["protected_paths"],
+        protected_gate=gate,
+        human_only_paths=globs["human_only_paths"],
+        second_reviewer_min_tier=min_tier,
     )
 
 
@@ -344,9 +491,50 @@ def _parse_orchestrator(raw: Any) -> OrchestratorRole:
     )
 
 
+def _parse_arbiter(raw: Any) -> ArbiterRole:
+    """Le rôle ``arbiter`` : palier ``strong`` par défaut, ``dontAsk`` imposé, fournisseur optionnel du registre."""
+    where = "orchestrator.roles.arbiter"
+    data = _table(raw, where, _ARBITER_KEYS)
+    enabled = data.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise _InvalidPolicyError(f"{where}.enabled doit être un booléen, pas {enabled!r}")
+    tier = _text(data.get("tier", DEFAULT_ARBITER_TIER), f"{where}.tier") or DEFAULT_ARBITER_TIER
+    if tier not in TIERS:
+        raise _InvalidPolicyError(f"{where}.tier : {tier!r} inconnu (admis : {', '.join(TIERS)})")
+    provider = _text(data.get("provider", ""), f"{where}.provider")
+    if provider and not _PROVIDER.fullmatch(provider):
+        raise _InvalidPolicyError(
+            f"{where}.provider : {provider!r} n'est pas un identifiant de fournisseur du registre (lettres, chiffres, . _ -)"
+        )
+    mode = _text(data.get("permission_mode", ARBITER_PERMISSION_MODE), f"{where}.permission_mode")
+    if mode != ARBITER_PERMISSION_MODE:
+        raise _InvalidPolicyError(
+            f"{where}.permission_mode : {mode!r} refusé — la session arbitre tourne toujours en "
+            f"{ARBITER_PERMISSION_MODE} (lecture seule, un seul canal de vote)"
+        )
+    return ArbiterRole(
+        enabled=enabled,
+        tier=tier,
+        provider=provider,
+        sessions_per_day=_positive(data.get("sessions_per_day", 5), f"{where}.sessions_per_day"),
+        permission_mode=mode,
+    )
+
+
 def _parse(block: Any) -> OrchestratorPolicy:
-    top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor", "probe_host"}))
-    roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker", "reviewer", "merger", "orchestrator"}))
+    top = _table(block, "orchestrator", frozenset({"base", "host", "roles", "breaker", "janitor", "probe_host"}))
+    host = _text(top.get("host", CLAUDE_CODE_HOST), "orchestrator.host")
+    if not host:
+        # Une clé posée mais vide n'est pas « absente » : elle ne vaut pas claude-code en silence.
+        raise _InvalidPolicyError(
+            f"orchestrator.host : vide (admis : {', '.join(PROJECT_HOSTS)} ; omettre la clé pour {CLAUDE_CODE_HOST})"
+        )
+    if host not in PROJECT_HOSTS:
+        raise _InvalidPolicyError(f"orchestrator.host : {host!r} inconnu (admis : {', '.join(PROJECT_HOSTS)})")
+    roles = _table(
+        top.get("roles", {}), "orchestrator.roles",
+        frozenset({"worker", "reviewer", "merger", "orchestrator", "arbiter"}),
+    )
     breaker = _table(top.get("breaker", {}), "orchestrator.breaker", frozenset({"threshold"}))
     janitor = _table(top.get("janitor", {}), "orchestrator.janitor", frozenset({"close_issue"}))
     close_issue = janitor.get("close_issue", False)
@@ -359,14 +547,16 @@ def _parse(block: Any) -> OrchestratorPolicy:
     if base and not _BRANCH.fullmatch(base):
         raise _InvalidPolicyError(f"orchestrator.base : {base!r} n'est pas un nom de branche simple (lettres, chiffres, . _ / -)")
     return OrchestratorPolicy(
-        worker=_parse_worker(roles["worker"]) if "worker" in roles else WorkerRole(),
+        worker=_parse_worker(roles["worker"], host) if "worker" in roles else WorkerRole(host=host),
         reviewer=_parse_reviewer(roles["reviewer"]) if "reviewer" in roles else ReviewerRole(),
         merger=_parse_merger(roles["merger"]) if "merger" in roles else MergerRole(),
         orchestrator=_parse_orchestrator(roles["orchestrator"]) if "orchestrator" in roles else OrchestratorRole(),
+        arbiter=_parse_arbiter(roles["arbiter"]) if "arbiter" in roles else ArbiterRole(),
         base=base,
         breaker_threshold=_positive(breaker.get("threshold", DEFAULT_BREAKER_THRESHOLD), "orchestrator.breaker.threshold"),
         close_issue=close_issue,
         probe_host=probe_host,
+        host=host,
     )
 
 

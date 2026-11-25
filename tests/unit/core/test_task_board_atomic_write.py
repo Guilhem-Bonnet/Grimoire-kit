@@ -65,6 +65,19 @@ def _board_path(tmp_path: Path) -> Path:
     return tmp_path / "_grimoire" / "standard" / "task-board.yaml"
 
 
+def _read_board(dest: Path) -> Any:
+    """Lecture nue. Sous Windows, un ``open`` qui tombe pile dans le remplacement échoue (``PermissionError``) :
+    ce n'est pas un board partiel, on rouvre ; seul un contenu lu compte.
+    """
+    for attempt in range(200):
+        try:
+            return YAML(typ="safe").load(dest)
+        except PermissionError:
+            if attempt == 199:
+                raise
+            time.sleep(0.005)
+
+
 def test_a_reader_never_sees_a_half_written_board(tmp_path: Path) -> None:
     """Un fil réécrit en boucle pendant qu'on lit en boucle : jamais de board partiel."""
     dest = _board_path(tmp_path)
@@ -91,7 +104,7 @@ def test_a_reader_never_sees_a_half_written_board(tmp_path: Path) -> None:
         # venir du remplacement, pas de la relecture. Les écrivains tournent
         # jusqu'à la fin de ces lectures : chaque lecture est concurrente.
         for _ in range(8):
-            document = YAML(typ="safe").load(dest)
+            document = _read_board(dest)
             tasks = document.get("tasks") if isinstance(document, dict) else None
             if not isinstance(tasks, list):
                 failures.append("le board lu n'a pas de liste `tasks`")

@@ -283,7 +283,12 @@ export const api = {
   // l'URL vit ici, avec la même cible que toute lecture. Un message est un tour humain : le
   // cockpit le relaie à l'agent et n'écrit rien lui-même (ADR-007).
   chatStreamUrl: (resume) => withProject(WS + 'chat/stream' + (resume ? '?resume=1' : '')),
-  chatSend: (text, answerTo) => post(WS + 'chat/send', answerTo ? { text, answer_to: answerTo } : { text }),
+  chatSend: (text, answerTo, { dictation = false } = {}) =>
+    post(WS + 'chat/send', { text, ...(answerTo ? { answer_to: answerTo } : {}), ...(dictation ? { dictation: true } : {}) }),
+  // Lot V2 : le message vocal. Le serveur local transcrit un WAV 16 kHz mono (base64) ; sans l'extra
+  // `voice`, `voiceConfig` le dit (`available: false`, avec la raison) et le bouton n'existe pas.
+  voiceConfig: () => get(WS + 'voice/config'),
+  voiceTranscribe: (audio) => post(WS + 'voice/transcribe', { audio, ...projectBody() }),
   // ACP4 : le geste du pilote automatique. Un bouton que la personne clique, avec la clé de contrôle
   // qu'elle saisit — la page ne la garde pas ; l'agent du chat n'a ni la route ni la clé. Lot 3 : le
   // corps nomme aussi le projet visé, pour que l'hôte vérifie l'URL et le corps ensemble.

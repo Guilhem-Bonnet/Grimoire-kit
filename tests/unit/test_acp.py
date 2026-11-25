@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from grimoire.acp import AcpClient, AcpError, PermissionRequest, new_machine, replay, rust_backend_available
+from grimoire.bridges.schemas import HostId
 from grimoire.hosts.capabilities import all_profiles
 
 REPO = Path(__file__).resolve().parents[2]
@@ -289,7 +290,8 @@ def test_an_agent_error_on_prompt_raises_and_leaves_the_session_usable(tmp_path:
 
 
 def test_every_known_host_declares_its_acp_command() -> None:
-    table = {p.host_id.value: p.acp_command for p in all_profiles()}
+    # Zed est un client ACP (zed.dev/docs/ai/external-agents) : il n'expose aucun agent.
+    table = {p.host_id.value: p.acp_command for p in all_profiles() if p.host_id is not HostId.ZED}
     assert all(table.values()), table
     by_name = {p.display_name: p.acp_command for p in all_profiles()}
     assert by_name["Gemini CLI"] == ("gemini", "--acp")

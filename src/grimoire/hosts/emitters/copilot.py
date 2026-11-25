@@ -30,8 +30,12 @@ from grimoire.hosts.emitters.base import (
     parallel_brainstorm_section,
     persona_section,
 )
+from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT, tier_for
+from grimoire.hosts.emitters.copilot_mcp import KIT_SERVERS, vscode_mcp_merge
+from grimoire.hosts.emitters.copilot_setup import SETUP_STEPS, setup_steps_file
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
+from grimoire.hosts.model_table import TIERS, load_model_table, resolve_model
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -68,6 +72,11 @@ _WIRE_NAMES: dict[HookEvent, str] = {
     HookEvent.SUBAGENT_STOP: "SubagentStop",
     HookEvent.PRE_COMPACT: "PreCompact",
     HookEvent.STOP: "Stop",
+    # PascalCase comme les autres fichiers du kit : la référence GitHub donne à ces deux événements
+    # une forme « VS Code compatible » (snake_case) ; l'orthographe camelCase ferait lire au
+    # diagnostic ``copilot_harness`` tout le projet comme Copilot CLI.
+    HookEvent.ERROR_OCCURRED: "ErrorOccurred",
+    HookEvent.USER_PROMPT_TRANSFORMED: "UserPromptTransformed",
 }
 
 
@@ -115,17 +124,77 @@ non vérifié, quel que soit son ton.
 {parallel_brainstorm_section("résultat relu selon la classe ci-dessus")}"""
 
 
-def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...] = ()) -> EmittedFile:
-    # Pas de `model` ici : le contrat documenté pour .github/agents/*.agent.md
-    # (https://code.visualstudio.com/docs/copilot/customization/custom-agents)
-    # accepte un nom de modèle explicite ou une liste de repli, mais ne
-    # documente aucune valeur de sélection automatique équivalente à
-    # `inherit` côté Claude Code. Inventer un nom de modèle serait mentir sur
-    # ce que l'hôte sait faire ; la lacune est déclarée en toutes lettres dans
-    # la dégradation « model affinity » du plan plutôt que d'être tue.
+def _agent_model(agent: AgentSpec, copilot_models: dict[str, str]) -> str:
+    """Le ``model`` Copilot de *agent*, ou ``""`` (rien n'est émis).
+
+    Même affinité que Claude Code (:func:`tier_for`, reasoning x cost -> palier
+    ``strong``/``mid``/``cheap``), traduite par la table palier x hôte x fournisseur
+    (``dispatch.models.copilot.<palier>``, alias historique ``dispatch.copilot_models``) :
+    le nom est celui que le projet déclare,
+    jamais un nom que le kit aurait deviné. Palier ``inherit`` (aucun signal
+    fort) ou palier sans correspondance : pas de ``model``, le modèle du
+    sélecteur s'applique.
+
+    Doc « Custom agent file reference » (code.visualstudio.com/docs/agents/reference/
+    custom-agent-file-reference) : ``model`` accepte un modèle ou une liste ordonnée,
+    harness Local et Copilot ; ``model-policy`` vaut ``preferred`` par défaut. Il
+    n'est pas émis : ``preferred`` est déjà le défaut, ``required`` enlèverait à
+    l'utilisateur le choix d'un autre modèle, et la référence dit que le harness
+    Copilot ne le transmet pas à son SDK.
+    """
+    tier = tier_for(agent)
+    return copilot_models.get(tier, "") if tier != "inherit" else ""
+
+
+def _model_tiers(project_root: Path) -> dict[str, str]:
+    """Les paliers de la politique que le projet traduit en nom de modèle Copilot."""
+    table = load_model_table(project_root)
+    choices = (resolve_model(tier, "copilot", table=table) for tier in TIERS)
+    return {choice.tier: choice.model for choice in choices if choice.model}
+
+
+def _with_agent_hooks(header: str, agent: AgentSpec) -> str:
+    """Ajoute au frontmatter le bloc ``hooks:`` propre à *agent* (#1280 P3).
+
+    Forme de la référence GitHub « Agent-scoped hooks » (docs.github.com/en/copilot/reference/
+    hooks-reference) : ``hooks:`` {Événement: [{type: command, command, windows?, timeoutSec?}]}.
+    Il ne porte que ce que la persona déclare : la garde globale reste dans
+    ``.github/hooks/`` — le collecteur refuse un hook d'agent qui la relancerait.
+    """
+    if not agent.hooks:
+        return header
+    by_event: dict[str, list[Any]] = {}
+    for hook in agent.hooks:
+        by_event.setdefault(hook.event, []).append(hook)
+    lines = ["hooks:"]
+    for event, hooks in by_event.items():
+        lines.append(f"  {event}:")
+        for hook in hooks:
+            lines.append("    - type: command")
+            lines.append(f"      command: {json.dumps(hook.command, ensure_ascii=False)}")
+            if hook.windows:
+                lines.append(f"      windows: {json.dumps(hook.windows, ensure_ascii=False)}")
+            if hook.timeout is not None:
+                lines.append(f"      timeoutSec: {hook.timeout}")
+    head, _, _ = header.rpartition("\n---")
+    return "\n".join([head, *lines, "---"])
+
+
+def _agent_file(
+    agent: AgentSpec,
+    surface: ProjectSurface,
+    owned_skills: tuple[SkillSpec, ...] = (),
+    copilot_models: dict[str, str] | None = None,
+) -> EmittedFile:
+    # `model` n'est émis que si l'affinité de la persona donne un palier ET que
+    # le projet déclare le nom Copilot de ce palier (voir `_agent_model`). Aucune
+    # valeur de sélection automatique équivalente à `inherit` n'est documentée :
+    # sans correspondance, la lacune reste déclarée par la dégradation
+    # « model affinity » du plan plutôt que comblée par un nom inventé.
     fields: dict[str, Any] = {
         "description": agent.description,
         "tools": list(map_verbs(agent.tools, _TOOL_TABLE)),
+        "model": _agent_model(agent, copilot_models or {}),
         "user-invocable": agent.entry_point,
     }
     routed = [other for other in surface.agents if not other.entry_point and other.name != agent.name]
@@ -137,8 +206,13 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         # d'un modèle qui appelle l'outil. Décision (2026-09-25) : il reçoit
         # l'union des outils des personas qu'il route, plus `agent` — sur une
         # demande directe et bornée il agit lui-même, sinon il délègue
-        # (#656). Sur VS Code, déléguer exige l'outil `agent`
-        # ET une liste `agents:`. Pas de `handoffs:` : un bouton par persona
+        # (#656). Sur VS Code (harness Local), déléguer exige l'outil `agent`
+        # ET une liste `agents:` : la référence du fichier d'agent classe `agents`
+        # « Local only » ; le harness Copilot délègue par son outil natif `task`
+        # sans cette liste. Le fichier est unique pour les deux : `agents:` reste
+        # (c'est lui qui borne la délégation tant que Local existe, retiré en
+        # février 2027), et le plan le déclare (dégradation « agents allow-list »).
+        # Pas de `handoffs:` : un bouton par persona
         # après chaque réponse n'aide pas.
         union: list[str] = list(fields["tools"])
         for other in routed:
@@ -147,7 +221,7 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         fields["agents"] = [other.name for other in routed]
         verbs = ", ".join(dict.fromkeys(v.value for other in (agent, *routed) for v in other.tools))
         boundary = f"{verbs} (l'union de tes personas), plus la délégation par l'outil `agent` aux personas listées dans `agents`"
-    header = Emitter.frontmatter(fields)
+    header = _with_agent_hooks(Emitter.frontmatter(fields), agent)
     role = (
         "Point d'entrée : sur une demande directe et bornée (`grimoire-agent-dispatch` en juge), tu "
         "fais le travail toi-même avec tes outils ; sinon tu délègues à la persona adaptée avec l'outil "
@@ -183,6 +257,11 @@ def _skill_file(skill: SkillSpec) -> EmittedFile:
         {
             "name": skill.slug,
             "description": skill.description,
+            # Champs d'invocation documentés (code.visualstudio.com/docs/copilot/
+            # customization/agent-skills), écrits seulement quand la source les déclare.
+            "argument-hint": skill.argument_hint,
+            "user-invocable": skill.user_invocable,
+            "disable-model-invocation": skill.disable_model_invocation,
             "license": skill.license,
             "compatibility": skill.compatibility,
         }
@@ -195,6 +274,7 @@ def _prompt_file(command: CommandSpec) -> EmittedFile:
     header = Emitter.frontmatter(
         {
             "description": command.description,
+            "argument-hint": command.argument_hint,
             "agent": "agent",
             "tools": list(map_verbs(command.tools, _TOOL_TABLE)),
         }
@@ -206,22 +286,287 @@ def _prompt_file(command: CommandSpec) -> EmittedFile:
     return EmittedFile(relpath=GH_DIR / "prompts" / f"{command.slug}.prompt.md", content=content)
 
 
-def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
+#: Famille d'outils neutre -> noms d'outils du harness « Copilot » (référence :
+#: https://docs.github.com/en/copilot/reference/hooks-reference). Les fichiers
+#: portent des noms d'événements PascalCase : l'hôte y rapporte le nom d'outil
+#: façon Claude (``Bash``, ``Edit``…), et un matcher en liste littérale
+#: ``a|b|c`` se déclenche quand un jeton égale le nom runtime *ou* son nom
+#: Claude. Les deux nommages sont écrits quand même : la garde ne doit pas
+#: dépendre de la table de correspondance de l'hôte.
+#:
+#: Pas de ``MultiEdit``/``NotebookEdit`` : ces outils n'existent pas chez Copilot,
+#: et le fichier n'écrit que des noms que la référence documente.
+_MATCHER_TABLE: dict[str, tuple[str, ...]] = {
+    # `bash` et `powershell` (Windows) sont tous deux rapportés `Bash`.
+    "execute": ("Bash", "bash", "powershell"),
+    # `create` (rapporté `Write`) crée un fichier ; `edit`, `str_replace_editor`
+    # et `apply_patch` sont tous rapportés `Edit`.
+    "write": ("Edit", "Write", "edit", "create", "str_replace_editor", "apply_patch"),
+    # Copilot n'a pas de table de permissions déclarative (dégradation
+    # « permissions ») : le refus de lecture d'un secret n'existe que dans la
+    # garde. La lecture de fichier reste donc dans le matcher, contrairement à
+    # Claude Code où la table de refus la couvre sans processus. La recherche
+    # (`grep`/`rg` rapportés `Grep`, `glob` rapporté `Glob`) lit ce qu'elle parcourt :
+    # même garde que la lecture.
+    "secret": ("Read", "view", "Grep", "grep", "rg", "Glob", "glob"),
+    "network": ("WebFetch", "WebSearch", "web_fetch", "web_search"),
+    # Délégation à un sous-agent : `task`, rapporté `Agent` (`Task` accepté).
+    "delegation": ("Agent", "Task", "task"),
+}
+
+#: Les outils intégrés que la référence documente, sous leurs deux nommages,
+#: qu'ils soient ou non dans un matcher du kit. Tout autre nom (outil MCP, outil
+#: propre à VS Code, outil futur) est inconnu : le kit ne sait pas s'il écrit.
+_BUILTIN_TOOLS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        [
+            *(tool for tools in _MATCHER_TABLE.values() for tool in tools),
+            *("Grep", "grep", "rg", "Glob", "glob"),
+            *("AskUserQuestion", "ask_user", "TodoWrite", "update_todo"),
+        ]
+    )
+)
+
+#: Seconde entrée d'un hook à matcher : tout outil dont le nom n'est *pas* un
+#: outil intégré connu. Une valeur qui n'est ni un nom ni une liste ``a|b`` est,
+#: selon la référence, une regex sensible à la casse ancrée en ``^(?:…)$``,
+#: testée sur le nom Claude (ou runtime faute d'équivalent). Le motif exclut des
+#: noms exacts et accepte tout le reste : un nom inconnu, quelle que soit sa
+#: casse, passe par la décision. Les deux nommages sont exclus, pour que les
+#: outils intégrés ne lancent pas la décision deux fois quel que soit le nom testé.
+UNKNOWN_TOOL_MATCHER = "(?!(?:" + "|".join(_BUILTIN_TOOLS) + ")$).*"
+
+#: Événements dont l'entrée accepte un ``matcher`` dans le harness Copilot et
+#: pour lesquels le kit en déclare un. Le harness « Local » (déprécié) ignore ce
+#: champ : tout outil y déclenche le hook, comme avant, et la décision filtre.
+_MATCHED_EVENTS = frozenset({HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE})
+
+#: Délai de la garde avant outil (secondes). Chez Copilot un hook qui dépasse son
+#: délai laisse passer l'appel (échec ouvert, garde comprise) alors qu'une sortie
+#: non nulle le refuse : un délai court élargit le cas où la garde ne juge pas.
+#: Même pire cas borné que Claude Code (voir ``claude_code.FAIL_CLOSED_TIMEOUT``,
+#: #1276), donc même plancher.
+GUARD_TIMEOUT = FAIL_CLOSED_TIMEOUT
+
+
+def matcher_for(hook: HookSpec) -> str:
+    """Le ``matcher`` Copilot de *hook* : liste littérale de noms, ou ``""`` (tous les outils)."""
+    if hook.event not in _MATCHED_EVENTS:
+        return ""
+    tools: list[str] = []
+    for family in hook.matcher:
+        for tool in _MATCHER_TABLE.get(family, ()):
+            if tool not in tools:
+                tools.append(tool)
+    return "|".join(tools)
+
+
+def _hook_timeout(hook: HookSpec) -> int:
+    if hook.event is HookEvent.PRE_TOOL_USE and hook.enforcement is Enforcement.BLOCKING:
+        return max(hook.timeout, GUARD_TIMEOUT)
+    return hook.timeout
+
+
+def _powershell_program(program: str) -> str:
+    """Un chemin entre guillemets ne se lance sous PowerShell qu'avec l'opérateur ``&``."""
+    return f"& {program}" if program.startswith('"') else program
+
+
+def _dispatch_entry(launcher: HookLauncher = BARE) -> dict[str, Any]:
+    """L'entrée consultative ``grimoire.dispatch-model`` du fichier ``PreToolUse`` (#1280, P1-4).
+
+    Même lanceur que la garde, ``--decision`` en plus, matcher sur les seuls
+    outils de délégation, délai court (3 s) : un dépassement laisse passer
+    l'appel tel quel, ce qui est le comportement voulu d'un hook consultatif.
+    Elle vient *après* les entrées de la garde et ne la remplace pas ; elle
+    n'affirme jamais de permission (voir ``runtime._render_copilot_advisory_pre_tool``).
+    Le harness Local ignore ``matcher`` : elle y part sur chaque outil, et la
+    décision s'abstient hors délégation (dégradation déclarée par le plan).
+    """
+    spec = DISPATCH_MODEL_HOOK
+    (entry,) = _hook_entries(spec, launcher)
+    for key in ("command", "bash", "powershell"):
+        entry[key] = f"{entry[key]} --decision {spec.decision}"
+    return {**entry, "matcher": matcher_for(spec)}
+
+
+#: Hook consultatif ``SubagentStart`` (#1280, P3) : le contexte de dispatch du sous-agent.
+#: Propre à Copilot (Claude Code et les autres hôtes gardent leurs hooks). Délai court :
+#: un dépassement laisse démarrer le sous-agent sans contexte ajouté.
+SUBAGENT_START_HOOK = HookSpec(
+    event=HookEvent.SUBAGENT_START,
+    decision="grimoire.subagent-start",
+    enforcement=Enforcement.ADVISORY,
+    timeout=3,
+    rationale="Dit au sous-agent la classe de vérifiabilité et le palier recommandés pour sa tâche.",
+)
+
+
+def _subagent_start_file(launcher: HookLauncher = BARE) -> EmittedFile:
+    """``grimoire-subagent-start.json`` : une entrée, ``--decision`` en plus du lanceur commun."""
+    (entry,) = _hook_entries(SUBAGENT_START_HOOK, launcher)
+    for key in ("command", "bash", "powershell"):
+        entry[key] = f"{entry[key]} --decision {SUBAGENT_START_HOOK.decision}"
+    payload: dict[str, Any] = {"version": 1, "hooks": {"SubagentStart": [entry]}}
+    return EmittedFile(
+        relpath=GH_DIR / "hooks" / "grimoire-subagent-start.json",
+        content=json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        managed=False,
+        owned_if_contains=OWNED_COMMAND_MARKERS,
+    )
+
+
+#: Observation ``errorOccurred`` (#1280, P3) : l'erreur est inscrite au journal de session (trace).
+ERROR_OCCURRED_HOOK = HookSpec(
+    event=HookEvent.ERROR_OCCURRED,
+    decision="grimoire.error-occurred",
+    enforcement=Enforcement.ADVISORY,
+    timeout=3,
+    rationale="Inscrit l'erreur (type, message tronqué, outil) au journal de session ; ne bloque jamais.",
+)
+
+#: ``userPromptTransformed`` : mutation seule côté Copilot ; le kit n'y réécrit rien, il trace l'événement.
+USER_PROMPT_TRANSFORMED_HOOK = HookSpec(
+    event=HookEvent.USER_PROMPT_TRANSFORMED,
+    decision="grimoire.event-trace",
+    enforcement=Enforcement.ADVISORY,
+    timeout=3,
+    rationale="Trace l'événement (jamais le texte du prompt) ; ne réécrit rien.",
+)
+
+
+def _observation_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
+    """``grimoire-<événement>.json`` d'un hook d'observation Copilot : une entrée, ``--decision`` nommée."""
+    (entry,) = _hook_entries(hook, launcher)
+    for key in ("command", "bash", "powershell"):
+        entry[key] = f"{entry[key]} --decision {hook.decision}"
+    payload: dict[str, Any] = {"version": 1, "hooks": {_WIRE_NAMES[hook.event]: [entry]}}
+    return EmittedFile(
+        relpath=_hook_relpath(hook),
+        content=json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        managed=False,
+        owned_if_contains=OWNED_COMMAND_MARKERS,
+    )
+
+
+def _hook_entries(hook: HookSpec, launcher: HookLauncher = BARE) -> list[dict[str, Any]]:
+    """Les entrées de *hook* : une, ou deux pour un hook à matcher (outils connus, puis inconnus)."""
     event = _WIRE_NAMES[hook.event]
     entry: dict[str, Any] = {"type": "command"}
     if launcher.project_relative and launcher.windows:
         # Issue #760 : un venv du projet n'est pas dans le PATH de VS Code. Le
         # chemin part de la racine (``cwd``), et Windows a sa propre forme.
-        entry["command"] = Emitter.hook_command(HOST_ALIAS, event, f"./{launcher.posix}")
-        entry["windows"] = Emitter.hook_command(HOST_ALIAS, event, f".\\{launcher.windows}")
-        entry["cwd"] = "."
+        posix = Emitter.hook_command(HOST_ALIAS, event, f"./{launcher.posix}")
+        windows = Emitter.hook_command(HOST_ALIAS, event, f".\\{launcher.windows}")
+        cwd: str | None = "."
     else:
-        entry["command"] = Emitter.hook_command(HOST_ALIAS, event, Emitter.quoted_program(launcher.posix))
-    entry["timeout"] = hook.timeout
-    payload: dict[str, Any] = {"hooks": {event: [entry]}}
-    slug = hook.event.value.replace("_", "-")
+        program = Emitter.quoted_program(launcher.posix)
+        posix = Emitter.hook_command(HOST_ALIAS, event, program)
+        windows = Emitter.hook_command(HOST_ALIAS, event, _powershell_program(program))
+        cwd = None
+    entry["command"] = posix
+    entry["bash"] = posix
+    entry["powershell"] = windows
+    if cwd:
+        entry["cwd"] = cwd
+    entry["timeoutSec"] = _hook_timeout(hook)
+    if hook.decision == DISPATCH_MODEL_HOOK.decision:
+        return [entry]
+    matcher = matcher_for(hook)
+    if matcher:
+        # Avant les matchers, chaque appel passait par la décision : la seconde
+        # entrée garde ce comportement pour les outils que le kit ne connaît pas.
+        return [{**entry, "matcher": matcher}, {**entry, "matcher": UNKNOWN_TOOL_MATCHER}]
+    return [entry]
+
+
+def _hook_relpath(hook: HookSpec) -> Path:
+    return GH_DIR / "hooks" / f"grimoire-{hook.event.value.replace('_', '-')}.json"
+
+
+def _entry_identity(entry: Any) -> tuple[str, str] | None:
+    """Matcher et commande sans le lanceur : ce qui désigne une entrée d'un ``up`` à l'autre."""
+    if not isinstance(entry, dict):
+        return None
+    command = entry.get("command")
+    if not isinstance(command, str) or " --host " not in command:
+        return None
+    matcher = entry.get("matcher", "")
+    return (matcher if isinstance(matcher, str) else "", command[command.index(" --host ") :])
+
+
+def _existing_timeouts(path: Path, event: str) -> dict[tuple[str, str], int]:
+    """Les ``timeoutSec`` en place dans le fichier de hook *path*, par entrée ; vide s'il est illisible."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    hooks = payload.get("hooks") if isinstance(payload, dict) else None
+    entries = hooks.get(event) if isinstance(hooks, dict) else None
+    found: dict[tuple[str, str], int] = {}
+    for entry in entries if isinstance(entries, list) else []:
+        identity = _entry_identity(entry)
+        timeout = entry.get("timeoutSec") if isinstance(entry, dict) else None
+        # ``bool`` est un ``int`` : ``true`` n'est pas un délai.
+        if identity is not None and isinstance(timeout, int) and not isinstance(timeout, bool):
+            found[identity] = max(timeout, found.get(identity, 0))
+    return found
+
+
+def _keep_raised_timeouts(hook: HookSpec, entries: list[dict[str, Any]], project_root: Path | None) -> None:
+    """Garde le ``timeoutSec`` de la garde relevé à la main au-dessus du délai émis (#1277).
+
+    Le fichier est réécrit en entier à chaque ``up`` : sans cela un délai porté
+    à 60 s pour une machine lente redescendrait au plancher :data:`GUARD_TIMEOUT`.
+    Chez Copilot un dépassement laisse passer l'appel : un délai plus long
+    resserre ce cas. Un délai plus court remonte au délai émis, et l'entrée
+    consultative (``--decision``) reprend toujours le sien.
+    """
+    if project_root is None or hook.event is not HookEvent.PRE_TOOL_USE or hook.enforcement is not Enforcement.BLOCKING:
+        return
+    existing = _existing_timeouts(project_root / _hook_relpath(hook), _WIRE_NAMES[hook.event])
+    for entry in entries:
+        identity = _entry_identity(entry)
+        if identity is None or " --decision " in identity[1]:
+            continue
+        entry["timeoutSec"] = max(entry["timeoutSec"], existing.get(identity, 0))
+
+
+def _hook_file(
+    hook: HookSpec,
+    launcher: HookLauncher = BARE,
+    *,
+    dispatch: bool = False,
+    project_root: Path | None = None,
+) -> EmittedFile:
+    """Un fichier ``.github/hooks/grimoire-<événement>.json`` au format du harness Copilot.
+
+    ``{"version": 1, "hooks": {"<Événement>": [entrée]}}``, entrée portant
+    ``bash`` (Unix) et ``powershell`` (Windows), plus ``command`` comme repli.
+    Pas de ``windows`` (issue #760) : le harness Copilot ne le documente que
+    pour les hooks propres à un agent, et le harness Local prend ``powershell``
+    comme repli de ``windows`` — la forme Windows du lanceur passe donc par
+    ``powershell``, lu par les deux harness. ``command`` porte la forme Unix :
+    le harness Copilot le copie dans ``bash``/``powershell`` seulement quand
+    ceux-ci manquent, il ne sert qu'aux VS Code antérieurs aux deux replis.
+    ``windows`` n'est pas réintroduit pour ces derniers : la référence GitHub ne
+    le liste pas pour un fichier de hook, ne dit rien d'un champ inconnu, et
+    écarte un élément malformé — l'élément ici, c'est la garde elle-même.
+
+    Le délai s'écrit ``timeoutSec`` seul : les deux harness le lisent, et ils
+    donnent des priorités opposées à ``timeout`` et ``timeoutSec`` posés ensemble.
+
+    *dispatch* ajoute, après les entrées de *hook* (``PreToolUse`` seulement),
+    l'entrée consultative du modèle imposé aux sous-agents (:func:`_dispatch_entry`).
+    """
+    event = _WIRE_NAMES[hook.event]
+    entries = _hook_entries(hook, launcher)
+    _keep_raised_timeouts(hook, entries, project_root)
+    if dispatch and hook.event is HookEvent.PRE_TOOL_USE:
+        entries.append(_dispatch_entry(launcher))
+    payload: dict[str, Any] = {"version": 1, "hooks": {event: entries}}
     return EmittedFile(
-        relpath=GH_DIR / "hooks" / f"grimoire-{slug}.json",
+        relpath=_hook_relpath(hook),
         content=json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         managed=False,
         owned_if_contains=OWNED_COMMAND_MARKERS,
@@ -246,6 +591,8 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         f"| Skills attachées | {attached} — repliées dans le fichier de leur agent |",
         f"| Prompts | {len([c for c in surface.commands if c.source != 'workflow'])} — `.github/prompts/` |",
         f"| Hooks | {len(surface.hooks)} — `.github/hooks/` |",
+        f"| Serveurs MCP | {len([m for m in surface.mcp_servers if m.name in KIT_SERVERS])} — `.vscode/mcp.json` |",
+        f"| Agent cloud | installation du kit — `{SETUP_STEPS.as_posix()}` |",
         "",
         "Les fichiers de hook ne portent pas de marqueur de gestion : ce sont des",
         "JSON purs. C'est la commande invoquée qui dit à qui le fichier",
@@ -263,8 +610,9 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         f"- **V1** — {Verifiability.V1.explanation}",
         f"- **V2** — {Verifiability.V2.explanation}",
         "",
-        "Cet hôte ne documente aucun nom de modèle par palier : voir la",
-        "dégradation « model affinity » ci-dessous, le contrat",
+        "Cet hôte ne documente aucun nom de modèle par palier : `model` n'est",
+        "émis que pour un palier déclaré sous `dispatch.copilot_models` (voir la",
+        "dégradation « model affinity » ci-dessous), le contrat",
         "`.github/agents/*.agent.md` n'offre rien d'équivalent à `inherit`.",
         "Ce qui reste vrai partout : toute persona routée doit clore sa",
         "réponse par un bloc ```grimoire-uncertainties``` — une liste JSON",
@@ -292,11 +640,13 @@ class CopilotEmitter(Emitter):
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
+        copilot_models = _model_tiers(project_root)
         files.extend(
             _agent_file(
                 agent,
                 surface,
                 owned_skills=tuple(by_slug[slug] for slug in agent.skills if slug in by_slug),
+                copilot_models=copilot_models,
             )
             for agent in surface.agents
         )
@@ -308,7 +658,11 @@ class CopilotEmitter(Emitter):
         # make two writers for one path, and every sync would report a
         # conflict on a file nobody actually edited.
         files.extend(_prompt_file(c) for c in surface.commands if c.source != "workflow")
-        files.extend(_hook_file(hook, launcher) for hook in surface.hooks)
+        files.append(_subagent_start_file(launcher))
+        files.extend(_observation_file(h, launcher) for h in (ERROR_OCCURRED_HOOK, USER_PROMPT_TRANSFORMED_HOOK))
+        files.extend(_hook_file(hook, launcher, dispatch=True, project_root=project_root) for hook in surface.hooks)
+        # Agent cloud (#1280, P3) : le kit installé avant que l'agent commence.
+        files.append(setup_steps_file())
 
         degradations: list[Degradation] = list(Emitter.launcher_degradations(launcher))
         if not surface.permissions.is_empty():
@@ -319,26 +673,114 @@ class CopilotEmitter(Emitter):
                     fallback="règles appliquées par le hook PreToolUse (mêmes refus, même formulation).",
                 )
             )
-        degradations.append(
-            Degradation(
-                surface="hook matchers",
-                reason="Les hooks VS Code ne filtrent pas par outil dans leur configuration.",
-                fallback="le filtrage se fait dans la décision : un appel en lecture seule sort en `allow` sans effet.",
+        if any(matcher_for(h) for h in surface.hooks):
+            degradations.append(
+                Degradation(
+                    surface="hook matchers",
+                    reason=(
+                        "Les hooks à matcher (garde PreToolUse, trace PostToolUse) nomment les outils "
+                        "intégrés de Copilot qu'ils jugent, et une seconde entrée rattrape tout outil "
+                        "non intégré (MCP, outils propres à VS Code). Restent hors garde : les outils "
+                        "intégrés de recherche, web, question, liste de tâches et délégation (Grep, Glob, "
+                        "WebFetch, WebSearch, AskUserQuestion, TodoWrite, Agent/Task), un outil tiers "
+                        "homonyme de l'un d'eux, et la seconde entrée si l'hôte ne compile pas son motif "
+                        "(entrée sautée, la première reste). Le harness Local ignore `matcher` : tout "
+                        "outil y passe par la décision."
+                    ),
+                    fallback=(
+                        "aucun de ces outils n'écrit ni n'exécute : une écriture ou une commande passe "
+                        "par `edit`/`create`/`bash`, jugés. La recherche (Grep/Glob) parcourt des fichiers "
+                        "sans le refus de lecture des secrets, que la décision ne leur applique pas non plus."
+                    ),
+                )
             )
+        if any(h.event is HookEvent.PRE_TOOL_USE and h.enforcement is Enforcement.BLOCKING for h in surface.hooks):
+            degradations.append(
+                Degradation(
+                    surface="hook timeout",
+                    reason=(
+                        "Chez Copilot, un hook qui dépasse son délai laisse passer l'appel d'outil, "
+                        "garde PreToolUse comprise (seule une sortie non nulle refuse)."
+                    ),
+                    fallback=f"délai de la garde porté à {GUARD_TIMEOUT} s ; `grimoire doctor` le rappelle.",
+                )
+            )
+        if any(h.event is HookEvent.PRE_TOOL_USE for h in surface.hooks):
+            degradations.append(
+                Degradation(
+                    surface="dispatch model",
+                    reason=(
+                        "Le modèle de la politique de dispatch est proposé aux sous-agents (`task`, "
+                        "`runSubagent`, `Agent`/`Task`) par une entrée consultative du hook PreToolUse, "
+                        "mais Copilot nomme ses modèles autrement que les paliers de la politique et ne "
+                        "documente pas les valeurs que `task` accepte : aucune correspondance n'est inventée. "
+                        "L'entrée réécrite (`modifiedArgs`, ou aussi `updatedInput` pour une charge snake_case) "
+                        "est rendue sans `permissionDecision` ; un lot de plusieurs appels n'est jamais réécrit. "
+                        "Le harness Local ignore `matcher` : l'entrée y part sur chaque outil (3 s au plus)."
+                    ),
+                    fallback=(
+                        "sans `dispatch.models.copilot.<palier>` (alias `dispatch.copilot_models`) dans la politique d'orchestration du standard, "
+                        "le palier recommandé est seulement dit à l'agent (additionalContext) ; "
+                        "`dispatch.impose_model: off` coupe la décision."
+                    ),
+                )
+            )
+        unmapped = sorted(
+            agent.name
+            for agent in surface.agents
+            if (tier := tier_for(agent)) != "inherit" and tier not in copilot_models
         )
+        if unmapped:
+            degradations.append(
+                Degradation(
+                    surface="model affinity",
+                    reason=(
+                        "L'agent personnalisé VS Code (.github/agents/*.agent.md) accepte un nom de "
+                        "modèle explicite ou une liste de repli via `model`, mais aucune valeur de "
+                        "sélection automatique équivalente à `inherit` n'y est documentée, et Copilot "
+                        "nomme ses modèles autrement que les paliers du kit. Personas dont le palier n'a "
+                        f"pas de nom Copilot déclaré : {', '.join(unmapped)}."
+                    ),
+                    fallback=(
+                        "`model` n'est émis que pour un palier déclaré sous `dispatch.models.copilot.<palier>` (alias `dispatch.copilot_models`) "
+                        "de la politique d'orchestration ; les autres personas n'ont pas de `model` et le "
+                        "modèle actuel du sélecteur VS Code s'applique."
+                    ),
+                )
+            )
+        if any(a.entry_point for a in surface.agents) and any(not a.entry_point for a in surface.agents):
+            degradations.append(
+                Degradation(
+                    surface="agents allow-list",
+                    reason=(
+                        "`agents:` (liste des sous-agents que l'agent d'entrée peut lancer) est « Local only » "
+                        "dans la référence du fichier d'agent VS Code ; le harness Copilot délègue par son "
+                        "outil natif `task`, sans cette liste, et le harness Local sera retiré en février 2027."
+                    ),
+                    fallback=(
+                        "`agents:` reste émis (un seul fichier sert les deux harness, la liste borne la "
+                        "délégation sous Local) ; sous le harness Copilot la délégation n'est pas bornée "
+                        "par cette liste."
+                    ),
+                )
+            )
         degradations.append(
             Degradation(
-                surface="model affinity",
+                surface="mcp cloud agent",
                 reason=(
-                    "L'agent personnalisé VS Code (.github/agents/*.agent.md) accepte un nom de "
-                    "modèle explicite ou une liste de repli via `model`, mais aucune valeur de "
-                    "sélection automatique équivalente à `inherit` n'y est documentée (source : "
-                    "https://code.visualstudio.com/docs/copilot/customization/custom-agents)."
+                    "`.vscode/mcp.json` (VS Code) est écrit, et la CLI Copilot lit `.mcp.json` à la racine ; "
+                    "l'agent cloud de GitHub ne lit aucun fichier du dépôt : sa configuration MCP se saisit "
+                    "dans les réglages du dépôt (Settings > Copilot > MCP servers), avec `tools` obligatoire."
                 ),
-                fallback="`model` n'est pas émis ; le modèle actuel du sélecteur VS Code s'applique à chaque agent.",
+                fallback=(
+                    "la configuration à saisir est dans docs/reference/hotes.md ; le serveur `grimoire-mcp` "
+                    f"y existe parce que `{SETUP_STEPS.as_posix()}` installe le kit avant l'agent."
+                ),
             )
         )
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking, degradations))
-        plan = EmitPlan(host_id=self.host_id, files=tuple(files), merges=(), degradations=tuple(degradations))
+        mcp_merge = vscode_mcp_merge(surface.mcp_servers)
+        merges = (mcp_merge,) if mcp_merge is not None else ()
+        plan = EmitPlan(host_id=self.host_id, files=tuple(files), merges=merges, degradations=tuple(degradations))
         return with_rule_layers(plan, project_root)

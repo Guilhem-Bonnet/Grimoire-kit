@@ -122,6 +122,30 @@ Code de sortie 1 quand une exigence reste sans critère vérifiable ou en confli
 Corriger le fichier suffit à rendre une question caduque, sans réponse
 fabriquée.
 
+## L'entretien de cadrage : `grimoire cadrage interview`
+
+Le kit n'appelle aucun modèle : il tient la structure de l'entretien, l'agent
+formule les questions. `grimoire cadrage interview --chantier <nom>` (`--json`
+disponible) rend sept angles — utilisateurs et usage réel, existant à
+réutiliser, critères de réussite, hors périmètre, contraintes, risques et
+pré-mortem, alternatives plus simples — chacun *ouvert*, *couvert* ou *écarté
+avec raison*, avec son intention et deux questions d'amorce à adapter.
+
+La profondeur vient de l'intake déterministe (type, risque, périmètre) et se
+fige au premier appel : `express` (1 question par angle, 3 angles obligatoires),
+`standard` (2 questions, 5 obligatoires), `approfondi` (les 7). `--depth` la force.
+
+```bash
+grimoire cadrage interview answer utilisateurs "Les mainteneurs du kit"
+grimoire cadrage interview answer criteres --unknown   # inscrit une hypothèse à valider
+grimoire cadrage interview answer alternatives --skip "Raison de l'écart"
+```
+
+Une réponse est repliée sur une ligne (un retour à la ligne ne peut pas créer de
+titre) ; la même réponse redonnée n'est pas dupliquée. `grimoire cadrage check`
+refuse un angle obligatoire resté ouvert, écarté sans raison, d'état inconnu, ou
+un `entretien.json` illisible, invalide ou en lien symbolique.
+
 ## Le gate, dans `standard verify`
 
 `cadrage check` (la commande) et le gate du standard (`grimoire standard
@@ -174,3 +198,18 @@ Les identifiants émis, `cadrage.gate_incomplete` et
 - [Référence CLI — Cadrage produit](../reference/cli/projet.md#cadrage-produit)
 - [Standard agentique gouverné](rendre-la-preuve-bloquante.md)
 - [Installer par needs](installer-par-besoins.md)
+
+### La nature de la demande (`--kind`)
+
+L'intake propose, avec sa raison, l'une des douze natures (nouveau projet, nouvelle
+fonctionnalité, évolution, anomalie, incident, investigation, analyse, recherche,
+maintenance, migration, sécurité, question), en français comme en anglais, sans modèle.
+`grimoire cadrage interview --kind <nature>` la corrige et rend les questions propres,
+le livrable attendu et la recette de la MOA. Une question ne déclenche aucun entretien
+et n'efface jamais un entretien déjà entamé, qui reste contrôlé. Un incident rend trois
+questions au plus et ne bloque jamais l'action immédiate : le cadrage complet est reporté
+au post-mortem, que `grimoire cadrage check` signale comme dû (« Post-mortem dû ») tant
+que les angles obligatoires restent ouverts. Une demande interrogative ou étiquetée qui
+porte un verbe d'action (« Comment ajouter un export CSV ? », « incident: ajouter… »)
+reste classée par ce verbe. Changer de nature en cours conserve les réponses déjà
+consignées.

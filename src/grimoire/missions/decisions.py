@@ -268,10 +268,15 @@ def decisions_summary(project_root: Path, *, now: datetime | None = None) -> dic
     ``count`` décisions en attente, ``oldest`` la plus ancienne (tâche et âge), ``line`` la phrase
     prête à afficher (vide s'il n'y en a aucune), ``notify_failures`` les notifications échouées.
     """
-    from grimoire.core.standard_state import LEDGER_RELPATH
+    from grimoire.core.standard_state import ledger_location
 
     empty: dict[str, Any] = {"count": 0, "oldest": None, "line": "", "notify_failures": []}
-    events = project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+    # #1259 : le ledger du projet d'origine dans un worktree de tâche ; invérifiable, rien à afficher
+    # (un affichage, pas une garde : les questions restent au ledger et au cockpit).
+    location = ledger_location(project_root)
+    if location.root is None:
+        return empty
+    events = location.root / "events.jsonl"
     if not events.is_file():
         return empty
     try:

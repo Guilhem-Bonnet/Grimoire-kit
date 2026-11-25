@@ -146,6 +146,7 @@ class ProbeReport:
 def _file_states(plan: EmitPlan, result: EmitResult, root: Path) -> list[FileProbe]:
     paths = {f.relpath.as_posix(): f.relpath for f in plan.files}
     paths.update({(m.label or m.relpath.as_posix()): m.relpath for m in plan.merges})
+    paths.update({(m.label or m.relpath.as_posix()): m.relpath for m in plan.text_merges})
     states: dict[str, FileProbe] = {}
     for label in result.unchanged:
         states[label] = FileProbe(paths.get(label, Path(label)).as_posix(), FILE_OK)

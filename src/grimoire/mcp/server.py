@@ -741,7 +741,7 @@ def _task_service(project_path: str, ledger_root: str) -> Any:
     return TaskService(Path(project_path).resolve(), Path(ledger_root))
 
 
-def _task_json(task: Any) -> dict[str, Any]:
+def _task_json(task: Any, project_root: Path | None = None) -> dict[str, Any]:
     from grimoire.missions.board import board_status_of, priority_of
     from grimoire.missions.dispatch_advice import dispatch_advice
     from grimoire.missions.session_link import session_fields
@@ -754,7 +754,7 @@ def _task_json(task: Any) -> dict[str, Any]:
     # est `None` sur V2 (aucun nom de modèle valide pour l'outil `Agent` —
     # #662) ; `model_tier` ("cheap"/"mid"/"session"), lui, est
     # toujours renseigné.
-    advice = dispatch_advice(task)
+    advice = dispatch_advice(task, project_root)
     data["verifiability"] = advice["verifiability"]
     data["recommended_model"] = advice["recommended_model"]
     data["model_tier"] = advice["model_tier"]
@@ -869,7 +869,7 @@ def task_list_ready(
         if not service.has_ledger:
             return json.dumps({"tasks": [], "count": 0, "note": "no Mission Ledger yet — `task add` opens one"})
         tasks = service.list_ready(mission or None)
-        return json.dumps({"tasks": [_task_json(t) for t in tasks], "count": len(tasks)}, indent=2, ensure_ascii=False)
+        return json.dumps({"tasks": [_task_json(t, service.home_root) for t in tasks], "count": len(tasks)}, indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 
@@ -919,7 +919,7 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
             for (src, to), entry in declared_transitions(service.project_root).items()
             if src == here
         }
-        payload = _task_json(task)
+        payload = _task_json(task, service.home_root)
         payload["next_moves_require"] = requires
         # W5-05 : le motif exact que `task_claim` opposerait (checkpoint de vague requis et non validé), vide sinon.
         payload["claim_blocked_by"] = claim_refusal(service, task_id)
@@ -953,7 +953,7 @@ def task_claim(
     try:
         service = _task_service(project_path, ledger_root)
         move = service.claim(task_id, actor, host)
-        payload = move.to_dict()
+        payload = move.to_dict(service.home_root)
         # Issue #680 : le claim d'une session lui appartient (session lue dans
         # l'environnement du serveur MCP, quand l'hôte l'y exporte).
         session = service.attach_current_session(task_id, actor=actor)
@@ -1006,7 +1006,7 @@ def task_update(
         actor: Who acts (default: "mcp-agent").
         project_path: Path to project root (default: current directory).
         ledger_root: Mission Ledger directory, relative to the project root.
-        text: The comment or directive for "comment".
+        text: The comment/directive for "comment"; for "close"/"block"/"move", the lesson kept in memory.
         kind: "comment" (informs) or "directive" (steers) for "comment".
         directive_id: The directive to acknowledge for "ack" (as listed by task_show / task_recall).
         force: For "cancel": cancel even if another session holds the task.
@@ -1041,8 +1041,9 @@ def task_update(
     else:
         target = TaskState.CLOSED
     try:
-        move = _task_service(project_path, ledger_root).transition(task_id, target, actor, reason)
-        return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
+        service = _task_service(project_path, ledger_root)
+        move = service.transition(task_id, target, actor, reason, lesson=text)
+        return json.dumps(move.to_dict(service.home_root), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 
@@ -1155,7 +1156,7 @@ def task_context(
             payload["note"] = "several claims, none attached to this session — `grimoire task attach <id>`"
         task = service.ledger.get_task(resolved) if service.has_ledger else None
         if task is not None:
-            payload["task"] = _task_json(task)
+            payload["task"] = _task_json(task, service.home_root)
             payload["mission_scope"] = service.mission_scope(task.mission_id)  # R25 : le périmètre posé à `mission open`
             artifact = service.context(resolved)
             payload["context_bundle_path"] = str(artifact.path)
@@ -1257,15 +1258,18 @@ def grimoire_providers_status(project_path: str = ".") -> str:
     et dernier `grimoire providers audit`, issue #330) : quels fournisseurs
     sont activés, avec quels modèles par palier (cheap/mid/strong), lequel
     `choose()` retiendrait maintenant pour chaque palier, et ce que l'audit a
-    vu (`available`, `probed_at`, `models_seen`, `probe_note`) — la même
-    question que `grimoire providers status`, pour un client MCP qui n'a pas
-    de terminal.
+    vu (`available`, `probed_at`, `models_seen`, `probe_note`), et les
+    capacités de chaque fournisseur et modèle avec leur provenance
+    (`capabilities`, #1281 L3) — la même charge que `grimoire providers
+    status --json`, pour un client MCP qui n'a pas de terminal.
 
     Args:
         project_path: Path to project root (default: current directory).
     """
     from datetime import UTC, datetime
 
+    from grimoire.cli.cmd_providers import _provider_json
+    from grimoire.providers.capability_probe import load_probes
     from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderRegistryError, read_registry
     from grimoire.providers.routing import choose
     from grimoire.providers.state import load_state
@@ -1277,30 +1281,12 @@ def grimoire_providers_status(project_path: str = ".") -> str:
         return _tool_error({"error": str(exc)})
 
     now = datetime.now(UTC)
-    state = load_state(target)
-
-    def _provider_payload(provider: Any) -> dict[str, Any]:
-        entry = state.get(provider.id)
-        cooling_down = entry is not None and entry.is_cooling_down(now=now)
-        return {
-            "id": provider.id,
-            "enabled": provider.enabled,
-            "currency": provider.currency,
-            "invocation": provider.invocation,
-            "models": [{"id": model.id, "tier": model.tier} for model in provider.models],
-            "cooling_down": cooling_down,
-            "cooldown_until": entry.cooldown_until.isoformat() if entry and entry.cooldown_until else None,
-            # Issue #330 : dernier résultat de `grimoire providers audit`.
-            "available": entry.available if entry is not None else True,
-            "probed_at": entry.probed_at if entry is not None else None,
-            "models_seen": list(entry.models_seen) if entry is not None else [],
-            "probe_note": entry.probe_note if entry is not None else None,
-        }
-
+    state, probes = load_state(target), load_probes(target)
     next_choice = {tier: choose(target, tier, now=now) for tier in SUPPORTED_MODEL_TIERS}
+    payload = [_provider_json(p, state, now=now, probe=probes.get(p.id)) for p in providers]
     return json.dumps(
         {
-            "providers": [_provider_payload(provider) for provider in providers],
+            "providers": payload,
             "next_choice": {tier: (spec.id if spec is not None else None) for tier, spec in next_choice.items()},
         },
         indent=2,

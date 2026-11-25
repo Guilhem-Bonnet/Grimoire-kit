@@ -16,8 +16,10 @@ from grimoire.bridges.schemas import HostId
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
+from grimoire.hosts.decisions import DEFAULT_DECISION_BY_EVENT
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
+    Degradation,
     EmitPlan,
     EmittedFile,
     Emitter,
@@ -30,6 +32,7 @@ from grimoire.hosts.emitters.base import (
 )
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
+from grimoire.hosts.model_table import CLAUDE_CODE, TIERS, load_model_table, resolve_model
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -40,7 +43,7 @@ from grimoire.hosts.surface import (
     SkillSpec,
     ToolVerb,
 )
-from grimoire.missions.dispatch_advice import RECOMMENDED_MODEL_BY_CLASS
+from grimoire.missions.dispatch_advice import TIER_BY_CLASS
 from grimoire.missions.verifiability import Verifiability
 
 HOST_ALIAS = "claude"
@@ -68,11 +71,13 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
     "delegation": ("Task", "Agent"),
 }
 
-#: Reasoning demand -> model tier, avant croisement avec ``cost`` dans
-#: :func:`_model_for`. ``inherit`` reste le défaut honnête du milieu : sans
+#: Reasoning demand -> palier, avant croisement avec ``cost`` dans
+#: :func:`tier_for`. ``inherit`` reste le défaut honnête du milieu : sans
 #: signal fort dans un sens ou dans l'autre, le modèle de la session est une
 #: meilleure estimation que la nôtre.
-_MODEL_BY_REASONING = {"high": "opus", "medium": "inherit", "low": "haiku"}
+_TIER_BY_REASONING = {"high": "strong", "medium": "inherit", "low": "cheap"}
+#: Pas un palier : le modèle de la session (ou de l'agent parent).
+INHERIT = "inherit"
 
 #: Budget de tours par défaut d'un sous-agent, faute d'un ``max_turns:``
 #: déclaré dans sa fiche — assez pour une tranche de travail bornée (lire,
@@ -161,13 +166,23 @@ Une clôture sans vérification verte est une tâche non terminée.
 """
 
 
-def _model_for(agent: AgentSpec) -> str:
+def claude_models(project_root: Path | None = None) -> dict[str, str]:
+    """Palier -> modèle Claude Code, lu dans la table du projet (défaut du kit : ``haiku``/``sonnet``/``opus``).
+
+    Un palier sans correspondance est absent du résultat (jamais un nom inventé).
+    """
+    table = load_model_table(project_root) if project_root is not None else None
+    choices = (resolve_model(tier, CLAUDE_CODE, table=table) for tier in TIERS)
+    return {choice.tier: choice.model for choice in choices if choice.model}
+
+
+def tier_for(agent: AgentSpec) -> str:
     """Croise ``reasoning`` et ``cost`` : le premier signal fort gagne.
 
-    ``reasoning: high`` donne ``opus``, sauf s'il est aussi déclaré
-    ``cost: low`` : un agent invoqué souvent (le concierge, qui trie en
-    lecture seule) prend alors ``sonnet``, le palier qui raisonne sans payer
-    ``opus`` à chaque appel — mesuré le 2026-10-12, 54 % des délégations sans
+    ``reasoning: high`` donne ``strong`` (``opus`` sous Claude Code), sauf s'il est aussi
+    déclaré ``cost: low`` : un agent invoqué souvent (le concierge, qui trie en
+    lecture seule) prend alors ``mid`` (``sonnet``), le palier qui raisonne sans payer
+    le palier fort à chaque appel — mesuré le 2026-10-12, 54 % des délégations sans
     ``model=`` tombaient sur ce défaut (#740). En dessous de ce plancher,
     `cost: low` prime sur `reasoning` : un agent qu'on veut bon marché doit
     rester bon marché même à raisonnement moyen. Ce n'est qu'en l'absence de
@@ -177,10 +192,22 @@ def _model_for(agent: AgentSpec) -> str:
     """
     reasoning = agent.affinity.reasoning.lower()
     if reasoning == "high":
-        return "sonnet" if agent.affinity.cost.lower() == "low" else "opus"
+        return "mid" if agent.affinity.cost.lower() == "low" else "strong"
     if agent.affinity.cost.lower() == "low":
-        return "haiku"
-    return _MODEL_BY_REASONING.get(reasoning, "inherit")
+        return "cheap"
+    return _TIER_BY_REASONING.get(reasoning, INHERIT)
+
+
+def _model_for(agent: AgentSpec, models: dict[str, str] | None = None) -> str:
+    """Le ``model:`` Claude Code de *agent* : son palier (:func:`tier_for`) traduit par *models*.
+
+    *models* vient de :func:`claude_models` (table du projet) ; absent, les défauts du kit.
+    Palier ``inherit`` ou sans correspondance : ``inherit``.
+    """
+    tier = tier_for(agent)
+    if tier == INHERIT:
+        return INHERIT
+    return (models if models is not None else claude_models()).get(tier, INHERIT)
 
 
 def _effort_for(agent: AgentSpec) -> str:
@@ -197,13 +224,16 @@ def _max_turns_for(agent: AgentSpec) -> int:
     return agent.max_turns if agent.max_turns is not None else _DEFAULT_MAX_TURNS
 
 
-def _model_label(verifiability: Verifiability) -> str:
-    """Le modèle d'une classe, lu dans ``RECOMMENDED_MODEL_BY_CLASS`` (#654) — une seule table dans le kit."""
-    model = RECOMMENDED_MODEL_BY_CLASS[verifiability]
-    return "le modèle de la session (le tien)" if model == "session" else f"`{model}`"
+_SESSION_LABEL = "le modèle de la session (le tien)"
 
 
-def _dispatch_policy_section() -> str:
+def _model_label(verifiability: Verifiability, models: dict[str, str] | None = None) -> str:
+    """Le modèle d'une classe : son palier (``TIER_BY_CLASS``, #654) traduit par la table (lot L5)."""
+    model = (models if models is not None else claude_models()).get(TIER_BY_CLASS[verifiability], "")
+    return f"`{model}`" if model else _SESSION_LABEL
+
+
+def _dispatch_policy_section(models: dict[str, str] | None = None) -> str:
     """Section "Politique de dispatch" (issue #329, révisée #655) — quel
     modèle pour quelle tâche.
 
@@ -230,7 +260,18 @@ def _dispatch_policy_section() -> str:
     ``SessionStart`` — the one the main loop actually sees on every session,
     not only when it reads this file in full — so the two can never drift
     apart either.
+
+    *models* : palier -> modèle de la table du projet (:func:`claude_models`) ; absent,
+    les défauts du kit (``haiku``, ``sonnet``).
     """
+    models = models if models is not None else claude_models()
+    cheap = models.get("cheap", "")
+    mid = models.get("mid", "")
+    fallback = (
+        f"une recherche, une lecture ou une mesure part en `{cheap}`, une revue ou une analyse\nen `{mid}`."
+        if cheap and mid
+        else "choisis le palier le plus bas qui suffit (recherche, lecture, mesure : cheap ;\nrevue, analyse : mid)."
+    )
     return f"""## Politique de dispatch
 
 Avant de dispatcher un sous-agent — ou, si cette persona tourne elle-même en
@@ -238,14 +279,13 @@ sous-agent sans l'outil `Agent`, avant de recommander une persona dans ta
 réponse finale — choisis son modèle selon la classe de
 vérifiabilité de la tâche (celle que `grimoire task dispatch` calcule) :
 
-- **V0** — {Verifiability.V0.explanation} → {_model_label(Verifiability.V0)}.
-- **V1** — {Verifiability.V1.explanation} → {_model_label(Verifiability.V1)}.
-- **V2** — {Verifiability.V2.explanation} → {_model_label(Verifiability.V2)}.
+- **V0** — {Verifiability.V0.explanation} → {_model_label(Verifiability.V0, models)}.
+- **V1** — {Verifiability.V1.explanation} → {_model_label(Verifiability.V1, models)}.
+- **V2** — {Verifiability.V2.explanation} → {_model_label(Verifiability.V2, models)}.
 
 Sur une tâche réclamée, `task_claim` et `task_context` rendent déjà cette classe
 et `recommended_model` : suis-les plutôt que de reclasser. Sans classe calculée,
-une recherche, une lecture ou une mesure part en `haiku`, une revue ou une analyse
-en `sonnet`. N'omets `model=` que si la sous-tâche exige ton propre jugement :
+{fallback} N'omets `model=` que si la sous-tâche exige ton propre jugement :
 l'omettre la fait tourner sur ton modèle, ou sur le défaut de la persona.
 
 Exige de chaque sous-agent, en fin de réponse, un bloc ```grimoire-uncertainties```
@@ -284,13 +324,19 @@ def _attached_skill_section(skill: SkillSpec) -> str:
 {skill.body}"""
 
 
-def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...] = ()) -> EmittedFile:
+def _agent_file(
+    agent: AgentSpec,
+    surface: ProjectSurface,
+    owned_skills: tuple[SkillSpec, ...] = (),
+    models: dict[str, str] | None = None,
+) -> EmittedFile:
     tools = map_verbs(agent.tools, _TOOL_TABLE)
+    models = models if models is not None else claude_models()
     fields: dict[str, Any] = {
         "name": agent.name,
         "description": agent.description,
         "tools": ", ".join(tools),
-        "model": _model_for(agent),
+        "model": _model_for(agent, models),
         "effort": _effort_for(agent),
         "maxTurns": _max_turns_for(agent),
     }
@@ -318,7 +364,9 @@ Tu incarnes la persona Grimoire **{agent.name}** du projet {surface.project_name
 3. Ne sors pas de ta frontière d'outils : {", ".join(v.value for v in agent.tools)}.
 4. {GROUNDING_RULE}
 """
-    body = f"{body}\n{_dispatch_policy_section()}" if agent.entry_point else f"{body}5. {UNCERTAINTIES_BLOCK_RULE}\n"
+    body = (
+        f"{body}\n{_dispatch_policy_section(models)}" if agent.entry_point else f"{body}5. {UNCERTAINTIES_BLOCK_RULE}\n"
+    )
     for skill in owned_skills:
         body = f"{body}\n{_attached_skill_section(skill)}"
     return EmittedFile(relpath=CLAUDE_DIR / "agents" / f"{agent.name}.md", content=body)
@@ -378,20 +426,91 @@ def _hook_program(launcher: HookLauncher) -> str:
     return Emitter.quoted_program(launcher.posix)
 
 
+#: Événements dont un hook de garde échoue fermé (``"onFailure": "block"``,
+#: Claude Code v2.1.295+, champ du gestionnaire ``command``). Sans lui, un hook
+#: qui plante, sort hors de 0/2 ou dépasse son ``timeout`` laisse passer l'outil.
+#: Seul ``PreToolUse`` : la référence exclut ``Stop``/``SubagentStop`` (sans
+#: effet), et un ``SessionStart``, un ``UserPromptSubmit`` ou un ``PostToolUse``
+#: consultatif qui bloquerait sur une panne gênerait sans rien protéger.
+_FAIL_CLOSED_EVENTS = frozenset({HookEvent.PRE_TOOL_USE})
+
+#: Délai minimal (secondes, unité du champ ``timeout`` de Claude Code) d'une
+#: garde en échec fermé. Un dépassement y vaut refus : le délai doit couvrir le
+#: pire cas réaliste et non le cas moyen. Au repos, ``grimoire-hook`` répond en
+#: ~0,2 s ; son pire cas borné est l'analyse (budget interne de 3 s) plus
+#: l'attente du verrou du journal de traces (2 s, voir ``runtime``), soit ~5 s
+#: de travail, qu'une machine saturée (charge ≥ cœurs) étire d'un facteur 3 à 5.
+#: 30 s couvre ce pire cas et reste loin des 600 s par défaut de l'hôte : une
+#: garde réellement bloquée refuse encore en un temps supportable.
+FAIL_CLOSED_TIMEOUT = 30
+
+
+def fails_closed(hook: HookSpec) -> bool:
+    """Le hook *hook* est-il une garde à émettre en échec fermé ?"""
+    return hook.enforcement is Enforcement.BLOCKING and hook.event in _FAIL_CLOSED_EVENTS
+
+
+#: Le hook qui rend mécanique la « Politique de dispatch » (leviers 2-3 de
+#: l'audit de coût) : un appel ``Agent`` sans ``model`` reçoit le modèle de la
+#: classe de la tâche, ou celui d'une heuristique — voir
+#: :mod:`grimoire.hosts.decisions.dispatch_model`. Propre à Claude Code : les
+#: autres hôtes n'ont pas d'outil ``Agent`` dont on puisse réécrire l'entrée, et
+#: un matcher ``delegation`` sans nom d'outil y élargirait le hook à tous les
+#: outils. Consultatif — jamais ``onFailure: block`` — et borné à 3 s : un
+#: dépassement ou une panne laisse passer l'appel tel quel.
+DISPATCH_MODEL_HOOK = HookSpec(
+    event=HookEvent.PRE_TOOL_USE,
+    decision="grimoire.dispatch-model",
+    enforcement=Enforcement.ADVISORY,
+    matcher=("delegation",),
+    timeout=3,
+    rationale=(
+        "Impose au sous-agent le modèle de la politique de dispatch quand l'appel Agent omet model= "
+        "(classe de la tâche, sinon heuristique) ; `dispatch.impose_model: off` le désactive."
+    ),
+)
+
+
 def _hook_entry(hook: HookSpec, launcher: HookLauncher = BARE) -> dict[str, Any]:
     entry: dict[str, Any] = {}
     if hook.event not in _MATCHERLESS:
         matcher = _matcher(hook, covered=_DECLARATIVELY_COVERED)
         if matcher:
             entry["matcher"] = matcher
-    entry["hooks"] = [
-        {
-            "type": "command",
-            "command": Emitter.hook_command(HOST_ALIAS, _WIRE_NAMES[hook.event], _hook_program(launcher)),
-            "timeout": hook.timeout,
-        }
-    ]
+    wire = _WIRE_NAMES[hook.event]
+    program = _hook_program(launcher)
+    command = (
+        Emitter.hook_command(HOST_ALIAS, wire, program)
+        if hook.decision == DEFAULT_DECISION_BY_EVENT.get(hook.event)
+        else Emitter.hook_command_for_decision(HOST_ALIAS, wire, program, hook.decision)
+    )
+    handler: dict[str, Any] = {
+        "type": "command",
+        "command": command,
+        "timeout": hook.timeout,
+    }
+    # Un lanceur introuvable bloquerait tout appel d'outil gardé : la garde reste
+    # alors en échec ouvert, et le plan le dit (:func:`_fail_closed_degradations`).
+    if launcher.found and fails_closed(hook):
+        handler["onFailure"] = "block"
+        handler["timeout"] = max(hook.timeout, FAIL_CLOSED_TIMEOUT)
+    entry["hooks"] = [handler]
     return entry
+
+
+def _fail_closed_degradations(surface: ProjectSurface, launcher: HookLauncher) -> tuple[Degradation, ...]:
+    if launcher.found or not any(fails_closed(hook) for hook in surface.hooks):
+        return ()
+    return (
+        Degradation(
+            surface="hook onFailure",
+            reason=(
+                "grimoire-hook est introuvable : la garde PreToolUse est émise sans "
+                '"onFailure": "block", sinon chaque appel d\'outil gardé serait refusé.'
+            ),
+            fallback="installer le kit (`uv tool install grimoire-kit` ou pipx) puis relancer `grimoire up`.",
+        ),
+    )
 
 
 def _permission_rules(surface: ProjectSurface) -> dict[str, list[str]]:
@@ -421,9 +540,14 @@ def _permission_rules(surface: ProjectSurface) -> dict[str, list[str]]:
     return out
 
 
+def claude_hooks(surface: ProjectSurface) -> tuple[HookSpec, ...]:
+    """Les hooks que Claude Code reçoit : ceux de la surface, plus :data:`DISPATCH_MODEL_HOOK`."""
+    return (*surface.hooks, DISPATCH_MODEL_HOOK)
+
+
 def _settings_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> JsonMerge:
     hooks_by_event: dict[str, list[dict[str, Any]]] = {}
-    for hook in surface.hooks:
+    for hook in claude_hooks(surface):
         hooks_by_event.setdefault(_WIRE_NAMES[hook.event], []).append(_hook_entry(hook, launcher))
     permissions = _permission_rules(surface)
 
@@ -433,8 +557,9 @@ def _settings_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> J
             hooks = {}
         for event, entries in hooks_by_event.items():
             existing = hooks.get(event)
-            kept = [entry for entry in (existing if isinstance(existing, list) else []) if not _owned_entry(entry)]
-            hooks[event] = kept + entries
+            previous = existing if isinstance(existing, list) else []
+            kept = [entry for entry in previous if not _owned_entry(entry)]
+            hooks[event] = kept + [_keep_raised_timeout(entry, previous) for entry in entries]
         # An event we no longer install must lose its stale entry, or a project
         # keeps firing a rule its surface has dropped.
         for event, existing in list(hooks.items()):
@@ -462,6 +587,50 @@ def _settings_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> J
         return data
 
     return JsonMerge(relpath=CLAUDE_DIR / "settings.json", merge=merge, label=".claude/settings.json")
+
+
+def _hook_identity(entry: Any) -> tuple[str, str] | None:
+    """Ce qui désigne une entrée gérée d'un ``up`` à l'autre : son matcher et sa commande sans le lanceur.
+
+    Le lanceur (nom nu ou chemin du venv, voir :func:`_hook_program`) peut
+    changer entre deux ``up`` sans que le hook change : seule la queue
+    ``--host … --event … [--decision …]`` identifie la décision appelée.
+    """
+    if not isinstance(entry, dict):
+        return None
+    handlers = entry.get("hooks")
+    if not isinstance(handlers, list) or len(handlers) != 1 or not isinstance(handlers[0], dict):
+        return None
+    command = handlers[0].get("command")
+    if not isinstance(command, str) or " --host " not in command:
+        return None
+    matcher = entry.get("matcher", "")
+    return (matcher if isinstance(matcher, str) else "", command[command.index(" --host ") :])
+
+
+def _keep_raised_timeout(entry: dict[str, Any], previous: list[Any]) -> dict[str, Any]:
+    """*entry* émise, avec le délai de son entrée en place s'il est plus long (#1277).
+
+    Pour une garde en échec fermé un dépassement vaut refus : un délai relevé à
+    la main (machine lente, CI chargée) ne doit pas redescendre à chaque ``up``.
+    Un délai plus court que celui émis remonte, lui : c'est le plancher
+    :data:`FAIL_CLOSED_TIMEOUT`. Un hook consultatif reprend son délai émis.
+    """
+    (handler,) = entry["hooks"]
+    if handler.get("onFailure") != "block":
+        return entry
+    identity = _hook_identity(entry)
+    raised = handler["timeout"]
+    for candidate in previous:
+        if not _owned_entry(candidate) or _hook_identity(candidate) != identity:
+            continue
+        timeout = candidate["hooks"][0].get("timeout")
+        # ``bool`` est un ``int`` : ``true`` n'est pas un délai.
+        if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout > raised:
+            raised = timeout
+    if raised == handler["timeout"]:
+        return entry
+    return {**entry, "hooks": [{**handler, "timeout": raised}]}
 
 
 def _owned_entry(entry: Any) -> bool:
@@ -496,11 +665,13 @@ class ClaudeCodeEmitter(Emitter):
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
+        models = claude_models(project_root)
         files.extend(
             _agent_file(
                 agent,
                 surface,
                 owned_skills=tuple(by_slug[slug] for slug in agent.skills if slug in by_slug),
+                models=models,
             )
             for agent in surface.agents
         )
@@ -519,7 +690,10 @@ class ClaudeCodeEmitter(Emitter):
                 host_id=self.host_id,
                 files=tuple(files),
                 merges=(_settings_merge(surface, launcher),),
-                degradations=Emitter.launcher_degradations(launcher),
+                degradations=(
+                    *Emitter.launcher_degradations(launcher),
+                    *_fail_closed_degradations(surface, launcher),
+                ),
             ),
             project_root,
         )
@@ -554,7 +728,7 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec]) -> EmittedFile:
         f"| Skills transversales | {transversal} — `.claude/skills/`, chargées toutes sessions |",
         f"| Skills attachées | {attached} — repliées dans le fichier de leur agent, payées seulement quand il tourne |",
         f"| Commandes | {len(surface.commands)} — `.claude/commands/` |",
-        f"| Hooks | {len(surface.hooks)} — `.claude/settings.json` |",
+        f"| Hooks | {len(claude_hooks(surface))} — `.claude/settings.json` |",
         "",
     ]
     if blocking:

@@ -144,7 +144,7 @@ def _refuse(ctx: typer.Context, refused: Any) -> None:
 
 def _transition(
     ctx: typer.Context, task_id: str, target: Any, project_root: Path, ledger_root: Path,
-    actor: str, reason: str = "", *, claim: Any = None,
+    actor: str, reason: str = "", *, claim: Any = None, lesson: str = "",
 ) -> None:
     from grimoire.core.exceptions import GrimoireError
     from grimoire.missions.service import TaskRefusedError
@@ -152,18 +152,18 @@ def _transition(
     service = _service(project_root, ledger_root)
     _require_task(service, task_id)
     try:
-        move = service.transition(task_id, target, actor, reason, claim=claim)
+        move = service.transition(task_id, target, actor, reason, claim=claim, lesson=lesson)
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
-    _emit_move(ctx, move)
+    _emit_move(ctx, move, service.home_root)
 
 
-def _emit_move(ctx: typer.Context, move: Any) -> None:
+def _emit_move(ctx: typer.Context, move: Any, root: Path | None = None) -> None:
     if _fmt(ctx) == "json":
-        typer.echo(json.dumps(move.to_dict(), indent=2, ensure_ascii=False))
+        typer.echo(json.dumps(move.to_dict(root), indent=2, ensure_ascii=False))
         return
     if move.advisories:
         console.print(f"[yellow]![/yellow] Gate de preuve « {move.verdict.transition_id} » : "
@@ -172,7 +172,7 @@ def _emit_move(ctx: typer.Context, move: Any) -> None:
             console.print(f"  - {line}")
         console.print(f"[dim]Profil « {move.verdict.strictness} » : signalé, non bloquant.[/dim]")
     task = move.task
-    move_dict = move.to_dict()
+    move_dict = move.to_dict(root)
     verifiabilite = move_dict.get("verifiability") or {}
     # `recommended_model` est `None` sur V2 (aucun nom de modèle valide pour
     # l'outil `Agent` — #662) ; `model_hint` rend alors le palier
@@ -283,7 +283,7 @@ def task_show(
 
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
-    advice = dispatch_advice(task)
+    advice = dispatch_advice(task, service.home_root)
     verifiabilite = advice["verifiability"]
     # Le dernier lancement (ou refus de repli) dit pourquoi le worker tourne sur l'hôte, ou pourquoi il n'a pas été
     # lancé : `provider_refused` est le motif du repli (#1133), `task.worker_deferred` celui d'un repli fermé.
@@ -356,6 +356,12 @@ def task_show(
             out.print(f"  différée : {escape(str(last_launch.payload.get('reason', '')))}")
         elif last_launch.payload.get("provider_refused"):
             out.print(f"  repli sur l'hôte : {escape(str(last_launch.payload['provider_refused']))}")
+        routed = last_launch.payload.get("sensitive_route")
+        if isinstance(routed, dict) and routed.get("route"):
+            out.print(
+                f"  routage fort : {escape(str(last_launch.payload.get('model') or ''))} — "
+                f"{escape(str(routed.get('reason') or ''))}"
+            )
     if task.owner or task.claim:
         out.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:
@@ -536,12 +542,19 @@ def task_fence(
     console.print(f"[green]OK[/green] fence posée (epoch {claim.lease_epoch}) : {hook}")
 
 
+#: Levier 6 : seule la leçon va en mémoire — le titre, les critères et l'historique sont déjà au ledger.
+_LESSON = Annotated[
+    str, typer.Option("--lesson", help="La leçon à garder en mémoire : décision prise, piège rencontré (sinon rien).")
+]
+
+
 @task_app.command("move")
 def task_move(
     ctx: typer.Context,
     task_id: Annotated[str, typer.Argument()],
     to: Annotated[str, typer.Option("--to", help="État ledger visé (ready, running, needs_verification…).")],
     reason: Annotated[str, typer.Option("--reason", help="Pourquoi.")] = "",
+    lesson: _LESSON = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -555,7 +568,7 @@ def task_move(
         console.print(f"[red]✗[/red] État inconnu : {to}")
         console.print("[dim]états : " + ", ".join(s.value for s in TARGETABLE_TASK_STATES) + "[/dim]")
         raise typer.Exit(1) from None
-    _transition(ctx, task_id, target, project_root, ledger_root, actor, reason)
+    _transition(ctx, task_id, target, project_root, ledger_root, actor, reason, lesson=lesson)
 
 
 @task_app.command("block")
@@ -563,6 +576,7 @@ def task_block(
     ctx: typer.Context,
     task_id: Annotated[str, typer.Argument()],
     reason: Annotated[str, typer.Option("--reason", help="Ce qui bloque.")],
+    lesson: _LESSON = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -570,13 +584,14 @@ def task_block(
     """Bloque une tâche en disant pourquoi."""
     from grimoire.missions.schemas import TaskState
 
-    _transition(ctx, task_id, TaskState.BLOCKED, project_root, ledger_root, actor, reason)
+    _transition(ctx, task_id, TaskState.BLOCKED, project_root, ledger_root, actor, reason, lesson=lesson)
 
 
 @task_app.command("close")
 def task_close(
     ctx: typer.Context,
     task_id: Annotated[str, typer.Argument()],
+    lesson: _LESSON = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -586,10 +601,13 @@ def task_close(
     Le gate `review → accepted` exige un verdict de vérification accepté : sans
     lui, la fermeture est refusée. C'est la seule garantie qui empêche un board
     entièrement vert de ne rien prouver.
+
+    Sans `--lesson`, rien n'est écrit en mémoire : le ledger garde déjà le titre,
+    les critères et l'historique. La leçon, c'est ce qu'il ne sait pas.
     """
     from grimoire.missions.schemas import TaskState
 
-    _transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor)
+    _transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor, lesson=lesson)
 
 
 def _emit_note(ctx: typer.Context, note: Any) -> None:
@@ -617,7 +635,7 @@ def _steer(ctx: typer.Context, project_root: Path, ledger_root: Path, task_id: s
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
     if hasattr(result, "previous"):
-        _emit_move(ctx, result)
+        _emit_move(ctx, result, service.home_root)
     else:
         _emit_note(ctx, result)
 
@@ -691,12 +709,14 @@ def task_cancel(
     task_id: Annotated[str, typer.Argument()],
     reason: Annotated[str, typer.Option("--reason", help="Pourquoi la tâche s'arrête (obligatoire).")],
     force: Annotated[bool, typer.Option("--force", help="Annuler même si une autre session la tient.")] = False,
+    lesson: _LESSON = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
 ) -> None:
     """Annule une tâche avec sa raison ; tenue par une autre session, elle exige --force."""
-    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.cancel(task_id, reason, actor, force=force))
+    _steer(ctx, project_root, ledger_root, task_id,
+           lambda s: s.cancel(task_id, reason, actor, force=force, lesson=lesson))
 
 
 @task_app.command("ack")
@@ -1457,6 +1477,9 @@ register_approve_commands(task_app)
 from grimoire.cli.cmd_task_review import register_review_commands  # noqa: E402
 
 register_review_commands(task_app)
+from grimoire.cli.cmd_task_arbitrate import register_arbitrate_commands  # noqa: E402
+
+register_arbitrate_commands(task_app)  # GAO-r-le-arbitre-001 : `task arbitrate`, hors du module (cliquet)
 
 from grimoire.cli.cmd_task_import import register_import_command  # noqa: E402
 

@@ -1,1 +1,0 @@
-- perf(hosts): `CLAUDE.md` court pour Claude Code — langue, contrat de complétion, règle « non vérifié » et pointeurs de mémoire ; il n'importe plus les instructions Copilot (~5,8 k caractères relus à chaque tour)

@@ -12,14 +12,18 @@ from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,
+    LEDGER_UNVERIFIABLE,
     NO_ACTIVE_TASK,
     TASK_UNPARKED,
     acknowledge_mutations,
     acknowledged_mutation_count,
     ambiguity_text,
     expired_text,
+    no_task_blocked_at,
     no_task_stop_reason,
     parked_task_of_session,
+    reblock_after,
+    record_no_task_block,
     record_unattached_work,
     session_mutation_count,
     stop_scope,
@@ -27,6 +31,7 @@ from grimoire.hosts.decisions.enrolment import (
 )
 from grimoire.hosts.decisions.gate_summary import _gate_summary
 from grimoire.hosts.decisions.profile_floor import session_profile
+from grimoire.policies.session_state import say_once
 
 #: Board states that owe no evidence artifact yet. A task parked here passes
 #: every gate by construction — see ``check_evidence_gates``.
@@ -148,7 +153,13 @@ def _decide_stop(hook: HookInput) -> Decision:
             # Une session qui a écrit sans tâche est déjà refusée plus haut (_no_task_closure). Ici elle n'a
             # rien écrit : un ledger durablement corrompu ne bloque pas chaque session à vide, il le dit.
             # Le board illisible garde son refus d'origine (gates non évaluables), une fois.
-            if profile in _BLOCKING_PROFILES and any(item.startswith("board") for item in active.unreadable):
+            if profile in _BLOCKING_PROFILES and (
+                any(item.startswith("board") for item in active.unreadable)
+                or (_designated_ledger_lost(active.unreadable) and _session_held_a_lease(hook))
+            ):
+                # #1259 : un ledger désigné par le marqueur d'un worktree mais invérifiable, alors que la session
+                # a tenu un bail (epoch noté à son journal), cache peut-être une tâche encore tenue : même refus
+                # unique qu'un board illisible, jamais le silence d'un « aucune tâche ».
                 return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
             return Decision(context=reason, detail=detail)
         if active.source == "ambiguous":
@@ -186,7 +197,10 @@ def _decide_stop(hook: HookInput) -> Decision:
             )
         if detail.get("state") in _STATES_WITHOUT_EVIDENCE:
             # Green because nothing is owed yet, not because the work is proven.
-            # Saying so is the difference between a guardrail and a placebo.
+            # Saying so is the difference between a guardrail and a placebo —
+            # once per session and state (« dire une fois »), not at every Stop.
+            if not say_once(hook.project_root, hook.session_id, f"stop.no_evidence:{task_id}", str(detail.get("state"))):
+                return Decision(detail={**detail, "reminder": "already_said"})
             return Decision(
                 context=(
                     f"[Grimoire] Tâche {task_id} encore en état « {detail.get('state') or 'non défini'} » : "
@@ -276,12 +290,16 @@ def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str,
     """
     if active.source not in ("session_claim", "env", "ledger_claim"):
         return None
+    from grimoire.core.standard_state import ledger_location
+
+    location = ledger_location(hook.project_root)  # #1259 : le ledger du projet d'origine dans un worktree de tâche
+    if location.root is None:
+        return _unverifiable_hold(active.task_id, location.problem, profile, detail)
     try:
-        from grimoire.core.standard_state import LEDGER_RELPATH
         from grimoire.missions.ledger import MissionLedger
         from grimoire.missions.schemas import TaskState
 
-        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+        events = location.root / "events.jsonl"
         task = MissionLedger(events.parent).get_task(active.task_id) if events.is_file() else None
     except Exception:
         return None
@@ -306,6 +324,37 @@ def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str,
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=message, detail=info)
     return Decision(context=message, detail=info)
+
+
+def _unverifiable_hold(task_id: str, problem: str, profile: str, detail: dict[str, Any]) -> Decision:
+    """#1259 : la tâche nommée est peut-être encore tenue, mais son ledger est invérifiable — refus unique, jamais le silence."""
+    message = (
+        f"[Grimoire] Tâche {task_id} : impossible de vérifier qu'elle est fermée ou garée — {problem}.\n"
+        "Recrée le worktree (`grimoire task worktree`) ou travaille depuis le projet d'origine, puis rends la tâche ; "
+        "si elle doit rester en cours, dis-le explicitement à l'utilisateur au lieu de conclure."
+    )
+    info = {**detail, "blocked_on": LEDGER_UNVERIFIABLE, "task_id": task_id, "ledger_problem": problem}
+    if profile in _BLOCKING_PROFILES:
+        return Decision(outcome=Outcome.BLOCK, reason=message, detail=info)
+    return Decision(context=message, detail=info)
+
+
+def _designated_ledger_lost(unreadable: tuple[str, ...]) -> bool:
+    from grimoire.core.standard_state import DESIGNATED_LEDGER_PROBLEM
+
+    return any(item.startswith(DESIGNATED_LEDGER_PROBLEM) for item in unreadable)
+
+
+def _session_held_a_lease(hook: HookInput) -> bool:
+    """Le journal de la session note un epoch : elle a réclamé une tâche (#1259). Illisible : ``False``."""
+    if not hook.session_id:
+        return False
+    try:
+        from grimoire.policies.session_state import load_session_state
+
+        return load_session_state(hook.project_root, hook.session_id, now_iso="").lease_epoch > 0
+    except Exception:
+        return False
 
 
 def _signature_of(hook: HookInput, task_id: str, summary: str, detail: dict[str, Any]) -> str:
@@ -421,6 +470,10 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
             reason += f"\n(Gate « fini » armé depuis le {verdict.armed_from} ; au plus 3 refus par session.)"
         return replace(decision, outcome=Outcome.BLOCK, reason=reason, detail=detail)
     if profile in _BLOCKING_PROFILES and decision.outcome is not Outcome.BLOCK:
+        # « Dire une fois » : l'avertissement shadow n'est redit que pour une nouvelle mutation.
+        mutation_key = verdict.last_mutation_ts or "?"
+        if not say_once(hook.project_root, hook.session_id, f"stop.done_gate_shadow:{task_id}", mutation_key):
+            return replace(decision, detail={**detail, "reminder": "already_said"})
         warning = (
             f"[Grimoire] Avertissement (gate « fini », shadow) : une mutation pour {task_id} est postérieure "
             f"au dernier check vert. Relance `{verdict.command_hint}` avant de conclure."
@@ -578,12 +631,33 @@ def _no_task_closure(
     goes through. Returns ``None`` when there is nothing to say.
     """
     mutations = session_mutation_count(hook)
-    if mutations <= 0 or mutations <= acknowledged_mutation_count(hook):
+    acknowledged = acknowledged_mutation_count(hook)
+    blocked_at = no_task_blocked_at(hook)
+    if acknowledged > mutations or blocked_at > mutations:
+        # Le journal dit avoir acquitté plus d'écritures qu'il n'en compte : il a été réécrit
+        # (il est modifiable par l'agent). Un marqueur incohérent ne vaut rien : refus complet.
+        acknowledged = blocked_at = 0
+    if mutations <= 0 or mutations <= acknowledged:
         return None  # rien écrit, ou rappel déjà rendu pour ces écritures (issue #1126)
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
     detail["unattached_work"] = record_unattached_work(hook, mutations)
+    threshold = reblock_after(hook)
+    if blocked_at > 0 and mutations - blocked_at < threshold:
+        # Le refus complet, remède compris, a été rendu il y a moins de *threshold* écritures : le
+        # redire à l'identique coûte un tour sans rien apprendre de neuf. Signalé en une ligne ;
+        # au-delà du seuil, le refus complet revient (le gate n'est pas désarmé).
+        acknowledge_mutations(hook, mutations)
+        detail |= {"repeat": True, "reblock_after": threshold, "since_block": mutations - blocked_at}
+        return Decision(
+            context=(
+                f"[Grimoire] Toujours hors tâche (profil {profile}) : {mutations - blocked_at} écriture(s) "
+                f"depuis le refus précédent ({mutations} au total) ; le refus revient à {threshold}. "
+                "Enrôle le chantier, ou dis explicitement à l'utilisateur qu'il reste hors ledger."
+            ),
+            detail=detail,
+        )
     reason = no_task_stop_reason(profile, mutations, candidates, expired, unreadable)
-    acknowledge_mutations(hook, mutations)
+    record_no_task_block(hook, mutations)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
     return Decision(context=reason, detail=detail)

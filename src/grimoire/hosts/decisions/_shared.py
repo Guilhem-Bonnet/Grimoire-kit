@@ -78,6 +78,13 @@ class Decision:
     reason: str = ""
     context: str = ""
     detail: dict[str, Any] = field(default_factory=dict)
+    updated_input: dict[str, Any] | None = None
+    """``PreToolUse`` seulement : l'entrée complète de l'outil à substituer à
+    l'originale (Claude Code ``updatedInput`` remplace, il ne fusionne pas)."""
+    abstain: bool = False
+    """« Pas d'avis » : rien n'est rendu à l'hôte, l'appel suit son cours comme
+    si le hook n'existait pas. Pour une décision consultative qui ne doit pas
+    même émettre ``permissionDecision: allow`` quand elle n'a rien à dire."""
 
     @property
     def is_refusal(self) -> bool:

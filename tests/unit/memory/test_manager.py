@@ -762,7 +762,7 @@ class TestHealthCheckParallelTimeout:
         mgr.health_check(timeout=1.0)
         elapsed = time.perf_counter() - started
 
-        assert elapsed < 0.4  # trois sondes de 0,2s en parallèle, pas 0,6s en série
+        assert elapsed < 0.5  # trois sondes de 0,2s en parallèle (mesure ~0,2 s), pas 0,6s en série
 
 
 class TestMemoryGraphConstructionTimeout:

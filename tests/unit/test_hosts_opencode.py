@@ -16,6 +16,7 @@ from grimoire.hosts.capabilities import contract_for, is_fenced, profile_for, re
 from grimoire.hosts.collect import build_surface
 from grimoire.hosts.detection import alias_for_host, detect_enabled_hosts
 from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+from grimoire.hosts.events import HookEvent
 from grimoire.hosts.runtime import run_hook
 from grimoire.hosts.sync import sync_host_surfaces
 
@@ -59,8 +60,10 @@ class TestRegistry:
         profile = profile_for(HostId.OPENCODE)
         assert profile.subagents_native and profile.skills_native and profile.commands_native
         assert profile.blocking_hooks and profile.mcp_native
-        assert profile.supported_events() == (profile.supported_events()[0],)
-        assert profile.supports_event(profile.supported_events()[0])
+        # `session.idle` alimente `stop` (doc V1), mais seul PreToolUse est prouvé bloquant.
+        assert set(profile.supported_events()) == {HookEvent.PRE_TOOL_USE, HookEvent.STOP}
+        assert profile.proven_blocking_events() == (HookEvent.PRE_TOOL_USE,)
+        assert not profile.blocks(HookEvent.STOP) and not profile.writes_refusal(HookEvent.STOP)
 
     @pytest.mark.parametrize("marker", [".opencode", "opencode.json"])
     def test_detection(self, tmp_path: Path, marker: str) -> None:
@@ -143,7 +146,12 @@ class TestEmission:
         paths = {f.relpath.as_posix() for f in emitter.plan(surface, governed).files}
         assert ".opencode/plugin/grimoire-guard.js" in paths
         advisory = replace(surface, hooks=tuple(replace(h, enforcement=Enforcement.ADVISORY) for h in surface.hooks))
-        paths = {f.relpath.as_posix() for f in emitter.plan(advisory, governed).files}
+        files = {f.relpath.as_posix(): f.content for f in emitter.plan(advisory, governed).files}
+        # Sans garde bloquante, le plugin ne porte plus que la décision de clôture (`session.idle`).
+        assert "const GUARDED = []" in files[".opencode/plugin/grimoire-guard.js"]
+        assert "const STOP_ENABLED = true" in files[".opencode/plugin/grimoire-guard.js"]
+        bare = replace(surface, hooks=())
+        paths = {f.relpath.as_posix() for f in emitter.plan(bare, governed).files}
         assert ".opencode/plugin/grimoire-guard.js" not in paths
 
     def test_a_hand_written_file_at_a_managed_path_is_preserved(self, governed: Path) -> None:
@@ -157,7 +165,7 @@ class TestEmission:
         emitter = emitter_for(HostId.OPENCODE)
         assert emitter is not None
         surfaces = {d.surface for d in emitter.plan(build_surface(governed), governed).degradations}
-        assert {"model affinity", "permissions", "ask"} <= surfaces
+        assert {"permissions", "ask", "hook stop verification"} <= surfaces
 
 
 class TestHostSync:

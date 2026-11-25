@@ -1,0 +1,25 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "copilot",
+  "capability": null,
+  "captured_on": "2026-06-10..2026-06-16",
+  "read_on": "2026-11-20",
+  "source": "journal de session de Copilot dans VS Code (events.jsonl, `hook.start`, `data.input`). 17 entrées userPromptSubmitted.",
+  "version_note": "Version de l'hôte non établie (copilotVersion=\"unknown\", journaux VS Code de la période non conservés).",
+  "wire_caveat": "Hooks déclarés en PascalCase (`UserPromptSubmit`) : la charge reçue sur stdin peut différer de celle journalisée.",
+  "observed": {"hook_end_success": true, "hook_output": "non journalisée"},
+  "redaction": "identifiant, chemin, horodatage et texte de l'invite remplacés.",
+  "payloads": [
+    {
+      "hookType": "userPromptSubmitted",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "timestamp": 1781000000000,
+        "cwd": "<PROJECT>",
+        "prompt": "<PROMPT>"
+      },
+      "expect": {"event": "user_prompt_submit", "prompt": "<PROMPT>"}
+    }
+  ]
+}

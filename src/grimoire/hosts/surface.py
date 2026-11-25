@@ -155,6 +155,20 @@ class ModelAffinity:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentHookSpec:
+    """Un hook que la persona déclare pour elle seule (clé ``hooks:`` de son fichier, #1280 P3).
+
+    ``event`` : nom PascalCase ; ``command`` : ligne de commande telle qu'écrite ;
+    ``windows`` : variante Windows facultative ; ``timeout`` en secondes (``None`` = défaut de l'hôte).
+    """
+
+    event: str
+    command: str
+    windows: str = ""
+    timeout: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AgentSpec:
     """One Grimoire persona, ready to be rendered as a host sub-agent."""
 
@@ -187,6 +201,10 @@ class AgentSpec:
     :mod:`grimoire.tools.context_router`, not proof that a session actually
     loads it — the router plans context adaptively and this field only says
     what the agent claims to need."""
+    hooks: tuple[AgentHookSpec, ...] = ()
+    """Hooks propres à cette persona, lus de la clé ``hooks:`` de son fichier (#1280 P3).
+    Seul Copilot les émet (bloc ``hooks:`` du ``.agent.md``) : la garde globale reste dans
+    les fichiers de hooks du projet, jamais ici."""
     definition_body: str = ""
     """The persona file's body, frontmatter excluded (#1179).
 
@@ -416,6 +434,12 @@ class SkillSpec:
     # Champs optionnels de la spec Agent Skills (#874), émis seulement quand renseignés.
     license: str = ""
     compatibility: str = ""
+    # Invocation (doc VS Code « Agent Skills ») : ``None`` = la source ne dit rien,
+    # l'émetteur n'écrit alors rien et l'hôte applique son défaut documenté
+    # (``user-invocable: true``, ``disable-model-invocation: false``).
+    user_invocable: bool | None = None
+    disable_model_invocation: bool | None = None
+    argument_hint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {

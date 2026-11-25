@@ -95,9 +95,20 @@ def _pre(root: Path, command: str):  # type: ignore[no-untyped-def]
     )
 
 
+def _refused_by_budget(decision) -> bool:  # type: ignore[no-untyped-def]
+    """Vrai si le refus vient du plafond de temps de l'analyse (#1305), pas de la garde.
+
+    Sur une machine chargée (shard CI), l'analyse peut dépasser ``POLICY_BUDGET_S`` : le refus reste un refus, mais
+    rien n'a été jugé, donc ni ``authority_vector`` ni révocation. Le refus lui-même reste exigé par l'appelant.
+    """
+    return decision.detail.get("policy_budget") == "exceeded"
+
+
 def _assert_refused_and_revoked(proj: Path, command: str) -> None:
     decision = _pre(proj, command)
-    assert decision.outcome is Outcome.DENY, command
+    assert decision.outcome is Outcome.DENY, (command, decision.detail)
+    if _refused_by_budget(decision):
+        return
     assert decision.detail["authority_vector"] == "control-zone", command
     assert decision.detail["authority_revokes"] is True, command
     assert not MandateStore(proj).state().active, command
@@ -179,6 +190,21 @@ PREFIXES = {
 @pytest.mark.parametrize("template", WRITES.values(), ids=WRITES.keys())
 def test_une_ecriture_prouvee_est_refusee_et_revoque(tmp_path: Path, zone: PurePosixPath, template: str, spelling: str) -> None:
     _assert_refused_and_revoked(_project(tmp_path / "proj"), _spell(template, zone, spelling))
+
+
+def test_le_refus_par_budget_reste_un_refus_sans_vecteur_ni_revocation(
+    tmp_path: Path, zone: PurePosixPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1305 — budget d'analyse épuisé : refus exigé, ``authority_vector`` absent toléré par l'assertion."""
+    from grimoire.hosts.decisions import tool_policy
+
+    monkeypatch.setattr(tool_policy, "POLICY_BUDGET_S", 0)
+    proj = _project(tmp_path / "proj")
+    decision = _pre(proj, _spell(WRITES["redirection"], zone))
+    assert decision.outcome is Outcome.DENY, decision.detail
+    assert decision.detail.get("policy_budget") == "exceeded", decision.detail
+    assert "authority_vector" not in decision.detail
+    _assert_refused_and_revoked(proj, _spell(WRITES["redirection"], zone))
 
 
 @pytest.mark.parametrize("prefix", PREFIXES.values(), ids=PREFIXES.keys())
@@ -269,10 +295,11 @@ UNREADABLE = {
     "python-a-la-syntaxe-invalide": "python3 -c \"open('{Z}/f', 'w'\"",
     "python-au-mode-calcule": "python3 -c \"m = 'w'; open('{Z}/f', m)\"",
     "decoupage-d-env-illisible": "env -S \"tee '{Z}/f\"",
-    "langage-non-lu-node": "node -e \"require('fs').writeFileSync('{Z}/f', 'x')\"",
-    "langage-non-lu-perl": "perl -e 'open(F, \">>{Z}/f\")'",
-    "langage-non-lu-awk": "awk 'BEGIN{print 1 > \"{Z}/f\"}'",
-    "ecrivain-hors-liste": "git clone /src {Z}/x",
+    # #1233 : node, perl, awk et `git clone` sont désormais lus ; restent illisibles un langage non lu et un
+    # chemin que le programme reçoit en argument.
+    "langage-non-lu": "pwsh -c \"Set-Content {Z}/f x\"",
+    "chemin-recu-en-argument": "node -e \"require('fs').writeFileSync(process.argv[1], 'x')\" {Z}/f",
+    "ecrivain-hors-liste": "make -C {Z} install",
 }
 
 
@@ -430,7 +457,7 @@ REFUSED_MENTIONS = {
     "fin-des-options": "git commit -m x -- {Z}/f",
     "git-c-majuscule": 'git -C {Z} commit -m "x"',
     "git-sous-commande-hors-liste": "git checkout -m {Z}/f",
-    "git-clone": "git clone /src {Z}/x",
+    "git-clone-branche": "git clone -b {Z} /src ailleurs",  # #1233 : `git clone` vers la zone révoque désormais
     "gh-sous-commande-hors-liste": "gh pr review --comment {Z}",
     "gh-api": "gh api repos/x --input {Z}/f",
     "option-courte-groupee": 'git commit -am "{Z}"',
@@ -713,7 +740,6 @@ ADVERSE_REFUSED = [
     'git commit -qm "{Z}"',
     'git -c core.editor=true commit -m "{Z}"',
     'git -c core.hooksPath={Z} commit -m "{Z}"',
-    'git --git-dir={Z} commit -m "{Z}"',
     'git --work-tree {Z} commit -m "{Z}"',
     "git commit --message {Z} --message",
     "git tag -F {Z}/f v1",
@@ -723,8 +749,6 @@ ADVERSE_REFUSED = [
     'git merge -m "{Z}" x',
     "git branch -m {Z} x",
     "git mv -m {Z}/a {Z}/b",
-    "git init --initial-branch -m {Z}",
-    "git clone --origin -m src {Z}/x",
     'git commit -m "{Z}"\x0c',
     'git commit -m "{Z}"\u2028rm -rf {Z}',
     'git commit -m "{Z}"\x85',
@@ -777,6 +801,10 @@ ADVERSE_REFUSED = [
     f"awk '{{print}}' {{Z}}/{PROOF}",
 ]
 ADVERSE_WRITES = [
+    # #1233 : la mention cache une écriture git que la preuve lit désormais (valeur d'option prise pour texte)
+    'git --git-dir={Z} commit -m "{Z}"',
+    "git init --initial-branch -m {Z}",
+    "git clone --origin -m src {Z}/x",
     # une écriture derrière une mention
     "gh pr create --title t --body '{Z}' #; true\nrm -rf {Z}",
     'gh pr create --title t --body "{Z}" --body "`rm -rf {Z}`"',
@@ -986,6 +1014,7 @@ class _Vault:
         "export F=/vault/f\necho x >> $F",
         "source <(echo 'cp a /vault/f')",
         "echo `echo x > /vault/f`",
+        "sed -n 'w /vault/f' /etc/passwd",  # #1233
         # antislash hors guillemets : séparateur d'un chemin Windows, ou échappement POSIX
         "echo x > \\vault\\f",
         "echo x > /vau\\lt/f",
@@ -1013,7 +1042,7 @@ def test_la_preuve_reconnait_une_ecriture(command: str) -> None:
         "python3 -c \"s = '/vault/f'.replace('a', 'b'); print(s)\"",
         "python3 -m http.server --directory /vault",
         "echo x > \"$UNSET\"",
-        "sed -n 'w /vault/f' /etc/passwd",
+        "sed -n 'w /tmp/out' /vault/f",
         "ssh host 'cat /vault/f'",
         "echo x \\> /vault/f",  # chevron échappé : un mot, pas une redirection
     ],

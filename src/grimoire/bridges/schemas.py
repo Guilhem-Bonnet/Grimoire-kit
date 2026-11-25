@@ -14,6 +14,8 @@ class HostId(StrEnum):
     CURSOR = "host-cursor"
     GEMINI_CLI = "host-gemini-cli"
     OPENCODE = "host-opencode"
+    KIMI_CODE = "host-kimi-code"
+    ZED = "host-zed"
     UNKNOWN = "host-unknown"
 
 
@@ -165,18 +167,23 @@ GITHUB_COPILOT_MANIFEST = HostCapabilityManifest(
     tool_policy_native=False,
 )
 
+# Codex (learn.chatgpt.com/docs/hooks, lue le 2026-11-21 ; CLI non installée sur
+# le poste) documente ces événements dans `.codex/hooks.json`. Le manifeste dit ce
+# que l'hôte **déclenche**, pas que chacun refuse : un hook de projet n'y tourne
+# qu'approuvé via /hooks, et aucun refus n'a été observé (voir
+# HostProfile.documented_blocking_events).
 CODEX_MANIFEST = HostCapabilityManifest(
     host_id=HostId.CODEX,
     display_name="Codex",
     hooks=HostHooks(
-        session_start=False,
-        user_prompt_submit=False,
-        pre_tool_use=False,
-        post_tool_use=False,
+        session_start=True,
+        user_prompt_submit=True,
+        pre_tool_use=True,
+        post_tool_use=True,
         subagent_start=True,
         subagent_stop=True,
-        pre_compact=False,
-        stop=False,
+        pre_compact=True,
+        stop=True,
     ),
     fallback=HostFallback(
         mode=FallbackMode.CLI_GUARDED,
@@ -192,12 +199,25 @@ CODEX_MANIFEST = HostCapabilityManifest(
     tool_policy_native=False,
 )
 
-# Editor/CLI hosts with an MCP client and an instructions file, but no agent
-# lifecycle hooks: governance can be stated there, never enforced.
+# Cursor (https://cursor.com/docs/hooks, lue le 2026-11-21 ; Cursor non installé sur
+# le poste) déclenche ces événements depuis `.cursor/hooks.json`. Le manifeste dit ce
+# que l'hôte **déclenche**, pas ce qu'il refuse : le refus de `preToolUse`/
+# `beforeShellExecution` est documenté mais non vérifié (HostProfile.documented_blocking_events),
+# d'où un repli inchangé. `beforeSubmitPrompt` alimente `user_prompt_submit`, sans canal de contexte.
 CURSOR_MANIFEST = HostCapabilityManifest(
     host_id=HostId.CURSOR,
     display_name="Cursor",
-    hooks=HostHooks(),
+    hooks=HostHooks(
+        session_start=True,
+        user_prompt_submit=True,
+        pre_tool_use=True,
+        post_tool_use=True,
+        post_tool_use_failure=True,
+        subagent_start=True,
+        subagent_stop=True,
+        pre_compact=True,
+        stop=True,
+    ),
     fallback=HostFallback(
         mode=FallbackMode.PREVIEW_ONLY,
         required_controls=("preview_before_write", "explicit_proof_for_risky_changes"),
@@ -238,13 +258,48 @@ GEMINI_CLI_MANIFEST = HostCapabilityManifest(
 )
 
 # opencode : un plugin (`.opencode/plugin`) dont le hook `tool.execute.before`
-# peut refuser un outil — observé (tests/fixtures/hosts/opencode/). Aucun autre
-# événement de cycle de vie n'a été sondé, donc aucun n'est déclaré.
+# peut refuser un outil — observé (tests/fixtures/hosts/opencode/). L'événement
+# `session.idle` (fin de tour, opencode.ai/docs/en/plugins, lue le 2026-11-22)
+# alimente la décision neutre `stop`, sans refus possible documenté.
 OPENCODE_MANIFEST = HostCapabilityManifest(
     host_id=HostId.OPENCODE,
     display_name="opencode",
-    hooks=HostHooks(pre_tool_use=True),
+    hooks=HostHooks(pre_tool_use=True, stop=True),
     fallback=HostFallback(mode=FallbackMode.CLI_GUARDED, required_controls=("explicit_proof_for_risky_changes",)),
+    supports_mcp=True,
+    supports_streaming=True,
+    supports_workspace_mutation=True,
+    tool_policy_native=False,
+)
+
+# Kimi Code CLI (moonshotai.github.io/kimi-code/en/customization/hooks, lue le 2026-11-22)
+# documente des hooks, mais seulement dans `~/.kimi-code/config.toml` ou un plugin : « there
+# is no project-level hook file ». Le kit n'écrit pas la configuration de l'utilisateur :
+# aucun événement n'est câblé, le manifeste n'en déclare donc aucun.
+KIMI_CODE_MANIFEST = HostCapabilityManifest(
+    host_id=HostId.KIMI_CODE,
+    display_name="Kimi Code",
+    hooks=HostHooks(),
+    fallback=HostFallback(
+        mode=FallbackMode.PREVIEW_ONLY,
+        required_controls=("preview_before_write", "explicit_proof_for_risky_changes"),
+    ),
+    supports_mcp=True,
+    supports_streaming=True,
+    supports_workspace_mutation=True,
+    tool_policy_native=False,
+)
+
+# Zed (zed.dev/docs/ai, lue le 2026-11-22) : aucun hook de cycle de vie documenté pour son
+# agent ; les seuls `hooks` de la doc sont ceux des tâches (`create_worktree`).
+ZED_MANIFEST = HostCapabilityManifest(
+    host_id=HostId.ZED,
+    display_name="Zed",
+    hooks=HostHooks(),
+    fallback=HostFallback(
+        mode=FallbackMode.PREVIEW_ONLY,
+        required_controls=("preview_before_write", "explicit_proof_for_risky_changes"),
+    ),
     supports_mcp=True,
     supports_streaming=True,
     supports_workspace_mutation=True,
@@ -258,4 +313,6 @@ _HOST_REGISTRY: dict[HostId, HostCapabilityManifest] = {
     HostId.CURSOR: CURSOR_MANIFEST,
     HostId.GEMINI_CLI: GEMINI_CLI_MANIFEST,
     HostId.OPENCODE: OPENCODE_MANIFEST,
+    HostId.KIMI_CODE: KIMI_CODE_MANIFEST,
+    HostId.ZED: ZED_MANIFEST,
 }

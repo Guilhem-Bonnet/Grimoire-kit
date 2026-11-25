@@ -465,6 +465,33 @@ Le serveur MCP suit la même règle. Un projet créé ensuite reçoit dans `.mcp
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
+## 19. Si toutes les actions sont refusées (Claude Code)
+
+**Symptôme** : chaque `Bash`, `Edit` ou `Write` est refusé, avec « [Grimoire] garde avant outil en panne », « hook indisponible » ou le message de Claude Code `failed; blocking because onFailure is "block"` (ou `timed out; …`).
+
+**Cause** : la garde `PreToolUse` est émise en échec fermé (`"onFailure": "block"`, Claude Code 2.1.295 ou plus) : quand elle ne peut pas juger un appel, elle le refuse au lieu de le laisser passer. Quatre cas :
+
+- la garde répond trop tard : Claude Code l'interrompt à son `timeout` (en secondes) et refuse, avec `timed out`. Les projets installés en 3.92.0 portent `"timeout": 10`, trop court sur une machine chargée (plusieurs agents, une suite de tests en parallèle) ; `grimoire up` émet 30 s, et `grimoire doctor` signale un délai plus court ou invalide (contrôle `hook_timeout`, qui lit `.claude/settings.json` puis `.claude/settings.local.json`, le local primant ; `grimoire up` n'écrit pas ce dernier, un délai qui y est posé se corrige à la main) ;
+
+- le kit répond mais une panne interne l'empêche de juger : le refus nomme la panne ;
+- le runtime du kit ne s'importe plus (mise à jour cassée, dépendance absente) : `grimoire-hook` répond quand même par un refus « hook indisponible » ;
+- `grimoire-hook` est introuvable, ou le paquet `grimoire` lui-même ne s'importe plus : le script ne peut rien répondre, et c'est Claude Code qui refuse, avec sa propre erreur.
+
+L'agent ne peut pas se réparer seul, puisque ses outils sont refusés : la suite se fait dans un terminal.
+
+**Fix** (dans l'ordre) :
+
+```bash
+grimoire doctor   # hook_commands nomme la commande qui ne se lance pas, hook_timeout un délai trop court
+grimoire up       # réinstalle les hooks avec le lanceur trouvé sur ce poste et le délai courant
+```
+
+Si `grimoire` lui-même ne se lance plus, réinstaller le kit (`uv tool install --force grimoire-kit` ou `pipx reinstall grimoire-kit`). En dernier recours, retirer à la main la ligne `"onFailure": "block"` du hook `PreToolUse` dans `.claude/settings.json` : la garde repasse en échec ouvert, et le prochain `grimoire up` la remet.
+
+**Sous GitHub Copilot**, le contrat diffère : une erreur de la garde (sortie non nulle) refuse l'appel, mais un dépassement de délai le laisse toujours passer, garde comprise — c'est le comportement de l'hôte, aucun champ ne le change. `grimoire up` écrit donc `.github/hooks/grimoire-pre-tool-use.json` au format du harness Copilot (`"version": 1`, `bash`/`powershell`, une entrée dont le `matcher` nomme les outils intégrés qui lisent un fichier, l'écrivent ou exécutent une commande, et une seconde qui rattrape tout outil non intégré, MCP compris ; ce qui reste hors garde est listé dans `.github/hooks/README.md`) avec `"timeoutSec": 30`, pour que ce cas reste rare sous charge. `grimoire doctor` le rappelle (contrôle `hook_timeout_copilot`) et avertit quand le délai est plus court, comme sur les fichiers écrits par les versions précédentes du kit (`"timeout": 10`).
+
+<img src="../assets/divider.svg" width="100%" alt="">
+
 ## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Obtenir de l'aide
 
 Si le problème persiste :

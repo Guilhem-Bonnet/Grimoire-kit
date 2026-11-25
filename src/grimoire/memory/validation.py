@@ -124,16 +124,26 @@ DEFAULT_ALLOWED_EMITTERS: tuple[str, ...] = (
 # journal restait rouge (alertes #342, #345, #346) alors qu'elle ne portait déjà
 # plus rien du secret. Le contenu de la table n'a pas changé ; son nom, si.
 _REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # Ce motif ne détecte que l'ouverture : l'étendue du bloc se cherche en une
+    # passe (:func:`_redact_pem_blocks`). `BEGIN…(.*?)…END` en regex rescannait
+    # jusqu'à la fin du texte à chaque ouverture sans fermeture : quadratique.
+    # En tête : un bloc caviardé raccourcit le texte que les motifs suivants
+    # parcourent (un texte de blocs piégés n'est plus balayé qu'une fois).
+    ("private-key-block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("aws-access-key-id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
+    # Jetons fine-grained : `github_pat_` + 22 caractères au moins (82 en pratique).
+    ("github-pat", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}")),
     ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{12,}\b")),
     ("anthropic-key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
     ("openai-key", re.compile(r"\bsk-(?!ant-)[A-Za-z0-9_-]{20,}\b")),
-    ("private-key-block", re.compile(
-        r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
-        re.DOTALL,
-    )),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
+    # Bearer opaque : placé après `jwt`, qui garde la main sur Bearer+JWT (le
+    # jeton y est déjà remplacé par `[redacted:jwt]`, que ce motif ne reconnaît pas).
+    # Jeton plausible : un chiffre (12+ caractères) ou 20+ caractères, pour ne pas
+    # masquer « Bearer authentication failed ». `Bearer: <jeton>` est couvert.
+    ("bearer-token", re.compile(
+        r"(?i)\bBearer:?\s+(?:(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{12,}|[A-Za-z0-9._~+/=-]{20,})")),
     # Authentification basique dans une URL : seul le couple identifiant/mot de
     # passe est caviardé, le hôte reste lisible.
     ("url-basic-auth", re.compile(r"(?<=://)[^\s/:@]+:[^\s/:@]{6,}(?=@)")),
@@ -358,6 +368,30 @@ def redact_metadata(metadata: Any, *, _path: str = "metadata") -> tuple[Any, tup
     return metadata, ()
 
 
+_PEM_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+
+
+def _redact_pem_blocks(text: str, begin: re.Pattern[str], label: str) -> tuple[str, int]:
+    """Caviarder les blocs de clé privée en temps linéaire.
+
+    Une ouverture sans fermeture rend aussi toutes les suivantes sans
+    fermeture : on s'arrête alors, et le reste du texte — une clé tronquée est
+    encore une clé — est caviardé d'un bloc depuis la première ouverture.
+    """
+    out: list[str] = []
+    pos = count = 0
+    while (start := begin.search(text, pos)) is not None:
+        end = _PEM_END.search(text, start.end())
+        out.append(text[pos:start.start()])
+        out.append(f"[redacted:{label}]")
+        count += 1
+        if end is None:
+            return "".join(out), count
+        pos = end.end()
+    out.append(text[pos:])
+    return "".join(out), count
+
+
 def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
     """Caviarder les secrets reconnus ; renvoyer le texte et les étiquettes vues.
 
@@ -372,7 +406,10 @@ def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
     hits: list[str] = []
     redacted, _ = normalize_for_storage(text)
     for label, pattern in _REDACTION_RULES:
-        redacted, count = pattern.subn(f"[redacted:{label}]", redacted)
+        if label == "private-key-block":
+            redacted, count = _redact_pem_blocks(redacted, pattern, label)
+        else:
+            redacted, count = pattern.subn(f"[redacted:{label}]", redacted)
         if count:
             hits.append(label)
     return redacted, tuple(hits)

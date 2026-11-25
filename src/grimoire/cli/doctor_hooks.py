@@ -1,4 +1,4 @@
-"""Contrôles ``hook_commands`` (issue #760) et ``hook_path`` (issue #1022) de ``grimoire doctor``.
+"""Contrôles ``hook_commands`` (#760), ``hook_timeout`` (#1276, #1277) et ``hook_path`` (#1022) de ``grimoire doctor``.
 
 Séparé de :mod:`grimoire.cli.cmd_up` pour tenir sous le plafond de taille des
 modules.
@@ -37,15 +37,22 @@ def _launches_grimoire_hook(command: str) -> bool:
     return name in _HOOK_PROGRAMS
 
 
-def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
-    """``(fichier, commande)`` de chaque hook du kit, pour l'OS courant.
+def _generated_hook_commands(target: Path) -> list[tuple[str, str, bool]]:
+    """``(fichier, commande, échec fermé)`` de chaque hook du kit, pour l'OS courant.
 
-    Copilot porte une variante ``windows``/``linux``/``osx`` par entrée ; c'est
-    elle que l'hôte lance sur cet OS quand elle existe.
+    *échec fermé* : le gestionnaire porte ``"onFailure": "block"`` (Claude Code) ;
+    un programme introuvable y refuse alors chaque appel d'outil gardé.
+
+    Copilot porte une variante par OS : ``bash``/``powershell`` (harness
+    Copilot, #1280), ou ``windows``/``linux``/``osx`` (harness Local, fichiers
+    antérieurs) ; c'est elle que l'hôte lance sur cet OS quand elle existe.
     """
-    os_key = {"nt": "windows"}.get(os.name, "osx" if sys.platform == "darwin" else "linux")
+    if os.name == "nt":
+        os_keys: tuple[str, ...] = ("windows", "powershell")
+    else:
+        os_keys = ("osx" if sys.platform == "darwin" else "linux", "bash")
     sources = [*sorted((target / ".github" / "hooks").glob("*.json")), target / ".claude" / "settings.json"]
-    found: list[tuple[str, str]] = []
+    found: list[tuple[str, str, bool]] = []
     for path in sources:
         if not path.is_file():
             continue
@@ -63,9 +70,11 @@ def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
                 for spec in inner if isinstance(inner, list) else []:
                     if not isinstance(spec, dict):
                         continue
-                    command = str(spec.get(os_key) or spec.get("command") or "")
+                    variant = next((spec[key] for key in os_keys if spec.get(key)), None)
+                    command = str(variant or spec.get("command") or "")
                     if _launches_grimoire_hook(command):
-                        found.append((path.relative_to(target).as_posix(), command))
+                        fails_closed = spec.get("onFailure") == "block"
+                        found.append((path.relative_to(target).as_posix(), command, fails_closed))
     return found
 
 
@@ -80,11 +89,12 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
     if not commands:
         return []
     problems: set[str] = set()
-    for relpath, command in commands:
+    for relpath, command, fails_closed in commands:
         program = _program(command)
         reason = hook_program_problem(program, target)
         if reason:
-            problems.add(f"{relpath}: {program} ({reason})")
+            closed = ", onFailure: block — every guarded tool call will be refused" if fails_closed else ""
+            problems.add(f"{relpath}: {program} ({reason}{closed})")
     broken = sorted(problems)
     if broken:
         return [EnvCheck(
@@ -103,6 +113,157 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
         passed=True,
         level="ok",
         detail=f"{len(commands)} hook command(s) resolve outside the active venv",
+    )]
+
+
+#: Fichiers de réglages Claude Code lus par ``hook_timeout``, du partagé au local.
+_CLAUDE_SETTINGS = (".claude/settings.json", ".claude/settings.local.json")
+
+
+def _fail_closed_guards(target: Path) -> dict[tuple[str, str], tuple[str, object]]:
+    """Gardes ``PreToolUse`` du kit en échec fermé, par ``(matcher, commande)``.
+
+    Valeur : ``(fichier, timeout brut)``. ``settings.json`` est lu, puis
+    ``settings.local.json`` : une même garde (même matcher, même commande)
+    redéclarée en local prend le délai local. Claude Code fusionne les hooks
+    des deux fichiers ; une garde présente d'un seul côté est gardée telle quelle.
+    """
+    guards: dict[tuple[str, str], tuple[str, object]] = {}
+    for relpath in _CLAUDE_SETTINGS:
+        try:
+            data = json.loads((target / relpath).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        hooks = data.get("hooks") if isinstance(data, dict) else None
+        entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+        for entry in entries if isinstance(entries, list) else []:
+            inner = entry.get("hooks") if isinstance(entry, dict) else None
+            matcher = str(entry.get("matcher") or "") if isinstance(entry, dict) else ""
+            for spec in inner if isinstance(inner, list) else []:
+                if not isinstance(spec, dict) or spec.get("onFailure") != "block":
+                    continue
+                command = str(spec.get("command") or "")
+                if _launches_grimoire_hook(command):
+                    guards[(matcher, command)] = (relpath, spec.get("timeout"))
+    return guards
+
+
+def check_guard_timeout(target: Path) -> list[EnvCheck]:
+    """Une garde Claude Code en échec fermé a-t-elle un délai tenable sous charge ?
+
+    Avec ``"onFailure": "block"``, un dépassement du ``timeout`` (secondes)
+    refuse l'outil : un délai court, celui des projets installés en 3.92.0
+    (10 s), refuse des commandes anodines sur une machine chargée. Lit
+    ``.claude/settings.json`` puis ``.claude/settings.local.json`` (le local
+    prime, #1277). Un délai booléen ou non numérique est invalide : ``bool``
+    sous-classe ``int``, ``true`` vaudrait sinon 1 s. Rien à dire sans garde en
+    échec fermé.
+    """
+    from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT
+
+    guards = _fail_closed_guards(target)
+    if not guards:
+        return []
+    short: list[str] = []
+    invalid: list[str] = []
+    for relpath, timeout in guards.values():
+        if timeout is None:
+            continue  # délai par défaut de Claude Code (60 s)
+        if isinstance(timeout, bool) or not isinstance(timeout, int | float):
+            invalid.append(f"{relpath}: {json.dumps(timeout)}")
+        elif timeout < FAIL_CLOSED_TIMEOUT:
+            short.append(f"{relpath}: {timeout:g} s")
+    problems: list[str] = []
+    if invalid:
+        problems.append(
+            f"PreToolUse guard fails closed with an invalid timeout ({'; '.join(invalid)}) — not a number of seconds"
+        )
+    if short:
+        problems.append(
+            f"PreToolUse guard fails closed with timeout {'; '.join(short)} "
+            f"(< {FAIL_CLOSED_TIMEOUT} s) — a slow answer under load is refused by Claude Code"
+        )
+    if problems:
+        remedy = "run `grimoire up` to re-emit the guard with its current timeout"
+        if any(item.startswith(_CLAUDE_SETTINGS[1]) for item in invalid + short):
+            # `up` n'écrit pas le fichier local : la correction y reste à la main.
+            remedy += f"; set a timeout >= {FAIL_CLOSED_TIMEOUT} (seconds) in {_CLAUDE_SETTINGS[1]}"
+        return [EnvCheck(
+            "hook_timeout",
+            passed=False,
+            level="warn",
+            detail="; ".join(problems),
+            remedy=remedy,
+        )]
+    return [EnvCheck(
+        "hook_timeout",
+        passed=True,
+        level="ok",
+        detail=f"fail-closed PreToolUse guard timeout >= {FAIL_CLOSED_TIMEOUT} s",
+    )]
+
+
+def check_copilot_guard_timeout(target: Path) -> list[EnvCheck]:
+    """La garde PreToolUse Copilot du kit, et ce que son délai garantit (#1280).
+
+    Chez GitHub Copilot, un hook qui dépasse son délai laisse passer l'appel
+    d'outil, garde comprise ; seule une sortie non nulle refuse. Le délai ne
+    peut donc pas rendre la garde fermée, seulement rendre ce cas rare : sous
+    le plancher du kit, avertissement ; au-dessus, une note le rappelle. Rien
+    à dire sans fichier de garde Copilot du kit.
+    """
+    from grimoire.hosts.emitters.copilot import GUARD_TIMEOUT
+
+    hooks_dir = target / ".github" / "hooks"
+    if not hooks_dir.is_dir():
+        return []
+    guards: list[tuple[str, float]] = []
+    for path in sorted(hooks_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        hooks = data.get("hooks") if isinstance(data, dict) else None
+        if not isinstance(hooks, dict):
+            continue
+        entries = hooks.get("PreToolUse", hooks.get("preToolUse"))
+        for spec in entries if isinstance(entries, list) else []:
+            if not isinstance(spec, dict):
+                continue
+            commands = (spec.get(key) for key in ("command", "bash", "powershell", "windows", "linux", "osx"))
+            launched = [str(c) for c in commands if c and _launches_grimoire_hook(str(c))]
+            if not launched:
+                continue
+            if any("--decision grimoire.dispatch-model" in c for c in launched):
+                # Entrée consultative (modèle des sous-agents, #1280 P1-4) : délai court voulu, pas une garde.
+                continue
+            # Même priorité que le harness Copilot : `timeoutSec`, puis son alias, puis 30 s.
+            raw = spec.get("timeoutSec", spec.get("timeout", 30))
+            delay = float(raw) if isinstance(raw, int | float) else 30.0
+            guards.append((path.relative_to(target).as_posix(), delay))
+    if not guards:
+        return []
+    short = [f"{relpath}: {delay:g} s" for relpath, delay in guards if delay < GUARD_TIMEOUT]
+    if short:
+        return [EnvCheck(
+            "hook_timeout_copilot",
+            passed=False,
+            level="warn",
+            detail=(
+                f"Copilot PreToolUse guard timeout below {GUARD_TIMEOUT} s ({'; '.join(short)}) — "
+                "GitHub Copilot lets a tool call through when a hook times out, so a short timeout "
+                "leaves more calls unjudged under load"
+            ),
+            remedy="run `grimoire up` to re-emit the Copilot hooks with the current timeout",
+        )]
+    return [EnvCheck(
+        "hook_timeout_copilot",
+        passed=True,
+        level="info",
+        detail=(
+            f"Copilot PreToolUse guard timeout >= {GUARD_TIMEOUT} s; GitHub Copilot fails open on a "
+            "hook timeout (guard included), so the guard refuses on error but not on timeout"
+        ),
     )]
 
 

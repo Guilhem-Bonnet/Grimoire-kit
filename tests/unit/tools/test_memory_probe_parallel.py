@@ -11,6 +11,7 @@ absent, en série. Ces tests fixent le contrat :
 
 from __future__ import annotations
 
+import functools
 import threading
 import time
 from pathlib import Path
@@ -122,7 +123,7 @@ class TestParallelProbes:
 
         def _slow(result: object) -> object:
             def _call() -> object:
-                time.sleep(0.2)
+                time.sleep(0.3)
                 return result
 
             return _call
@@ -137,15 +138,19 @@ class TestParallelProbes:
         graph.health_check.side_effect = _slow(MagicMock(healthy=True, detail={}))
         graph.stats.return_value = {"memories": 0, "weaviate_objects": 0}
         manager = MemoryManager(backend, hot_memory=hot, memory_graph=graph)
+        # La borne de 0,3 s par sonde est celle de la production ; ici les sondes durent 0,3 s, donc sur un
+        # runner chargé (macOS) l'une d'elles expirait et le statut passait « unavailable ». On élargit la borne
+        # (5 s) : la parallélisation reste prouvée par la durée totale ci-dessous.
+        manager.health_check = functools.partial(manager.health_check, timeout=5.0)  # type: ignore[method-assign]
 
         started = time.perf_counter()
         status = memory_link_status(tmp_path, probe=True, manager=manager)
         elapsed = time.perf_counter() - started
 
         assert status["state"] == "ok"
-        # Trois sondes de 0,2 s en parallèle : ~0,2 s. En série (ou avec des
-        # attentes cumulées), le test dépasserait 0,5 s.
-        assert elapsed < 0.5
+        # Trois sondes de 0,3 s en parallèle : ~0,3 s. En série (ou avec des
+        # attentes cumulées), le test dépasserait 0,9 s.
+        assert elapsed < 0.8
 
 
 class TestGraphParityReusesParallelVerdict:

@@ -145,17 +145,11 @@ REVOKED = {
 #: #1173 : les entrées de :data:`REVOKED` qui ne sont pas une écriture prouvée visant la zone. Elles restent
 #: refusées ; seule l'attente de révocation a changé (vrai → faux). Code dans un langage que la garde ne lit pas
 #: ou appel python hors liste (forme incertaine), écrivain hors liste, lecture, mention, commande illisible.
+#: #1233 : `fileinput` en place, `logging.FileHandler`, `sqlite3.connect`, `node -e`, `awk`, `sed w`, `perl -e` et
+#: `git clone` vers la zone sont des écritures prouvées : retirés de cette liste, ils révoquent de nouveau.
 NOT_A_PROVEN_WRITE = frozenset(
     {
-        "py-fileinput",  # python : `fileinput.input(..., inplace=True)` n'est pas une des écritures reconnues
-        "py-logging",  # python : `logging.FileHandler`, idem
-        "py-sqlite",  # python : `sqlite3.connect`, idem
-        "node-open",  # langage non lu
-        "awk",  # langage non lu
-        "sed-w",  # commande `w` d'un script sed : non lue (seul `sed -i` est reconnu)
-        "perl-open",  # langage non lu
         "echo-mention",  # mention
-        "git-other-sub",  # `git clone` vers la zone : écrivain hors liste
         "gh-api",  # `gh api --input` lit le fichier, il ne l'écrit pas
         "unclosed",  # guillemet jamais fermé : illisible
     }

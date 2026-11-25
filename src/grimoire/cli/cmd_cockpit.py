@@ -92,6 +92,7 @@ from grimoire.tools.request_guard import (
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 from grimoire.tools.workspace_read_cache import cacheable_read
 from grimoire.tools.workspace_write_guard import cockpit_journal_path, guard_write
+from grimoire.voice.stt_service import MAX_BODY_BYTES, declared_length, discard_body
 
 cockpit_app = typer.Typer(
     help="Local multi-project governance cockpit (serves the bundled site).",
@@ -261,6 +262,9 @@ def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
+    #: Vrai le temps d'une écriture (``do_POST``/``do_PUT``) : :meth:`send_response` vide alors le cache des lectures.
+    _mutating: bool = False
+
     def log_message(self, *args: object) -> None:
         return  # quiet by default
 
@@ -350,6 +354,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
 
     def _send_json(self, code: int, payload: dict[str, object], *, etag: bool = False) -> None:
         send_json(self, code, payload, etag=etag)
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        # Une écriture vide le cache des lectures AVANT que sa réponse parte. Vidé seulement après (le ``finally`` de
+        # ``do_POST``/``do_PUT``), la page qui relit dès la réponse reçue pouvait rejoindre un calcul commencé avant
+        # l'écriture, ou retrouver une réponse gardée, et afficher l'état d'avant sans jamais redemander. Le
+        # ``finally`` reste pour les chemins qui ne répondent pas ou qui écrivent pendant leur réponse.
+        if self._mutating:
+            _forget_live_reads()
+        super().send_response(code, message)
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
         # Même contrat pour les refus de ``http.server`` lui-même (501, 404
@@ -543,9 +556,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # rendent sans bouger l'empreinte du pouls ; leur cache est vidé une fois l'écriture faite.
         if not self._guard_mutation():
             return
+        self._mutating = True
         try:
             self._do_post()
         finally:
+            self._mutating = False
             _forget_live_reads()
 
     def _do_post(self) -> None:
@@ -688,6 +703,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             if proot is None:
                 code, error = write_refusal_status(self.path)
                 self._send_json(code, {"ok": False, "error": error})
+                return
+            declared = declared_length(self.headers)
+            if declared > MAX_BODY_BYTES and path.endswith("/voice/transcribe"):
+                discard_body(self.rfile, declared)
+                self._send_json(413, {"ok": False, "error": "audio trop volumineux"})
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -879,9 +899,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         """
         if not self._guard_mutation():
             return
+        self._mutating = True
         try:
             self._do_put()
         finally:
+            self._mutating = False
             _forget_live_reads()
 
     def _do_put(self) -> None:

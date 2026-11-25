@@ -399,6 +399,52 @@ def _task_completed(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     return measure
 
 
+def _pre_dispatch_model(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
+    _governed(root)
+    tool_input = {"description": "Find the emitters", "prompt": "x", "subagent_type": "general-purpose"}
+
+    def measure(fault: Fault) -> str:
+        with fault:
+            hook = _hook(root, HookEvent.PRE_TOOL_USE, tool_name="Agent", tool_input=tool_input)
+            return _label(run_decision("grimoire.dispatch-model", hook))
+
+    return measure
+
+
+def _subagent_start(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
+    _governed(root)
+
+    def measure(fault: Fault) -> str:
+        with fault:
+            hook = HookInput(
+                event=HookEvent.SUBAGENT_START,
+                project_root=root,
+                session_id=SESSION,
+                host="github-copilot",
+                raw={"timestamp": "2026-11-23T10:00:00.000Z", "session_id": SESSION, "hook_event_name": "SubagentStart"},
+            )
+            return _label(run_decision("grimoire.subagent-start", hook))
+
+    return measure
+
+
+def _error_occurred(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
+    _governed(root)
+
+    def measure(fault: Fault) -> str:
+        with fault:
+            hook = HookInput(
+                event=HookEvent.ERROR_OCCURRED,
+                project_root=root,
+                session_id=SESSION,
+                host="github-copilot",
+                raw={"sessionId": SESSION, "error": {"message": "m", "name": "N"}, "errorContext": "system"},
+            )
+            return _label(run_decision("grimoire.error-occurred", hook))
+
+    return measure
+
+
 SCENARIOS: dict[str, tuple[Scenario, str]] = {
     # nom -> (préparation, résultat sain attendu : la preuve que le scénario discrimine)
     "pre_forgery": (_pre_forgery, "deny"),
@@ -418,6 +464,9 @@ SCENARIOS: dict[str, tuple[Scenario, str]] = {
     "pre_compact": (_pre_compact, "allow"),
     "session_start": (_session_start, "allow"),
     "task_completed": (_task_completed, "allow"),
+    "pre_dispatch_model": (_pre_dispatch_model, "allow"),
+    "subagent_start": (_subagent_start, "allow"),
+    "error_occurred": (_error_occurred, "allow"),
 }
 
 
@@ -556,6 +605,30 @@ CASES: tuple[FaultCase, ...] = (
         "événement déclaré non émis (R31) : la décision n'en refuse aucun, elle ne fait que tracer ; sa panne perd la ligne de trace",
     ),
     _open(
+        "grimoire.dispatch-model",
+        "dispatch_model",
+        "pre_dispatch_model",
+        _P + "dispatch_model.impose_model_enabled",
+        "consultative : elle ne fait que compléter le model= omis d'un appel Agent, jamais un refus ; sa panne laisse "
+        "passer l'appel inchangé (abstention), le hook est émis sans onFailure: block",
+    ),
+    _open(
+        "grimoire.error-occurred",
+        "error_occurred",
+        "error_occurred",
+        _P + "error_occurred._error_detail",
+        "observation pure (Copilot) : elle ne fait qu'inscrire l'erreur au journal, jamais un refus ; sa panne laisse "
+        "la session intacte (abstention, code 0)",
+    ),
+    _open(
+        "grimoire.subagent-start",
+        "subagent_start",
+        "subagent_start",
+        _P + "subagent_start._class_tier",
+        "consultative (Copilot seul) : elle ne fait qu'ajouter la classe et le palier au contexte du sous-agent, jamais "
+        "un refus ; sa panne laisse démarrer le sous-agent sans contexte ajouté (abstention)",
+    ),
+    _open(
         "grimoire.activation",
         "activation",
         "session_start",
@@ -573,6 +646,9 @@ MODULES: dict[str, tuple[str, str]] = {
     "calibration": (SUPPORT, "journal d'observation (policy.hold) : ne change jamais une décision"),
     "context_capsule": (GUARD, ""),
     "chain_ack": (SUPPORT, "phrase d'explication d'une rupture du journal de preuve, appelée par task_context (UserPromptSubmit) : une panne y est couverte par les cas task_context ; sans phrase tapée, elle ne fait rien"),
+    "dispatch_model": (GUARD, ""),
+    "subagent_start": (GUARD, ""),
+    "error_occurred": (GUARD, ""),
     "done_gate": (GUARD, ""),
     "enrolment": (GUARD, ""),
     "event_trace": (GUARD, ""),
@@ -581,14 +657,19 @@ MODULES: dict[str, tuple[str, str]] = {
     "gate_override": (SUPPORT, "levée d'un refus de clôture appelée par evidence_gate DANS son filet W2-08 : une panne devient un refus tracé, couverte par les cas evidence_gate"),
     "gate_summary": (SUPPORT, "résumé de gates lu par evidence_gate, subagent_gate et context_capsule : panne couverte par leurs cas"),
     "human_turns": (GUARD, ""),
+    "resume_capsule": (SUPPORT, "état de reprise écrit au PreCompact et relu par activation : best-effort, chaque source illisible disparaît de la capsule, rend \"\" en cas de panne, aucune décision, aucun refus (la capsule n'est jamais une autorisation)"),
     "instruction_scan": (SUPPORT, "scan des fichiers d'instructions livré en contexte par activation (#667) : best-effort, rend \"\" en cas de panne, aucune décision, aucun refus"),
     "lease_brake": (GUARD, ""),
     "pause_brake": (GUARD, ""),
     "profile_floor": (SUPPORT, "plancher de profil lu par evidence_gate, activation, tool_policy et context_capsule : panne couverte par leurs cas"),
-    "read_only_arguments": (SUPPORT, "règles de lecture par verbe (curl, gh, journalctl, ss, systemctl) appelées par tool_facts dans classify_tool : une panne y remonte par classify_tool, couverte par le cas tool_facts"),
+    "search_globs": (SUPPORT, "confrontation des motifs de fichiers d'une recherche aux familles de secrets, appelée par tool_facts.classify_tool : une panne y remonte par classify_tool, couverte par le cas tool_facts"),
+    "read_only": (SUPPORT, "classement lecture / mutation d'une ligne de commande, appelé par tool_facts.classify_tool : une panne y lève dans classify_tool, couverte par le cas pre_destructive de tool_facts"),
+    "read_only_arguments": (SUPPORT, "règles de lecture par verbe (curl, gh, git, find, sed, awk…) appelées par read_only dans classify_tool : une panne y remonte par classify_tool, couverte par le cas tool_facts"),
+    "read_only_layout": (SUPPORT, "guillemets, commentaires et corps de heredoc d'une ligne de commande, lus par read_only et tool_facts dans classify_tool : une panne y remonte par classify_tool, couverte par le cas tool_facts"),
     "record": (SUPPORT, "journal d'observation (agent.dispatch / agent.miss) : ne change jamais une décision"),
     "repetition_guard": (GUARD, ""),
     "session_memory": (GUARD, ""),
+    "session_writes": (SUPPORT, "règle du compteur d'écritures appelée par evidence_trace (PostToolUse) : une panne y rend « compte » (échec fermé, counts_as_session_write), le refus hors tâche reste jugé par evidence_gate, couvert par ses cas"),
     "self_view": (SUPPORT, "ligne de vue de soi (bail, reprise) livrée en contexte par task_context : best-effort, rend \"\" en cas de panne, aucun refus"),
     "steering": (SUPPORT, "consignes du cockpit livrées en contexte : aucune décision, aucun refus"),
     "subagent_gate": (GUARD, ""),
@@ -596,6 +677,8 @@ MODULES: dict[str, tuple[str, str]] = {
     "tool_facts": (GUARD, ""),
     "tool_policy": (GUARD, ""),
     "write_proof": (GUARD, ""),
+    "write_proof_languages": (SUPPORT, "preuve d'écriture dans sed, awk et les interpréteurs, appelée par write_proof.proves_write sous son filet : une panne y lève dans proves_write, qui rend faux (refus sans révocation), couverte par le cas write_proof"),
+    "write_proof_programs": (SUPPORT, "preuve d'écriture de git, des archives et des outils à fichier de sortie, appelée par write_proof.proves_write sous son filet : une panne y lève dans proves_write, qui rend faux (refus sans révocation), couverte par le cas write_proof"),
 }
 #: Modules qui ne sont pas des décisions : le vocabulaire commun et le registre.
 INFRASTRUCTURE = frozenset({"__init__", "_shared"})

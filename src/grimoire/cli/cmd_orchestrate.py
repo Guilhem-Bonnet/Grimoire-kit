@@ -253,6 +253,9 @@ def _render_lot2(report: TickReport) -> None:
     """Lancements, nettoyages du janitor et état du disjoncteur (#876, lot 2)."""
     for launch in report.launches:
         console.print(f"Lancement {launch.status} : {launch.task_id} — {launch.detail}")
+    for task_id, decision in report.routes:
+        target = "fort (hôte, opus)" if decision.strong else "habituel"
+        console.print(f"Routage prévu : {task_id} — {target} : {decision.reason}")
     for review in report.reviews:
         console.print(f"Relecture {review.action} {review.status} : {review.task_id} — {review.detail}")
     for merge in report.merges:

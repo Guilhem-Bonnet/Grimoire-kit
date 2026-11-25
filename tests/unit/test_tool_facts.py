@@ -20,6 +20,7 @@ import pytest
 
 from grimoire.hosts.decisions import classify_tool, command_surface
 from grimoire.hosts.decisions.tool_facts import is_read_only_command
+from grimoire.policies.schemas import ActionKind, MutationClass
 
 # ── find: -delete, -exec ────────────────────────────────────────────────────
 
@@ -438,3 +439,39 @@ def test_a_symlink_to_the_control_key_is_still_the_key(real_home, tmp_path) -> N
 )
 def test_other_reads_stay_allowed(real_home, command: str) -> None:  # type: ignore[no-untyped-def]
     assert not classify_tool("Bash", {"command": command}).secret_target, command
+
+
+# ── Harness Copilot (#1280) ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("tool", "payload"), [("create", {"path": "a.py", "file_text": "x"}), ("Write", {"file_path": "a.py"})]
+)
+def test_copilot_create_tool_is_classified_as_a_write(tool: str, payload: dict) -> None:
+    facts = classify_tool(tool, payload)
+    assert facts.kind is ActionKind.FILE_WRITE
+    assert facts.mutation is MutationClass.MUTATION_CONTROLLED
+
+
+@pytest.mark.parametrize(
+    ("tool", "is_write"), [("create", True), ("Create", True), ("create_issue", False), ("recreate_index", False)]
+)
+def test_create_is_a_write_only_as_a_whole_name(tool: str, is_write: bool) -> None:
+    """``create`` seul est l'outil de fichier ; en sous-chaîne il capturerait des outils MCP."""
+    assert (classify_tool(tool, {"path": "a.py"}).kind is ActionKind.FILE_WRITE) is is_write
+
+
+def test_create_content_reaches_the_profile_downgrade_guard() -> None:
+    """L'argument de contenu d'un ``create`` Copilot est ``file_text``."""
+    facts = classify_tool(
+        "create", {"path": "_grimoire/standard/standard-profile.yaml", "file_text": "profile: minimal\n"}
+    )
+    assert facts.standard_profile_write == "minimal"
+    floor = classify_tool("create", {"path": "_grimoire/standard/profile-floor.yaml", "file_text": "floor: governed\n"})
+    assert floor.profile_floor_write == "governed"
+
+
+def test_copilot_edit_content_reaches_the_profile_downgrade_guard() -> None:
+    """L'argument de remplacement d'un ``edit`` Copilot est ``new_str``."""
+    facts = classify_tool("edit", {"path": "_grimoire/standard/standard-profile.yaml", "new_str": "profile: minimal"})
+    assert facts.standard_profile_write == "minimal"

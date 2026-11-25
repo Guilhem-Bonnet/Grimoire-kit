@@ -34,7 +34,7 @@ from grimoire.missions.verifiability import Verifiability, classify
 if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask, TaskCheck
 
-__all__ = ["NoDeclaredChecksError", "UnapprovedChecksError", "VerifyOutcome", "verify_task"]
+__all__ = ["VERIFIED_HEAD_CHECK", "NoDeclaredChecksError", "UnapprovedChecksError", "VerifyOutcome", "verify_task"]
 
 
 class NoDeclaredChecksError(ValueError):
@@ -63,6 +63,19 @@ class VerifyOutcome:
         """
         coverage = self.pack.coverage
         return coverage.acceptance_missing if coverage is not None else ()
+
+
+VERIFIED_HEAD_CHECK = "verified-head"
+
+
+def _head_of(project_root: Path) -> str:
+    import subprocess
+
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project_root, capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
 
 
 def _reason(check: TaskCheck, result: CheckResult) -> str:
@@ -137,6 +150,10 @@ def verify_task(task: MissionTask, project_root: Path, evidence_root: Path) -> V
     # humain » : le critère reste ``acceptance_missing`` et la fermeture est
     # refusée, au lieu d'un pack sans critère à opposer qui passait la gate.
     acceptance = () if classify(task) is Verifiability.V0 else task.acceptance
+    head = _head_of(project_root)
+    if head:
+        # Lie les commandes à la tête qu'elles ont vérifiée : le merger refuse un verdict d'une tête antérieure (#1257).
+        verdict_checks.append(VerificationCheck(id=VERIFIED_HEAD_CHECK, result=VerdictResult.PASSED, reason=head))
     service = EvidenceService(evidence_root)
     pack = service.create_pack(task.id, EvidenceProfile.LIGHT, items, acceptance=acceptance)
     verdict = service.verify(pack, extra_checks=tuple(verdict_checks))

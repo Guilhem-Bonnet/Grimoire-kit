@@ -719,3 +719,141 @@ class TestUpActivationContextRefresh:
         assert "activation-context.md" in result.output
         # Read-only: the file on disk is untouched.
         assert context_path.read_text(encoding="utf-8") == _STALE_824_CHAR_ACTIVATION_CONTEXT
+
+
+class TestUpRespectsEnabledHosts:
+    """`up` applique la sélection de `host sync` : jamais un hôte non déclaré."""
+
+    _OTHERS = (".zed", ".kimi-code", ".opencode", ".codex", ".rules")
+
+    @staticmethod
+    def _declare(target: Path, enabled: str | None) -> None:
+        import re
+
+        cfg = target / "project-context.yaml"
+        text = re.sub(r"^hosts:\n  enabled:.*\n", "", cfg.read_text(encoding="utf-8"), flags=re.MULTILINE)
+        if enabled is not None:
+            text = text.rstrip("\n") + f"\n\nhosts:\n  enabled: {enabled}\n"
+        cfg.write_text(text, encoding="utf-8")
+
+    @staticmethod
+    def _purge(target: Path, names: tuple[str, ...]) -> None:
+        import shutil
+
+        for name in names:
+            path = target / name
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+
+    def _up(self, runner, cli_app, target: Path, *extra: str):
+        return runner.invoke(cli_app, ["-o", "json", "up", str(target), "--backend", "local", *extra])
+
+    def test_declared_hosts_only_are_written(self, runner, cli_app, tmp_path: Path) -> None:
+        target = tmp_path / "proj"
+        assert self._up(runner, cli_app, target).exit_code == 0
+        self._declare(target, "[claude]")
+        self._purge(target, self._OTHERS)
+
+        result = self._up(runner, cli_app, target)
+        assert result.exit_code == 0, result.output
+        assert (target / ".claude").is_dir()
+        for name in self._OTHERS:
+            assert not (target / name).exists(), name
+
+    def test_dry_run_names_the_selected_hosts(self, runner, cli_app, tmp_path: Path) -> None:
+        target = tmp_path / "proj"
+        assert self._up(runner, cli_app, target).exit_code == 0
+        self._declare(target, "[claude]")
+        result = self._up(runner, cli_app, target, "--dry-run")
+        steps = {s["step"]: s for s in json.loads(result.stdout)["steps"]}
+        assert steps["host_sync"]["detail"] == "would sync host surfaces (claude)"
+
+    def test_dry_run_with_no_enabled_host_says_so(self, runner, cli_app, tmp_path: Path) -> None:
+        target = tmp_path / "proj"
+        assert self._up(runner, cli_app, target).exit_code == 0
+        self._declare(target, "[]")
+        result = self._up(runner, cli_app, target, "--dry-run")
+        steps = {s["step"]: s for s in json.loads(result.stdout)["steps"]}
+        assert "none enabled" in steps["host_sync"]["detail"]
+
+    def test_files_of_an_undeclared_host_are_reported_not_removed(
+        self,
+        runner,
+        cli_app,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        assert self._up(runner, cli_app, target).exit_code == 0
+        self._declare(target, "[claude]")
+        self._purge(target, self._OTHERS)
+        forced = runner.invoke(
+            cli_app,
+            ["host", "sync", "--host", "zed", "--force-host", "--project-root", str(target)],
+        )
+        assert forced.exit_code == 0, forced.output
+        written = sorted(p for p in target.rglob("*") if p.is_file() and ".zed" in p.parts)
+        assert written
+
+        result = self._up(runner, cli_app, target)
+        assert result.exit_code == 0, result.output
+        steps = {s["step"]: s for s in json.loads(result.stdout)["steps"]}
+        detail = steps["host_sync"]["detail"]
+        assert "not in hosts.enabled" in detail
+        assert "grimoire host sync --prune-disabled" in detail
+        assert "+" in detail and "zed" in detail
+        assert all(p.exists() for p in written)
+
+    def test_without_the_key_up_and_host_sync_select_the_same_hosts(
+        self,
+        runner,
+        cli_app,
+        tmp_path: Path,
+    ) -> None:
+        from grimoire.hosts.detection import enabled_host_ids
+        from grimoire.hosts.emitters import supported_hosts
+        from grimoire.hosts.sync import selected_host_ids
+
+        target = tmp_path / "proj"
+        assert self._up(runner, cli_app, target).exit_code == 0
+        self._declare(target, None)
+        (target / ".gemini").mkdir(exist_ok=True)
+
+        expected = [h for h in supported_hosts() if h in enabled_host_ids(target)]
+        assert selected_host_ids(target) == expected
+        assert selected_host_ids(target, frozenset(expected[:1])) == expected[:1]
+
+        steps = {s["step"]: s for s in json.loads(self._up(runner, cli_app, target, "--dry-run").stdout)["steps"]}
+        from grimoire.hosts.detection import alias_for_host
+
+        assert steps["host_sync"]["detail"] == (
+            f"would sync host surfaces ({', '.join(alias_for_host(h) for h in expected) or 'none enabled'})"
+        )
+
+    @pytest.mark.parametrize("enabled", ["[claude]", "[claude, cursor]", "[]"])
+    def test_up_and_host_sync_write_the_same_files(
+        self,
+        runner,
+        cli_app,
+        tmp_path: Path,
+        enabled: str,
+    ) -> None:
+        a, b = tmp_path / "a", tmp_path / "b"
+        for target in (a, b):
+            assert self._up(runner, cli_app, target).exit_code == 0
+            self._declare(target, enabled)
+            self._purge(target, (".claude", ".cursor", *self._OTHERS, ".gemini", ".github/copilot-instructions.md"))
+        assert self._up(runner, cli_app, a).exit_code == 0
+        sync = runner.invoke(cli_app, ["host", "sync", "--host", "all", "--project-root", str(b)])
+        assert sync.exit_code == 0, sync.output
+
+        def tops(root: Path) -> set[str]:
+            return {
+                p.name
+                for p in root.iterdir()
+                if p.name.startswith(".")
+                and p.name in {".claude", ".cursor", ".zed", ".kimi-code", ".opencode", ".codex", ".rules", ".gemini"}
+            }
+
+        assert tops(a) == tops(b)

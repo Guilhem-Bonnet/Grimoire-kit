@@ -25,6 +25,7 @@ from ruamel.yaml.error import YAMLError
 
 from grimoire.core.exceptions import GrimoireRegistryError
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.providers.capabilities import CapabilityPairs, parse_capabilities
 
 #: Chemin relatif du registre, projet par projet — même constante que
 #: ``grimoire.core.agentic_standard.LLM_PROVIDER_REGISTRY_FILE``, redéclarée
@@ -107,6 +108,8 @@ class ModelSpec:
     id: str
     tier: str
     pricing: ModelPricing | None = None
+    #: Bloc ``capabilities:`` du modèle (#1281 L3), validé ; vide s'il n'est pas déclaré.
+    capabilities: CapabilityPairs = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,8 +130,12 @@ class ProviderSpec:
     invocation: str | None = None
     models: tuple[ModelSpec, ...] = field(default_factory=tuple)
     anthropic_base_url: str | None = None
+    #: Racine d'une passerelle (``provider_type: litellm`` : le proxy LiteLLM, sans ``/v1``), pour la sonde.
+    base_url: str | None = None
     allowed_data_classes: tuple[str, ...] = ()
     forbidden_data_classes: tuple[str, ...] = ()
+    #: Bloc ``capabilities:`` du fournisseur (#1281 L3), validé ; vide s'il n'est pas déclaré.
+    capabilities: CapabilityPairs = ()
 
     def models_for_tier(self, tier: str) -> tuple[ModelSpec, ...]:
         """Modèles déclarés pour *tier*, dans l'ordre du registre."""
@@ -213,7 +220,14 @@ def _model_specs(value: Any) -> tuple[ModelSpec, ...]:
         tier = entry.get("tier")
         if not model_id or not tier:
             continue
-        specs.append(ModelSpec(id=str(model_id), tier=str(tier), pricing=_model_pricing(entry.get("pricing"))))
+        specs.append(
+            ModelSpec(
+                id=str(model_id),
+                tier=str(tier),
+                pricing=_model_pricing(entry.get("pricing")),
+                capabilities=parse_capabilities(entry.get("capabilities")),
+            )
+        )
     return tuple(specs)
 
 
@@ -238,6 +252,7 @@ def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
     currency = entry.get("currency")
     invocation = entry.get("invocation")
     base_url = entry.get("anthropic_base_url")
+    gateway_url = entry.get("base_url")
     data_policy = entry.get("data_policy")
     data_policy = data_policy if isinstance(data_policy, dict) else {}
     return ProviderSpec(
@@ -251,8 +266,10 @@ def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
         invocation=str(invocation) if isinstance(invocation, str) and invocation else None,
         models=_model_specs(entry.get("models")),
         anthropic_base_url=str(base_url) if isinstance(base_url, str) and base_url else None,
+        base_url=gateway_url.strip() if isinstance(gateway_url, str) and gateway_url.strip() else None,
         allowed_data_classes=_str_tuple(data_policy.get("allowed_data_classes")),
         forbidden_data_classes=_str_tuple(data_policy.get("forbidden_data_classes")),
+        capabilities=parse_capabilities(entry.get("capabilities")),
     )
 
 

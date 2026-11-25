@@ -416,6 +416,54 @@ class TestTraceLedger:
         t2 = _make_trace(ledger, run_id="RUN-seq")
         assert t1.id != t2.id
 
+    def test_auto_id_counts_only_its_own_run_without_rebuilding_traces(self, tmp_path, monkeypatch) -> None:
+        """Chaque hook ``PreToolUse`` passe ici sous verrou : aucune trace n'est reconstruite.
+
+        Une valeur texte qui cite la clé (``"run_id": "RUN-a"``) est échappée dans
+        le JSON et ne compte pas.
+        """
+        ledger = TraceLedger(tmp_path)
+        assert _make_trace(ledger, run_id="RUN-a").id == "TRC-RUN-a-001"
+        _make_trace(ledger, run_id="RUN-b")
+        ledger.record(
+            run_id="RUN-c",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="r",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            tags=['"run_id": "RUN-a"'],
+        )
+
+        _make_trace(ledger, run_id="RUN-é")
+
+        def no_rebuild(_data):
+            raise AssertionError("_next_id ne doit pas reconstruire les traces")
+
+        monkeypatch.setattr(TraceRecord, "from_dict", staticmethod(no_rebuild))
+        assert ledger._next_id("RUN-a") == "TRC-RUN-a-002"
+        assert ledger._next_id("RUN-é") == "TRC-RUN-é-002"
+
+    def test_record_gives_up_when_the_lock_stays_held(self, tmp_path) -> None:
+        """Un hook passe un délai court : la trace est perdue, la réponse à l'hôte non."""
+        import pytest
+
+        from grimoire.core.fsio import locked
+
+        ledger = TraceLedger(tmp_path)
+        with locked(tmp_path / "traces.jsonl"), pytest.raises(TimeoutError):
+            ledger.record(
+                run_id="RUN-x",
+                workflow_instance_id="",
+                mission_id="",
+                task_id="",
+                recipe_id="r",
+                outcome=TraceOutcome.SUCCESS,
+                started_at="2026-01-01T00:00:00+00:00",
+                lock_timeout=0.05,
+            )
+
     def test_oldest_started_at_empty_ledger(self, tmp_path) -> None:
         ledger = TraceLedger(tmp_path)
         assert ledger.oldest_started_at() is None

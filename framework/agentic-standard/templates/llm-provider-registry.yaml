@@ -38,6 +38,16 @@ metadata:
 #                   #       cache_write_1h_per_mtok: 0.54
 # Un tier ou une currency hors de ce vocabulaire est une erreur de vérification
 # (providers.model_tier_invalid / providers.currency_invalid).
+#   capabilities : capacités déclarées (épique #1281, lot L3), au niveau du
+#                 fournisseur ou d'un modèle (le modèle l'emporte) :
+#                   {openai_compatible: true, anthropic_compatible: true,
+#                    tools: true, structured_output: true, vision: false,
+#                    context_window: 128000, thinking: true, prompt_cache: true}
+#                 Toutes facultatives : une capacité absente vaut « inconnue »,
+#                 jamais « oui ». Une valeur déclarée prime sur la sonde
+#                 (`grimoire providers probe --capabilities`) et sur la doc du
+#                 fournisseur ; `grimoire providers capabilities` affiche la
+#                 provenance de chaque valeur.
 
 providers:
   - id: "github-copilot"

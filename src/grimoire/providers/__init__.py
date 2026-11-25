@@ -7,11 +7,15 @@ après échec et le résultat d'audit (``_grimoire-output/providers-state.json``
 ``routing`` combine les deux pour répondre à une seule question : quel
 fournisseur appeler maintenant pour ce palier ? ``audit`` (issue #330) sonde
 sans dépenser — PATH, ``--version``, modèles Ollama — pour nourrir cet état.
+``capabilities`` et ``capability_probe`` (#1281, lot L3) décrivent ce que chaque
+fournisseur et modèle sait faire, avec la provenance de chaque valeur.
 """
 
 from __future__ import annotations
 
 from grimoire.providers.audit import ProbeResult, audit_providers, probe_provider
+from grimoire.providers.capabilities import Capability, CapabilityProbe, ModelCapabilities, ProviderCapabilities
+from grimoire.providers.capability_probe import probe_capabilities, read_capabilities
 from grimoire.providers.quota import QuotaObservation, QuotaSignal, classify_failure, observe_window
 from grimoire.providers.registry import (
     REGISTRY_FILE,
@@ -46,9 +50,13 @@ __all__ = [
     "REGISTRY_FILE",
     "SUPPORTED_CURRENCIES",
     "SUPPORTED_MODEL_TIERS",
+    "Capability",
+    "CapabilityProbe",
+    "ModelCapabilities",
     "ModelPricing",
     "ModelSpec",
     "ProbeResult",
+    "ProviderCapabilities",
     "ProviderRegistryError",
     "ProviderRuntimeState",
     "ProviderSpec",
@@ -63,7 +71,9 @@ __all__ = [
     "cooling_down_entry",
     "load_state",
     "observe_window",
+    "probe_capabilities",
     "probe_provider",
+    "read_capabilities",
     "read_default_fallback_chain",
     "read_model_pricing",
     "read_registry",

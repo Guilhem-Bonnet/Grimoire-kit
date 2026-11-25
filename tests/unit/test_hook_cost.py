@@ -153,6 +153,42 @@ def test_the_closure_decision_still_reaches_the_engine() -> None:
     assert callable(check_evidence_gates)
 
 
+#: Ce qu'un ``PreToolUse`` Bash ordinaire n'a pas à charger : le registre des
+#: missions (``MissionLedger``, ses schémas et ses règles, ~60 ms et 24
+#: modules), autrefois tiré par l'``__init__`` du paquet dès que la garde lisait
+#: un bail ou une pause.
+_BASH_GUARD_FORBIDDEN = (
+    "grimoire.missions.ledger",
+    "grimoire.missions.schemas",
+    "grimoire.missions.task_flow_adapter",
+)
+
+
+def test_the_bash_guard_does_not_load_the_mission_ledger(tmp_path: Path) -> None:
+    (tmp_path / "_grimoire").mkdir()  # projet reconnu : la trace de décision est aussi écrite
+    probe = (
+        "import sys, os\n"
+        "sys.argv = ['grimoire-hook', '--host', 'claude', '--event', 'PreToolUse', "
+        f"'--project-root', {str(tmp_path)!r}]\n"
+        "r, w = os.pipe()\n"
+        "os.write(w, b'{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", "
+        "\"tool_input\": {\"command\": \"ls\"}}')\n"
+        "os.close(w)\n"
+        "os.dup2(r, 0)\n"
+        "from grimoire.hosts.hook_entry import main\n"
+        "main()\n"
+        "assert 'grimoire.missions.lease' in sys.modules, 'le bail n a pas été lu : sonde vide'\n"
+        f"print(','.join(m for m in {_BASH_GUARD_FORBIDDEN!r} if m in sys.modules), file=sys.stderr)\n"
+    )
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True, env=env, encoding="utf-8"
+    )
+    assert "permissionDecision" in result.stdout, result.stdout
+    leaked = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
+    assert not leaked, f"un PreToolUse Bash a chargé {leaked} — importer à l'usage, pas au module"
+
+
 def _run_one_decision(decision_id: str, payload: dict[str, object], project_root: str) -> subprocess.CompletedProcess[str]:
     """Run *decision_id* end to end (``grimoire.hosts.runtime.main``) in a clean subprocess.
 

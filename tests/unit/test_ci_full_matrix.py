@@ -230,30 +230,44 @@ def test_e2e_conftest_wiring_is_structural() -> None:
     assert not top_level_skips
 
 
-def test_windows_et_macos_passent_la_suite_complete_hors_pr_seulement() -> None:
-    """2026-10-27 : chaque réalignement de PR relançait ~45 min de Windows. Sur une PR, Windows et macOS rendent leur
-    check requis sans la suite ; sur main, la nuit et à la demande, ils la passent. Ubuntu la passe toujours."""
+def test_windows_et_macos_passent_la_suite_complete_la_nuit_et_a_la_demande_seulement() -> None:
+    """2026-11-20 : ~55 min de Windows par push sur main occupaient les runners. Jamais sur PR (le check requis
+    se rend sans la suite), jamais sur push main (le job n'existe pas), oui sur la passe de nuit et à la demande."""
     workflow = YAML(typ="safe").load(_CI.read_text(encoding="utf-8"))
     triggers = workflow.get("on") or workflow.get(True)
     assert "schedule" in triggers and "workflow_dispatch" in triggers and "push" in triggers
     job = workflow["jobs"]["test"]
     gate = job["env"]["FULL_SUITE"]
-    assert "matrix.os == 'ubuntu-latest'" in gate and "github.event_name != 'pull_request'" in gate
+    assert "github.event_name == 'schedule'" in gate and "github.event_name == 'workflow_dispatch'" in gate
+    assert "pull_request" not in gate and "push" not in gate
+    assert job["if"] == "github.event_name != 'push'"  # absent de main ; présent sur PR pour le check requis
     suite = next(s for s in job["steps"] if "pytest tests/unit/" in str(s.get("run", "")))
     assert suite.get("if") == "env.FULL_SUITE == 'true'"
     assert {"windows-latest", "macos-latest"} <= set(job["strategy"]["matrix"]["os"])  # le nom du check requis reste
 
 
-def test_une_pr_ne_lance_le_job_test_que_pour_une_release() -> None:
-    gate = _job("test")["env"]["FULL_SUITE"]
-    assert "startsWith(github.event.pull_request.title, 'chore: release')" in gate
-    assert {"3.12", "3.13"} <= set(_job("test")["strategy"]["matrix"]["python-version"])  # noms des checks requis
+def test_ubuntu_passe_par_les_parts_sur_main_et_une_release_seulement_pour_le_3_13() -> None:
+    """Ubuntu 3.12 et 3.13 ne sont plus portés par le job `test` : parts + agrégateur au nom du check requis.
+    Le 3.13 complet ne tourne que hors PR ou sur une PR de release dont le diff sort des fichiers de release
+    (garde de ci-scope) ; sinon l'agrégateur rend le check sans suite. La release légère ne le relance pas."""
+    test = _job("test")
+    excluded = test["strategy"]["matrix"]["exclude"]
+    assert {"os": "ubuntu-latest", "python-version": "3.12"} in excluded
+    assert {"os": "ubuntu-latest", "python-version": "3.13"} in excluded
+    assert {"3.12", "3.13"} <= set(test["strategy"]["matrix"]["python-version"])
+    assert _job("test-aggregate-313")["name"] == "Tests (Python 3.13, ubuntu-latest)"
+    assert _job("test-shard-313")["if"] == "needs.changes.outputs.always_full == 'true'"
+    scope = next(s for s in _job("changes")["steps"] if s.get("id") == "scope")["env"]["ALWAYS_FULL"]
+    assert scope == "${{ github.event_name != 'pull_request' }}"
+    step = next(s for s in _job("changes")["steps"] if s.get("id") == "scope")
+    assert "--release" in step["run"] and "grep -qx \"full=true\"" in step["run"]
+    assert "chore: release" in step["env"]["RELEASE"]
 
 
 def test_l_e2e_ne_saute_jamais_sa_suite_hors_pr() -> None:
     decision = _job("e2e-gate")
     gate = next(s for s in decision["steps"] if s.get("id") == "gate")["env"]["RUN_E2E"]
-    assert "github.event_name != 'pull_request'" in gate and "chore: release" in gate
+    assert "github.event_name != 'pull_request'" in gate and "chore: release" not in gate  # release légère : seul le cockpit déclenche
     filtres = next(s for s in decision["steps"] if s.get("id") == "filter")["with"]["filters"]
     assert "web/**" in filtres and "tests/e2e/**" in filtres
     assert _job("e2e")["if"] == "needs.e2e-gate.outputs.run == 'true'"
@@ -291,15 +305,29 @@ def test_la_suite_complete_avec_coeur_rust_reste_sur_main() -> None:
     assert all(s["if"] == "github.event_name != 'pull_request'" for s in etapes)
 
 
-def test_windows_framework_tourne_hors_pr_et_sur_les_releases() -> None:
+def test_windows_framework_tourne_la_nuit_et_a_la_demande_seulement() -> None:
     workflow = YAML(typ="safe").load((_CI.parent / "ci-validate.yml").read_text(encoding="utf-8"))
     triggers = workflow.get("on") or workflow.get(True)
     assert "schedule" in triggers and "workflow_dispatch" in triggers
     assert "src/**" in triggers["push"]["paths"]
     job = workflow["jobs"]["framework-tests"]
     gate = job["env"]["FULL_SUITE"]
-    assert "github.event_name != 'pull_request'" in gate and "matrix.os == 'ubuntu-latest'" in gate
-    assert "chore: release" in gate
-    suite = next(s for s in job["steps"] if "pytest tests/test_" in str(s.get("run", "")))
+    assert "matrix.os == 'ubuntu-latest'" in gate
+    assert "github.event_name == 'schedule'" in gate and "github.event_name == 'workflow_dispatch'" in gate
+    assert "pull_request" not in gate and "push" not in gate and "chore: release" not in gate
+    suite = next(s for s in job["steps"] if "TARGETS=(tests/test_*.py)" in str(s.get("run", "")))
     assert suite["if"] == "env.FULL_SUITE == 'true'"
     assert "windows-latest" in job["strategy"]["matrix"]["os"]  # le nom du check requis reste
+
+
+def test_une_pr_de_release_ne_relance_pas_la_suite_mais_garde_ses_gardes() -> None:
+    """La release ne change que version, notes, digests et budget : le push main a déjà testé le code.
+    Elle garde la garde de catalogue/CHANGELOG et le build de la roue ; un diff hors release remet la suite."""
+    build = _job("build")
+    garde = next(s for s in build["steps"] if "check-changelog-release" in str(s.get("run", "")))
+    assert "chore: release" in garde["if"] and "gen-kit-hashes.py --check" in garde["run"]
+    assert any("grimoire --version" in str(s.get("run", "")) for s in build["steps"])
+    assert _job("typecheck")  # ceremony budget
+    assert any("ceremony budget" in str(s.get("run", "")) for s in _job("typecheck")["steps"])
+    for name in ("test-shard", "test-shard-313", "e2e"):
+        assert "chore: release" not in str(_job(name).get("if", "")) + str(_job(name).get("env", ""))

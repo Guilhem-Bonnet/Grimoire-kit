@@ -118,14 +118,6 @@ _QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
 
 # ── Lite profile (issue Grimoire-kit#552, phase 2 lot 2.6) ─────────────────────
 
-_CI_MARKERS = (
-    ".github/workflows",
-    ".gitlab-ci.yml",
-    ".circleci/config.yml",
-    "azure-pipelines.yml",
-    ".travis.yml",
-    "Jenkinsfile",
-)
 _TEST_DIR_MARKERS = ("tests", "test", "spec", "__tests__")
 
 
@@ -136,7 +128,9 @@ def _looks_like_a_playground(target: Path) -> bool:
     surface the ``--lite`` suggestion in the wizard. It never changes what
     gets written; a false negative just means the suggestion isn't shown.
     """
-    if any((target / marker).exists() for marker in _CI_MARKERS):
+    from grimoire.core.ci_markers import has_ci
+
+    if has_ci(target):
         return False
     for name in _TEST_DIR_MARKERS:
         candidate = target / name
@@ -645,6 +639,10 @@ def _run_wizard(
     project_name = Prompt.ask("  [bold]Project name[/bold]", default=target.name)
     git_name = _git_user_name()
     user_name = Prompt.ask("  [bold]Your name[/bold]", default=git_name or "Developer")
+    moa = Prompt.ask(
+        "  [bold]Who owns the need (MOA — the human who validates requirements and signs off)?[/bold]",
+        default=user_name,
+    ).strip()
 
     # ── Step 2/5 · Preferences ────────────────────────────────────────
     console.print()
@@ -719,6 +717,7 @@ def _run_wizard(
     return {
         "project_name": project_name,
         "user_name": user_name,
+        "moa": moa,
         "language": language,
         "skill_level": deduction.skill_level,
         "archetypes": list(deduction.archetypes),
@@ -1227,7 +1226,11 @@ def run_init(
 
     # Phase 4: Interactive wizard or express mode
     project_name = name or target.name
-    user_name = _git_user_name() or "Developer"
+    git_name = _git_user_name()
+    user_name = git_name or "Developer"
+    # MOA (#1342) : sans question possible, le nom git est le seul humain connu ; sans lui, la section
+    # reste absente et `grimoire doctor` avertit plutôt que d'inventer un nom.
+    moa = git_name
     language = "Français"
     skill_level = "intermediate"
     offline = False
@@ -1258,6 +1261,7 @@ def run_init(
         )
         project_name = wizard_result["project_name"]
         user_name = wizard_result["user_name"]
+        moa = str(wizard_result.get("moa", ""))
         language = wizard_result["language"]
         skill_level = wizard_result["skill_level"]
         offline = bool(wizard_result.get("offline", False))
@@ -1317,6 +1321,7 @@ def run_init(
         force=force,
         profile=memory_profile,
         collection_prefix=collection_prefix,
+        moa=moa,
     )
     plan = scaffolder.plan()
 

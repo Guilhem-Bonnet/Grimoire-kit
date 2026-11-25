@@ -31,7 +31,14 @@ from rich.console import Console
 
 from grimoire.cli import cmd_setup
 from grimoire.cli.doctor_acp import check_acp_hosts
-from grimoire.cli.doctor_hooks import check_hook_commands, check_hook_path
+from grimoire.cli.doctor_codex import check_codex_hooks
+from grimoire.cli.doctor_copilot import check_copilot_hooks
+from grimoire.cli.doctor_hooks import (
+    check_copilot_guard_timeout,
+    check_guard_timeout,
+    check_hook_commands,
+    check_hook_path,
+)
 from grimoire.cli.doctor_instructions import check_instruction_files
 from grimoire.cli.doctor_mcp import check_mcp_processes, check_mcp_spec_http
 from grimoire.cli.env_checks import EnvCheck
@@ -505,6 +512,10 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         *check_mcp_json(target),
         check_mcp_processes(),
         *check_hook_commands(target),
+        *check_guard_timeout(target),
+        *check_copilot_guard_timeout(target),
+        *check_copilot_hooks(target),
+        *check_codex_hooks(target),
         *check_hook_path(target),
         *check_acp_hosts(target),
         *check_instruction_files(target),
@@ -876,7 +887,7 @@ def _step_override_review(state: _UpState, target: Path, *, blocked: bool) -> No
 
 
 def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bool) -> None:
-    """Synchronise every supported host surface after the kit tier refresh.
+    """Synchronise the project's enabled host surfaces after the kit tier refresh.
 
     ``refresh`` regenerates ``_grimoire/kit/`` and the agents it contains;
     the per-host surfaces (``.claude/``, ``.cursor/``, ``.codex/``,
@@ -887,23 +898,34 @@ def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bo
     still found dozens of files to write (issue #296) — nothing in `up`'s own
     output said the host surfaces were not part of what it had just done.
 
+    Same selection as ``grimoire host sync`` (:func:`selected_host_ids`):
+    ``hosts.enabled``, or detection when the key is absent — a host the project
+    does not declare is not written. Files already written for such a host are
+    reported, never removed (``host sync --prune-disabled`` does that).
+
     Never ``--force``: a file the project edited by hand is left alone here,
     exactly as ``grimoire host sync`` behaves by default.
     """
     if blocked:
         state.steps.append(StepResult("host_sync", "skipped", "no project configuration"))
         return
+    from grimoire.hosts.detection import alias_for_host
+    from grimoire.hosts.sync import selected_host_ids
+
+    selected = selected_host_ids(target)
     if dry_run:
-        state.steps.append(StepResult("host_sync", "planned", "would sync host surfaces (.claude/, .cursor/, .codex/, .gemini/)"))
+        names = ", ".join(alias_for_host(h) for h in selected) or "none enabled"
+        state.steps.append(StepResult("host_sync", "planned", f"would sync host surfaces ({names})"))
         return
     try:
         from grimoire.hosts.collect import build_surface
-        from grimoire.hosts.emitters import apply_plans, emitter_for, supported_hosts
-        from grimoire.hosts.sync import preserved_detail, unsynced_detail
+        from grimoire.hosts.emitters import apply_plans, emitter_for
+        from grimoire.hosts.sync import disabled_host_orphans, orphans_detail, preserved_detail, unsynced_detail
 
         surface = build_surface(target)
+        orphans = disabled_host_orphans(target, surface)
         plans = []
-        for host_id in supported_hosts():
+        for host_id in selected:
             emitter = emitter_for(host_id)
             if emitter is None:  # pragma: no cover - supported_hosts() only lists emitted hosts
                 continue
@@ -917,17 +939,18 @@ def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bo
     if problem:
         state.steps.append(StepResult("host_sync", "failed", problem))
         return
+    stale = orphans_detail(orphans)
 
     written = sum(len(r.written) for r in results)
     unchanged = sum(len(r.unchanged) for r in results)
     if written:
         state.steps.append(StepResult(
             "host_sync", "done",
-            f"{written} host artifact(s) written, {unchanged} unchanged, across {len(results)} host(s){preserved_detail(results, target)}",
+            f"{written} host artifact(s) written, {unchanged} unchanged, across {len(results)} host(s){preserved_detail(results, target)}{stale}",
         ))
         state.actions.append(f"Synced {written} host artifact(s)")
     else:
-        state.steps.append(StepResult("host_sync", "done", f"{len(results)} host(s) already in sync{preserved_detail(results, target)}"))
+        state.steps.append(StepResult("host_sync", "done", f"{len(results)} host(s) already in sync{preserved_detail(results, target)}{stale}"))
 
 
 def _step_structure(state: _UpState, target: Path, *, dry_run: bool) -> None:

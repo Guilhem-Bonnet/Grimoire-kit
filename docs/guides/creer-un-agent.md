@@ -125,17 +125,62 @@ et `cost` pour choisir un modèle (`reasoning: high` → `opus` quoi qu'il arriv
 sinon `cost: low` → `haiku` ; sinon `reasoning: low` → `haiku` ; sinon `inherit`,
 le modèle de la session). Le concierge illustre le premier cas : raisonnement
 élevé pour trier juste, mais invoqué à chaque tour — `cost: low` ne le
-rétrograde pas. Copilot, lui, ne reçoit pas cette affinité : son contrat
-`.github/agents/*.agent.md` n'accepte qu'un nom de modèle explicite ou une
-liste de repli, sans équivalent documenté de `inherit` ; `grimoire host sync
---host copilot` ne devine donc aucun nom de modèle et signale l'écart comme
-dégradation plutôt que de le taire. Le fichier de l'agent d'entrée émis pour
+rétrograde pas. Copilot reçoit la même affinité, traduite : `model:` n'est émis dans
+`.github/agents/*.agent.md` que si la persona a un palier (`opus`, `sonnet`,
+`haiku`) ET que `dispatch.copilot_models.<palier>` donne le nom Copilot de ce
+palier. Sans correspondance, ou pour `inherit`, rien n'est émis (le modèle du
+sélecteur s'applique) et `grimoire host sync --host copilot` signale l'écart
+comme dégradation « model affinity ». Cursor suit la même règle avec
+`dispatch.cursor_models.<palier>` (champ `model` de `.cursor/agents/*.md`, défaut
+`inherit`). `model-policy` n'est pas émis : sa valeur
+par défaut (`preferred`) laisse l'utilisateur changer de modèle, et le harness
+Copilot ne le transmet pas à son SDK (référence du fichier d'agent VS Code). Le fichier de l'agent d'entrée émis pour
 Claude Code porte en plus une « Politique de dispatch » (issue #329) : le
 modèle d'un sous-agent suit la classe de vérifiabilité de sa tâche
 (V0 → `haiku`, V1 → `sonnet`, V2 → le modèle de la session) et chaque
 sous-agent doit clore sa réponse par un bloc ```grimoire-uncertainties``` ;
 Copilot documente la même règle sans nom de modèle dans son README de
 surface, pour la raison ci-dessus.
+
+**La politique de dispatch est appliquée, pas seulement écrite.** Sous Claude
+Code, `grimoire host sync` (et donc `grimoire up`) émet un hook `PreToolUse`
+consultatif sur l'outil `Agent` (et `Task`, son ancien nom). Quand un appel
+omet `model`, le hook le complète :
+
+1. tâche réclamée de classe V0 ou V1 : le `recommended_model` de la classe,
+   le même que rendent `task_claim` et `task_context` ; classe V2 : rien n'est
+   imposé, le sous-agent garde le modèle de la session ;
+2. sans classe calculée, une heuristique sur la description de l'appel :
+   recherche, lecture ou mesure → `haiku` ; revue ou analyse simple →
+   `sonnet` ; écriture, sujet de jugement fort (audit, sécurité, architecture,
+   plan, conception) ou rien de reconnu → aucun modèle n'est imposé.
+
+Le hook ne remplace jamais un `model` explicite, ne touche pas un
+`subagent_type: "fork"` (qui hérite toujours du modèle parent) ni un agent de
+plugin (`plugin:agent`), et garde le `model:` d'une persona qui en déclare un
+autre que `inherit`, dans `.claude/agents/` du projet ou de l'utilisateur. Chaque
+modèle imposé est signalé à l'agent principal (`additionalContext`), affiché à
+l'utilisateur et noté au journal des traces (étiquettes `dispatch_model:<modèle>`
+et `dispatch_source:class|heuristic`). Le hook est borné à 3 s et sans
+`onFailure: block` : une panne ou un dépassement laisse passer l'appel tel quel.
+
+Pour le désactiver, dans `_grimoire/standard/orchestration-policy.yaml` :
+
+```yaml
+dispatch:
+  impose_model: off   # défaut : on
+```
+
+Toute valeur autre que `on`/`true`/`yes`, ou un fichier illisible, désactive le
+réglage : dans le doute, le hook n'impose rien.
+
+Sous GitHub Copilot, la même décision s'applique aux outils `task` et
+`runSubagent` (et `Agent`/`Task`), avec les mêmes exclusions. Elle garde aussi
+le `model:` d'un agent `.github/agents/<nom>.agent.md`. Copilot ne connaît pas
+les alias `haiku`/`sonnet` : le modèle n'est imposé que si le projet nomme le
+modèle Copilot de chaque palier sous `dispatch.copilot_models`. Sinon le palier
+recommandé est seulement dit à l'agent. Le détail par harness est dans
+[Hôtes](../reference/hotes.md).
 
 **Ce que `context:` change à l'émission (issue #379) :** sans cette clé, le
 fichier d'agent émis dit toujours à l'hôte de lire `_grimoire/_memory/shared-

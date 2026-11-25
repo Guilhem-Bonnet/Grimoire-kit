@@ -270,7 +270,9 @@ const KNOWN_TOP_KEYS: &[&str] = &[
     "source",
     "cockpit",
 ];
-const VALID_HOST_ALIASES: &[&str] = &["claude", "copilot", "codex", "cursor", "gemini", "opencode"];
+const VALID_HOST_ALIASES: &[&str] = &[
+    "claude", "copilot", "codex", "cursor", "gemini", "opencode", "kimi", "zed",
+];
 const KNOWN_HOSTS_KEYS: &[&str] = &["enabled", "preserve"];
 const VALID_EXECUTION_NEED_IDS: &[&str] = &[
     "test-runner",

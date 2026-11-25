@@ -1327,3 +1327,178 @@ def test_une_classe_de_donnees_non_declaree_garde_le_worker_sur_l_hote(route_pre
     (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
     assert lancement.payload["provider"] == ""
     assert "aucune classe de données" in lancement.payload["provider_refused"]
+
+
+# ── Routage fort des tâches qui visent des chemins sensibles (sensitive_route) ─
+
+
+def _route_sensible(projet: Path, *, route: str = "strong", extra: str = "") -> None:
+    write_policy(
+        projet,
+        extra=f"      provider: deepseek\n      tier: cheap\n      model_by_class: true\n      sensitive_route: {route}\n{extra}",
+    )
+
+
+def ready_v0_decrite(service: TaskService, title: str, description: str) -> str:
+    mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(title="Lot", origin="t", created_by="t")
+    task = service.ledger.create_task(
+        mission.id, title, acceptance=("pytest tests/x.py : le code de sortie vaut 0",), owner="amelia",
+        description=description, checks=(TaskCheck(cmd="pytest tests/x.py"),),
+    )
+    service.ledger.transition_task(task.id, TaskState.READY)
+    return task.id
+
+
+def test_une_tache_hors_chemins_sensibles_garde_le_worker_bon_marche(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete)
+    service = TaskService(route_prete)
+    tid = ready_v0_decrite(service, "doc", "Corriger la coquille dans `docs/guide.md`.")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "deepseek-chat"
+    assert "--settings" in argv
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert lancement.payload["provider"] == "deepseek"
+    assert "sensitive_route" not in lancement.payload
+
+
+def test_une_tache_qui_cite_un_hook_part_sur_le_modele_fort(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete)
+    service = TaskService(route_prete)
+    tid = ready_v0_decrite(service, "garde", "Durcir le hook `.github/hooks/scripts/gate.sh` et `src/grimoire/missions/launcher.py`.")
+
+    report = tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert "--settings" not in argv
+    assert "deepseek-chat" not in argv
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert lancement.payload["provider"] == ""
+    assert lancement.payload["model"] == "opus"
+    routed = lancement.payload["sensitive_route"]
+    assert routed["route"] == "strong"
+    assert ".github/hooks/scripts/gate.sh" in routed["paths"]
+    assert "src/grimoire/missions/launcher.py" in routed["paths"]
+    (outcome,) = report.launches
+    assert "routage fort (opus)" in outcome.detail
+    shown = runner.invoke(app, ["task", "show", tid, "--project-root", str(route_prete)])
+    assert "routage fort : opus" in shown.output, shown.output
+
+
+def test_politique_off_une_tache_sensible_reste_sur_le_worker_bon_marche(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete, route="off")
+    service = TaskService(route_prete)
+    tid = ready_v0_decrite(service, "garde", "Durcir `.github/workflows/ci.yml`.")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "deepseek-chat"
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert "sensitive_route" not in lancement.payload
+
+
+def test_un_motif_sensible_de_la_politique_s_ajoute_aux_chemins_reserves(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete, extra='      sensitive_paths: ["src/grimoire/policies/*"]\n')
+    service = TaskService(route_prete)
+    ready_v0_decrite(service, "politique", "Revoir src/grimoire/policies/engine.py")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"
+
+
+def test_le_plan_du_tick_montre_le_routage_prevu_sans_rien_lancer(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete)
+    service = TaskService(route_prete)
+    sensible = ready_v0_decrite(service, "garde", "Toucher pyproject.toml")
+    banale = ready_v0_decrite(service, "banale", "Rien de précis")
+
+    report = run_tick(route_prete, apply=False, exec_=host)
+
+    assert not host.of("claude", "--bg")
+    routes = dict(report.routes)
+    assert routes[sensible].strong
+    assert "pyproject.toml" in routes[sensible].reason
+    assert not routes[banale].strong
+    assert "aucun sensible" in routes[banale].reason  # ses critères citent tests/x.py, hors chemins sensibles
+    assert {r["task_id"] for r in report.to_dict()["routes"]} == {sensible, banale}
+
+    result = runner.invoke(app, ["orchestrate", "tick", "--project-root", str(route_prete)])
+    assert result.exit_code == 0, result.output
+    assert f"Routage prévu : {sensible} — fort" in result.output
+
+
+# ── L5 : table palier → modèle ────────────────────────────────────────────────
+
+
+def _append_dispatch(root: Path, block: str) -> None:
+    path = root / POLICY
+    path.write_text(path.read_text(encoding="utf-8") + "dispatch:\n  models:\n" + block, encoding="utf-8")
+
+
+def test_une_table_projet_ne_fait_jamais_descendre_la_route_sensible_sous_opus(route_prete: Path, host: FakeHost) -> None:
+    """`strong: haiku` dans la table du projet : la route sensible garde le défaut fort du kit (opus)."""
+    _route_sensible(route_prete)
+    _append_dispatch(route_prete, "    claude-code:\n      strong: haiku\n")
+    service = TaskService(route_prete)
+    tid = ready_v0_decrite(service, "garde", "Durcir le hook `.github/hooks/scripts/gate.sh`.")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert lancement.payload["model"] == "opus"
+
+
+def test_le_palier_du_worker_suit_la_table_du_projet(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      tier: strong\n")
+    _append_dispatch(projet, "    claude:\n      strong: claude-opus-4-7\n")
+    ready(service, "palier")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "claude-opus-4-7"
+
+
+def test_un_palier_sans_modele_ne_tourne_pas_en_silence_sur_la_session(
+    projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un palier demandé que la table ne traduit pas : la tâche attend, avec un motif, sans session lancée."""
+    import grimoire.missions.launcher as launcher_module
+
+    write_policy(projet, extra="      tier: strong\n")
+    monkeypatch.setattr(launcher_module, "tier_model", lambda _root, _tier: "")
+    tid = ready(service, "palier")
+    report = tick(projet, host)
+    assert host.of("claude", "--bg") == []
+    (outcome,) = report.launches
+    assert outcome.status == "deferred" and "aucun modèle pour le palier strong" in outcome.detail
+    assert service.require(tid).status is TaskState.READY
+
+
+def test_tools_false_au_fournisseur_ne_vide_pas_la_table(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Registre et sonde qui disent `tools: false` partout : les défauts du kit restent, le worker garde opus."""
+    import json
+
+    (projet / "_grimoire" / "standard" / "llm-provider-registry.yaml").write_text(
+        '$schema: "grimoire-llm-provider-registry/v1"\nproviders:\n'
+        '  - id: "anthropic"\n    enabled: true\n    provider_type: "hosted"\n    capabilities:\n      tools: false\n',
+        encoding="utf-8",
+    )
+    probes = projet / "_grimoire-output" / "providers-capabilities.json"
+    probes.parent.mkdir(parents=True, exist_ok=True)
+    models = {name: {"tools": False} for name in ("haiku", "sonnet", "opus")}
+    probes.write_text(
+        json.dumps({"providers": {"anthropic": {"measured": True, "note": "", "endpoint": "x", "models": models}}}),
+        encoding="utf-8",
+    )
+    write_policy(projet, extra="      tier: strong\n")
+    ready(service, "palier")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"

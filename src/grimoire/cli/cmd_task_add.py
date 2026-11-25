@@ -260,8 +260,9 @@ def task_classify(
     from grimoire.missions.dispatch_advice import dispatch_advice, model_hint
     from grimoire.missions.verifiability import as_dict, diagnose
 
-    task = _require_task(_service(project_root, ledger_root), task_id)
-    advice = dispatch_advice(task)
+    service = _service(project_root, ledger_root)
+    task = _require_task(service, task_id)
+    advice = dispatch_advice(task, service.home_root)
     verifiabilite = as_dict(task)
     if _fmt(ctx) == "json":
         payload = {

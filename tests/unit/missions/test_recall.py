@@ -18,6 +18,7 @@ from grimoire.memory.manager import MemoryManager
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.recall import (
     DEFAULT_LEDGER_RELPATH,
+    MAX_HIT_CHARS,
     build_task_recall,
     consolidate_task_memory,
 )
@@ -211,12 +212,12 @@ def test_consolidation_n_ecrit_que_sur_cloture_ou_blocage(
 def test_consolidation_est_idempotente_sur_le_meme_motif(
     tmp_path: Path, ledger: MissionLedger, memoire: MemoryManager
 ) -> None:
-    """Reclôturer sur le même motif ne double pas la mémoire — `remember` upserte."""
+    """Reclôturer sur la même leçon ne double pas la mémoire — `remember` upserte."""
     mission = ledger.create_mission(title="Travaux", origin="test")
     task = ledger.create_task(mission.id, "Tâche répétée", acceptance=(ACCEPTATION,))
 
-    consolidate_task_memory(memoire, ledger, task, TaskState.CLOSED, actor="a")
-    consolidate_task_memory(memoire, ledger, task, TaskState.CLOSED, actor="a")
+    consolidate_task_memory(memoire, ledger, task, TaskState.CLOSED, actor="a", lesson="garder le verrou court")
+    consolidate_task_memory(memoire, ledger, task, TaskState.CLOSED, actor="a", lesson="garder le verrou court")
 
     assert memoire.count() == 1
 
@@ -257,3 +258,76 @@ def test_sans_manager_memoire_le_rappel_reste_celui_du_ledger_seul(
     recall = build_task_recall(tmp_path, task.id, memory_manager=None)
 
     assert recall.memory_hits == ()
+
+
+# ── levier 6 : la mémoire ne garde que ce que le ledger ne sait pas ──────────
+
+
+def test_une_cloture_sans_lecon_n_ecrit_rien(tmp_path: Path, ledger: MissionLedger, memoire: MemoryManager) -> None:
+    """L'ancienne fiche « Tâche X clôturée : titre. Critères : … » recopiait le ledger."""
+    mission = ledger.create_mission(title="Travaux", origin="test")
+    task = ledger.create_task(mission.id, "Configurer le webhook", acceptance=(ACCEPTATION,))
+
+    assert consolidate_task_memory(memoire, ledger, task, TaskState.CLOSED, actor="a", reason="fini") is None
+    assert memoire.count() == 0
+
+
+def test_une_cloture_avec_lecon_ne_garde_que_la_lecon(
+    tmp_path: Path, ledger: MissionLedger, memoire: MemoryManager
+) -> None:
+    mission = ledger.create_mission(title="Travaux", origin="test")
+    task = ledger.create_task(mission.id, "Configurer le webhook", acceptance=(ACCEPTATION,))
+
+    entry = consolidate_task_memory(
+        memoire, ledger, task, TaskState.CLOSED, actor="a", lesson="le staging exige un certificat TLS récent",
+    )
+
+    assert entry is not None
+    assert "le staging exige un certificat TLS récent" in entry.text
+    assert ACCEPTATION not in entry.text and "Critères" not in entry.text
+    assert entry.metadata["type"] == "decisions"
+    assert "lesson" in entry.tags
+
+
+def test_un_blocage_sans_raison_ni_lecon_n_ecrit_rien(
+    tmp_path: Path, ledger: MissionLedger, memoire: MemoryManager
+) -> None:
+    mission = ledger.create_mission(title="Travaux", origin="test")
+    task = ledger.create_task(mission.id, "Tâche muette", acceptance=(ACCEPTATION,))
+
+    assert consolidate_task_memory(memoire, ledger, task, TaskState.BLOCKED, actor="a") is None
+    assert memoire.count() == 0
+
+
+def test_un_abandon_ne_garde_que_sa_lecon(tmp_path: Path, ledger: MissionLedger, memoire: MemoryManager) -> None:
+    mission = ledger.create_mission(title="Travaux", origin="test")
+    task = ledger.create_task(mission.id, "Migrer vers Weaviate", acceptance=(ACCEPTATION,))
+
+    assert consolidate_task_memory(memoire, ledger, task, TaskState.CANCELLED, actor="a", reason="doublon") is None
+    entry = consolidate_task_memory(
+        memoire, ledger, task, TaskState.CANCELLED, actor="a", reason="doublon",
+        lesson="Weaviate n'a pas de mode embarqué : abandon au profit de Qdrant",
+    )
+
+    assert entry is not None and "abandonnée" in entry.text
+    assert entry.metadata["type"] == "failures"
+
+
+def test_le_rappel_ne_sert_que_les_lecons_bornees(
+    tmp_path: Path, ledger: MissionLedger, memoire: MemoryManager
+) -> None:
+    """Fiches recopiées et restes de tests ne sont plus injectés au démarrage ; une leçon longue est coupée."""
+    mission = ledger.create_mission(title="Paiement", origin="test")
+    task = ledger.create_task(mission.id, "Réparer le webhook de paiement", acceptance=(ACCEPTATION,))
+    memoire.remember("decisions", "a", "Tâche GAO-x-001 clôturée : webhook de paiement. Critères : 200.")
+    memoire.remember("failures", "a", "webhook de paiement : reste de fixture", tags=("fixture",))
+    longue = "webhook de paiement : le certificat TLS expire chaque lundi. " + "détail " * 80
+    memoire.remember("failures", "a", longue)
+
+    recall = build_task_recall(tmp_path, task.id, memory_manager=memoire)
+
+    assert len(recall.memory_hits) == 1
+    hit = recall.memory_hits[0]
+    assert hit.text.startswith("webhook de paiement : le certificat TLS")
+    assert len(hit.text) <= MAX_HIT_CHARS
+    assert "clôturée" not in recall.text and "fixture" not in recall.text

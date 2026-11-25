@@ -118,3 +118,18 @@ def test_list_verdicts(svc):
     assert svc.list_verdicts() == [verdict]
     assert svc.list_verdicts("GAO-task-001") == [verdict]
     assert svc.list_verdicts("GAO-other-001") == []
+
+
+def test_has_unreadable_verdicts_ne_reutilise_pas_la_ligne_precedente(tmp_path):
+    """Une ligne non JSON après une ligne d'une autre tâche reste illisible : échec fermé (#1257)."""
+    svc = EvidenceService(tmp_path / "evidence")
+    svc._verdicts_path.parent.mkdir(parents=True, exist_ok=True)
+    svc._verdicts_path.write_text('{"task_id": "AUTRE"}\n{pas du json\n', encoding="utf-8")
+    assert svc.has_unreadable_verdicts("T-1") is True
+
+
+def test_has_unreadable_verdicts_ignore_la_ligne_d_une_autre_tache(tmp_path):
+    svc = EvidenceService(tmp_path / "evidence")
+    svc._verdicts_path.parent.mkdir(parents=True, exist_ok=True)
+    svc._verdicts_path.write_text('{"task_id": "AUTRE"}\n', encoding="utf-8")
+    assert svc.has_unreadable_verdicts("T-1") is False

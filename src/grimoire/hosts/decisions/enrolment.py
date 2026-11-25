@@ -28,7 +28,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from grimoire.core.standard_state import LEDGER_RELPATH, ActiveTask
+from grimoire.core.standard_state import ActiveTask, ledger_location
 from grimoire.hosts.decisions._shared import HookInput
 
 #: Profiles whose ``Stop`` hook refuses a closure — red gates, unevaluable
@@ -43,6 +43,14 @@ NO_ACTIVE_TASK = "no_active_task"
 #: Marqueur de ``Decision.detail["blocked_on"]`` quand la session tient encore une
 #: tâche ``claimed``/``running`` qu'elle n'a ni fermée ni garée (K3, §5.1).
 TASK_UNPARKED = "task_unparked"
+#: ... quand la tâche nommée est peut-être encore tenue mais que son ledger (désigné par le marqueur
+#: d'un worktree de tâche) est invérifiable (#1259).
+LEDGER_UNVERIFIABLE = "ledger_unverifiable"
+
+#: Clé « dire une fois » (:func:`grimoire.policies.session_state.say_once`) de la ligne de tâche
+#: que ``SessionStart`` et ``UserPromptSubmit`` injectent : rendue une fois, puis seulement quand
+#: elle change (tâche ouverte, claim expiré, ledger illisible…).
+PROMPT_TASK_KEY = "prompt.task"
 
 _REMEDY_LINES = (
     '  grimoire task add "<titre>" -a "<critère d\'acceptation>" --owner <nom> --ready',
@@ -335,8 +343,11 @@ def parked_task_of_session(hook: HookInput) -> Any:
         from grimoire.policies.session_state import load_session_state
 
         task_id = load_session_state(hook.project_root, hook.session_id, now_iso="").task_id
-        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
-        if not task_id or not events.is_file():
+        # #1259 : le ledger du projet d'origine dans un worktree de tâche. Invérifiable (marqueur illisible,
+        # ledger désigné absent) : aucune tâche garée ne couvre la session — l'exemption manque, rien ne s'ouvre.
+        location = ledger_location(hook.project_root)
+        events = location.root / "events.jsonl" if location.root is not None else None
+        if not task_id or events is None or not events.is_file():
             return None
         task = MissionLedger(events.parent).get_task(task_id)
     except Exception:
@@ -380,8 +391,10 @@ def stop_scope(hook: HookInput, active: ActiveTask) -> ActiveTask:
     try:
         from grimoire.missions.ledger import MissionLedger
 
-        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
-        if not events.is_file():
+        # #1259 : invérifiable, la tâche reste jugée — le Stop ne retire jamais une tâche qu'il ne peut pas lire.
+        location = ledger_location(hook.project_root)
+        events = location.root / "events.jsonl" if location.root is not None else None
+        if events is None or not events.is_file():
             return active
         task = MissionLedger(events.parent).get_task(active.task_id)
     except Exception:
@@ -448,3 +461,46 @@ def record_unattached_work(hook: HookInput, mutations: int) -> dict[str, Any]:
             hook.project_root, hook.session_id, mutations=mutations, files=files, now_iso=datetime.now(UTC).isoformat()
         )
     return {"files": list(files), "mutations": mutations}
+
+
+#: Écritures hors tâche, depuis le dernier refus complet, au-delà desquelles ``Stop`` refuse de
+#: nouveau (option de profil ``options.unattached_reblock_after``). Dix : un lot de travail réel
+#: (quelques fichiers édités, un commit) redéclenche le refus ; une ou deux retouches après le
+#: premier refus, déjà vu avec son remède, sont signalées sans coûter un tour entier.
+DEFAULT_REBLOCK_AFTER = 10
+
+
+def reblock_after(hook: HookInput) -> int:
+    """Le seuil de nouveau refus hors tâche : l'option de profil si elle est un entier >= 1, sinon le défaut."""
+    try:
+        from ruamel.yaml import YAML
+
+        from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
+
+        profile = hook.project_root.resolve() / STANDARD_PROFILE_FILE
+        data = YAML(typ="safe").load(profile) if profile.is_file() else None
+        options = data.get("options") if isinstance(data, dict) else None
+        value = options.get("unattached_reblock_after") if isinstance(options, dict) else None
+    except Exception:
+        return DEFAULT_REBLOCK_AFTER
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else DEFAULT_REBLOCK_AFTER
+
+
+def no_task_blocked_at(hook: HookInput) -> int:
+    """Le compteur d'écritures au dernier refus complet hors tâche — ``0`` sans journal."""
+    if not hook.session_id:
+        return 0
+    try:
+        from grimoire.policies.session_state import session_no_task_blocked_at
+
+        return session_no_task_blocked_at(hook.project_root, hook.session_id)
+    except Exception:
+        return 0
+
+
+def record_no_task_block(hook: HookInput, mutations: int) -> None:
+    """Best-effort : retient *mutations* comme compteur du refus complet qui vient d'être rendu."""
+    with contextlib.suppress(Exception):
+        from grimoire.policies.session_state import note_no_task_block
+
+        note_no_task_block(hook.project_root, hook.session_id, mutations, now_iso=datetime.now(UTC).isoformat())

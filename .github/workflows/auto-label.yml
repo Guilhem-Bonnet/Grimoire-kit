@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Seules les PR annulent le run précédent ; push main, tag et nuit vont au bout.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   pull-requests: write

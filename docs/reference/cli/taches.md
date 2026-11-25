@@ -22,6 +22,7 @@ réussit-elle systématiquement ?
 | Commande | Description |
 | --- | --- |
 | `grimoire dispatch stats [--since 30d] [--json]` | Coût par tâche résolue, taux d'escalade, part d'inexécutable — pour l'ensemble, par classe de vérifiabilité, par fournisseur et par flow — et pass^k sur les nœuds rejoués |
+| `grimoire dispatch models [--json]` | Table palier → modèle résolue pour le projet, avec la provenance de chaque choix (voir [Fournisseurs](fournisseurs.md#table-palier-modele-hote-fournisseur)) |
 
 **Coût par tâche résolue** : le coût total de toutes les tentatives (vertes
 et rouges confondues, un check rouge a quand même coûté un appel) divisé
@@ -72,12 +73,12 @@ prochain export l'écrase.
 | `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
 | `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`). Une tâche `claimed`/`running` dont le bail est perdu (`expires_at` passé, battement de cœur perdu) se réclame directement : barrière du bail, retour `ready` journalisé (`reclaimed`), nouveau claim au nouvel epoch ; un autre acteur que le titulaire seulement si l'hôte du claim a un frein vérifié, sinon `grimoire task reap` pose la question à l'humain. Le WIP ne compte que les claims vivants |
-| `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
-| `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
-| `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé ; depuis `needs_verification`, reçu de revue frais exigé) |
+| `grimoire task move <id> --to <état> [--lesson "<leçon>"]` | Déplacer une tâche, si la machine à états et le gate le permettent |
+| `grimoire task block <id> --reason "<motif>" [--lesson "<leçon>"]` | Bloquer en disant pourquoi ; la raison (ou la leçon si donnée) est gardée en mémoire |
+| `grimoire task close <id> [--lesson "<leçon>"]` | Fermer une tâche vérifiée (verdict accepté exigé ; depuis `needs_verification`, reçu de revue frais exigé). Seule la leçon (décision prise, piège rencontré) va en mémoire ; sans `--lesson`, rien n'y est écrit — voir [Ce que la clôture garde en mémoire](#ce-que-la-cloture-garde-en-memoire) |
 | `grimoire task review <id> --verdict READY\|NOT-READY [--finding "résumé :: commande"]` | Écrire le reçu de revue, lié à l'empreinte présente de l'arbre (`_grimoire-output/reviews/<id>/review-receipt.json`) |
 | `grimoire task verify <id> [--evidence <fichier> ...]` | Lancer les commandes déclarées de la tâche, écrire le pack et le verdict (0 `passed`, 1 `failed`, 2 aucune commande, 3 commandes non approuvées). Pour une tâche **sans** commande, `--evidence` (répétable) écrit un pack **déclaratif** : chaque fichier doit exister sous la racine du projet, il entre haché (SHA-256, taille, URI `file:<chemin>`), le verdict est `skipped` (`created_by: declarative`, contrôle `declarative-only`) et le code de sortie 4 : la revue peut s'ouvrir (`needs_verification`), la clôture reste refusée (`review_gate`) — une preuve déclarative n'est jamais un vert mécanique |
-| `grimoire task accept <id> --reason "<ce qui a été relu>" [--no-close]` | Accepter la preuve **déclarative** d'une tâche en revue (canal humain seulement, refusé depuis une session d'agent comme `task answer`) : pack d'attestation (les éléments du dernier pack plus l'acceptation, qui nomme chaque critère), verdict `passed` signé `created_by: human:<acteur>`, reçu de revue `READY` (`reviewer_id: human:<acteur>`), puis clôture ; `--no-close` s'arrête avant (issue #865) |
+| `grimoire task accept <id> --reason "<ce qui a été relu>" [--no-close] [--lesson "<leçon>"]` | Accepter la preuve **déclarative** d'une tâche en revue (canal humain seulement, refusé depuis une session d'agent comme `task answer`) : pack d'attestation (les éléments du dernier pack plus l'acceptation, qui nomme chaque critère), verdict `passed` signé `created_by: human:<acteur>`, reçu de revue `READY` (`reviewer_id: human:<acteur>`), puis clôture ; `--no-close` s'arrête avant (issue #865) |
 | `grimoire task prioritize <id> --to low\|medium\|high\|critical [--reason "<motif>"]` | Changer la priorité (issue #638) — l'historique reste au ledger, le board se retrie |
 | `grimoire task comment <id> "<texte>" [--kind comment\|directive]` | Poser un commentaire ou une consigne ; la session qui tient la tâche la lit au prochain `UserPromptSubmit` |
 | `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
@@ -88,6 +89,8 @@ prochain export l'écrase.
 | `grimoire task ask <id> --from <lot.yaml\|->` | Poser un lot de questions (JSON ou YAML) en **une** interruption et une notification ; une question déjà répondue (même clé) n'est pas reposée |
 | `grimoire task answer <id> "<réponse>" [--question <q-…>]` | Répondre (canal humain seulement) ; la tâche n'est rendue que quand toutes les bloquantes du lot ont leur réponse |
 | `grimoire task questions [<id>] [--open]` | Le registre des questions : statut, bloquante ou non, pourquoi, qui a répondu, par quel canal ou sur quelle source, et le nombre d'interruptions |
+| `grimoire task questions --precedents` | Les précédents du projet (jurisprudence du pilote automatique) : classe, option, date, question d'origine, état |
+| `grimoire task questions --forget <id>` | Retire un précédent — canal humain seulement, comme `task answer` |
 | `grimoire task resolve <id> <q-…> "<réponse>" --source <d'où>` | Déduire la réponse d'une question **non bloquante**, source citée ; une bloquante est refusée |
 | `grimoire task decisions` | Les décisions qui attendent un humain (un lot = une décision, ses questions ouvertes listées) |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
@@ -96,6 +99,33 @@ prochain export l'écrase.
 | `grimoire task trace-export [<dest>] [--format otel\|langfuse\|otlp] [--endpoint <url>] [--header NOM=VALEUR] [--mission-id <id>]` | Exporte le TraceLedger (plus, pour OTel et OTLP, les spans des runs de flow lus dans le journal du kernel, avec `parentSpanId`) : JSONL aux conventions OTel GenAI ou Langfuse, ou `--format otlp --endpoint` vers un collecteur OTLP/HTTP (échoue si le lot n'est pas accepté) |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 | `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--start-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
+
+### Ce que la clôture garde en mémoire
+
+Le Mission Ledger est la source des faits : titre, critères, historique,
+transitions. La mémoire du projet ne garde que ce qu'il ne sait pas :
+
+- à la clôture (`task close`, `task accept`, `task move --to closed`), la
+  **leçon** passée par `--lesson` — la décision prise, le piège rencontré. Sans
+  `--lesson`, rien n'est écrit en mémoire ;
+- au blocage ou à l'échec, la leçon si elle est donnée, sinon la raison ;
+- à l'abandon (`task cancel`), la seule leçon : la raison d'annulation reste au
+  ledger.
+
+La leçon est aussi tracée au ledger (`lesson` dans l'événement de transition).
+Par MCP, `task_update` la prend dans `text` pour `close`, `block` et `move` ; la
+route du cockpit, dans le champ `lesson`.
+
+```bash
+grimoire task close GAO-webhook-002 \
+  --lesson "le certificat TLS du staging expire chaque lundi : le renouveler avant la recette"
+```
+
+Le rappel de tâche (`task recall`, injecté au `SessionStart`) ne sert que ces
+leçons, chacune coupée à 280 caractères, le tout borné en tokens. Les anciennes
+fiches de clôture qui recopiaient le ledger ne sont plus servies ;
+`grimoire memory prune --apply` les retire du store
+([référence](memoire.md)).
 
 ### Une attente porte sur sa tâche, pas sur la session
 
@@ -468,16 +498,62 @@ grimoire autonomy autopilot off       # même canal humain (révoquer le mandat 
   mandat révoqué, expiré ou remplacé, il est coupé, et un nouveau mandat ne le rallume pas.
 - **Liste fermée, dans le code** : identifiants, secrets, dépense payante, accès hors du dépôt (`permission` hors
   du dépôt ou sans chemin), suppression de données utilisateur, mandat, réglages du dépôt. Le classement lit la
-  question, ses options, sa raison et la tâche, sans accents ni casse. La section `autopilot.reserved` de
-  `orchestration-policy.yaml` peut **ajouter** des réservations (catégories d'escalade ou mots) ; toute autre clé
-  ou forme rend la politique invalide et le pilote ne décide plus rien.
+  question, ses options, sa raison et la tâche, sans accents ni casse. La section `autopilot` de
+  `orchestration-policy.yaml` accepte quatre clés : `reserved`, qui peut seulement **ajouter** des réservations
+  (catégories d'escalade ou mots), `default_action`, `precedents` et `precedent_days` (ci-dessous) ; toute autre
+  clé, forme ou valeur rend la politique invalide et le pilote ne décide plus rien.
 - **Comment il décide** : d'abord l'option recommandée par la question (`task ask --recommended <option> --why
-  "…"`, ou le champ `recommended` d'un lot), appliquée par le tick sans session. Sinon une session tranche avec les
+  "…"`, ou le champ `recommended` d'un lot), appliquée par le tick sans session — sauf ce qu'un agent ne peut pas
+  se répondre à lui-même : une question `permission` ou `merge`, « abandonner » ou un choix marqué dangereux, une
+  question que la liste fermée garde (titre de la tâche compris). Sinon une session tranche avec les
   critères, les directives et la mémoire, et chaque réponse porte `--why "<justification>" --confidence
   high|medium|low` (`task answer`). Confiance basse, non déclarée ou sans justification : la question reste à
   l'humain (`autopilot.deferred`, que le cockpit signale).
+- **Action par défaut** (`autopilot.default_action`) : `ask` (le défaut ; un projet qui ne règle rien ne change
+  pas) ou `apply_recommended`. Sous `apply_recommended`, quand personne n'assume de décision (confiance basse ou
+  non déclarée), l'option recommandée de la question tranche à la place de la réponse soumise : l'événement
+  `autopilot.decided` porte la source `default` et `reversible`, et le cockpit la range dans « Décisions à
+  revoir » (« À traiter »), un bloc replié qui ne compte pas comme une attente ; il montre aussi, distinguées, les
+  options qu'un agent recommandait et que le pilote a prises telles quelles (source `recommended`). Les questions de conduite que le
+  kit écrit lui-même (« reprendre ou abandonner ? » après des retours de fusion ou des relectures répétées,
+  récolte, tâche garée sur une erreur du fournisseur) portent toutes une option recommandée : c'est leur option
+  par défaut, que le tick applique sous `apply_recommended` seulement — sous `ask`, elle n'engage pas le pilote.
+  `task ask` avertit l'agent qui pose une question sans `--recommended`.
+- **Ce qu'une décision par défaut ne fait jamais** : trancher une question de la liste fermée (jugée titre de la
+  tâche compris, sauf si le kit a lui-même écrit la question) ; appliquer autre chose que l'une des options de la
+  question ; répondre « abandonner » ou un choix marqué dangereux ; trancher une question de nature `merge` ou
+  `permission` ; reprendre une tâche tant que rien ne prouve que la session du worker ne travaille plus (liste des
+  sessions illisible, session inconnue du tick, introuvable ou d'état inconnu : rien n'est appliqué) ; dépasser
+  deux décisions par défaut sur une même tâche depuis la dernière réponse humaine. Dans tous ces cas la question se juge comme sous
+  `ask`. Répondre n'est jamais fusionner, accepter ni publier : la réponse rend la tâche `ready`, et ces gestes
+  gardent leurs propres contrôles (merger, double relecture, mandat).
+- **Jurisprudence** (`autopilot.precedents`, `off` par défaut) : sous `on`, la dernière réponse **humaine** à
+  une question de conduite écrite par le kit vaut pour les questions de la même classe. Quand personne n'assume
+  de décision, son option tranche : `autopilot.decided` porte la source `precedent` et la référence de cette
+  réponse (identifiant, classe, question d'origine, date), et le cockpit la range dans « Décisions à revoir »
+  (« d'après ta réponse »). Le précédent passe avant l'option par défaut, qui reste le repli sous
+  `apply_recommended`.
+  - **La classe est calculée par le kit**, jamais déclarée : la cause codée que le relecteur ou le merger écrit
+    dans son événement d'escalade (`review:not_ready_cycles`, `review:no_worker_session`,
+    `review:unjudgeable_reviews`, `merge:ci_red`, `merge:conflict`, `merge:desync`, `merge:stale_ready`,
+    `merge:no_worker_session`), la nature d'une question de la récolte (`reap:resume_branch`,
+    `reap:resume_unfenced`, `reap:retry_exhausted`) ou la tâche garée sur une erreur du fournisseur
+    (`launcher:provider_error`). La liste est fermée. Une question d'agent n'a pas de classe, donc pas de
+    précédent ; une question « fusionner ? » ou « accepter ? », une escalade sur un pack de preuve absent ou une
+    clôture refusée, non plus.
+  - **Aucun fichier à part** : les précédents se relisent au ledger (réponse d'origine `human`, oubli, « Revenir »).
+    Seule la dernière réponse humaine d'une classe compte ; une décision du pilote — précédent appliqué compris —
+    n'en est jamais une. « Abandonner » n'est jamais appliqué d'après un précédent ; tant que c'est le dernier
+    mot de l'humain pour la classe, l'option par défaut ne reprend pas non plus et la question se juge. Oubliée (`task questions --forget <id>`), reprise par « Revenir » sur l'une de ses
+    applications, ou vieille de plus de `autopilot.precedent_days` jours (30 par défaut, 1 à 365), elle ne
+    s'applique plus, et une réponse plus ancienne ne revient pas à sa place. À l'activation, les réponses humaines
+    encore dans ce délai comptent : `task questions --precedents` les montre avant.
+  - **Mêmes refus que la décision par défaut** : liste fermée, option encore proposée par la question, jamais
+    « abandonner » ni un choix dangereux, worker prouvé à l'arrêt, et la même borne de deux options appliquées sans
+    jugement par tâche (précédents et défauts ensemble). Précédents illisibles : aucun n'est appliqué, et le tick
+    comme la question laissée à l'humain le disent.
 - **Traçabilité** : chaque décision est un événement `autopilot.decided` (question, option, justification,
-  confiance, source de la recommandation, mandat). Sans borne de présentations (le plafond de sessions du jour et
+  confiance, source — `recommended`, `judgment`, `default` ou `precedent` —, mandat). Sans borne de présentations (le plafond de sessions du jour et
   le disjoncteur bornent encore).
 - **Limites** : une annulation décidée par le pilote est terminale (l'état `cancelled` n'a pas de sortie) ; la
   raison est au ledger. L'acceptation sous dérogation n'est pas traitée (aucune dérogation n'existe dans le kit).
@@ -549,6 +625,201 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
   Limite : un agent qui lance un script arbitraire, ou dont le chemin est assemblé par le shell (`$X`),
   contourne une garde de chemin.
 
+### Routage fort des chemins sensibles (worker)
+
+Sous `model_by_class` et un `provider` bon marché, le worker du tick écrit les tâches V0/V1 avec un modèle peu cher.
+Sur les chemins sensibles (gardes, hooks, autorité, politique, relecture, CI), ses PR sont souvent rejetées puis
+réécrites par un modèle fort : on paie deux fois. Avec `sensitive_route: strong`, une telle tâche part d'emblée sur
+l'hôte, au palier fort (`opus`), sans route de fournisseur :
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  roles:
+    worker:
+      provider: deepseek
+      model_by_class: true
+      sensitive_route: strong   # off (défaut) : inchangé ; toute autre valeur rend la politique invalide
+      sensitive_paths: []       # motifs ajoutés aux chemins réservés ci-dessous
+```
+
+- **Chemins sensibles** : il n'y a pas de seconde liste. Ce sont les chemins qui escaladent au merger (voir plus bas,
+  `DEFAULT_PROTECTED_PATHS` plus `merger.protected_paths`), ceux qui restent à l'humain en double relecture
+  (`HUMAN_ONLY_PATHS` plus `merger.human_only_paths`), et les motifs de `worker.sensitive_paths`. Comparaison en
+  `casefold()`.
+- **Chemins visés par la tâche** : seulement ce que la tâche cite, lu sans réseau ni modèle. Sont lus son titre, sa
+  description, sa surface, ses critères, ses garde-fous, ses preuves attendues et les consignes de l'orchestrateur.
+  Le context bundle ne porte rien de plus. L'issue liée n'est pas lue, pour ne pas faire dépendre le lancement du
+  réseau. Un jeton compte comme chemin s'il contient un `/`, commence par un `.` ou finit par une extension de
+  fichier connue. Une URL, un chemin absolu ou un chemin sous `~` n'en est pas un. Un nom de fichier nu
+  (`launcher.py`) vaut le chemin réservé qui finit par ce nom.
+- **En cas de doute, rien ne change** : si la tâche ne cite aucun chemin, ou aucun chemin sensible, elle part comme
+  avant (`model_by_class`, `provider`). Le routage ne fait que monter. Une tâche dont la classe de données ferme
+  les modèles hébergés reste différée, comme pour tout repli sur l'hôte.
+- **Trace** : l'événement `task.session_launched` porte `sensitive_route` (route, chemins, raison) et le modèle.
+  `grimoire task show` affiche `routage fort : opus — chemins sensibles cités : …`. La sortie du tick le dit dans
+  le détail du lancement.
+- **Avant de lancer** : `grimoire orchestrate tick` (le plan, sans `--apply`) affiche `Routage prévu : <id> — fort
+  | habituel : <raison>` pour chaque tâche admise, et la clé `routes` en `--json`.
+
+### Hôte du worker : Claude Code ou opencode (#1281, lot L4)
+
+Le worker du tick passe par une interface d'hôte (`WorkerHost`, `missions/worker_host.py`). Elle porte ce qui dépend
+de l'hôte : ligne de commande, environnement, modèle, mode de permission, consigne, identité de session, arrêt.
+`roles.worker.host` choisit l'hôte. Absent, c'est Claude Code, à l'identique d'avant. Le test
+`tests/unit/missions/test_worker_host_parity.py` compare argv, environnement et fichiers écrits à une fixture
+produite depuis `origin/main` 3.100.0.
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  roles:
+    worker:
+      enabled: true
+      host: opencode          # claude-code (défaut : orchestrator.host) | opencode | gemini ; sinon invalide
+      provider: deepseek      # obligatoire avec opencode : deepseek, moonshot (ou kimi) ou un fournisseur local
+      tier: cheap
+      permission_mode: acceptEdits
+    reviewer:
+      host: claude-code       # seule valeur admise dans ce lot
+dispatch:
+  models:
+    opencode:
+      deepseek:
+        cheap: deepseek-v4-flash
+```
+
+- **Commande** : `opencode run --format json --title grimoire-<id> --model <fournisseur>/<modèle> -- "<consigne>"`,
+  la commande non interactive documentée (<https://opencode.ai/docs/cli/#run>). Elle ne rend pas la main : le kit
+  la lance en arrière-plan, dans son propre groupe de processus. Sa sortie JSON va dans
+  `_grimoire-output/control/workers/<id>.opencode.jsonl`, hors du worktree.
+- **Fournisseur et modèle** : `deepseek` et `moonshotai` sont les identifiants du catalogue d'opencode. Un
+  fournisseur `local` (Ollama) est déclaré en ligne (`@ai-sdk/openai-compatible`), à l'URL de boucle locale
+  `anthropic_base_url` suivie de `/v1`. Le modèle vient de `roles.worker.model`, sinon de
+  `dispatch.models.opencode.<fournisseur>.<palier>`, sinon du premier modèle non suspendu du palier dans le
+  registre (repli sur `cheap`). Sans modèle, la tâche attend : jamais de nom inventé.
+- **Clé** : lue au magasin de secrets (`grimoire providers set-key`). `OPENCODE_CONFIG_CONTENT` ne porte que
+  `{env:DEEPSEEK_API_KEY}` (substitution documentée, <https://opencode.ai/docs/config/>). La valeur ne passe que
+  dans l'environnement du processus, jamais dans l'argv, le ledger ni le journal d'autorité. L'URL officielle du
+  fournisseur hébergé est posée dans la même configuration en ligne : un autre `baseURL` ne reçoit pas la clé.
+- **Environnement** : minimal et explicite. Il contient une liste fermée de variables du système (chemins,
+  langue), la clé du fournisseur et la configuration en ligne. Aucun jeton, aucune autre clé, aucune variable
+  `OPENCODE_*` qui changerait la découverte de la configuration.
+- **`HOME` du kit** : opencode charge des plugins sous `$HOME/.opencode/` et lit configuration, sessions,
+  authentifications et cache sous les dossiers XDG. Pour toute commande opencode du worker, `HOME` et
+  `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` pointent sous un dossier du kit, hors de
+  tout dépôt : `~/.cache/grimoire-kit/opencode/<empreinte du projet>/<id de tâche>-<nonce>/`.
+  - Ce dossier est neuf à chaque lancement et n'est jamais partagé entre workers. Seule la reprise du même worker
+    le réutilise (il est noté au lancement) : sa base de sessions y vit, c'est là que `session list` retrouve la
+    session.
+  - Avant chaque commande, puis une dernière fois juste avant `opencode run`, ce dossier, son dossier de sondes et
+    le worktree sont contrôlés. Rien n'y doit apparaître : ni plugin, agent, mode ou commande, ni configuration
+    non vide, ni fichier d'authentification.
+  - Un lien symbolique posé par le compte sur son chemin est refusé. Un lien du superutilisateur (`/var` sous
+    macOS) est admis.
+  - Les commandes qui ne visent pas le worktree (`--version`, `session list`) tournent dans un dépôt git vide de
+    ce dossier. Sa racine borne la découverte d'opencode : le dépôt principal reste hors champ.
+  - Le worker reçoit `GH_CONFIG_DIR` (le dossier `gh` d'origine) et `GIT_CONFIG_GLOBAL` (`~/.gitconfig`, à défaut
+    la configuration git XDG), pour ouvrir sa PR avec la configuration réelle.
+  - Il reçoit aussi `SSH_AUTH_SOCK`, pour pousser vers une remote SSH dont la clé est tenue par l'agent. `ssh` lit
+    ses clés dans le dossier personnel du compte, pas dans `HOME`.
+- **Garde, avant toute commande opencode** : opencode exécute le code de ses plugins dès qu'il lit sa
+  configuration. Rien d'opencode ne tourne donc avant ces vérifications, faites sans lui :
+  - `.opencode/plugin/grimoire-guard.js` est identique à l'octet à la sortie de l'émetteur, sinon il est réécrit ;
+  - aucun autre fichier de code sous `.opencode/plugin(s)/` ou `.opencode/tool(s)/` ;
+  - aucun `opencode.json` ou `opencode.jsonc` à la racine ou dans `.opencode/` ;
+  - aucun agent, mode ou commande sous `.opencode/agent(s)/`, `mode(s)/`, `command(s)/` : un agent y changerait
+    modèle et permissions ;
+  - aucun lien symbolique sur ces chemins ;
+  - le manifeste de paquets ne déclare que le paquet de plugin d'opencode.
+
+  Vient ensuite une preuve fonctionnelle : le programme de garde appelé par le plugin reçoit une charge témoin,
+  jamais exécutée, et doit la refuser (le plugin émis bloque l'outil sur « deny » comme sur « ask »). Enfin,
+  `opencode debug config` doit résoudre ce plugin comme seul plugin, sans agent, mode ni commande, avec l'URL de
+  fournisseur posée par le kit. Sa sortie n'est jamais recopiée. Le contrôle est rejoué à chaque
+  reprise. Sans cette preuve, rien ne part : la tâche revient en `ready` avec un motif fixe. Au troisième refus de
+  suite, elle est garée chez l'humain. `--pure` n'est jamais passé. Le `.gitignore` de `.opencode/` ne nomme que
+  le plugin émis et ce qu'opencode installe lui-même : tout ajout se voit dans `git status`.
+- **Mode de permission** : `opencode run` rejette d'office toute demande d'autorisation. `acceptEdits`, `default`,
+  `dontAsk` et `auto` gardent la table de l'hôte. `plan` prend l'agent `plan` intégré. `bypassPermissions` passe
+  `--dangerously-skip-permissions`. Tout autre mode fait attendre la tâche, avec son motif.
+- **Restent sur Claude Code** : une tâche qui vise un chemin sensible (`sensitive_route: strong`, `opus`) et une
+  tâche V2, qu'aucun verdict mécanique ne jugerait. Le lancement porte `host_fallback` avec la raison. Une tâche
+  devenue sensible entre deux tours repart, à la reprise, en session Claude Code neuve au palier fort.
+- **Limite** : un dépôt qui suit un `opencode.json` à sa racine, ou des agents ou commandes sous `.opencode/`, ne
+  peut pas lancer de worker opencode.
+- **Indépendance de la relecture** : le relecteur reste sur Claude Code. Son modèle doit différer de celui du
+  worker (`models_distinct`). Un modèle DeepSeek ou Kimi est d'une autre famille que `sonnet` ou `opus`.
+- **Pas de repli silencieux** : sans route (fournisseur fermé, clé absente, politique de données, fournisseur local
+  occupé), la tâche est différée (`task.worker_deferred`). Elle ne part pas sur Claude Code à la place.
+- **Vie de la session** : l'identité se lit dans `opencode session list --format json` (titre et dossier). Le
+  lanceur rattache lui-même la session au claim : opencode n'exporte pas d'identité aux commandes qu'il lance. Un
+  processus vivant dont le journal a parlé dans les 15 dernières minutes renouvelle le bail. Un processus mort rend
+  la tâche. En revue ou en attente, le processus reçoit `SIGTERM`. Un renvoi reprend la conversation par
+  `opencode run --session <id>`.
+- **Limites** : la reprise automatique après une erreur transitoire du fournisseur (#1158) lit le journal de Claude
+  Code et ne s'applique pas à opencode. `lean` est sans effet sur opencode. La relecture opencode n'est pas outillée.
+
+### Hôte du projet : Gemini CLI (`orchestrator.host`)
+
+`orchestrator.host` nomme l'hôte du projet. Absent ou `claude-code`, rien ne change. `gemini` place le worker sur
+Gemini CLI (`missions/gemini_host.py`, derrière la même interface `WorkerHost`). Toute autre valeur rend la politique
+invalide, y compris une clé posée vide (`host: ""`) : pour `claude-code` par défaut, omettre la clé. `roles.worker.host`, s'il est posé, l'emporte pour le worker.
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  host: gemini                # claude-code (défaut) | gemini
+  roles:
+    worker:
+      enabled: true
+      tier: mid               # modèle : roles.worker.model, sinon dispatch.models.gemini.<palier>
+      permission_mode: acceptEdits
+```
+
+- **Frein d'abord** : aucune session ne part tant que le refus au `BeforeTool` n'est pas prouvé pour la version
+  exacte de `gemini` (`gemini --version`). La règle est celle de la reprise d'un bail Claude Code
+  (`is_fenced`). Sans preuve, rien n'est créé ni réclamé. La sortie du tick dit `worker Gemini CLI non lancé : frein
+  non prouvé pour Gemini CLI <version>…`. Au 2026-11-23, aucune capture de refus Gemini n'est versée (#1304) : en
+  pratique, le worker Gemini ne part pas encore.
+- **Commande** : `gemini --prompt=<consigne> --output-format stream-json --approval-mode <mode> [--model=<modèle>]`.
+  La consigne passe en une seule chaîne (`--prompt=…`) : un message qui commence par `-` n'est jamais lu comme une
+  option. Reprise : la même commande avec `--resume=<id>` (un seul jeton), sur le même worktree. L'identifiant doit
+  être un UUID : `--yolo`, `latest` ou un numéro d'ordre sont refusés, et rien ne part.
+- **Environnement** : une liste fermée, jamais celui du tick. Celle d'opencode (`PATH`, `HOME`, langue, `TMPDIR`,
+  `SSH_AUTH_SOCK`…), plus l'authentification Gemini (`GEMINI_API_KEY`, `GOOGLE_API_KEY`, masquées dans les traces ;
+  `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_GENAI_USE_VERTEXAI`,
+  `GOOGLE_GENAI_USE_GCA`), le réseau (mandataires, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_*`) et des chemins de
+  configuration (`XDG_*`, `GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`). Ni `GH_TOKEN`/`GITHUB_TOKEN` (`gh` s'authentifie
+  par son fichier), ni la clé d'un autre fournisseur, ni `GEMINI_CLI_*` (qui déplacerait les réglages, donc le hook).
+- **Processus tenu par le kit** : Gemini CLI ne documente aucune session détachée. Le kit lance le processus en
+  arrière-plan, dans son propre groupe, et écrit le flux dans `_grimoire-output/control/workers/<id>.gemini.jsonl`.
+  Le pid, le journal et l'identité du processus (heure de démarrage et exécutable exact, lus dans `/proc` sous
+  Linux, par `ps` ailleurs) sont notés au lancement. Un pid qui porte une autre identité compte pour mort : il n'est
+  ni renouvelé ni tué. L'heure de démarrage est la clé ; le seul changement d'exécutable admis part de `env` (un
+  `gemini` installé par npm est un script `#!/usr/bin/env node` : `env` au départ, puis l'interpréteur, sous le même
+  pid), et l'identité est relevée de nouveau à l'événement `init`, une fois l'interpréteur lancé. Battement, fin, arrêt au repos et janitor suivent les règles
+  d'opencode : processus vivant et journal récent, le bail est renouvelé ; processus mort, la tâche est rendue ;
+  `SIGTERM` au groupe. POSIX seulement.
+- **Identité** : le `session_id` de l'événement `init` du flux. Seul compte ce que ce lancement a écrit (lecture à
+  partir de l'octet de départ). Le processus meurt sans `init` : le lancement échoue et compte au disjoncteur. Le
+  lanceur rattache lui-même la session au claim.
+- **Résultat final** : texte des événements `message` de rôle `assistant` ; issue lue dans l'événement `result`.
+- **Permission** : `acceptEdits` → `auto_edit`, `plan` → `plan`, `bypassPermissions` → `yolo`, `default` et
+  `dontAsk` → `default`. `auto` et tout autre mode font attendre la tâche.
+- **Worktree** : `.gemini/settings.json` doit porter le hook `BeforeTool` du kit, commité (`grimoire host sync`).
+  Sans lui, rien ne part. Pas de synchronisation à la volée : elle laisserait des fichiers non suivis.
+- **L'hôte du projet ne se quitte pas** : une tâche qui vise un chemin sensible part au palier `strong` de Gemini ;
+  une tâche V2 reste sur Gemini ; la reprise ne retombe jamais sur Claude Code. `provider` et `lean` ne s'appliquent
+  pas et rendent la politique invalide.
+- **Relecteur, arbitre, session orchestrateur** : seulement outillés pour Claude Code. Avec `orchestrator.host:
+  gemini`, ils ne sont pas lancés, et la sortie du tick le dit (`relecteur non lancé : orchestrator.host vaut
+  'gemini'…`). Aucun repli silencieux sur `claude`.
+- **Non vérifié** (Gemini CLI n'est pas installé sur le poste de développement : tout est testé sur un faux binaire
+  qui émet le flux documenté) : le format exact des événements `stream-json` ; un événement de fin de tour capable
+  de bloquer (`AfterAgent`) ; le format des fichiers de session ; le comportement du mode `default` sans interface
+  face à un outil qui demande confirmation.
+
 ### Fusion par le merger (#876, lot 4)
 
 Le rôle `merger` est une étape de `orchestrate tick --apply`, après le relecteur. Il est désactivé par défaut :
@@ -563,6 +834,9 @@ orchestrator:
       ignored_checks: ["codecov/*"] # hors du verdict, seulement quand gh dit qu'aucun check n'est requis
       max_cycles: 2                 # retours au worker (CI rouge, conflit) avant l'escalade
       protected_paths: []           # chemins qui reviennent à l'humain, en plus des défauts
+      protected_gate: human         # human (défaut) | dual_review ; toute autre valeur rend la politique invalide
+      human_only_paths: []          # chemins qui restent à l'humain quel que soit protected_gate, en plus des défauts
+      second_reviewer_min_tier: strong  # dual_review : palier minimal du second relecteur (cheap | mid | strong)
 ```
 
 La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
@@ -579,8 +853,8 @@ dans cet ordre, et chaque garde échoue fermée :
 | READY | la tête GitHub est la tête **scellée** au jugement (ou un réalignement noté au même journal) ; reçu et pack inchangés à l'octet | tête relue pas encore poussée : attente ; sinon nouvelle relecture |
 | CI | checks requis (`gh pr checks --required`) ; tous hors `ignored_checks` seulement si gh dit qu'aucun n'est requis ; au moins un `pass` ; vert au tick précédent aussi | rouge : retour au worker ; en attente, sans check ou gh en panne : attente |
 | Cible | la base GitHub contenue dans la tête | réalignement en plomberie, poussé sans forcer, puis nouvelle CI |
-| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun fichier qui escalade, reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
-| Acceptation | fusion revérifiée, tête fusionnée couverte par le sceau, aucun fichier qui escalade, mandat qui couvre `accept` | question non bloquante « accepter ? » avec la commande `task accept` |
+| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun fichier qui escalade (en `dual_review` : aucun fichier qui reste à l'humain, et deux READY scellés pour les autres chemins réservés), reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
+| Acceptation | fusion revérifiée, tête fusionnée couverte par le sceau, aucun fichier qui escalade (en `dual_review` : les deux sceaux tenus sur la tête fusionnée), mandat qui couvre `accept` | question non bloquante « accepter ? » avec la commande `task accept` |
 
 - **Sceau du READY** (`missions/review_seal.py`) : au lancement du relecteur, la tête de `task/<id>` est notée au journal
   d'autorité (`~/.grimoire/control/`). Au jugement, sont scellés la même tête (une branche qui a bougé pendant la
@@ -592,6 +866,53 @@ dans cet ordre, et chaque garde échoue fermée :
   `.gitmodules`, les fichiers conftest de pytest, `.claude/*`, `.mcp.json`, `.vscode/*`, `.pre-commit-config.yaml` et les
   fichiers compilés. La clé `protected_paths` s'y ajoute. La
   comparaison se fait en `casefold()`, sur la liste de fichiers que GitHub annonce ; une liste tronquée fait escalader.
+- **Double relecture** (`protected_gate: dual_review`, `missions/dual_review.py`) : par défaut (`human`), tout chemin
+  réservé escalade, comme ci-dessus. En `dual_review`, les chemins réservés se partagent en deux listes, et aucun ne
+  devient libre.
+- **Double relecture, ce qui reste à l'humain dès que le réglage vaut `dual_review`** : la politique et la configuration d'hôte
+  (`_grimoire/standard/*`, `.claude/*`, `.mcp.json`, `.vscode/*`) ; ce qui définit la CI et les tests (`.github/*`, les
+  fichiers conftest de pytest, `pyproject.toml`, `setup.cfg` et le script setup de setuptools,
+  `.pre-commit-config.yaml`, `.githooks/*`, `.husky/*`, `framework/hooks/*`, `codeowners`, `.gitmodules`,
+  `.gitattributes`) ; les fichiers compilés ; le mécanisme lui-même (`merger.py`, `dual_review.py`, `review_seal.py`,
+  `reviewer.py`, `mandate.py`, `autopilot.py`, `breaker.py`, `launcher.py`, `orchestrator_policy.py` de
+  `src/grimoire/missions/`, un paquet du même nom que l'un d'eux, `src/grimoire/missions/__init__.py`,
+  `src/grimoire/hosts/decisions/*`, l'attestation des flows) ; et les **dépendances directes** du mécanisme, c'est-à-dire
+  les modules de `src/grimoire/` que ces neuf modules importent, avec les `__init__.py` qui s'exécutent avant eux :
+  `src/grimoire/providers/*` (le registre décide le palier du second relecteur), une partie de `src/grimoire/core/`
+  (dossier du standard, verrou et écriture du journal, git du tick, identité de session, exceptions), une partie de
+  `src/grimoire/missions/` (reçus, acceptation, service, schémas, worktree de la tâche, le tick lui-même…), les flows
+  d'autonomie, le service de preuve, la synchronisation d'hôte. La liste exacte est `HUMAN_ONLY_PATHS` dans
+  `missions/dual_review.py`. Elle couvre le premier rang d'imports, pas la fermeture transitive ; un test lit ces
+  imports et échoue le jour où le mécanisme importe un module qu'elle ne nomme pas. « CI verte » est l'autre
+  condition de fusion : un fichier capable de la rendre verte à tort, ou de changer ce que la relecture juge, ne se
+  relit pas par deux agents. La clé `human_only_paths` étend cette liste ; rien ne la réduit. Certains de ces chemins
+  ne sont pas réservés en `human` (`src/grimoire/providers/*`, par exemple) : là, rien ne change par rapport à avant.
+- **Double relecture, ce qui y passe** : le reste de `src/grimoire/missions/*`, `src/grimoire/core/*`, et les
+  `protected_paths` du projet.
+- **Double relecture, second relecteur et décision** : dès que le premier `READY` tient et sous mandat actif, le merger
+  inscrit la demande d'une seconde relecture au journal
+  d'autorité ; le relecteur la lance au tick suivant et **choisit lui-même son modèle**, dans le registre de
+  fournisseurs : un modèle que l'hôte du relecteur sait lancer (fournisseur `anthropic`, `claude` ou `claude-code`,
+  sans route), distinct de celui du premier relecteur, d'une autre famille que le worker. Parmi eux, **le plus fort**
+  est pris, d'après le palier que le registre déclare (`strong`, puis `mid`, puis `cheap`), jamais d'après le nom ; une
+  famille différente de celle du premier relecteur ne départage qu'à palier égal. `second_reviewer_min_tier` (défaut
+  `strong`) est le palier en dessous duquel personne n'est pris : sans candidat à ce palier, la PR va à l'humain avec
+  la raison, sans repli sur un modèle plus faible. Avec un registre à trois alias (`haiku`, `sonnet`, `opus`), un
+  worker `sonnet` relu par `opus` n'a donc pas de second relecteur sous le défaut : déclarer un second modèle fort,
+  ou abaisser le seuil en connaissance de cause. La fusion et l'acceptation exigent deux sceaux
+  `READY` du journal d'autorité, de deux sessions et de deux modèles distincts, aucun du worker, sur la même tête et le
+  même arbre, et la CI verte (`task.merge_dual_review` au ledger). Rien de cela ne se lit dans le ledger
+  d'événements, qu'un worker peut écrire. Échec fermé : un `NOT-READY`, un `READY` périmé, tout retour au
+  worker ou remise en file par le merger (CI rouge, conflit) défont d'abord, au journal d'autorité, les relectures
+  scellées de la tâche : il faut ensuite deux relectures fraîches, même sans nouveau commit, et si cette annulation ne
+  peut pas s'inscrire rien n'est appliqué ; des sceaux qui ne couvrent plus la tête renvoient à la relecture ; aucun candidat au registre,
+  registre ou journal illisible, identités ou modèles en défaut, erreur : question « fusionner ? » à l'humain, avec la
+  raison. Une tâche faite à la main, ou lancée avant le réglage, n'a pas de worker scellé : sa PR reste à l'humain.
+- **Double relecture, limite connue** : la double relecture repose sur l'isolation entre le worker et le tick. Tant
+  que le worker, les relecteurs et le tick tournent sous le même utilisateur du système, elle protège contre un worker
+  qui se trompe, pas contre un worker hostile ; en `dual_review`, cette limite (celle du verrou 7) porte sur des
+  chemins réservés qu'en `human` elle n'atteint pas. Seule une isolation par utilisateur du système la fermerait :
+  ne passer en `dual_review` que si les workers sont tenus pour honnêtes sur ces chemins.
 - **Réalignement** : `git merge-tree`, puis `commit-tree -p <tête GitHub> -p <base GitHub>`, sur objets : le worktree du
   worker n'est pas touché. Les objets sont récupérés à refspec explicite vers `refs/grimoire/tick/…`, depuis l'URL de
   `origin` vérifiée égale au dépôt de la PR. Un conflit limité à `CHANGELOG.md` est résolu par l'union des deux côtés,

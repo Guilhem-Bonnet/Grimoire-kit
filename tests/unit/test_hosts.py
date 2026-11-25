@@ -733,15 +733,17 @@ def test_a_hand_written_copilot_wrapper_is_preserved(governed: Path) -> None:
     assert target.read_text(encoding="utf-8") == "# Mon agent à moi\n"
 
 
-def test_prose_only_host_states_that_governance_is_not_enforced(governed: Path) -> None:
+def test_codex_entrypoint_states_that_hooks_need_approval(governed: Path) -> None:
+    """Codex a des hooks, mais un hook de projet ne tourne qu'approuvé via /hooks : AGENTS.md le dit."""
     emitter = emitter_for(HostId.CODEX)
     assert emitter is not None
     plan = emitter.plan(build_surface(governed), governed)
     apply_plan(plan, governed, force=True)
     catalog = (governed / "AGENTS.md").read_text(encoding="utf-8")
     assert "concierge" in catalog
-    assert "ne sont pas opposables" in catalog
-    assert {"subagents", "skills", "commands", "hooks"} <= {d.surface for d in plan.degradations}
+    assert "approbation requise via /hooks" in catalog
+    assert "que par discipline et par la CI" in catalog
+    assert {"hook approval", "hook enforcement", "commands"} <= {d.surface for d in plan.degradations}
 
 
 @pytest.mark.parametrize("host_id", list(supported_hosts()))
@@ -2099,10 +2101,10 @@ def test_the_same_refusal_reaches_both_blocking_hosts(governed: Path) -> None:
 def test_a_host_without_blocking_hooks_gets_context_not_a_refusal(governed: Path) -> None:
     _set_task_in_progress(governed)
     (governed / "_grimoire-output/context/bootstrap/context-bundle.yaml").unlink(missing_ok=True)
-    rendered, decision, hook = run_hook({"hook_event_name": "Stop", "cwd": str(governed)}, host_id=HostId.CODEX)
+    rendered, decision, hook = run_hook({"hook_event_name": "Stop", "cwd": str(governed)}, host_id=HostId.UNKNOWN)
     assert "decision" not in rendered
     assert decision.outcome is Outcome.BLOCK  # the rule is the same...
-    assert render(decision, hook, HostId.CODEX) == rendered  # ...only the wiring differs
+    assert render(decision, hook, HostId.UNKNOWN) == rendered  # ...only the wiring differs
 
 
 def test_pre_tool_use_renders_a_permission_decision(governed: Path) -> None:
@@ -2161,8 +2163,12 @@ def test_a_crashing_policy_asks_instead_of_allowing(governed: Path, monkeypatch:
     assert decision.outcome is Outcome.ASK
     assert claude["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert "moteur de politique cassé" in claude["hookSpecificOutput"]["permissionDecisionReason"]
-    copilot, _, _ = run_hook(payload, host_id=HostId.CODEX)
-    assert "moteur de politique cassé" in copilot["hookSpecificOutput"]["additionalContext"]
+    unknown, _, _ = run_hook(payload, host_id=HostId.UNKNOWN)
+    assert "moteur de politique cassé" in unknown["hookSpecificOutput"]["additionalContext"]
+    # Codex ne prend pas `ask` sur PreToolUse (le hook échouerait, l'outil passerait) : refus motivé.
+    codex, _, _ = run_hook(payload, host_id=HostId.CODEX)
+    assert codex["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "moteur de politique cassé" in codex["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_a_crashing_non_tool_decision_keeps_the_session_and_says_so(
@@ -2816,12 +2822,21 @@ def test_an_unwritable_trace_ledger_never_breaks_recording_a_miss(project: Path)
 #: chaque valeur. Vrai seulement là où l'hôte documente l'ouverture d'une
 #: session dans un agent nommé.
 _AGENT_AUTOSTART_BY_HOST: dict[HostId, tuple[bool, str]] = {
+    HostId.KIMI_CODE: (
+        True,
+        "`kimi --agent <nom>` (moonshotai.github.io/kimi-code/en/customization/agents, lue le 2026-11-22)",
+    ),
     HostId.CLAUDE_CODE_CLI: (
         True,
         "`claude --agent <name>` (code.claude.com/docs/en/cli-reference), clé `agent` "
         "(code.claude.com/docs/en/settings-reference), `agent_type` au SessionStart (code.claude.com/docs/en/hooks)",
     ),
-    HostId.GITHUB_COPILOT: (False, "un agent `.github/agents/*.agent.md` ne s'ouvre que par le sélecteur de chat"),
+    HostId.GITHUB_COPILOT: (
+        False,
+        "VS Code : sélecteur de chat seulement ; la CLI a `copilot --agent <id>` (docs.github.com, agents "
+        "personnalisés de Copilot CLI) mais le profil décrit VS Code et aucune source ne dit que les hooks "
+        "Copilot portent l'identité de l'agent",
+    ),
     HostId.CODEX: (False, "`codex` n'a pas d'option d'agent nommé (AGENTS.md seulement)"),
     HostId.CURSOR: (False, "Cursor charge des règles et des sous-agents, pas une session dans un agent"),
     HostId.GEMINI_CLI: (False, "`gemini` n'a pas d'option d'agent nommé (sous-agents `.gemini/agents/`, pas de session ouverte dans un agent)"),
