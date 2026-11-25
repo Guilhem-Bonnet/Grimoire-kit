@@ -41,8 +41,12 @@ CHARS_PER_WORD = 8
 DETAIL_ON_SCREEN = "Le détail est à l'écran."
 
 _TAG_RE = re.compile(rf"<{SPOKEN_TAG}>(.*?)</{SPOKEN_TAG}>", re.DOTALL | re.IGNORECASE)
-_FENCE_RE = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
-_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+_FENCE_RE = re.compile(r"```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|<pre\b.*?(?:</pre>|\Z)", re.DOTALL | re.IGNORECASE)
+_FENCE_LINE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_FINAL_TAG_RE = re.compile(
+    rf"(?:\A|\n)<{SPOKEN_TAG}>((?:(?!</?{SPOKEN_TAG}>).)*)</{SPOKEN_TAG}>\s*\Z", re.DOTALL | re.IGNORECASE
+)
+_INLINE_CODE_RE = re.compile(r"(`+)[^`\n]*?\1")
 _LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 _URL_RE = re.compile(r"https?://\S+")
 _PATH_RE = re.compile(
@@ -117,20 +121,44 @@ def _cap(text: str, max_seconds: float) -> tuple[str, bool]:
     return " ".join(out), True
 
 
-def _outside_code(reply: str) -> str:
-    """La réponse sans blocs de code, code en ligne ni citations : ce qui y est cité n'est pas le message de l'orchestrateur."""
-    text = _FENCE_RE.sub(" ", reply)
-    text = _INLINE_CODE_RE.sub(" ", text)
-    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+def _open_block_at(prefix: str) -> bool:
+    """Vrai si ``prefix`` s'achève dans un bloc de code non fermé (clôture ``` ou ~~~, ou ``<pre>``)."""
+    fence = ""
+    for line in prefix.splitlines():
+        m = _FENCE_LINE_RE.match(line)
+        if not m:
+            continue
+        marker = m.group(1)
+        if not fence:
+            fence = marker
+        elif marker[0] == fence[0] and len(marker) >= len(fence) and not m.group(2).strip():
+            fence = ""
+    if fence:
+        return True
+    lowered = prefix.lower()
+    return lowered.count("<pre") > lowered.count("</pre>")
+
+
+def _final_tag(reply: str) -> str | None:
+    """Le contenu de la balise parlée, seulement en position non ambiguë.
+
+    Non ambiguë : dernier bloc de la réponse, en début de ligne sans retrait (ni code indenté, ni citation),
+    hors de tout bloc de code ouvert. Le reste — balise citée, recopiée, au milieu — retombe sur les règles
+    déterministes : on ne devine pas la grammaire Markdown, on ne prend que ce qu'elle ne peut pas faire
+    passer pour du code ou une citation.
+    """
+    m = _FINAL_TAG_RE.search(reply)
+    if not m or _open_block_at(reply[: m.start()]):
+        return None
+    return m.group(1)
 
 
 def spoken_from_reply(reply: str, max_seconds: float) -> tuple[str, str]:
     """Le texte à dire pour une réponse, et sa source (``"tag"`` ou ``"rules"``). ``("", "none")`` s'il n'y a rien à dire."""
-    reply = _outside_code(reply)  # une balise citée (code, fichier recopié, citation) n'est jamais lue
-    tags = _TAG_RE.findall(reply)
+    tag = _final_tag(reply)  # une balise citée ou hors position n'est jamais lue : repli déterministe
     source = "tag"
-    if tags:
-        text, removed = _clean(tags[0])  # la première balise hors code ; le repli déterministe sinon
+    if tag is not None:
+        text, removed = _clean(tag)
     else:
         text, removed = "", False
     if not text:

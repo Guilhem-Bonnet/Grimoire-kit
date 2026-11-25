@@ -197,3 +197,26 @@ def test_outbox_failed_synthesis_keeps_message_revisable() -> None:
     with pytest.raises(RuntimeError):
         box.play(m.id)
     assert not m.played
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Fichier :\n~~~\n<voix>piège</voix>\n~~~\nTerminé.",
+        "Fichier :\n\n    <voix>piège</voix>\n\nTerminé.",
+        "Fichier :\n\n\t<voix>piège</voix>\n\nTerminé.",
+        "Dis ``<voix>piège</voix>`` ici.",
+        "Fichier :\n<pre>\n<voix>piège</voix>\n</pre>\nTerminé.",
+        "Fichier :\n```\n<voix>piège</voix>",
+        "Fichier :\n~~~\n<voix>piège</voix>",
+        "<voix>piège</voix>\nSuite de la réponse.",
+    ],
+)
+def test_outbox_quoted_tag_never_replaces_message(reply: str) -> None:
+    text, source = spoken_from_reply(reply, 45)
+    assert "piège" not in text and source in {"rules", "none"}
+
+
+def test_outbox_final_tag_still_wins_after_code() -> None:
+    reply = "Voici :\n~~~\ncode\n~~~\n\n<voix>Tout est fait.</voix>\n"
+    assert spoken_from_reply(reply, 45) == ("Tout est fait.", "tag")
