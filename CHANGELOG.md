@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.107.0] - 2026-11-25
+
+- feat(agents): skill livré `grimoire-cadrage` (posé par `grimoire up` pour Claude Code, Copilot et les autres hôtes à skills) : l'orchestrateur mène l'entretien de cadrage (une question à la fois, réponses consignées, challenge, arrêt quand les angles obligatoires sont couverts) sans jamais valider à la place de la MOA ; la persona d'entrée y renvoie (Refs #1342) (#1361)
+- perf(cockpit): la vue « attention » à chaud passe d'environ 0,6 s à 0,15 s sur un ledger de 400 tâches : un seul `git for-each-ref` pour les tâches tenues, préfixe du ledger couvert par l'instantané relu une fois (clé : empreinte du préfixe), verdict de vérifiabilité mémoïsé, propositions et version de l'outil du projet gardées tant que leurs fichiers ne bougent pas (#1243) (#1363)
+- feat(voice): moteur de synthèse `qwen3-tts-clone` (Qwen3-TTS 0.6B Base, clonage d'une voix de référence française livrée dans le paquet, ou d'un WAV local via `voice.tts.voice`), extra séparé `grimoire-kit[voice-qwen]` ; défaut du moteur de synthèse selon les paquets présents (qwen3-tts-clone, pocket-tts, navigateur) ; threads torch limités à la moitié des cœurs (`voice.tts.threads`) ; `grimoire doctor` donne le moteur retenu, la mémoire attendue (~6 Go) et le modèle absent du cache (#1343). (#1360)
+
 ## [3.106.0] - 2026-11-25
 
 - fix(missions): arbitre — `open_request` et le tick ne lisent une clôture (`task.arbitrated`, `task.arbitration_fallback`) que scellée au journal d'autorité (`arbitration_closure`) : une ligne forgée au ledger avec le `request_id` d'une demande ouverte ne la ferme plus ; la session arbitre n'a plus de liste noire d'options gh (contournée trois fois : `-cw`, tabulation) mais une liste blanche fermée de formes exactes sans `*`, générée pour la PR de la demande (`allowed_tools` : `gh pr diff <n>`, `gh pr view <n> --json <champs fixes>`), `--web`/`-w` compris refusés ; le sceau de clôture est posé après l’événement. La PR, la tête et les critères que lit la session viennent du sceau de la demande, plus de la ligne du ledger (une ligne forgée sous le même `request_id` ne redirige plus l’arbitre) ; `grimoire task show <tâche>` et `grimoire task arbitrate <tâche> --request <demande> --json '…'` sont des formes exactes générées pour la demande (plus de `*`, plus de `--project-root`), le JSON encadré d’apostrophes droites et toute troisième apostrophe refusée ; un critère qui porte `'` se vote en `’`.
