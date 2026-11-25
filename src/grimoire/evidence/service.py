@@ -148,13 +148,13 @@ class EvidenceService:
         return pack
 
     def get_pack(self, pack_id: str) -> EvidencePack | None:
-        return self._load_packs().get(pack_id)
+        return file_memo.view_copy(self._load_packs().get(pack_id))
 
     def list_packs(self, task_id: str | None = None) -> list[EvidencePack]:
         packs = list(self._load_packs().values())
         if task_id is not None:
             packs = [p for p in packs if p.task_id == task_id]
-        return packs
+        return file_memo.view_copy(packs)
 
     def verify(
         self,
@@ -246,9 +246,8 @@ class EvidenceService:
         if not self._verdicts_path.exists():
             return []
         verdicts = file_memo.view_derived(self._verdicts_path, "evidence-verdicts", _parse_verdicts)
-        if task_id is None:
-            return list(verdicts)
-        return [v for v in verdicts if v.task_id == task_id]
+        chosen = list(verdicts) if task_id is None else [v for v in verdicts if v.task_id == task_id]
+        return file_memo.view_copy(chosen)
 
     def has_unreadable_verdicts(self, task_id: str) -> bool:
         """``True`` si une ligne de ``verdicts.jsonl`` est illisible et peut concerner *task_id* (échec fermé, #1257).

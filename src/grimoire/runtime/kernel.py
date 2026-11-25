@@ -710,18 +710,5 @@ class RuntimeKernel:
         # Dans une lecture d'affichage du cockpit (``file_memo.view_scope``), le journal immobile n'est parsé qu'une
         # fois pour tous les runs ; partout ailleurs (reprise, décisions du moteur), c'est une lecture simple.
         events = file_memo.view_derived(self._events_path, "kernel-run-events", _parse_run_events)
-        if wfi_id is None:
-            return list(events)
-        return [evt for evt in events if evt.workflow_instance_id == wfi_id]
-        for line in self._events_path.read_text(encoding="utf-8").split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-                evt = RunEvent.from_dict(raw)
-                if wfi_id is None or evt.workflow_instance_id == wfi_id:
-                    events.append(evt)
-            except (json.JSONDecodeError, KeyError):
-                pass
-        return events
+        chosen = list(events) if wfi_id is None else [evt for evt in events if evt.workflow_instance_id == wfi_id]
+        return file_memo.view_copy(chosen)  # les payloads sont des dict : jamais ceux de la mémoire

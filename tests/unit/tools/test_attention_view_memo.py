@@ -285,3 +285,256 @@ class TestKernelEventsInView:
         flow_runs._attach_live_status(root, runs)
         assert runs[0]["status"] is None
         assert runs[0]["currentNode"] is None
+
+
+# ── Revue adverse de #1383 ──────────────────────────────────────────────────
+
+
+class TestServedValuesCannotPolluteTheMemory:
+    """C2 : ce que la vue sert est une copie profonde ; la mutation d'un payload, d'un pack ou d'un verdict ne reste pas."""
+
+    def test_un_payload_d_evenement_modifie_ne_pollue_ni_le_scope_ni_le_suivant(
+        self, tmp_path: Path, _ancien: None
+    ) -> None:
+        kernel = RuntimeKernel(tmp_path / "rt")
+        with (tmp_path / "rt" / "run_events.jsonl").open("w", encoding="utf-8") as fh:
+            fh.write(json.dumps(_event("e1", "w1").to_dict()) + "\n")
+        with file_memo.view_scope():
+            kernel.get_run_events("w1")[0].payload["reason"] = "POLLUE"
+            assert kernel.get_run_events("w1")[0].payload["reason"] == "x"
+            kernel.get_run_events()[0].payload["reason"] = "POLLUE"
+        with file_memo.view_scope():
+            assert kernel.get_run_events("w1")[0].payload["reason"] == "x"
+
+    def test_un_pack_et_un_verdict_servis_sont_des_copies(self, tmp_path: Path, _ancien: None) -> None:
+        service = TestEvidenceInView()._service(tmp_path)
+        with file_memo.view_scope():
+            served = service.list_packs("T-1")[0]
+            object.__setattr__(served, "task_id", "POLLUE")  # figé, mais forcé : la mémoire ne doit pas le voir
+            assert [p.task_id for p in service.list_packs()] == ["T-1", "T-2"]
+            fetched = service.get_pack(served.id)
+            assert fetched is not None
+            object.__setattr__(fetched, "task_id", "POLLUE")
+        with file_memo.view_scope():
+            assert [p.task_id for p in service.list_packs()] == ["T-1", "T-2"]
+
+
+class TestScopeDoesNotLeak:
+    """C3 : les deux sites d'ouverture sont des ``with`` simples ; rien ne reste actif derrière eux."""
+
+    def test_le_scope_se_referme_apres_une_exception(self) -> None:
+        with pytest.raises(RuntimeError), file_memo.view_scope():
+            assert file_memo._view_active.get() is True
+            raise RuntimeError("boom")
+        assert file_memo._view_active.get() is False
+
+    def test_les_scopes_imbriques_se_referment_dans_l_ordre(self) -> None:
+        with file_memo.view_scope():
+            with file_memo.view_scope():
+                pass
+            assert file_memo._view_active.get() is True
+        assert file_memo._view_active.get() is False
+
+    def test_le_scope_ne_passe_pas_a_un_autre_fil(self) -> None:
+        import threading
+
+        seen: list[bool] = []
+        with file_memo.view_scope():
+            thread = threading.Thread(target=lambda: seen.append(file_memo._view_active.get()))
+            thread.start()
+            thread.join()
+        assert seen == [False]
+
+    def test_les_sites_du_cockpit_ne_laissent_rien_d_actif(self, tmp_path: Path) -> None:
+        from grimoire.tools import flow_runs
+
+        root = tmp_path / "proj"
+        (root / "_grimoire-runtime-output" / "flows").mkdir(parents=True)
+        flow_runs._attach_live_status(root, [{"runId": "inconnu"}])
+        assert file_memo._view_active.get() is False
+
+
+GATES = """\
+$schema: "grimoire-agentic-standard-evidence-gates/v1"
+states: [proposed, ready, in_progress, blocked, review, accepted, released, archived]
+transitions:
+  - id: review_to_accepted
+    from: review
+    to: accepted
+    required_evidence: ["evidence_pack", "review_gate"]
+profile_strictness:
+  starter: advisory
+  governed: hard_fail
+"""
+
+
+class TestGateReadsRealEvidence:
+    """T1 : le gate de la vue LIT des preuves ; sa sortie égale celle du chemin sans scope, à chaque étape."""
+
+    def _project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
+        from grimoire.missions.schemas import TaskState
+        from grimoire.missions.service import TaskService
+
+        monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "cockpit"))
+        for var in ("GRIMOIRE_TASK_ID", "GRIMOIRE_ACTOR", "GRIMOIRE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
+            monkeypatch.delenv(var, raising=False)
+        root = tmp_path / "proj"
+        root.mkdir()
+        service = TaskService(root)
+        task_id = service.add("À relire", ("le test passe",), actor="t", owner="g", ready=True).task.id
+        service.claim(task_id, "agent-a", host="host-claude-code-cli")
+        service.transition(task_id, TaskState.RUNNING, "agent-a")
+        service.transition(task_id, TaskState.NEEDS_VERIFICATION, "agent-a")
+        standard = root / "_grimoire" / "standard"
+        standard.mkdir(parents=True)
+        (standard / "evidence-gates.yaml").write_text(GATES, encoding="utf-8")
+        (standard / "standard-profile.yaml").write_text("profile: governed\n", encoding="utf-8")
+        return root, task_id
+
+    @staticmethod
+    def _view(root: Path) -> dict[str, Any]:
+        from datetime import UTC, datetime
+
+        from grimoire.tools import workspace_attention as wa
+
+        view = wa.attention_view(
+            root,
+            now=datetime(2026, 11, 25, tzinfo=UTC),
+            pr_reader=lambda *_a, **_k: [],
+            service_probe=lambda *_a: "online",
+        )
+        view.pop("generated_at")
+        return view
+
+    def _plain(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+        import contextlib
+
+        with monkeypatch.context() as patch:
+            patch.setattr(file_memo, "view_scope", contextlib.nullcontext)
+            return self._view(root)
+
+    def _verify(self, root: Path, task_id: str, *, passes: bool) -> None:
+        service = EvidenceService(root / "_grimoire-runtime-output" / "evidence")
+        pack = service.create_pack(
+            task_id,
+            EvidenceProfile.STANDARD,
+            [
+                EvidenceItem(
+                    id="I-t",
+                    kind=EvidenceKind.TEST,
+                    uri="a://t",
+                    digest="d",
+                    summary="le test passe" if passes else "rien",
+                ),
+                EvidenceItem(
+                    id="I-l",
+                    kind=EvidenceKind.LOG,
+                    uri="a://l",
+                    digest="d",
+                    summary="le test passe" if passes else "rien",
+                ),
+            ],
+            acceptance=("le test passe",),
+        )
+        service.verify(pack, acceptance=("le test passe",))
+
+    def _reasons(self, view: dict[str, Any]) -> list[str]:
+        return [
+            item["detail"] if "detail" in item else str(item)
+            for section in view["sections"]
+            for item in section["items"]
+        ]
+
+    def test_equivalence_a_froid_a_chaud_et_apres_chaque_ecriture(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _ancien: None
+    ) -> None:
+        root, task_id = self._project(tmp_path, monkeypatch)
+
+        def same() -> dict[str, Any]:
+            memo = self._view(root)
+            assert memo == self._plain(root, monkeypatch)
+            return memo
+
+        none_yet = same()  # froid : ni pack ni verdict
+        assert same() == none_yet  # chaud
+        self._verify(root, task_id, passes=False)  # verdict FAILED
+        failed = same()
+        assert failed != none_yet
+        self._verify(root, task_id, passes=True)  # puis PASSED
+        passed = same()
+        assert passed != failed
+        # Le verdict est bien passé par la mémoire d'affichage : sinon rien de ce test ne prouve la mémoire.
+        assert any(kind == "evidence-verdicts" for kind, _ in file_memo._view_entries)
+        assert any(kind == "evidence-packs" for kind, _ in file_memo._view_entries)
+
+        # Réécriture à taille égale, date restaurée : « passed » devient « failed ».
+        path = root / "_grimoire-runtime-output" / "evidence" / "verdicts.jsonl"
+        info = path.stat()
+        data = path.read_bytes()
+        forged = data.replace(b'"verdict": "passed"', b'"verdict": "failed"')
+        assert forged != data
+        assert len(forged) == len(data)
+        path.write_bytes(forged)
+        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        again = same()
+        assert again != passed
+
+
+class TestRealRunStatusFollowsEachStep:
+    """T2 : le statut d'un vrai run, lu à chaud par ``_attach_live_status``, suit chaque étape du moteur."""
+
+    def test_en_cours_checkpoint_puis_termine(self, tmp_path: Path, _ancien: None) -> None:
+        import io
+
+        from grimoire.flows.engine import FlowEngine
+        from grimoire.flows.executor import InteractiveNodeExecutor
+        from grimoire.tools.flow_runs import list_flow_runs
+
+        blueprint = {
+            "blueprintVersion": 1,
+            "id": "deux-nodes",
+            "name": "Deux nodes",
+            "nodes": [
+                {
+                    "id": "a",
+                    "kind": "pattern",
+                    "ref": "ORC-01",
+                    "label": "A",
+                    "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
+                },
+                {
+                    "id": "b",
+                    "kind": "pattern",
+                    "ref": "QUA-04",
+                    "label": "B",
+                    "pins": [{"id": "in", "direction": "in", "contract": "c1"}],
+                },
+            ],
+            "edges": [{"from": "a.out", "to": "b.in", "contract": "c1"}],
+        }
+        path = tmp_path / "deux-nodes.blueprint.json"
+        path.write_text(json.dumps(blueprint), encoding="utf-8")
+        engine = FlowEngine(
+            kernel_root=tmp_path / "_grimoire-runtime-output" / "runtime",
+            flows_root=tmp_path / "_grimoire-runtime-output" / "flows",
+            project_root=tmp_path,
+        )
+        wfi, _ = engine.run(path, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+
+        def shown() -> tuple[str | None, str | None]:
+            run = list_flow_runs(tmp_path)[0]
+            direct = engine.status(wfi.id, include_contract=False)
+            assert (run["status"], run["currentNode"]) == (direct.status, direct.current_node)  # même chose, sans scope
+            again = list_flow_runs(tmp_path)[0]  # à chaud : même réponse
+            assert (again["status"], again["currentNode"]) == (run["status"], run["currentNode"])
+            return run["status"], run["currentNode"]
+
+        steps = [shown()]
+        engine.resume(wfi.id, output={"pins": {"out": {"contract": "c1"}}})
+        steps.append(shown())
+        assert steps[-1] == ("checkpointed", "b")
+        engine.resume(wfi.id, output={"pins": {}})
+        steps.append(shown())
+        assert steps[-1][0] == "completed"
+        assert len(set(steps)) == 3  # chaque étape a changé ce que la vue affiche
+        assert any(kind == "kernel-run-events" for kind, _ in file_memo._view_entries)
