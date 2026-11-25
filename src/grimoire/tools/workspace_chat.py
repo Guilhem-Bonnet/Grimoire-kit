@@ -163,6 +163,7 @@ class Conversation:
         self._pilot_open: dict[tuple[str, str], dict[str, Any]] = {}
         self._pilot_polled = float("-inf")
         self._turn_text: list[str] = []
+        self._spoken_token: str | None = None  # jeton du message parlé du tour en cours, un par tour
 
     # ── journal ──────────────────────────────────────────────────────────
 
@@ -447,18 +448,22 @@ class Conversation:
 
     def _with_spoken_brief(self, text: str) -> str:
         """En mode vocal, la consigne du message parlé suit le message de la personne (le fil, lui, ne l'affiche pas)."""
-        from grimoire.voice.outbox import spoken_instruction
+        from grimoire.voice.outbox import new_spoken_token, spoken_instruction
         from grimoire.voice.settings import load_voice_settings
 
         settings = load_voice_settings(self.root)
-        return f"{text}\n\n{spoken_instruction(settings.spoken_max_s)}" if settings.enabled else text
+        self._spoken_token = new_spoken_token() if settings.enabled else None
+        if self._spoken_token is None:
+            return text
+        return f"{text}\n\n{spoken_instruction(settings.spoken_max_s, self._spoken_token)}"
 
     def _record_spoken(self, reply: str) -> None:
         """Dépose le message parlé de la réponse dans la boîte d'envoi vocale ; le fil reçoit l'événement."""
         from grimoire.voice import outbox_service
 
+        token, self._spoken_token = self._spoken_token, None  # jamais réutilisé
         try:
-            message = outbox_service.record_reply(self.root, reply)
+            message = outbox_service.record_reply(self.root, reply, token)
         except Exception:  # le vocal est un confort : il ne casse jamais un tour
             return
         if message is not None:

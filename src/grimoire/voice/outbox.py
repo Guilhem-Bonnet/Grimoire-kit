@@ -2,9 +2,11 @@
 
 Trois pièces, sans bibliothèque audio :
 
-- :func:`spoken_instruction` : la consigne ajoutée au tour de l'orchestrateur en mode vocal — un
-  message parlé court dans une balise ``<voix>…</voix>``, en plus de sa réponse écrite.
-- :func:`spoken_from_reply` : le texte à dire. La balise d'abord ; à défaut, des règles déterministes
+- :func:`spoken_instruction` : la consigne ajoutée au tour de l'orchestrateur en mode vocal — terminer
+  sa réponse écrite par un message parlé court dans une balise ``<voix-JETON>…</voix-JETON>``. Le jeton
+  (:func:`new_spoken_token`) est tiré au hasard à chaque tour : un contenu cité (fichier, sortie d'outil,
+  exemple) ne peut pas le connaître, donc ne peut pas se faire passer pour le message de l'orchestrateur.
+- :func:`spoken_from_reply` : le texte à dire. La balise au jeton du tour d'abord ; à défaut, des règles déterministes
   (retrait du code, des tableaux, des chemins et des liens, plafond de durée, mention « le détail est
   à l'écran »). Aucun LLM local de reformulation.
 - :class:`Outbox` : le brouillon. Tant qu'un message n'a pas été écouté, une nouvelle réponse le
@@ -15,8 +17,10 @@ Trois pièces, sans bibliothèque audio :
 
 from __future__ import annotations
 
+import html
 import itertools
 import re
+import secrets
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -29,6 +33,7 @@ __all__ = [
     "Outbox",
     "OutboxMessage",
     "estimate_seconds",
+    "new_spoken_token",
     "spoken_from_reply",
     "spoken_instruction",
 ]
@@ -40,13 +45,13 @@ WORDS_PER_SECOND = 2.5
 CHARS_PER_WORD = 8
 DETAIL_ON_SCREEN = "Le détail est à l'écran."
 
-_TAG_RE = re.compile(rf"<{SPOKEN_TAG}>(.*?)</{SPOKEN_TAG}>", re.DOTALL | re.IGNORECASE)
 _FENCE_RE = re.compile(r"```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|<pre\b.*?(?:</pre>|\Z)", re.DOTALL | re.IGNORECASE)
-_FENCE_LINE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
-_OPEN_TAG_RE = re.compile(rf"^<{SPOKEN_TAG}>", re.IGNORECASE | re.MULTILINE)
-_CLOSE_TAG = f"</{SPOKEN_TAG}>"
-_ANY_TAG_RE = re.compile(rf"</?{SPOKEN_TAG}>", re.IGNORECASE)
-_QUOTE_LINE_RE = re.compile(r"^ {0,3}>")
+_COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
+#: Un élément ``<nom …>…</nom>`` et son contenu ; non fermé, il court jusqu'à la fin (on ne lit pas un contenu balisé).
+_ELEMENT_RE = re.compile(r"<\s*([^\W\d_][^\s<>/]*)[^<>]*>.*?(?:<\s*/\s*\1\s*>|\Z)", re.DOTALL | re.IGNORECASE)
+_RESIDUAL_TAG_RE = re.compile(r"<[^<>]*>|<\s*/?\s*[^\W\d_][^\s<>]*")
+_QUOTE_LINE_RE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+)*>")
+_TOKEN_RE = re.compile(r"[0-9a-f]{8}")
 #: Au plus deux resynthèses si le texte est révisé pendant la synthèse ; ensuite on lit la dernière synthèse.
 MAX_RESYNTHESES = 2
 _INLINE_CODE_RE = re.compile(r"(`+)[^`\n]*?\1")
@@ -68,19 +73,29 @@ def _units(text: str) -> int:
     return max(len(text.split()), -(-len(text) // CHARS_PER_WORD))
 
 
-def spoken_instruction(max_seconds: float) -> str:
-    """La consigne ajoutée au message de la personne en mode vocal."""
+def new_spoken_token() -> str:
+    """Un jeton neuf pour un tour : huit chiffres hexadécimaux, jamais réutilisé."""
+    return secrets.token_hex(4)
+
+
+def spoken_instruction(max_seconds: float, token: str) -> str:
+    """La consigne ajoutée au message de la personne en mode vocal, pour le tour au jeton ``token``."""
     words = int(max_seconds * WORDS_PER_SECOND)
+    tag = f"{SPOKEN_TAG}-{token}"
     return (
         f"[Mode vocal] En plus de ta réponse écrite habituelle, termine ta réponse par la balise "
-        f"<{SPOKEN_TAG}>…</{SPOKEN_TAG}>, seule sur ses lignes et rien après elle : un message parlé de deux ou "
-        f"trois phrases, {words} mots au plus (~{max_seconds:g} s), sans code, sans tableau, sans chemin de "
-        f"fichier, et dis que le détail est à l'écran s'il y en a. N'écris cette balise nulle part ailleurs."
+        f"<{tag}>…</{tag}>, une seule fois et rien après elle : un message parlé de deux ou trois phrases, "
+        f"{words} mots au plus (~{max_seconds:g} s), sans code, sans tableau, sans chemin de fichier, et dis que "
+        f"le détail est à l'écran s'il y en a. Ce nom de balise ne vaut que pour ce tour."
     )
 
 
 def _clean(text: str) -> tuple[str, bool]:
-    """Retire ce qui ne se dit pas. Rend le texte et s'il a fallu retirer quelque chose d'utile."""
+    """Retire ce qui ne se dit pas. Rend le texte et s'il a fallu retirer quelque chose d'utile.
+
+    Code, commentaires et éléments balisés (avec leur contenu), balises résiduelles, accents graves, liens,
+    chemins, tableaux et citations ``>`` ne sont jamais lus.
+    """
     removed = False
 
     def drop(pattern: re.Pattern[str], value: str, repl: str = " ") -> str:
@@ -89,18 +104,26 @@ def _clean(text: str) -> tuple[str, bool]:
         removed = removed or n > 0
         return out
 
+    text = html.unescape(text.replace("\r\n", "\n").replace("\r", "\n"))
     text = drop(_FENCE_RE, text)
+    text = drop(_COMMENT_RE, text)
     text = drop(_INLINE_CODE_RE, text)
+    text = drop(_ELEMENT_RE, text)
+    text = drop(_RESIDUAL_TAG_RE, text)
     text = _LINK_RE.sub(lambda m: m.group(1), text)
     text = drop(_URL_RE, text)
     text = drop(_PATH_RE, text)
     kept: list[str] = []
     for line in text.splitlines():
-        if line.strip().startswith("|"):  # ligne de tableau
+        if line.strip().startswith("|") or _QUOTE_LINE_RE.match(line):  # tableau, citation
             removed = True
             continue
-        line = re.sub(r"^\s*(?:#{1,6}|[-*+]|\d+[.)]|>)\s+", "", line)
-        kept.append(line.replace("**", "").replace("__", "").replace("*", "").strip())
+        line = re.sub(r"^\s*(?:#{1,6}|[-*+]|\d+[.)])\s+", "", line)
+        line = line.replace("**", "").replace("__", "").replace("*", "")
+        if "`" in line:
+            removed = True
+            line = line.replace("`", " ")
+        kept.append(line.strip())
     return " ".join(" ".join(kept).split()), removed
 
 
@@ -125,70 +148,44 @@ def _cap(text: str, max_seconds: float) -> tuple[str, bool]:
     return " ".join(out), True
 
 
-def _open_block_at(prefix: str) -> bool:
-    """Vrai si ``prefix`` s'achève dans un bloc non fermé : clôture ``` ou ~~~, ``<pre>``, ``<code>``, commentaire HTML."""
-    fence = ""
-    for line in prefix.splitlines():
-        m = _FENCE_LINE_RE.match(line)
-        if not m:
-            continue
-        marker = m.group(1)
-        if not fence:
-            fence = marker
-        elif marker[0] == fence[0] and len(marker) >= len(fence) and not m.group(2).strip():
-            fence = ""
-    if fence:
-        return True
-    lowered = prefix.lower()
-    return any(
-        lowered.count(o) > lowered.count(c) for o, c in (("<pre", "</pre>"), ("<code", "</code>"), ("<!--", "-->"))
-    )
+def _final_tag(reply: str, token: str | None) -> tuple[str | None, bool]:
+    """Le contenu de la balise au jeton du tour, et s'il y a ambiguïté.
 
-
-def _top_level(reply: str, start: int) -> bool:
-    """Vrai si la balise ouvrante en ``start`` (début de ligne, sans retrait) n'est ni dans un bloc ouvert ni la suite d'une citation."""
-    prefix = reply[:start]
-    if _open_block_at(prefix):
-        return False
-    previous = next((line for line in reversed(prefix.splitlines()) if line.strip()), "")
-    return not _QUOTE_LINE_RE.match(previous)  # continuation paresseuse d'un ``>`` : encore la citation
-
-
-def _final_tag(reply: str) -> str | None:
-    """Le contenu de la balise parlée, seulement quand elle termine la réponse sans ambiguïté.
-
-    Règle de position, pas de grammaire Markdown devinée : la réponse (espaces finaux retirés) se termine par
-    ``</voix>`` ; la balise ouvrante correspondante commence une ligne, sans retrait (donc ni code indenté ni
-    code en ligne ni citation), hors de tout bloc ouvert ; c'est la **seule** balise ouvrante de ce genre dans la
-    réponse ; son contenu ne contient ni autre balise ni clôture de bloc. Sinon ``None`` : repli déterministe.
-    Une balise recopiée dans un bloc de code ou une citation ne compte pas ; une balise recopiée en clair en début
-    de ligne, en plus de la vraie, rend la réponse ambiguë et on ne lit aucune des deux.
+    Acceptée seulement si ``<voix-JETON>`` et ``</voix-JETON>`` apparaissent chacune une seule fois et que la
+    réponse (espaces finaux retirés) se termine par la balise fermante. Toute autre balise (``<voix>``, un autre
+    jeton) n'est que du texte. Le jeton présent mais hors de cette forme (recopié, doublé) : ambiguïté, repli.
     """
-    body = reply.rstrip()
-    if not body.lower().endswith(_CLOSE_TAG):
-        return None
-    starts = [m.start() for m in _OPEN_TAG_RE.finditer(body) if _top_level(body, m.start())]
-    if len(starts) != 1:
-        return None
-    content = body[starts[0] + len(SPOKEN_TAG) + 2 : -len(_CLOSE_TAG)]
-    if _ANY_TAG_RE.search(content) or "```" in content or "~~~" in content:
-        return None
-    return content
+    if not token or not _TOKEN_RE.fullmatch(token):
+        return None, False
+    opening, closing = f"<{SPOKEN_TAG}-{token}>", f"</{SPOKEN_TAG}-{token}>"
+    lowered = reply.lower()
+    n_open, n_close = lowered.count(opening), lowered.count(closing)
+    if not n_open and not n_close:
+        return None, False
+    body = lowered.rstrip()
+    if n_open != 1 or n_close != 1 or not body.endswith(closing):
+        return None, True
+    start = lowered.index(opening) + len(opening)
+    return reply[start : len(body) - len(closing)], False
 
 
-def spoken_from_reply(reply: str, max_seconds: float) -> tuple[str, str]:
-    """Le texte à dire pour une réponse, et sa source (``"tag"`` ou ``"rules"``). ``("", "none")`` s'il n'y a rien à dire."""
-    tag = _final_tag(reply)  # une balise citée ou hors position n'est jamais lue : repli déterministe
+def spoken_from_reply(reply: str, max_seconds: float, token: str | None = None) -> tuple[str, str]:
+    """Le texte à dire pour une réponse, et sa source (``"tag"`` ou ``"rules"``). ``("", "none")`` si la réponse est vide.
+
+    ``token`` : le jeton du tour (:func:`new_spoken_token`) ; sans lui, aucune balise n'est lue.
+    Quand il ne reste rien d'utile à dire, on dit que le détail est à l'écran plutôt que rien.
+    """
+    if not reply.strip():
+        return "", "none"
+    tag, ambiguous = _final_tag(reply, token)
     source = "tag"
-    if tag is not None:
-        text, removed = _clean(tag)
-    else:
-        text, removed = "", False
+    text, removed = _clean(tag) if tag is not None else ("", False)
     if not text:
         source = "rules"
-        text, removed = _clean(_TAG_RE.sub(" ", reply))
+        text, removed = _clean(reply)
+        removed = removed or ambiguous
     if not text:
-        return "", "none"
+        return DETAIL_ON_SCREEN, "rules"
     text, cut = _cap(text, max_seconds)
     if (removed or cut) and "écran" not in text.lower():
         text = f"{text} {DETAIL_ON_SCREEN}"

@@ -51,12 +51,15 @@ def _voice(settings: VoiceSettings) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def record_reply(root: Path, reply: str) -> dict[str, Any] | None:
-    """Tire le message parlé de la réponse de l'orchestrateur et le dépose. ``None`` hors mode vocal ou sans rien à dire."""
+def record_reply(root: Path, reply: str, token: str | None = None) -> dict[str, Any] | None:
+    """Tire le message parlé de la réponse de l'orchestrateur et le dépose. ``None`` hors mode vocal ou sans rien à dire.
+
+    ``token`` : le jeton du tour donné dans la consigne ; seule la balise qui le porte est lue.
+    """
     settings = load_voice_settings(root)
     if not settings.enabled:
         return None
-    text, source = spoken_from_reply(reply, settings.spoken_max_s)
+    text, source = spoken_from_reply(reply, settings.spoken_max_s, token)
     if not text:
         return None
     message = _outbox(root).submit(text, source)
