@@ -77,7 +77,63 @@ def test_un_secret_coupe_par_un_caractere_invisible_est_toujours_masque() -> Non
 
 # ── La vue de la flotte, avec et sans la nouvelle normalisation ──────────────
 
-from tests.unit.tools import test_fleet_live as base  # noqa: E402
+from grimoire.tools import workspace_fleet_live as fleet  # noqa: E402
+
+REGISTRY = """\
+providers:
+  - id: "anthropic"
+    enabled: true
+    models:
+      - id: "claude-sonnet-5-5"
+        tier: "mid"
+      - id: "claude-opus-5-5"
+        tier: "strong"
+"""
+
+
+def _journal_dir(claude_home: Path, root: Path) -> Path:
+    directory = claude_home / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(root.resolve()))
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _assistant(
+    session: str, message_id: str, model: str, *, at: str, tools: tuple[dict[str, Any], ...] = ()
+) -> dict[str, Any]:
+    return {
+        "type": "assistant",
+        "timestamp": at,
+        "effort": "high",
+        "sessionId": session,
+        "entrypoint": "cli",
+        "message": {
+            "id": message_id,
+            "model": model,
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+            "content": list(tools),
+        },
+    }
+
+
+def _tool(name: str, tool_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "tool_use", "id": tool_id, "name": name, "input": payload}
+
+
+def _result(session: str, tool_id: str, content: str, *, error: bool = False) -> dict[str, Any]:
+    return {
+        "type": "user",
+        "timestamp": "2026-11-12T10:00:00Z",
+        "sessionId": session,
+        "message": {
+            "content": [{"type": "tool_result", "tool_use_id": tool_id, "is_error": error, "content": content}]
+        },
+    }
+
+
+def _write(path: Path, lines: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+
 
 NOW = datetime(2026, 11, 12, 10, 5, tzinfo=UTC)
 
@@ -98,14 +154,14 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "projet"
     root.mkdir()
     setup_standard_profile(root, profile_id="governed", task_id="bootstrap")
-    (root / "_grimoire/standard/llm-provider-registry.yaml").write_text(base.REGISTRY, encoding="utf-8")
+    (root / "_grimoire/standard/llm-provider-registry.yaml").write_text(REGISTRY, encoding="utf-8")
     reg.save_registry([{"slug": "projet", "name": "Projet", "path": str(root.resolve())}])
     return root
 
 
 def _view(project: Path) -> dict[str, Any]:
-    base.fleet.reset_cache()
-    view = base.fleet.fleet_live_view(project, now=NOW)
+    fleet.reset_cache()
+    view = fleet.fleet_live_view(project, now=NOW)
     return json.loads(json.dumps(view, default=str, sort_keys=True))
 
 
@@ -115,23 +171,23 @@ def test_la_vue_est_identique_avec_l_ancienne_normalisation(
     session = "0f0f0f0f-1e1e1e1e-2d2d2d2d-3c3c3c3c-4b4b4b4b4b4b"
     other = "1a1a1a1a-1e1e1e1e-2d2d2d2d-3c3c3c3c-4b4b4b4b4b4b"
     tools = (
-        base._tool("Bash", "b1", {"command": "echo ​caché é"}),
-        base._tool("Read", "r1", {"file_path": "/tmp/ﬁchier.txt"}),
-        base._tool("Bash", "b2", {"command": "\x1b[31mrouge\x1b[0m"}),
+        _tool("Bash", "b1", {"command": "echo ​caché é"}),
+        _tool("Read", "r1", {"file_path": "/tmp/ﬁchier.txt"}),
+        _tool("Bash", "b2", {"command": "\x1b[31mrouge\x1b[0m"}),
     )
-    lines = [base._assistant(session, "m1", "claude-sonnet-5-5", tools=tools, at="2026-11-12T10:00:00Z")]
-    lines.append(base._result(session, "b1", "sortie accentuée — « ok » fin ghp_abcdefghijklmnopqrstuvwxyz0123456789"))
-    lines.append(base._result(session, "r1", "plain"))
-    lines.append(base._result(session, "b2", "\x1b[32mvert\x1b[0m", error=True))
-    directory = base._journal_dir(claude_home, project)
-    base._write(directory / f"{session}.jsonl", lines)
-    base._write(
+    lines = [_assistant(session, "m1", "claude-sonnet-5-5", tools=tools, at="2026-11-12T10:00:00Z")]
+    lines.append(_result(session, "b1", "sortie accentuée — « ok » fin ghp_abcdefghijklmnopqrstuvwxyz0123456789"))
+    lines.append(_result(session, "r1", "plain"))
+    lines.append(_result(session, "b2", "\x1b[32mvert\x1b[0m", error=True))
+    directory = _journal_dir(claude_home, project)
+    _write(directory / f"{session}.jsonl", lines)
+    _write(
         directory / f"{other}.jsonl",
-        [base._assistant(other, "m9", "claude-opus-5-5", at="2026-11-12T10:01:00Z")],
+        [_assistant(other, "m9", "claude-opus-5-5", at="2026-11-12T10:01:00Z")],
     )
 
     fast_cold = _view(project)
-    fast_hot = base.fleet.fleet_live_view(project, now=NOW)
+    fast_hot = fleet.fleet_live_view(project, now=NOW)
     assert json.loads(json.dumps(fast_hot, default=str, sort_keys=True)) == fast_cold
     monkeypatch.setattr(validation, "normalize_for_storage", _legacy)
     legacy = _view(project)
