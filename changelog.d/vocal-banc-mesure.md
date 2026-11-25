@@ -1,1 +1,0 @@
-- chore(vocal): `scripts/voice_bench.py` (outil interne, hors paquet) — banc de mesure reconnaissance (taux d'erreur de mots, facteur temps réel) et synthèse (délai avant le premier son, facteur temps réel, pic de mémoire, WAV anonymisés pour écoute à l'aveugle) ; rien n'est téléchargé sans `--download` (Refs #1343)
