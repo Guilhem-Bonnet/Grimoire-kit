@@ -1549,7 +1549,7 @@ def audit_runtime_events(project_root: Path) -> dict[str, Any]:
     invalid_lines: list[int] = []
     event_count = 0
     event_types: dict[str, int] = {}
-    for line_no, line in enumerate(journal.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_no, line in enumerate(journal.read_text(encoding="utf-8").split("\n"), start=1):
         if not line.strip():
             continue
         try:

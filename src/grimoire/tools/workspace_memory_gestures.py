@@ -298,7 +298,7 @@ def _snapshot_of(root: Path, ref: str) -> dict[str, Any] | None:
             raw = handle.read().decode("utf-8", errors="replace")
     except OSError:
         return None
-    for line in reversed(raw.splitlines()):
+    for line in reversed(raw.split("\n")):
         try:
             row = json.loads(line)
         except json.JSONDecodeError:

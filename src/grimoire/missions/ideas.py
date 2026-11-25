@@ -75,7 +75,7 @@ class IdeaStore:
         except OSError:
             return []
         events: builtins.list[dict[str, Any]] = []
-        for line in raw.splitlines():
+        for line in raw.split("\n"):
             try:
                 event = json.loads(line)
             except ValueError:
