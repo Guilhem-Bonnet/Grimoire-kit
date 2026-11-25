@@ -16,7 +16,7 @@ from pathlib import Path
 
 import grimoire
 
-AUDIO_MODULES = ("faster_whisper", "torch", "onnxruntime", "pocket_tts")
+AUDIO_MODULES = ("faster_whisper", "torch", "onnxruntime", "pocket_tts", "qwen_tts")
 
 _SCRIPT = r"""
 import importlib.util, json, sys, threading, urllib.request

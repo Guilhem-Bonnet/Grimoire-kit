@@ -6,7 +6,9 @@
       mode: text            # text | voice — défaut text
     voice:
       stt: faster-whisper   # ou une table : {engine: faster-whisper, model: small}
-      tts: pocket-tts       # ou {engine: pocket-tts, language: french, voice: estelle}
+      tts: qwen3-tts-clone  # défaut : qwen3-tts-clone si qwen_tts est installé, sinon pocket-tts, sinon navigateur
+                            # ou {engine: qwen3-tts-clone, voice: /chemin/voix.wav, threads: 4}
+                            # (voix = WAV local avec un .txt voisin ; sinon la voix livrée)
       idle_unload_seconds: 300
       language: fr
       max_record_seconds: 120 # plafond d'un enregistrement (1 à 600)
@@ -39,7 +41,25 @@ INTERACTION_MODES = ("text", "voice")
 #: assez court pour rendre la mémoire quand la conversation est finie.
 DEFAULT_IDLE_UNLOAD_S = 300.0
 DEFAULT_STT = "faster-whisper"
-DEFAULT_TTS = "pocket-tts"
+QWEN_TTS = "qwen3-tts-clone"
+POCKET_TTS = "pocket-tts"
+BROWSER_TTS = "browser"
+
+
+def default_tts() -> str:
+    """Moteur de synthèse par défaut selon les paquets présents : qwen3-tts-clone, pocket-tts, sinon navigateur.
+
+    Lu par ``find_spec`` : aucun paquet n'est importé. Un ``voice.tts`` explicite garde la priorité.
+    """
+    from grimoire.voice.engines import ENGINES, availability
+
+    for name in (QWEN_TTS, POCKET_TTS):
+        spec = ENGINES.get(("tts", name))
+        if spec is not None and availability(spec).ok:
+            return name
+    return BROWSER_TTS
+
+
 #: Plafond d'un enregistrement : deux minutes tiennent dans un message, et bornent le poids de l'audio.
 DEFAULT_MAX_RECORD_S = 120.0
 MAX_RECORD_CEILING_S = 600.0
@@ -62,7 +82,7 @@ class VoiceSettings:
 
     mode: str = "text"
     stt: EngineChoice = field(default_factory=lambda: EngineChoice(DEFAULT_STT))
-    tts: EngineChoice = field(default_factory=lambda: EngineChoice(DEFAULT_TTS))
+    tts: EngineChoice = field(default_factory=lambda: EngineChoice(default_tts()))
     idle_unload_s: float = DEFAULT_IDLE_UNLOAD_S
     language: str = "fr"
     allow_download: bool = False
@@ -139,7 +159,7 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         allow = False
 
     stt = _engine_choice(voice.get("stt"), "stt", DEFAULT_STT, problems)
-    tts = _engine_choice(voice.get("tts"), "tts", DEFAULT_TTS, problems)
+    tts = _engine_choice(voice.get("tts"), "tts", default_tts(), problems)
     _check_known("stt", stt, problems)
     _check_known("tts", tts, problems)
 

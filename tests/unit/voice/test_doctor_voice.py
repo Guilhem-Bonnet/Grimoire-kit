@@ -41,7 +41,7 @@ def test_voice_mode_flags_a_model_missing_from_the_cache(monkeypatch: pytest.Mon
     monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
     monkeypatch.setattr("grimoire.voice.faster_whisper_engine.model_cached", lambda _o: False)
     monkeypatch.setattr("grimoire.voice.pocket_tts_engine.model_cached", lambda _o: True)
-    out = _run({"interaction": {"mode": "voice"}})
+    out = _run({"interaction": {"mode": "voice"}, "voice": {"tts": "pocket-tts"}})
     assert out["voice_stt"]["level"] == "warn" and out["voice_stt"]["available"] is False
     assert "absent du cache" in out["voice_stt"]["detail"]
     assert out["voice_tts"]["level"] == "ok"
@@ -103,3 +103,21 @@ def test_grimoire_doctor_reports_voice_entries(tmp_path: Path) -> None:
     names = {c["name"]: c for c in checks}
     assert {"voice_extra", "voice_stt", "voice_tts"} <= set(names)
     assert names["voice_tts"]["engine"] == "browser" and names["voice_tts"]["level"] == "ok"
+
+
+def test_voice_mode_reports_qwen_engine_memory_and_missing_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
+    monkeypatch.setattr("grimoire.voice.faster_whisper_engine.model_cached", lambda _o: True)
+    monkeypatch.setattr("grimoire.voice.qwen_tts_engine.model_cached", lambda _o=None: False)
+    out = _run({"interaction": {"mode": "voice"}})  # qwen_tts « installé » : moteur retenu par défaut
+    tts = out["voice_tts"]
+    assert tts["engine"] == "qwen3-tts-clone"
+    assert tts["level"] == "warn" and "absent du cache" in tts["detail"]
+    assert "6 Go" in tts["detail"]
+
+
+def test_voice_mode_qwen_missing_package_points_at_its_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda m: m != "qwen_tts")
+    out = _run({"interaction": {"mode": "voice"}, "voice": {"tts": "qwen3-tts-clone"}})
+    assert out["voice_tts"]["level"] == "warn"
+    assert "voice-qwen" in out["voice_tts"]["detail"]

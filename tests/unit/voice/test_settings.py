@@ -15,7 +15,8 @@ from grimoire.voice.settings import (
 )
 
 
-def test_defaults_are_text_mode_with_local_engines_and_no_download() -> None:
+def test_defaults_are_text_mode_with_local_engines_and_no_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda m: m == "pocket_tts")
     s = settings_from_mapping({"project": {"name": "x"}})
     assert s == VoiceSettings()
     assert s.mode == "text" and not s.enabled
