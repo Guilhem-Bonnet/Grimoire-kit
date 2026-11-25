@@ -38,6 +38,12 @@ def test_cadrage_interview_persona_skill_carries_the_key_rules() -> None:
         "Ne jamais écrire une validation",
         "Quand ne pas le mener",
         "critère d'acceptation",
+        "Selon la nature de la demande",
+        "Investigation",
+        "Recherche ou comparatif",
+        "Anomalie",
+        "une réponse prouvée",
+        "--kind",
     ):
         assert marker in text, marker
 

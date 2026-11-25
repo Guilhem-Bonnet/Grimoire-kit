@@ -18,6 +18,12 @@
       "prompt": "Corrige la faute dans le titre de README.md : « Grimiore » doit être « Grimoire ».",
       "expected_output": "Fait la correction directement, sans entretien de cadrage.",
       "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Je voudrais savoir si on peut remplacer notre file de messages par une autre.",
+      "expected_output": "Lit la nature rendue par `grimoire cadrage interview --json` (recherche ou comparatif), pose les questions propres (critères de choix, sources acceptées, temps alloué) sans les inventer, vise une recommandation tranchée et sourcée, et laisse la MOA prononcer la recette.",
+      "files": []
     }
   ]
 }

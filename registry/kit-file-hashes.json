@@ -2386,6 +2386,10 @@
    "version": "3.64.0",
    "path": "framework/mcp/grimoire-mcp-server.md"
   },
+  "93b12b5207c9c3aad3ef6a28e8325a7be6921bbdeeb422a50938726d4f9892a3": {
+   "version": "3.105.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
+  },
   "9460a0425ed146b54aca0671e5ebbb1a8230a577290086ab8aebc38a69820de9": {
    "version": "3.4.2",
    "path": "framework/tools/self-healing.py"

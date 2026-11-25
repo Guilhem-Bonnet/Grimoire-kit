@@ -11,8 +11,9 @@ besoin) valide. Voir `docs/explications/moa-moe.md`.
 
 ## Quand mener l'entretien
 
-- Une demande de construction, de refonte ou de changement dont le besoin,
-  l'utilisateur ou le critère de réussite ne sont pas clairs.
+- Toute demande dont le besoin, la question à résoudre ou le critère de fin
+  n'est pas clair : construction, refonte, anomalie, investigation, audit,
+  recherche, migration, sécurité…
 - Un chantier qui touche plusieurs composants ou plusieurs personnes.
 
 ## Quand ne pas le mener
@@ -36,6 +37,21 @@ besoin) valide. Voir `docs/explications/moa-moe.md`.
 4. Consigner chaque réponse : `grimoire cadrage interview answer <angle> "<réponse>"`.
    Un « je ne sais pas » devient une hypothèse consignée (`--unknown`), pas un
    blocage. Un angle sans objet s'écarte avec sa raison (`--skip`).
+
+## Selon la nature de la demande
+
+L'entretien s'adapte à la nature rendue par `grimoire cadrage interview --json`
+(projet, fonctionnalité, évolution, anomalie, incident, investigation,
+analyse ou audit, recherche ou comparatif, maintenance, migration, sécurité,
+question). Les questions propres, le livrable et le critère de recette
+viennent de cette sortie : ne pas les inventer. L'essentiel par famille :
+
+- Anomalie : attendu contre observé, reproduction, depuis quand. Recette : le cas ne se reproduit plus.
+- Investigation : la question à résoudre, les hypothèses, les preuves attendues, le critère d'arrêt. Recette : une réponse prouvée.
+- Analyse ou audit : la décision que l'analyse doit éclairer, le périmètre, le format. Recette : un rapport qui permet de décider.
+- Recherche ou comparatif : critères de choix, sources acceptées, temps alloué. Recette : une recommandation tranchée et sourcée.
+- Migration, maintenance, sécurité : ce qui ne doit pas bouger, le retour arrière, l'exposition.
+- Une demande peut changer de nature en route : relancer avec `--kind`, les réponses sont conservées.
 
 ## Challenger
 
