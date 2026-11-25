@@ -135,7 +135,11 @@ def _phase_path(root: Path, slug: str, filename: str) -> Path:
         if known is None:
             raise FileNotFoundError(f"chantier inconnu : {slug!r}")
     base = cadrage_dir(root, None).resolve()
-    path = (cadrage_dir(root, known) / filename).resolve()
+    raw = cadrage_dir(root, known) / filename
+    # Même garde que `cadrage_interview._load` : ni le fichier ni son dossier ne sont des liens symboliques.
+    if raw.is_symlink() or raw.parent.is_symlink():
+        raise FileNotFoundError(f"chantier inconnu : {slug!r}")
+    path = raw.resolve()
     if not path.is_relative_to(base):
         raise FileNotFoundError(f"chantier inconnu : {slug!r}")
     return path
@@ -210,10 +214,25 @@ def document(root: Path, slug: str) -> dict[str, Any]:
         found = read_chantier(root)
     if found is None:
         raise FileNotFoundError(f"chantier inconnu : {slug!r}")
-    return {"chantier": _chantier_row(root, found), "phases": [_phase_view(root, None if found.default else found.slug, p) for p in PHASES]}
+    return {
+        "chantier": _chantier_row(root, found),
+        "phases": [_phase_view(root, None if found.default else found.slug, p) for p in PHASES],
+    }
 
 
 # ── Édition d'un bloc ───────────────────────────────────────────────────────
+
+_STRUCTURE = re.compile(r"^\s{0,3}(?:#{1,6}\s|---\s*$)", re.MULTILINE)
+
+
+def _refuse_structure(text: str) -> None:
+    """Un bloc ne réécrit pas la structure du fichier (même règle que `cadrage_interview._fold`).
+
+    Une ligne de titre ``#`` ou un filet ``---`` ferait naître une rubrique ou un front matter : refusé,
+    comme l'entretien le neutralise en repliant la saisie sur une ligne.
+    """
+    if _STRUCTURE.search(text):
+        raise ValueError("un bloc ne peut pas contenir de titre (#) ni de filet (---) : il structurerait le fichier")
 
 
 def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -248,6 +267,8 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
             raise ConflictError(f"le bloc {block_id!r} n'existe plus dans {phase.filename}") from exc
         if not block.editable:
             raise PermissionError(f"le bloc {block.kind} ne se modifie pas d'ici : il structure le fichier")
+        if block.kind != "paragraphe" or not text.lstrip().startswith(("```", "~~~")):
+            _refuse_structure(text)
         updated = atelier_blocs.replace_block(current, block, text)
         if updated != current:
             atomic_write(path, updated.encode("utf-8"))

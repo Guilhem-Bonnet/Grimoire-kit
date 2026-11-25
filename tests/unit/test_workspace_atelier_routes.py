@@ -152,5 +152,33 @@ def test_block_edit_stays_inside_the_cadrage_folder(project: Path, tmp_path_fact
     assert {f.name: f.read_bytes() for f in (outside / "un").iterdir()} == before
 
 
+def test_block_edit_cannot_rewrite_the_structure(project: Path) -> None:
+    """Comme `cadrage_interview._fold` : un bloc ne fait naître ni titre ni front matter."""
+    _on(project)
+    workspace_post(project, f"{P}atelier/chantiers", {"titre": "Un"})
+    path = project / "_grimoire/cadrage/un/02-brainstorm.md"
+    path.write_text(path.read_text(encoding="utf-8") + "\n- Une piste\n", encoding="utf-8")
+    phase = workspace_get(project, f"{P}atelier/chantiers/un", {})["phases"][1]
+    block = next(b for b in phase["blocks"] if b["text"] == "- Une piste")
+    before = path.read_bytes()
+    for text in ("- ok\n## Intrus", "# Titre", "- ok\n---\n- suite", "x\n  ### y"):
+        code, _ = _put(project, "un", block["id"], {"text": text, "expected": phase["fingerprint"]})
+        assert code == 400 and path.read_bytes() == before
+
+
+def test_block_edit_refuses_a_symlinked_phase_file(project: Path) -> None:
+    _on(project)
+    workspace_post(project, f"{P}atelier/chantiers", {"titre": "Un"})
+    folder = project / "_grimoire/cadrage/un"
+    phase = workspace_get(project, f"{P}atelier/chantiers/un", {})["phases"][0]
+    editable = next(b for b in phase["blocks"] if b["editable"])
+    target = project / "_grimoire/cadrage/autre.md"
+    (folder / "01-brief.md").replace(target)
+    (folder / "01-brief.md").symlink_to(target)
+    before = target.read_bytes()
+    code, _ = _put(project, "un", editable["id"], {"text": "x", "expected": phase["fingerprint"]})
+    assert code == 404 and target.read_bytes() == before
+
+
 def test_unhandled_paths_stay_unhandled(project: Path) -> None:
     assert workspace_get(project, "/api/autre", {}) is WORKSPACE_UNHANDLED
