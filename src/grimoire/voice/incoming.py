@@ -81,28 +81,51 @@ def purge(root: Path, ttl_s: float, *, clock: Callable[[], float] = time.time) -
     return removed
 
 
+def _open_folder(folder: Path) -> int | None:
+    """Ouvre le dossier sans suivre de lien (``O_DIRECTORY | O_NOFOLLOW``) ; ``None`` là où ces moyens n'existent pas
+    (Windows : ``O_DIRECTORY``, ``O_NOFOLLOW`` et ``dir_fd=`` sont absents), le repli travaille alors par chemin."""
+    if not (hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW") and os.open in os.supports_dir_fd):
+        return None
+    return os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
+
+def _write(folder: Path, name: str, data: bytes, dir_fd: int | None) -> None:
+    fd = os.open(name if dir_fd is not None else folder / name, _OPEN_FLAGS, 0o600, dir_fd=dir_fd)
+    with os.fdopen(fd, "wb") as handle:
+        if hasattr(os, "fchmod"):
+            os.fchmod(handle.fileno(), 0o600)
+        handle.write(data)
+
+
 @contextlib.contextmanager
 def recording(root: Path, data: bytes) -> Iterator[Path]:
     """Écrit ``data`` dans un fichier 0600 du dossier entrant, le rend, puis le supprime quoi qu'il arrive.
 
     Pas d'écriture atomique (le fichier est éphémère, jamais remplacé) : un nom aléatoire de 128 bits dans un
-    dossier 0700, ouvert sans suivre de lien (``O_NOFOLLOW``), mis en 0600 par ``fchmod`` quoi qu'il existât.
-    Un dossier non inscriptible devient un refus lisible.
+    dossier 0700, mis en 0600 par ``fchmod`` quoi qu'il existât. Le dossier est ouvert sans suivre de lien
+    (``O_DIRECTORY | O_NOFOLLOW``) puis le fichier créé et supprimé relativement à ce descripteur (``dir_fd=``) :
+    un lien posé après le contrôle de :func:`incoming_dir` n'est plus suivi. Là où ces moyens manquent (Windows),
+    repli par chemin, gardé par ``O_NOFOLLOW`` quand il existe. Un dossier non inscriptible devient un refus lisible.
     """
     try:
         folder = incoming_dir(root)
+        dir_fd = _open_folder(folder)
     except OSError:
         raise ValueError(_UNWRITABLE) from None
-    path = folder / f"{PREFIX}{secrets.token_hex(16)}{SUFFIX}"
+    name = f"{PREFIX}{secrets.token_hex(16)}{SUFFIX}"
+    path = folder / name
     try:
         try:
-            fd = os.open(path, _OPEN_FLAGS, 0o600)
-            with os.fdopen(fd, "wb") as handle:
-                if hasattr(os, "fchmod"):
-                    os.fchmod(handle.fileno(), 0o600)
-                handle.write(data)
+            _write(folder, name, data, dir_fd)
         except OSError:
             raise ValueError(_UNWRITABLE) from None
         yield path
     finally:
-        path.unlink(missing_ok=True)
+        if dir_fd is None:
+            path.unlink(missing_ok=True)
+        else:
+            try:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(name, dir_fd=dir_fd)
+            finally:
+                os.close(dir_fd)

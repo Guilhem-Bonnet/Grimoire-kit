@@ -74,15 +74,30 @@ _KIND_LABEL = {
 }
 _DEFAULT_LABEL = "utiliser un outil"
 _TARGET_KEYS = ("file_path", "path", "notebook_path", "filePath")
-#: Seul le nom du programme se dit, et seulement s'il a la forme d'un nom d'exécutable (pas de chemin, pas de phrase).
-#: En minuscules seulement : une majuscule trahit une phrase déguisée (« Dites-oui ») ; sinon « un programme ».
-_BINARY = re.compile(r"[a-z0-9][a-z0-9_.+-]{0,23}")
-#: D'un fichier, seule l'extension se dit, courte et en minuscules ; sinon « un fichier ».
-_EXTENSION = re.compile(r"\.[a-z0-9]{1,5}")
+#: Liste fermée des programmes courants dont le nom se dit ; tout autre nom (même bien formé, il peut être choisi
+#: par l'agent) devient « un programme ».
+KNOWN_PROGRAMS = frozenset(
+    {
+        "git", "gh", "uv", "pip", "pipx", "python", "python3", "node", "bash", "sh", "zsh", "perl", "ruby", "npm", "npx", "pnpm", "yarn", "cargo",
+        "rustc", "go", "make", "cmake", "docker", "ls", "cat", "rm", "mv", "cp", "mkdir", "touch", "grep", "rg",
+        "sed", "awk", "find", "curl", "wget", "tar", "unzip", "pytest", "ruff", "mypy", "grimoire", "terraform",
+        "kubectl", "echo", "cd", "head", "tail", "chmod", "ssh", "scp", "rsync", "java", "mvn", "gradle", "dotnet",
+    }
+)  # fmt: skip
+#: Liste fermée des extensions de fichier qui se disent ; toute autre devient « un fichier ».
+KNOWN_EXTENSIONS = frozenset(
+    {
+        ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml", ".toml", ".md", ".txt", ".html", ".css",
+        ".sh", ".rs", ".go", ".java", ".c", ".h", ".cpp", ".sql", ".ini", ".cfg", ".csv", ".xml", ".lock",
+    }
+)  # fmt: skip
 #: Les enveloppes connues : on dit « par l'intermédiaire de sudo », jamais le mot suivant (choisi par l'agent).
-#: ``bash``/``sh`` ne sont une enveloppe que suivis de ``-c`` ; seuls, ils sont le programme.
-_WRAPPERS = frozenset({"sudo", "env", "nohup", "time", "xargs"})
-_SHELLS = frozenset({"bash", "sh"})
+#: Les shells ne sont une enveloppe que suivis d'un drapeau court contenant ``c`` (``-c``, ``-lc``) ; les
+#: interpréteurs que suivis de leur drapeau de code en ligne ; seuls, ils sont le programme.
+_WRAPPERS = frozenset({"sudo", "doas", "env", "nohup", "time", "xargs", "timeout", "nice", "stdbuf", "command", "exec"})
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "fish"})
+_INLINE_CODE = {"python": "-c", "python3": "-c", "node": "-e", "perl": "-e", "ruby": "-e"}
+_SHELL_FLAG = re.compile(r"-[a-z]*c[a-z]*")
 #: Les natures de question qu'une dictée ne tranche jamais.
 _VOICE_FORBIDDEN_KINDS = frozenset({"permission", "merge"})
 
@@ -178,7 +193,7 @@ def _file_label(call: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             name = PureWindowsPath(value).name if "\\" in value else PurePosixPath(value).name
             suffix = PurePosixPath(name).suffix
-            return f"un fichier {suffix}" if _EXTENSION.fullmatch(suffix) else "un fichier"
+            return f"un fichier {suffix}" if suffix in KNOWN_EXTENSIONS else "un fichier"
     return ""
 
 
@@ -195,16 +210,21 @@ def _program(call: dict[str, Any]) -> str:
     if not words:
         return ""
     first = words[0]
-    if first in _WRAPPERS or (first in _SHELLS and words[1:] == ["-c"]):
+    second = words[1] if len(words) > 1 else ""
+    if (
+        first in _WRAPPERS
+        or (first in _SHELLS and _SHELL_FLAG.fullmatch(second))
+        or (first in _INLINE_CODE and second == _INLINE_CODE[first])
+    ):
         return f"un programme lancé par l'intermédiaire de {first}"
-    return f"programme {first}" if _BINARY.fullmatch(first) else "un programme"
+    return f"programme {first}" if first in KNOWN_PROGRAMS else "un programme"
 
 
 def permission_spoken(tool_call: Any) -> str:
     """Le message parlé d'une demande de permission : gabarit fixe, sans texte libre de l'agent.
 
-    Lit ``kind`` (liste fermée), le nom du programme lancé (premier mot de ``rawInput.command``, s'il a la forme
-    d'un nom d'exécutable en minuscules ; une enveloppe connue est nommée comme telle) et l'extension du fichier visé ; ignore le reste de la commande, le nom du fichier,
+    Lit ``kind`` (liste fermée), le nom du programme lancé (premier mot de ``rawInput.command``, s'il figure dans
+    :data:`KNOWN_PROGRAMS` ; une enveloppe connue est nommée comme telle) et l'extension du fichier visé ; ignore le reste de la commande, le nom du fichier,
     ``title``, ``content`` et tout autre champ rédigé par l'agent. La consigne de l'écran ouvre et clôt le message ;
     le détail complet est à l'écran.
     """

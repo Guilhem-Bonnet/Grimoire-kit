@@ -55,7 +55,8 @@ def pending_questions(root: Path) -> list[dict[str, Any]]:
     """Les questions ouvertes que le pilote laisse à l'humain — vide si le pilote n'est pas activé.
 
     Chaque ligne : ``task_id``, ``question_id``, ``text``, ``options``, ``recommended``, ``why``, ``kind``, ``kept``,
-    la raison pour laquelle la question reste à l'humain, et ``reserved`` : vrai quand elle relève d'une catégorie
+    la raison pour laquelle la question reste à l'humain (celle de l'engagement s'il y en a une, sinon celle de la
+    réserve, sinon celle du report), et ``reserved`` : vrai quand elle relève d'une catégorie
     réservée (liste fermée du pilote, ou demande qui engage : fusion, publication, déploiement, autorisation), faux
     quand le pilote l'a seulement reportée. Une question réservée ne se tranche pas par une dictée (#1343 V5).
     """
@@ -70,15 +71,26 @@ def pending_questions(root: Path) -> list[dict[str, Any]]:
         for record in open_in_group(task):
             question = record.question
             reserved = reserved_reason(question, task, service.project_root)
-            kept = reserved or last_deferral(service.ledger.events_for(task.id), question.id)
-            if not kept:
+            deferral = "" if reserved else last_deferral(service.ledger.events_for(task.id), question.id)
+            if not (reserved or deferral):
                 continue
-            rows.append({
-                "task_id": task.id, "task_title": task.title, "question_id": question.id,
-                "text": question.text, "options": list(question.options), "recommended": question.recommended,
-                "why": question.why, "kept": kept, "kind": question.kind,
-                "reserved": bool(reserved or engaging_reason(question, task)),
-            })
+            engaging = engaging_reason(question, task)
+            # La raison affichée : celle de l'engagement quand elle existe, sinon la réserve, sinon le report.
+            kept = engaging or reserved or deferral
+            rows.append(
+                {
+                    "task_id": task.id,
+                    "task_title": task.title,
+                    "question_id": question.id,
+                    "text": question.text,
+                    "options": list(question.options),
+                    "recommended": question.recommended,
+                    "why": question.why,
+                    "kept": kept,
+                    "kind": question.kind,
+                    "reserved": bool(reserved or engaging),
+                }
+            )
     return rows
 
 

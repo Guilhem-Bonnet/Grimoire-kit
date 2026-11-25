@@ -56,6 +56,7 @@ MAX_OPTIONS = 8
 MAX_OPTION_CHARS = 200
 MAX_FULL_TEXT_CHARS = 4000
 MAX_CONTEXT_CHARS = 1000
+CONTEXT_TRUNCATED_MARK = "… (raison tronquée)"
 TRUNCATED_MARK = "… (texte tronqué : la question complète est dans le fil)"
 OPTIONS_ON_SCREEN = "Les autres options sont à l'écran."
 
@@ -108,7 +109,7 @@ def interview_instruction(chantier: str) -> str:
         f"par un point d'interrogation ; elle s'affichera comme question en tête de la boîte vocale. "
         f"Quand la personne répond, sa réponse est une transcription : elle peut se tromper sur les noms propres "
         f"et les nombres. Reformule la réponse entendue, puis consigne-la comme une réponse écrite : "
-        f"`grimoire cadrage interview{flag} answer <angle> \"<réponse>\"`. Si l'entretien est fini, ne pose "
+        f'`grimoire cadrage interview{flag} answer <angle> "<réponse>"`. Si l\'entretien est fini, ne pose '
         f"pas de question."
     )
 
@@ -292,7 +293,9 @@ class OutboxMessage:
     answered: bool = False
     truncated: bool = False  # le texte affiché est coupé : aucune option cliquable
     options_hidden: int = 0  # options sans bouton (trop nombreuses, modifiées ou coupées) : à traiter dans le fil
-    full_text: str = ""  # texte d'origine, complet et non nettoyé : c'est lui que le cockpit affiche (``text`` n'est que l'audio)
+    full_text: str = (
+        ""  # texte d'origine, complet et non nettoyé : c'est lui que le cockpit affiche (``text`` n'est que l'audio)
+    )
     reserved: bool = False  # catégorie réservée à l'humain : aucune option cliquable
 
     @property
@@ -315,6 +318,7 @@ class OutboxMessage:
             "reserved": self.reserved,
             "truncated": self.truncated,
             "options_hidden": self.options_hidden,
+            "fixed": self.fixed,
         }
 
 
@@ -385,7 +389,9 @@ class Outbox:
             message = self._open(text, source, kind="question", options=safe, ref=ref)
             message.options_hidden = len(options) - len(safe)
             # La raison d'abord, hors du plafond du texte : seule la question est coupée, et la coupure se voit.
-            head = clean_display(context, keep_newlines=True).strip()[:MAX_CONTEXT_CHARS]
+            head = clean_display(context, keep_newlines=True).strip()
+            if len(head) > MAX_CONTEXT_CHARS:
+                head = head[: MAX_CONTEXT_CHARS - len(CONTEXT_TRUNCATED_MARK)].rstrip() + CONTEXT_TRUNCATED_MARK
             body = clean_display(full_text, keep_newlines=True).strip()
             room = MAX_FULL_TEXT_CHARS - len(head) - 2
             if len(body) > room:
@@ -411,13 +417,16 @@ class Outbox:
             return hit
 
     def _open(
-        self, text: str, source: str, *, kind: str = "report", options: tuple[str, ...] = (),
+        self,
+        text: str,
+        source: str,
+        *,
+        kind: str = "report",
+        options: tuple[str, ...] = (),
         ref: tuple[str, str] | None = None,
     ) -> OutboxMessage:
         """Ouvre un nouveau message (verrou tenu par l'appelant). Une question sans réponse n'est jamais évincée."""
-        message = OutboxMessage(
-            id=f"v{next(self._ids)}", text=text, source=source, kind=kind, options=options, ref=ref
-        )
+        message = OutboxMessage(id=f"v{next(self._ids)}", text=text, source=source, kind=kind, options=options, ref=ref)
         self._messages.append(message)
         while len(self._messages) > self._keep:
             victim = next((m for m in self._messages if not (m.kind == "question" and not m.answered)), None)

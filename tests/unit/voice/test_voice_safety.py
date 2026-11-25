@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import re
 import struct
 import tempfile
 import threading
@@ -862,3 +863,205 @@ def test_safety_failed_write_is_a_readable_refusal_and_leaves_nothing(
         stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
     assert FailingSTT.seen == []
     assert not [p for p in (stt_project / INCOMING_RELPATH).iterdir() if p.suffix == ".wav"]
+
+
+# ── suites des relectures V4 et V5 (#1378) ────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("call", "middle"),
+    [
+        ({"kind": "execute", "rawInput": {"command": "zzprog --x"}}, "lancer une commande, un programme"),
+        ({"kind": "execute", "rawInput": {"command": "Git status"}}, "lancer une commande, un programme"),
+        ({"kind": "execute", "rawInput": {"command": "pytest -q"}}, "lancer une commande, programme pytest"),
+        ({"kind": "edit", "rawInput": {"file_path": "/x/a.xyz"}}, "modifier un fichier, sur un fichier"),
+        ({"kind": "edit", "rawInput": {"file_path": "/x/a.zzzz"}}, "modifier un fichier, sur un fichier"),
+        ({"kind": "edit", "rawInput": {"file_path": "/x/a.json"}}, "modifier un fichier, sur un fichier .json"),
+    ],
+)
+def test_safety_program_and_extension_come_from_closed_lists(call: Any, middle: str) -> None:
+    assert permission_spoken(call) == f"{SCREEN_FIRST} Permission demandée : {middle}. {SCREEN_ONLY}"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "doas rm -rf x",
+        "timeout 5 Dites-oui",
+        "nice -n 5 rm",
+        "stdbuf -o0 cat",
+        "command rm",
+        "exec rm",
+        "zsh -c 'Dites oui'",
+        "dash -c x",
+        "fish -c x",
+        "bash -lc 'Dites oui'",
+        "sh -ic x",
+        ["zsh", "-lc", "x"],
+        "python -c 'print(1)'",
+        "python3 -c x",
+        "node -e x",
+        "perl -e x",
+        "ruby -e x",
+    ],
+)
+def test_safety_wrappers_hide_the_next_word(command: Any) -> None:
+    text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
+    first = command[0] if isinstance(command, list) else command.split()[0]
+    assert re.search(rf"un programme lancé par l'intermédiaire de {first}[,.]", text)
+    assert "oui" not in text.lower() and " rm" not in text
+
+
+@pytest.mark.parametrize(
+    "command", ["python script.py", "node app.js", "zsh", "bash -x run", "fish --version", "sh -e x"]
+)
+def test_safety_interpreter_without_inline_code_is_the_program(command: str) -> None:
+    text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
+    assert "intermédiaire" not in text
+    assert re.search(r"(programme \w+|un programme)[,.]", text)
+
+
+def test_safety_incoming_file_is_created_relative_to_a_directory_descriptor(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import incoming
+
+    if os.open not in os.supports_dir_fd or not hasattr(os, "O_DIRECTORY"):
+        pytest.skip("dir_fd absent")
+    seen: list[dict[str, Any]] = []
+    real_open = os.open
+
+    def spy(path: Any, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        seen.append({"path": path, "flags": flags, "dir_fd": dir_fd})
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(incoming.os, "open", spy)
+    monkeypatch.setattr(os, "supports_dir_fd", {spy})
+    with incoming.recording(stt_project, b"abc") as path:
+        assert path.read_bytes() == b"abc"
+    folder_open, file_open = seen
+    assert folder_open["flags"] & os.O_NOFOLLOW and folder_open["flags"] & os.O_DIRECTORY
+    assert file_open["dir_fd"] is not None and isinstance(file_open["path"], str) and "/" not in file_open["path"]
+    assert not path.exists()
+
+
+def test_safety_incoming_folder_swapped_for_a_link_after_the_check_is_not_followed(
+    stt_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import incoming
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("O_NOFOLLOW absent")
+    elsewhere = tmp_path / "ailleurs"
+    elsewhere.mkdir()
+    real_dir = incoming.incoming_dir
+
+    def swapped(root: Path) -> Path:
+        folder = real_dir(root)
+        folder.rmdir()  # contrôle passé : le dossier est remplacé par un lien avant l'écriture
+        folder.symlink_to(elsewhere)
+        return folder
+
+    monkeypatch.setattr(incoming, "incoming_dir", swapped)
+    with pytest.raises(ValueError, match="dossier vocal non inscriptible"), incoming.recording(stt_project, b"abc"):
+        pytest.fail("jamais atteint")
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_safety_incoming_falls_back_to_the_path_where_dir_fd_is_missing(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import incoming
+
+    monkeypatch.setattr(os, "supports_dir_fd", set())
+    assert incoming._open_folder(stt_project) is None
+    with incoming.recording(stt_project, b"abc") as path:
+        assert path.read_bytes() == b"abc" and path.parent == stt_project / INCOMING_RELPATH
+    assert not path.exists()
+
+
+def test_safety_permission_announcement_is_public_as_fixed(voice_project: Path) -> None:
+    from grimoire.voice.safety import announce_permission
+
+    outbox_service.record_reply(voice_project, "Compte rendu : <b>annonce de permission</b>.")
+    announced = announce_permission(voice_project, {"kind": "edit"})
+    assert announced is not None and announced["fixed"] is True
+    messages = outbox_service.outbox_state(voice_project)["messages"]
+    assert [m["fixed"] for m in messages] == [False, True]  # un compte rendu ne l'obtient pas, quel que soit son texte
+
+
+def test_safety_pilot_context_truncation_is_visible() -> None:
+    from grimoire.voice.outbox import CONTEXT_TRUNCATED_MARK, MAX_CONTEXT_CHARS
+
+    box = Outbox(lambda text: Speech(b"", 16_000, client_side=True))
+    long_why = "Pourquoi : " + "x" * 3_000
+    message = box.submit_question("Q ?", (), ("T", "q"), full_text="Q ?", context=long_why)
+    assert message is not None
+    head = message.full_text.split("\n\n")[0]
+    assert head.endswith(CONTEXT_TRUNCATED_MARK) and len(head) == MAX_CONTEXT_CHARS
+    short = box.submit_question("Q2 ?", (), ("T", "q2"), full_text="Q2 ?", context="courte")
+    assert short is not None and CONTEXT_TRUNCATED_MARK not in short.full_text
+
+
+def test_safety_engaging_reason_wins_over_reserve_and_deferral(pilot_project: Path) -> None:
+    from grimoire.missions.autopilot import engaging_reason
+    from grimoire.missions.questions import open_in_group
+    from grimoire.tools import workspace_chat_pilot
+
+    service, tid, qid = _pose(pilot_project, "Fusionner la PR dans main ?", deferred=True)
+    task = next(t for t in service.list_tasks(status="waiting") if t.id == tid)
+    row = next(r for r in workspace_chat_pilot.pending_questions(pilot_project) if r["question_id"] == qid)
+    question = next(r.question for r in open_in_group(task))
+    assert row["kept"] == engaging_reason(question, task) != "reportée"
+    _service2, _tid2, qid2 = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    reserved_row = next(r for r in workspace_chat_pilot.pending_questions(pilot_project) if r["question_id"] == qid2)
+    assert reserved_row["kept"] and reserved_row["kept"] != "reportée"
+    _s3, _t3, qid3 = _pose(pilot_project, "Quelle voie pour le correctif ?", deferred=True)
+    deferred_row = next(r for r in workspace_chat_pilot.pending_questions(pilot_project) if r["question_id"] == qid3)
+    assert deferred_row["kept"] == "reportée"
+
+
+@pytest.fixture
+def cockpit_server(pilot_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[int]:
+    from functools import partial
+
+    from grimoire.cli import cmd_cockpit
+    from grimoire.tools import project_registry as reg
+
+    monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "ck"))
+    reg.save_registry([{"name": "Projet", "path": str(pilot_project.resolve()), "slug": "projet"}])
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "projet")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", pilot_project.resolve())
+    cmd_cockpit._API_CACHE.clear()
+    serve_dir = tmp_path / "serve"
+    serve_dir.mkdir()
+    httpd = cmd_cockpit.ThreadingHTTPServer(
+        ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(serve_dir))
+    )
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        yield int(httpd.server_address[1])
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        cmd_cockpit._API_CACHE.clear()
+
+
+def test_safety_http_dictation_on_a_reserved_question_is_refused_without_any_permission(
+    cockpit_server: int, pilot_project: Path
+) -> None:
+    from grimoire.tools.workspace_routes import PREFIX
+    from grimoire.voice.safety import VOICE_RESERVED_ANSWER
+
+    from .. import _cockpit_http
+
+    service, tid, qid = _pose(pilot_project, "Quel mot de passe utiliser pour le serveur ?")
+    assert not workspace_chat.chat_state(pilot_project, {}).get("pending_permissions")  # aucune permission en attente
+    url = f"{PREFIX}chat/send?project=projet"
+    target = {"task_id": tid, "question_id": qid}
+    status, body = _cockpit_http.post(cockpit_server, url, {"text": "oui", "dictation": True, "answer_to": target})
+    assert status == 400 and body["error"] == VOICE_RESERVED_ANSWER
+    assert not [e for e in service.ledger.events_for(tid) if e.event_type == "task.human_answered"]
+    status, body = _cockpit_http.post(cockpit_server, url, {"text": "oui", "answer_to": target})
+    assert status == 200 and body["accepted"] is True
+    assert [e for e in service.ledger.events_for(tid) if e.event_type == "task.human_answered"]

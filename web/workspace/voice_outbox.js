@@ -43,6 +43,13 @@ export function needsFold(text) {
   return text.length > FOLD_CHARS || text.split('\n').length > FOLD_LINES;
 }
 
+/** La mention d'état d'un message : une annonce fixe (champ serveur `fixed`, jamais le texte) n'est pas un brouillon. */
+export function stateMention(message) {
+  if (message.kind === 'question') return message.answered ? ' · répondue' : ' · question en attente de votre réponse';
+  if (message.fixed === true) return ' · annonce de permission, la confirmation se fait à l’écran';
+  return message.played ? ' · écouté' : ' · brouillon, mis à jour tant qu’il n’est pas lu';
+}
+
 const ANGLE_STATE = { ouvert: 'ouvert', couvert: 'couvert', ecarte: 'écarté' };
 
 /** Rang d'affichage : les questions sans réponse d'abord, puis l'ordre d'arrivée. */
@@ -184,12 +191,11 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
     row.text.textContent = shown;
     row.fold.hidden = !(isQuestion && needsFold(shown));
     row.text.classList.toggle('is-folded', !row.fold.hidden);
-    const state = isQuestion
-      ? (message.answered ? ' · répondue' : ' · question en attente de votre réponse')
-      : (message.played ? ' · écouté' : ' · brouillon, mis à jour tant qu’il n’est pas lu');
+    const state = stateMention(message);
     row.meta.textContent = `${formatDuration(message.duration_s)}${isQuestion && message.played && waiting ? ' · écoutée' : ''}${state}`;
     row.node.dataset.played = String(Boolean(message.played));
     row.node.dataset.kind = isQuestion ? 'question' : 'report';
+    row.node.dataset.fixed = String(message.fixed === true);
     row.node.dataset.answered = String(Boolean(message.answered));
     row.badge.hidden = !isQuestion;
     row.reply.hidden = !waiting;
