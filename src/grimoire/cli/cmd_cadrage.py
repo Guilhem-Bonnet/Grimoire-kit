@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 from rich.console import Console
@@ -70,10 +70,20 @@ def cadrage_init(
 
 
 @cadrage_app.command("status")
-def cadrage_status(ctx: typer.Context, path: Path = _path_arg, chantier: str | None = _chantier_opt) -> None:
+def cadrage_status(
+    ctx: typer.Context,
+    path: Path = _path_arg,
+    chantier: str | None = _chantier_opt,
+    as_json: bool = typer.Option(
+        False, "--json", help="Phases et état de chaque exigence en JSON stable (lecture seule, pour les intégrations)."
+    ),
+) -> None:
     """Progression du cadrage, phase par phase."""
     root = path.resolve()
     report = _guard(lambda: status(root, chantier))
+    if as_json:
+        _print_status_json(root, chantier, report)
+        return
     if not report["initialized"]:
         console.print(
             "[yellow]cadrage non initialisé[/yellow] — lancez "
@@ -94,6 +104,54 @@ def cadrage_status(ctx: typer.Context, path: Path = _path_arg, chantier: str | N
         )
     console.print(table)
     _print_requirement_states(root, chantier)
+
+
+def _print_status_json(root: Path, chantier: str | None, report: dict[str, Any]) -> None:
+    """La sortie ``--json`` : ``schema``, ``chantier``, les phases et, par exigence, sa clé, son état, sa nature, ses
+    tâches et le dernier verdict scellé (``null`` sans). Un état illisible laisse ``requirements`` vide et dit
+    pourquoi dans ``requirements_error`` ; le code de sortie reste celui du mode texte (1 si non initialisé)."""
+    import json
+
+    from grimoire.core.cadrage import DEFAULT_CHANTIER
+    from grimoire.missions.moa_acceptance import requirement_views
+    from grimoire.missions.requirement_gate import origin_root
+    from grimoire.missions.service import TaskService
+
+    requirements: list[dict[str, Any]] = []
+    error = ""
+    try:
+        views = requirement_views(root, chantier, service=TaskService(origin_root(root)))
+        for v in views:
+            data = v.to_dict()
+            requirements.append({
+                "requirement": v.key,
+                "chantier": v.key.partition("/")[0] if "/" in v.key else DEFAULT_CHANTIER,
+                "title": v.title,
+                "state": v.state,
+                "state_label": data["state_label"],
+                "nature": v.nature,
+                "tasks": [
+                    {"id": t.id, "title": t.title, "status": t.status, "delivered": t.delivered} for t in v.tasks
+                ],
+                "last_verdict": data["last_verdict"],
+            })
+    except (ValueError, GrimoireError) as exc:
+        error = str(exc)
+    out: dict[str, Any] = {
+        "schema": "grimoire-cadrage-status/v1",
+        "chantier": chantier or DEFAULT_CHANTIER,
+        "initialized": report["initialized"],
+        "progress": report["progress"],
+        "phases": [
+            {"phase": r["phase"], "state": r["state"], "gate": r["gate"]} for r in report["phases"]
+        ],
+        "requirements": requirements,
+    }
+    if error:
+        out["requirements_error"] = error
+    typer.echo(json.dumps(out, indent=2, ensure_ascii=False))
+    if not report["initialized"]:
+        raise typer.Exit(1)
 
 
 def _print_requirement_states(root: Path, chantier: str | None) -> None:

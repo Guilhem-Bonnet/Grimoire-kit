@@ -69,6 +69,7 @@ __all__ = [
     "follow_up_command",
     "parse_verdict",
     "pending_acceptance",
+    "pending_follow_up",
     "pronounce",
     "requirement_view",
     "requirement_views",
@@ -422,6 +423,19 @@ def requirement_views(
     return [_view(ctx, key, proofs=False) for key in keys]
 
 
+def _cited_keys(tasks: Iterable[MissionTask]) -> list[str]:
+    """Les exigences que citent les tâches livrées (une référence illisible ne cite aucune exigence)."""
+    keys: set[str] = set()
+    for task in tasks:
+        raw = rg.requirement_of(task)
+        if task.status.value == _DONE and raw:  # seule une tâche livrée met une exigence en attente de recette
+            try:
+                keys.add(rg.normalize_key(raw))
+            except GrimoireMissionError:
+                continue
+    return sorted(keys)
+
+
 def pending_acceptance(
     home_root: Path, tasks: list[MissionTask], *, journal: AuthorityJournal | None = None
 ) -> list[str]:
@@ -432,15 +446,24 @@ def pending_acceptance(
     ctx = _context(home_root, service=None, tasks=tasks, journal=journal)
     if not ctx.declared:
         return []
-    keys: set[str] = set()
-    for task in tasks:
-        raw = rg.requirement_of(task)
-        if task.status.value == _DONE and raw:  # seule une tâche livrée met une exigence en attente de recette
-            try:
-                keys.add(rg.normalize_key(raw))
-            except GrimoireMissionError:  # une référence illisible ne cite aucune exigence
-                continue
-    return [key for key in sorted(keys) if _view(ctx, key, proofs=False).state == DELIVERED]
+    return [key for key in _cited_keys(tasks) if _view(ctx, key, proofs=False).state == DELIVERED]
+
+
+def pending_follow_up(
+    home_root: Path, tasks: list[MissionTask], *, journal: AuthorityJournal | None = None
+) -> list[tuple[str, str]]:
+    """Pour le cockpit : les exigences dont le verdict est scellé mais la tâche de suite absente, avec la commande
+    exacte qui la crée (``follow_up_command``). Même garde que :func:`pending_acceptance`."""
+    ctx = _context(home_root, service=None, tasks=tasks, journal=journal)
+    if not ctx.declared:
+        return []
+    out: list[tuple[str, str]] = []
+    for key in _cited_keys(tasks):
+        view = _view(ctx, key, proofs=False)
+        if view.state == FOLLOW_UP_MISSING:
+            last = view.verdict or {}
+            out.append((key, follow_up_command(key, str(last.get("verdict") or ""), str(last.get("motif") or ""))))
+    return out
 
 
 # ── Le verdict (le geste de la MOA) ─────────────────────────────────────────
