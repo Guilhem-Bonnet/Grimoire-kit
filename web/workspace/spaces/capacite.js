@@ -27,50 +27,7 @@
 
 import { badge, icon, levelBars } from '../shell.js';
 
-const STYLE_ID = 'cp-styles';
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .cp-panel { display: flex; flex-direction: column; gap: var(--sp-3); }
-    .cp-panel h3 { font-size: var(--t-m); font-weight: 500; margin: 0; color: var(--ink); display: flex; align-items: center; gap: var(--sp-2); }
-    .cp-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); font-size: var(--t-s); color: var(--ink2); }
-    .cp-head b { color: var(--ink); font-weight: 600; }
-    .cp-band { display: flex; flex-direction: column; gap: 4px; }
-    .cp-res { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--t-s); color: var(--ink2); padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
-    .cp-res[data-etat="plein"] { border-color: var(--warn); }
-    .cp-res[data-etat="inconnu"], .cp-res[data-etat="non_declare"] { color: var(--ink3); }
-    .cp-res-name { font-weight: 500; color: var(--ink); }
-    .cp-res[data-etat="inconnu"] .cp-res-name, .cp-res[data-etat="non_declare"] .cp-res-name { color: var(--ink3); font-weight: 400; }
-    .cp-meter { width: 72px; height: 6px; border-radius: 3px; background: var(--e2); overflow: hidden; flex: none; }
-    .cp-meter i { display: block; height: 100%; background: var(--acc); }
-    .cp-meter[data-etat="plein"] i { background: var(--warn); }
-    .cp-sains { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--t-s); color: var(--ink2); padding: 2px 0; }
-    .cp-sains .cp-meter { width: 48px; }
-    .cp-sain { display: inline-flex; align-items: center; gap: 6px; }
-    .cp-file { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); overflow: hidden; }
-    .cp-group { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); padding: 8px var(--sp-3) 4px; border-top: 1px solid var(--line); }
-    .cp-group:first-child { border-top: 0; }
-    .cp-group h4 { margin: 0; font-size: var(--t-min); font-weight: 600; color: var(--ink2); }
-    .cp-group .cp-n { color: var(--rub); font-weight: 600; font-size: var(--t-min); }
-    .cp-group .cp-why { color: var(--ink3); font-size: var(--t-min); overflow-wrap: anywhere; }
-    .cp-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto; gap: var(--sp-2); align-items: center; padding: 4px var(--sp-3); font-size: var(--t-s); }
-    .cp-rank { color: var(--ink3); font-family: var(--mono); font-size: var(--t-min); text-align: right; }
-    .cp-title { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
-    .cp-title .cp-id { font-family: var(--mono); font-size: var(--t-min); color: var(--ink3); flex: none; }
-    .cp-title .cp-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cp-retry { color: var(--ink3); font-size: var(--t-min); white-space: nowrap; }
-    .cp-empty, .cp-foot { color: var(--ink3); font-size: var(--t-s); margin: 0; }
-    .cp-foot { padding: 6px var(--sp-3); border-top: 1px solid var(--line); }
-    @container canvas (max-width: 900px) {
-      .cp-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
-      .cp-row .cp-retry { display: none; }
-    }
-  `;
-  document.head.append(style);
-}
 
 const PRIORITY_LABEL = { low: 'basse', medium: 'moyenne', high: 'haute', critical: 'critique' };
 const PRIORITY_BARS = { low: 1, medium: 2, high: 3, critical: 3 };
@@ -285,7 +242,6 @@ function renderInto(node, data) {
  * celui résolu par l'hôte (même convention que `ctx.api.sheet`).
  */
 export function renderCapacityPanel(ctx, { project = null, initial = null } = {}) {
-  injectStyles();
   const node = el('section', 'pl-section cp-panel');
   node.dataset.panel = 'capacite';
   let generation = 0;

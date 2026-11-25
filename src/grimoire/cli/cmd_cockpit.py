@@ -61,6 +61,7 @@ from grimoire.cli.cockpit_write_target import (
 )
 from grimoire.data import site_script, web_path
 from grimoire.tools.cockpit_registry_routes import REGISTRY_ROUTES, registry_post
+from grimoire.tools.page_security import SecureHandlerMixin, html_page, serve_session_script
 from grimoire.tools.project_registry import (
     browse,
     classify_registry,
@@ -86,7 +87,6 @@ from grimoire.tools.request_guard import (
     check_host,
     drain_body,
     has_body,
-    inject_session_token,
     new_session_token,
 )
 from grimoire.tools.workspace_legacy import legacy_redirect_target
@@ -259,7 +259,7 @@ def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
         pool.shutdown(wait=False)
 
 
-class _CockpitHandler(SimpleHTTPRequestHandler):
+class _CockpitHandler(SecureHandlerMixin, SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
     #: Vrai le temps d'une écriture (``do_POST``/``do_PUT``) : :meth:`send_response` vide alors le cache des lectures.
@@ -395,6 +395,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
 
     def _serve_static(self) -> None:
         """Fichier statique ; une page HTML reçoit le jeton de session."""
+        if serve_session_script(self, self.path):
+            return
         target = Path(self.translate_path(self.path))
         if target.is_dir():
             target = target / "index.html"
@@ -402,10 +404,12 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             super().do_GET()
             return
         if target.suffix.lower() == ".html":
-            body = inject_session_token(target.read_bytes())
+            body, security = html_page(target.read_bytes())
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
+            for name, value in security:
+                self.send_header(name, value)
             body = gzip_body(self, body)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()

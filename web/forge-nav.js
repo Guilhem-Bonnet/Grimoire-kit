@@ -21,22 +21,10 @@
   /* ── Nav HTML ── */
   const navEl = document.getElementById('forge-nav');
   if (navEl && !MODE_ATELIER) {
-    const napStyle = document.createElement('style');
-    napStyle.textContent = `
-      .nav-atelier { position: relative; }
-      .nav-atelier .nav-cta { background: var(--accent); color: var(--bg); cursor: pointer; font-weight: 600; }
-      .nav-atelier .nav-cta:hover { filter: brightness(1.08); }
-      .nav-atelier-panel {
-        position: absolute; top: calc(100% + 12px); right: 0; width: 300px;
-        background: var(--elev-2); border: 1px solid var(--line-strong); border-radius: 8px;
-        padding: 16px; box-shadow: 0 18px 48px rgba(0,0,0,0.55); z-index: 950; }
-      .nav-atelier-panel .nap-lbl { display: block; font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.14em; color: var(--ink-muted); margin-bottom: 8px; }
-      .nav-atelier-panel code { display: block; font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink); background: var(--elev-1); border: 1px solid var(--line); border-radius: 4px; padding: 7px 10px; margin-bottom: 6px; }
-      .nav-atelier-panel p { font-size: 0.7rem; color: var(--ink-soft); line-height: 1.55; margin: 10px 0 12px; }
-      .nav-atelier-panel p b { color: var(--ink); }
-      .nav-atelier-panel .nap-open { display: block; text-align: center; font-family: var(--font-mono); font-size: 0.66rem; font-weight: 600; background: var(--accent); color: var(--bg); padding: 9px 12px; border-radius: 4px; text-decoration: none; margin-bottom: 10px; }
-      .nav-atelier-panel .nap-gh { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); text-decoration: none; }
-      .nav-atelier-panel .nap-gh:hover { color: var(--ink); }`;
+    // CSS du panneau dans un fichier : la politique de sécurité interdit un <style> fabriqué (#1366).
+    const napStyle = document.createElement('link');
+    napStyle.rel = 'stylesheet';
+    napStyle.href = 'forge-nav.css';
     document.head.appendChild(napStyle);
 
     navEl.innerHTML = `

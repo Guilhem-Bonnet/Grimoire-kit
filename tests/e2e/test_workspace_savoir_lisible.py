@@ -133,7 +133,7 @@ def served() -> Iterator[dict[str, Any]]:
 
 
 def _open(browser: Browser, srv: dict[str, Any], *, scheme: str = "light", width: int = 1440, height: int = 900) -> Page:
-    context = browser.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce", color_scheme=scheme)
+    context = browser.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce", color_scheme=scheme, bypass_csp=True)  # axe-core est injecté en ligne par le harnais (CSP de la page : test_workspace_csp.py)
     page = context.new_page()
     page.goto(f"{srv['base']}/workspace/index.html?project={srv['slug']}#savoir/memoire", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)

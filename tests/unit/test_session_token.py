@@ -82,7 +82,16 @@ def test_la_page_servie_porte_le_jeton(name: str, request: pytest.FixtureRequest
         conn.close()
     assert resp.status == 200
     assert request_guard.session_token() in page
-    assert SESSION_HEADER in page
+    # Le relais `fetch` est un fichier (CSP `script-src 'self'`, #1366) : la page le charge, il porte l'en-tête.
+    assert f'src="{request_guard.SESSION_SCRIPT_PATH}"' in page
+    conn = http.client.HTTPConnection("127.0.0.1", host.port, timeout=10)
+    try:
+        conn.request("GET", request_guard.SESSION_SCRIPT_PATH)
+        script = conn.getresponse().read().decode("utf-8")
+    finally:
+        conn.close()
+    assert SESSION_HEADER in script
+    assert request_guard.session_token() not in script
 
 
 def test_la_comparaison_est_en_temps_constant() -> None:
