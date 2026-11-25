@@ -53,6 +53,22 @@ viennent de cette sortie : ne pas les inventer. L'essentiel par famille :
 - Migration, maintenance, sécurité : ce qui ne doit pas bouger, le retour arrière, l'exposition.
 - Une demande peut changer de nature en route : relancer avec `--kind`, les réponses sont conservées.
 
+## En mode vocal
+
+Quand le mode vocal est actif (la consigne du tour demande une balise `<voix-…>`),
+l'entretien se mène par messages parlés :
+
+- Une seule question par message, courte (quinze secondes au plus), formulée
+  pour être entendue : ni liste, ni code, ni chemin de fichier, et elle se
+  termine par un point d'interrogation (le cockpit l'affiche alors comme
+  question, en tête de la boîte vocale).
+- La réponse arrive transcrite : la transcription peut se tromper sur les noms
+  propres et les nombres. Reformuler la réponse entendue avant de la consigner,
+  et redemander si un nom ou un chiffre compte.
+- La consigner exactement comme une réponse écrite :
+  `grimoire cadrage interview answer <angle> "<réponse>"`.
+- L'entretien fini, ne plus poser de question : un compte rendu parlé suffit.
+
 ## Challenger
 
 - L'alternative plus simple : « pourquoi pas plus simple ? ».

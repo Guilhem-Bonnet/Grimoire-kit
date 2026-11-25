@@ -14,6 +14,7 @@ Elle borne le nombre de questions par angle et fixe les angles obligatoires. L'�
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,7 @@ __all__ = [
     "check_interview",
     "classify_depth",
     "interview_plan",
+    "interview_states",
 ]
 
 STATE_FILE = "entretien.json"
@@ -347,6 +349,34 @@ def answer(
         _append_to_section(target / filename, angle.section, f"- {text}")
     _save(root, chantier, state)
     return _render(state, "enregistrée")
+
+
+MAX_STATE_DIRS = 50
+
+
+def interview_states(root: Path) -> list[dict[str, Any]]:
+    """L'état des entretiens déjà entamés, en lecture seule : un par chantier qui a un ``entretien.json``.
+
+    Rien n'est écrit, aucune intake n'est lancée : sans entretien, c'est une liste vide et trois ``stat`` au plus.
+    Un état illisible donne une ligne ``error`` (la liste ne casse pas). Chaque ligne porte ``chantier``
+    (``principal`` pour le dossier historique) et la vue de ``interview_plan`` (angles, ouverts, complet).
+    """
+    base = cadrage_dir(root)
+    if not base.is_dir():
+        return []
+    names: list[str | None] = [None]
+    with contextlib.suppress(OSError):
+        names += sorted(d.name for d in itertools.islice(base.iterdir(), MAX_STATE_DIRS) if d.is_dir() and not d.is_symlink())
+    out: list[dict[str, Any]] = []
+    for name in names:
+        label = name or "principal"
+        try:
+            state = _load(root, name)
+            if state is not None:
+                out.append({"chantier": label, **_render(state, "enregistrée")})
+        except ValueError as exc:
+            out.append({"chantier": label, "error": str(exc)})
+    return out
 
 
 def check_interview(root: Path, chantier: str | None = None) -> list[str]:

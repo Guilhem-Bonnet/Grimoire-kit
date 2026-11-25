@@ -2102,6 +2102,10 @@
    "version": "3.16.0",
    "path": "framework/tools/vision-judge.py"
   },
+  "83c0b353e9b68d7583a0133e113e99042bb367292d62836e02a7defe5d7284dd": {
+   "version": "3.108.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
+  },
   "83c7143d64fdadc1be7864d0796054d19f0ea740c9c1edffd25ded469d706386": {
    "version": "3.17.0",
    "path": "framework/memory/mem0-bridge.py"

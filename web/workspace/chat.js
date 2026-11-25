@@ -91,11 +91,15 @@ export function createChat({ readOnly = () => false } = {}) {
     api, input, slot: form.querySelector('.chat-actions'), readOnly,
     note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text),
   });
-  const voiceOut = createVoiceOutbox({ note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text), api });
+  const voiceOut = createVoiceOutbox({
+    note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text), api,
+    onReply: (message) => replyToVoiceQuestion(message),
+    onOption: (message, option) => answerVoiceQuestion(message, option),
+  });
   const hostSelect = mk('select', { class: 'chat-host', id: 'chat-host', 'aria-label': 'Hôte de l’orchestrateur' });
   const hostBar = mk('div', { class: 'chat-hostbar' },
     mk('label', { for: 'chat-host', class: 'chat-host-label', text: 'Hôte' }), hostSelect);
-  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, voiceOut.element, form);
+  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, voiceOut.interview, voiceOut.element, form);
 
   let stream = null;
   let lastSeq = 0;
@@ -309,6 +313,20 @@ export function createChat({ readOnly = () => false } = {}) {
     append(box);
   }
 
+  /** « Répondre » sur une question vocale : la saisie vise cette question (dictée ou texte, relue avant l'envoi). */
+  function replyToVoiceQuestion(message) {
+    const entry = message.ref ? questions.get(`${message.ref.task_id}/${message.ref.question_id}`) : null;
+    if (entry) setTarget(entry); else input.focus({ preventScroll: true });
+  }
+
+  /** Un clic sur une option d'une question vocale : la réponse part comme celle d'un clic dans le fil. */
+  async function answerVoiceQuestion(message, option) {
+    if (!message.ref || readOnly()) throw new Error('cette question ne se tranche pas par un clic');
+    await api.chatSend(option, { task_id: message.ref.task_id, question_id: message.ref.question_id }, { dictation: false });
+    const entry = questions.get(`${message.ref.task_id}/${message.ref.question_id}`);
+    if (entry) { entry.state.textContent = 'Réponse transmise : tranchée par vous.'; if (target === entry) setTarget(null); }
+  }
+
   function questionResolved(event) {
     const entry = questions.get(`${event.task_id}/${event.question_id}`);
     if (!entry) return;
@@ -464,6 +482,7 @@ export function createChat({ readOnly = () => false } = {}) {
         current = null;
         planBox = null;
         setBusy(false);
+        voiceOut.refreshInterview();
         const label = STOP_LABEL[event.stop_reason];
         if (label) note(label, event.stop_reason === 'error' ? 'error' : 'info');
         element.dispatchEvent(new CustomEvent('chat:turn-ended', { bubbles: true, detail: { stopReason: event.stop_reason } }));

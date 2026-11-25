@@ -30,12 +30,15 @@ from grimoire.voice.engines import Speech
 
 __all__ = [
     "DETAIL_ON_SCREEN",
+    "QUESTION_MAX_S",
     "Outbox",
     "OutboxMessage",
+    "asks_a_question",
     "estimate_seconds",
     "new_spoken_token",
     "spoken_from_reply",
     "spoken_instruction",
+    "spoken_question",
 ]
 
 SPOKEN_TAG = "voix"
@@ -44,6 +47,9 @@ WORDS_PER_SECOND = 2.5
 #: Longueur moyenne d'un mot, espace comprise : un « mot » géant compte pour plusieurs mots.
 CHARS_PER_WORD = 8
 DETAIL_ON_SCREEN = "Le détail est à l'écran."
+#: Plafond d'une question vocale (lot V4) : bien plus court qu'un compte rendu.
+QUESTION_MAX_S = 15.0
+OPTIONS_ON_SCREEN = "Les autres options sont à l'écran."
 
 _FENCE_RE = re.compile(r"```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|<pre\b.*?(?:</pre>|\Z)", re.DOTALL | re.IGNORECASE)
 _COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
@@ -85,15 +91,33 @@ def new_spoken_token() -> str:
     return secrets.token_hex(4)
 
 
-def spoken_instruction(max_seconds: float, token: str) -> str:
-    """La consigne ajoutée au message de la personne en mode vocal, pour le tour au jeton ``token``."""
+def interview_instruction(chantier: str) -> str:
+    """Ce que le mode vocal ajoute quand un entretien de cadrage est en cours pour le projet (lot V4)."""
+    flag = "" if chantier == "principal" else f" --chantier {chantier}"
+    return (
+        f" Un entretien de cadrage est en cours : dans la balise, pose UNE seule question, courte "
+        f"(~{QUESTION_MAX_S:g} s), formulée pour être entendue (ni liste, ni code, ni chemin), qui se termine "
+        f"par un point d'interrogation ; elle s'affichera comme question en tête de la boîte vocale. "
+        f"Quand la personne répond, sa réponse est une transcription : elle peut se tromper sur les noms propres "
+        f"et les nombres. Reformule la réponse entendue, puis consigne-la comme une réponse écrite : "
+        f"`grimoire cadrage interview{flag} answer <angle> \"<réponse>\"`. Si l'entretien est fini, ne pose "
+        f"pas de question."
+    )
+
+
+def spoken_instruction(max_seconds: float, token: str, interview: str | None = None) -> str:
+    """La consigne ajoutée au message de la personne en mode vocal, pour le tour au jeton ``token``.
+
+    ``interview`` : le chantier dont l'entretien de cadrage est en cours (lot V4), s'il y en a un.
+    """
     words = int(max_seconds * WORDS_PER_SECOND)
     tag = f"{SPOKEN_TAG}-{token}"
+    extra = interview_instruction(interview) if interview else ""
     return (
         f"[Mode vocal] En plus de ta réponse écrite habituelle, termine ta réponse par la balise "
         f"<{tag}>…</{tag}>, une seule fois et rien après elle : un message parlé de deux ou trois phrases, "
         f"{words} mots au plus (~{max_seconds:g} s), sans code, sans tableau, sans chemin de fichier, et dis que "
-        f"le détail est à l'écran s'il y en a. Ce nom de balise ne vaut que pour ce tour."
+        f"le détail est à l'écran s'il y en a. Ce nom de balise ne vaut que pour ce tour.{extra}"
     )
 
 
@@ -201,6 +225,36 @@ def spoken_from_reply(reply: str, max_seconds: float, token: str | None = None) 
     return text, source
 
 
+def asks_a_question(text: str) -> bool:
+    """Le message dit une question : il se termine par un point d'interrogation (hors mention « détail à l'écran »)."""
+    body = text.strip().removesuffix(DETAIL_ON_SCREEN).rstrip()
+    return body.endswith("?")
+
+
+def spoken_question(text: str, options: tuple[str, ...] | list[str] = (), max_seconds: float = QUESTION_MAX_S) -> str:
+    """Le texte parlé d'une question à options : la question, puis les options tant que le plafond le permet.
+
+    Même nettoyage que le compte rendu (jamais de code ni de chemin). Les options qui ne tiennent pas sont
+    renvoyées à l'écran, où elles restent cliquables ; la question, elle, n'est coupée qu'en dernier recours.
+    """
+    question, _ = _clean(text)
+    question, _cut = _cap(question, max_seconds)
+    cleaned = [c for c in (_clean(o)[0] for o in options) if c][:8]
+    budget = max(1, int(max_seconds * WORDS_PER_SECOND))
+    used = _units(question)
+    spoken: list[str] = []
+    for option in cleaned:
+        if used + _units(option) + 2 > budget:
+            break
+        spoken.append(option)
+        used += _units(option) + 1
+    if not spoken:
+        return f"{question} {OPTIONS_ON_SCREEN}".strip() if cleaned else question
+    listed = spoken[0] if len(spoken) == 1 else f"{', '.join(spoken[:-1])} ou {spoken[-1]}"
+    tail = f" {OPTIONS_ON_SCREEN}" if len(spoken) < len(cleaned) else ""
+    return f"{question} Options : {listed}.{tail}"
+
+
 @dataclass(slots=True)
 class OutboxMessage:
     id: str
@@ -209,6 +263,10 @@ class OutboxMessage:
     revisions: int = 1
     played: bool = False  # figé : plus aucune révision
     audio: Speech | None = field(default=None, repr=False)
+    kind: str = "report"  # « report » (compte rendu) ou « question » (lot V4)
+    options: tuple[str, ...] = ()
+    ref: tuple[str, str] | None = None  # (tâche, question) du pilote ; None pour une question de l'entretien
+    answered: bool = False
 
     @property
     def duration_s(self) -> float:
@@ -222,6 +280,10 @@ class OutboxMessage:
             "revisions": self.revisions,
             "played": self.played,
             "duration_s": self.duration_s,
+            "kind": self.kind,
+            "options": list(self.options),
+            "ref": {"task_id": self.ref[0], "question_id": self.ref[1]} if self.ref else None,
+            "answered": self.answered,
         }
 
 
@@ -241,7 +303,8 @@ class Outbox:
         if not text:
             return None
         with self._lock:
-            last = self._messages[-1] if self._messages else None
+            # Un compte rendu ne remplace que le dernier COMPTE RENDU : une question reste un message distinct.
+            last = next((m for m in reversed(self._messages) if m.kind == "report"), None)
             if last is not None and not last.played:
                 last.text, last.source = text, source
                 last.revisions += 1
@@ -249,11 +312,45 @@ class Outbox:
                 return last
             return self._open(text, source)
 
-    def _open(self, text: str, source: str) -> OutboxMessage:
-        """Ouvre un nouveau message (verrou tenu par l'appelant)."""
-        message = OutboxMessage(id=f"v{next(self._ids)}", text=text, source=source)
+    def submit_question(
+        self, text: str, options: tuple[str, ...] = (), ref: tuple[str, str] | None = None, source: str = "question"
+    ) -> OutboxMessage | None:
+        """Dépose une question : toujours un message distinct, jamais fusionné dans un compte rendu.
+
+        Une question du pilote (``ref``) n'est déposée qu'une fois, quel que soit le nombre de relevés.
+        """
+        text = text.strip()
+        if not text:
+            return None
+        with self._lock:
+            if ref is not None:
+                known = next((m for m in self._messages if m.ref == ref), None)
+                if known is not None:
+                    return known
+            return self._open(text, source, kind="question", options=tuple(options), ref=ref)
+
+    def resolve_question(self, ref: tuple[str, str] | None = None) -> list[OutboxMessage]:
+        """Marque répondue la question du pilote ``ref`` ; sans ``ref``, celles de l'entretien (la personne vient de répondre)."""
+        with self._lock:
+            hit = [m for m in self._messages if m.kind == "question" and m.ref == ref and not m.answered]
+            for message in hit:
+                message.answered = True
+            return hit
+
+    def _open(
+        self, text: str, source: str, *, kind: str = "report", options: tuple[str, ...] = (),
+        ref: tuple[str, str] | None = None,
+    ) -> OutboxMessage:
+        """Ouvre un nouveau message (verrou tenu par l'appelant). Une question sans réponse n'est jamais évincée."""
+        message = OutboxMessage(
+            id=f"v{next(self._ids)}", text=text, source=source, kind=kind, options=options, ref=ref
+        )
         self._messages.append(message)
-        del self._messages[: -self._keep]
+        while len(self._messages) > self._keep:
+            victim = next((m for m in self._messages if not (m.kind == "question" and not m.answered)), None)
+            if victim is None or victim is message:
+                break
+            self._messages.remove(victim)
         return message
 
     def get(self, message_id: str) -> OutboxMessage | None:
@@ -294,4 +391,7 @@ class Outbox:
 
     def state(self) -> dict[str, Any]:
         with self._lock:
-            return {"messages": [m.public() for m in self._messages]}
+            # Les questions sans réponse d'abord (la plus ancienne en tête), puis le reste dans l'ordre.
+            waiting = [m for m in self._messages if m.kind == "question" and not m.answered]
+            rest = [m for m in self._messages if m not in waiting]
+            return {"messages": [m.public() for m in (*waiting, *rest)]}

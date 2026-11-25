@@ -2,6 +2,19 @@
 // et un bouton lecture. Tant qu'il n'a pas été écouté, une nouvelle réponse met le texte à jour sur place ;
 // au premier « Lire » il est figé (le serveur ouvre un autre message pour la suite). La synthèse n'a lieu
 // qu'à la lecture. La lecture est interruptible : le même bouton devient « Arrêter ».
+//
+// Lot V4 : une question de l'orchestrateur est un message distinct, marqué « Question », en tête de la boîte
+// tant qu'elle n'a pas de réponse ; ses options sont des boutons (un clic répond), « Répondre » cible la
+// saisie (dictée ou texte, corrigeable avant l'envoi). L'état des angles d'un entretien de cadrage est
+// affiché à côté. Tout texte passe par textContent.
+
+const ANGLE_STATE = { ouvert: 'ouvert', couvert: 'couvert', ecarte: 'écarté' };
+
+/** Rang d'affichage : les questions sans réponse d'abord, puis l'ordre d'arrivée. */
+export function displayOrder(messages) {
+  const waiting = (m) => m.kind === 'question' && !m.answered;
+  return [...messages].sort((a, b) => (waiting(b) - waiting(a)) || (a.order - b.order));
+}
 
 /** « 12 s » ou « 1 min 05 s ». */
 export function formatDuration(seconds) {
@@ -48,13 +61,24 @@ function speakText(text, lang) {
   return { done: new Promise((resolve) => { utterance.onend = resolve; utterance.onerror = resolve; synth.speak(utterance); }), stop: () => synth.cancel() };
 }
 
-export function createVoiceOutbox({ api, note, setStatus }) {
+export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, onOption = async () => {} }) {
   const element = document.createElement('section');
   element.className = 'chat-voice-out';
   element.setAttribute('aria-label', 'Messages parlés de l’orchestrateur');
   element.hidden = true;
+  const interview = document.createElement('aside');
+  interview.className = 'chat-voice-interview';
+  interview.setAttribute('aria-label', 'Entretien de cadrage');
+  interview.hidden = true;
   const rows = new Map();
+  const messages = new Map();
+  let counter = 0;
   let playing = null; // { id, stop }
+
+  function arrange() {
+    const ordered = displayOrder([...rows.entries()].map(([id, row]) => ({ id, kind: messages.get(id).kind, answered: messages.get(id).answered, order: row.order })));
+    for (const item of ordered) element.append(rows.get(item.id).node);
+  }
 
   function stopPlayback() {
     if (!playing) return;
@@ -79,16 +103,79 @@ export function createVoiceOutbox({ api, note, setStatus }) {
       button.setAttribute('aria-pressed', 'false');
       const node = document.createElement('div');
       node.className = 'chat-voice-msg';
-      node.append(text, meta, button);
+      const badge = document.createElement('strong');
+      badge.className = 'chat-voice-badge';
+      badge.textContent = 'Question';
+      badge.hidden = true;
+      const choices = document.createElement('div');
+      choices.className = 'chat-voice-options';
+      choices.hidden = true;
+      const reply = document.createElement('button');
+      reply.type = 'button';
+      reply.className = 'btn pri chat-voice-reply';
+      reply.textContent = 'Répondre';
+      reply.hidden = true;
+      node.append(badge, text, meta, button, reply, choices);
       element.append(node);
-      row = { node, text, meta, button };
+      counter += 1;
+      row = { node, text, meta, button, badge, choices, reply, order: counter };
       rows.set(message.id, row);
       button.addEventListener('click', () => toggle(message.id));
+      reply.addEventListener('click', () => onReply(messages.get(message.id)));
     }
+    messages.set(message.id, message);
+    const isQuestion = message.kind === 'question';
+    const waiting = isQuestion && !message.answered;
     row.text.textContent = message.text;
-    row.meta.textContent = `${formatDuration(message.duration_s)}${message.played ? ' · écouté' : ' · brouillon, mis à jour tant qu’il n’est pas lu'}`;
+    const state = isQuestion
+      ? (message.answered ? ' · répondue' : ' · question en attente de votre réponse')
+      : (message.played ? ' · écouté' : ' · brouillon, mis à jour tant qu’il n’est pas lu');
+    row.meta.textContent = `${formatDuration(message.duration_s)}${isQuestion && message.played && waiting ? ' · écoutée' : ''}${state}`;
     row.node.dataset.played = String(Boolean(message.played));
+    row.node.dataset.kind = isQuestion ? 'question' : 'report';
+    row.node.dataset.answered = String(Boolean(message.answered));
+    row.badge.hidden = !isQuestion;
+    row.reply.hidden = !waiting;
+    row.choices.replaceChildren();
+    row.choices.hidden = !(waiting && message.ref && (message.options || []).length);
+    if (!row.choices.hidden) {
+      for (const option of message.options) {
+        const choice = document.createElement('button');
+        choice.type = 'button';
+        choice.className = 'btn chat-voice-option';
+        choice.textContent = option;
+        choice.addEventListener('click', async () => {
+          for (const b of row.choices.querySelectorAll('button')) b.disabled = true;
+          try { await onOption(messages.get(message.id), option); } catch (error) {
+            for (const b of row.choices.querySelectorAll('button')) b.disabled = false;
+            note(`Réponse non transmise : ${error.message}`, 'error');
+          }
+        });
+        row.choices.append(choice);
+      }
+    }
+    arrange();
     element.hidden = false;
+  }
+
+  function paintInterview(state) {
+    interview.replaceChildren();
+    const open = (state.interviews || []).filter((entry) => !entry.error);
+    interview.hidden = open.length === 0;
+    for (const entry of open) {
+      const title = document.createElement('div');
+      title.className = 'chat-voice-interview-title';
+      title.textContent = `Entretien de cadrage${entry.chantier && entry.chantier !== 'principal' ? ` — ${entry.chantier}` : ''}${entry.complete ? ' : terminé' : ''}`;
+      const list = document.createElement('ul');
+      list.className = 'chat-voice-angles';
+      for (const angle of entry.angles || []) {
+        const item = document.createElement('li');
+        item.dataset.state = angle.state;
+        item.textContent = `${angle.title} : ${ANGLE_STATE[angle.state] || angle.state}${angle.state === 'ecarte' && angle.reason ? ` (${angle.reason})` : ''}`;
+        list.append(item);
+      }
+      interview.append(title, list);
+    }
   }
 
   async function toggle(id) {
@@ -116,6 +203,11 @@ export function createVoiceOutbox({ api, note, setStatus }) {
 
   return {
     element,
+    /** L'état des angles de l'entretien de cadrage, à côté de la boîte (rien d'affiché sans entretien). */
+    interview,
+    async refreshInterview() {
+      try { paintInterview(await api.voiceInterview()); } catch { interview.hidden = true; }
+    },
     /** Un événement `voice_message` du flux : texte à jour, ou nouveau message. */
     receive(message) { paint(message); },
     /** À l'ouverture : l'état du serveur (la page a pu manquer des messages). */
@@ -124,6 +216,7 @@ export function createVoiceOutbox({ api, note, setStatus }) {
         const state = await api.voiceOutbox();
         for (const message of state.messages || []) paint(message);
       } catch { /* sans vocal, rien à montrer */ }
+      await this.refreshInterview();
     },
     abort: stopPlayback,
   };
