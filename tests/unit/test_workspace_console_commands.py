@@ -41,6 +41,12 @@ def _is_group(command: object) -> bool:
     return callable(getattr(command, "get_command", None)) and callable(getattr(command, "list_commands", None))
 
 
+def _runs_alone(command: object) -> bool:
+    """Un groupe dont le callback s'exécute sans sous-commande (``invoke_without_command``) et ne se contente pas
+    d'afficher l'aide (``no_args_is_help``) : la propriété réelle du groupe Click/Typer, pas une liste d'exceptions."""
+    return bool(getattr(command, "invoke_without_command", False)) and not getattr(command, "no_args_is_help", False)
+
+
 def _resolve(words: list[str]) -> tuple[object | None, list[str], str]:
     """Descend *words* dans l'arbre : (commande atteinte, reste, mot inconnu)."""
     command: object = typer.main.get_command(app)
@@ -73,7 +79,7 @@ def _problem(words: list[str], flags: list[str]) -> str:
     shown = "grimoire " + " ".join(words)
     if command is None:
         return f"{shown} — sous-commande inconnue : {unknown}"
-    if _is_group(command):
+    if _is_group(command) and not _runs_alone(command):
         return f"{shown} — groupe sans sous-commande : n'exécute rien"
     missing = sorted(flag for flag in flags if flag not in _options(command))
     if missing:
@@ -144,3 +150,17 @@ def test_la_garde_attrape_une_commande_morte() -> None:
     assert "drapeau" in _problem(["doctor"], ["--check-paths"])
     assert not _problem(["task", "list"], ["--all-projects"])
     assert not _problem(["blueprint", "validate"], [])
+
+
+def test_un_groupe_qui_s_execute_seul_est_accepte_et_un_groupe_pur_refuse() -> None:
+    """Les deux sens : `cadrage interview` (callback `invoke_without_command`) s'exécute sans sous-commande ; `task`
+    n'est qu'un groupe, il reste refusé ; un groupe qui n'affiche que l'aide (`no_args_is_help`) aussi."""
+    assert not _problem(["cadrage", "interview"], ["--kind"])
+    assert "drapeau" in _problem(["cadrage", "interview"], ["--inconnu"])
+    assert "groupe" in _problem(["task"], [])
+    pure = click.Group("pur", commands={"x": click.Command("x")})
+    assert not _runs_alone(pure)
+    alone = click.Group("seul", invoke_without_command=True, callback=lambda: None)
+    assert _runs_alone(alone)
+    helps = click.Group("aide", invoke_without_command=True, no_args_is_help=True, callback=lambda: None)
+    assert not _runs_alone(helps)
