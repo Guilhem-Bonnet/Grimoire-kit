@@ -358,3 +358,77 @@ class TestViewNeverWritesThroughTheLightRead:
         with mandate.acting_as_orchestrator(), contextlib.suppress(MandateRefusedError, JournalError):
             store.authorize("answer", None, {"kind": "rule", "ref": "r"}, record=False)
         assert journal.path.read_bytes() == before
+
+
+class TestViewJournalEdges:
+    def test_journal_absent_donne_vide_et_tete_sans_journal_est_refusee(self, tmp_path: Path) -> None:
+        view = ViewJournal(tmp_path / "authority.jsonl")
+        assert view.read() == []
+        view.head_path.write_text(json.dumps({"seq": 0, "hash": "x"}))
+        with pytest.raises(JournalError):
+            view.read()
+
+    def test_tete_en_avance_refusee_meme_a_chaud(self, _vieux_pour_la_vue: None, tmp_path: Path) -> None:
+        base = _journal(tmp_path)
+        view = ViewJournal(base.path)
+        view.read()  # chaud
+        base.head_path.write_text(json.dumps({"seq": 99, "hash": "x"}))
+        with pytest.raises(JournalError, match="tronqué"):
+            view.read()
+
+    def test_la_memoire_de_la_vue_est_bornee(
+        self, _vieux_pour_la_vue: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(autopilot_view, "_VIEW_MAX", 1)
+        first = _journal(tmp_path / "a")
+        second = _journal(tmp_path / "b")
+        ViewJournal(first.path).read()
+        assert set(autopilot_view._view_verified) == {str(first.path)}
+        ViewJournal(second.path).read()
+        assert set(autopilot_view._view_verified) == {str(second.path)}
+
+    def test_journal_de_session_qui_n_est_pas_un_objet_est_ignore(self, tmp_path: Path) -> None:
+        runs = tmp_path / portfolio.RUNS_RELPATH
+        runs.mkdir(parents=True)
+        (runs / "session-liste.json").write_text("[1, 2]")
+        _age(runs / "session-liste.json")
+        assert wa._live_journal(tmp_path, datetime.now(UTC)) is False
+
+
+class TestCoveredCacheBounds:
+    def _ledger(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.service import TaskService
+
+        root.mkdir(parents=True, exist_ok=True)
+        service = TaskService(root)
+        service.add("T0", ("ok",), actor="t", owner="g", ready=True)
+        monkeypatch.setattr(ledger_snapshot, "SNAPSHOT_AFTER_MS", -1.0)
+        MissionLedger(service.ledger._root).list_tasks()
+        monkeypatch.setattr(ledger_snapshot, "SNAPSHOT_AFTER_MS", 1e9)
+        return service, service.ledger._root
+
+    def test_une_version_perimee_du_meme_journal_est_retiree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from grimoire.missions.ledger import MissionLedger
+
+        service, root = self._ledger(tmp_path / "p", monkeypatch)
+        MissionLedger(root).list_events()
+        service.add("T1", ("ok",), actor="t", owner="g", ready=True)
+        monkeypatch.setattr(ledger_snapshot, "SNAPSHOT_AFTER_MS", -1.0)
+        MissionLedger(root).list_tasks()  # nouvel instantané : autre décalage, autre empreinte
+        monkeypatch.setattr(ledger_snapshot, "SNAPSHOT_AFTER_MS", 1e9)
+        MissionLedger(root).list_events()
+        mine = [k for k in ledger_snapshot._covered_cache if k[0] == str(root / "events.jsonl")]
+        assert len(mine) == 1
+
+    def test_le_cache_est_borne_par_nombre_de_journaux(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.missions.ledger import MissionLedger
+
+        monkeypatch.setattr(ledger_snapshot, "_COVERED_MAX", 1)
+        _, first = self._ledger(tmp_path / "a", monkeypatch)
+        _, second = self._ledger(tmp_path / "b", monkeypatch)
+        MissionLedger(first).list_events()
+        MissionLedger(second).list_events()
+        assert {k[0] for k in ledger_snapshot._covered_cache} == {str(second / "events.jsonl")}
