@@ -329,14 +329,20 @@ def worker_at_work(service: TaskService, task_id: str, states: dict[str, str] | 
     return not short or states.get(short) not in _AT_REST
 
 
+#: Le type de l'exception qui a fait échouer la dernière lecture des sessions (``""`` : aucune), pour le motif du refus.
+_STATES_FAILURE: ContextVar[str] = ContextVar("grimoire_states_failure", default="")
+
+
 def _states(service: TaskService, claude_bin: str = "claude") -> dict[str, str] | None:
     """L'état des sessions de fond : celui que le tick a déjà lu s'il est en train d'appliquer, sinon lu ici."""
     held = _TICK_STATES.get()
     if held is not None:
         return held[0]
+    _STATES_FAILURE.set("")
     try:
         return session_states(_read_agents(default_exec, service.home_root, claude_bin))
-    except Exception:  # une lecture qui échoue n'est pas une preuve d'arrêt : ``None`` (le worker reste « au travail »)
+    except Exception as exc:  # une lecture qui échoue n'est pas une preuve d'arrêt : ``None`` (le worker reste « au travail »)
+        _STATES_FAILURE.set(type(exc).__name__)  # le type seulement : le message peut porter des chemins
         return None
 
 
@@ -533,6 +539,8 @@ def answer_plan(
         )
     except GrimoireMissionError as exc:
         reason = f"{exc} ; {unread}" if unread else str(exc)  # des précédents illisibles : le dire à l'humain
+        if failure := _STATES_FAILURE.get():  # la lecture des sessions a échoué : le dire, par son type seulement
+            reason = f"{reason} ; lecture des sessions impossible ({failure})"
         _defer(service, task.id, question.id, reason)
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {reason}") from exc
     # Une option appliquée à la place de la réponse n'est jamais « abandonner » (:func:`~.autopilot.safe_option`).

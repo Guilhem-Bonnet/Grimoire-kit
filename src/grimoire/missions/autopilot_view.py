@@ -25,6 +25,7 @@ from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.file_memo import COARSE_CLOCK_NS
 from grimoire.missions.autopilot import (
     DECIDED_EVENT,
+    DEFERRED_EVENT,
     AutopilotStore,
     last_deferral,
     load_autopilot_policy,
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from grimoire.missions.decisions import PendingDecision
     from grimoire.missions.service import TaskService
 
-__all__ = ["REVERTED_EVENT", "Held", "ViewJournal", "journal", "partition", "revert"]
+__all__ = ["REVERTED_EVENT", "Held", "ViewJournal", "journal", "partition", "revert", "reverted_decisions"]
 
 REVERTED_EVENT = "autopilot.reverted"
 
@@ -182,24 +183,40 @@ def _how_to_revert(service: TaskService, task_id: str, question_id: str = "") ->
     return ""
 
 
+def reverted_decisions(events: list[Any]) -> dict[str, str]:
+    """``{identifiant de la décision: date de la reprise}`` : une reprise porte sur **une** décision, jamais sur la question.
+
+    Une reprise nomme sa décision (``decision_id``). Une reprise ancienne, sans identifiant, vaut pour les décisions de la
+    même question inscrites avant elle (l'ordre du ledger) : jamais pour une décision postérieure. *events* est dans
+    l'ordre du ledger.
+    """
+    earlier: dict[tuple[Any, Any], list[str]] = {}
+    out: dict[str, str] = {}
+    for event in events:
+        p = event.payload
+        key = (p.get("task_id") or event.entity_id, p.get("question_id"))
+        if event.event_type == DECIDED_EVENT:
+            earlier.setdefault(key, []).append(event.id)
+        elif event.event_type == REVERTED_EVENT:
+            named = p.get("decision_id")
+            for decision_id in [named] if named else earlier.get(key, []):
+                out[str(decision_id)] = event.created_at
+    return out
+
+
 def journal(service: TaskService, limit: int = 200) -> list[dict[str, Any]]:
     """Les décisions du pilote, la plus récente d'abord ; chacune dit si elle a été reprise et si elle se défait."""
     events = service.ledger.list_events()
-    reverted = {
-        (e.payload.get("task_id"), e.payload.get("question_id")): e.created_at
-        for e in events
-        if e.event_type == REVERTED_EVENT
-    }
+    reverted = reverted_decisions(events)
     out: list[dict[str, Any]] = []
     for event in reversed(events):
         if event.event_type != DECIDED_EVENT:
             continue
         p = event.payload
-        key = (p.get("task_id"), p.get("question_id"))
         task = service.ledger.get_task(str(p.get("task_id") or ""))
         undo = (
             ""
-            if key in reverted
+            if event.id in reverted
             else _how_to_revert(service, str(p.get("task_id") or ""), str(p.get("question_id") or ""))
         )
         out.append(
@@ -217,7 +234,7 @@ def journal(service: TaskService, limit: int = 200) -> list[dict[str, Any]]:
                 "source": p.get("recommendation_source", ""),
                 "recommended": p.get("recommended", ""),
                 "precedent": p.get("precedent") if isinstance(p.get("precedent"), dict) else None,
-                "reverted_at": reverted.get(key, ""),
+                "reverted_at": reverted.get(event.id, ""),
                 "revert": undo,
             }
         )
@@ -232,22 +249,29 @@ def revert(service: TaskService, task_id: str, question_id: str, actor: str) -> 
     Refuse (rien n'est écrit) si aucune décision du pilote ne porte cette question, si elle a déjà été reprise, ou si la
     tâche a déjà avancé (un worker a repris sa réponse : le geste n'est plus réversible).
     """
-    decided = [
-        e
-        for e in service.ledger.events_for(task_id)
-        if e.event_type == DECIDED_EVENT and e.payload.get("question_id") == question_id
-    ]
+    history = service.ledger.events_for(task_id)
+    decided = [e for e in history if e.event_type == DECIDED_EVENT and e.payload.get("question_id") == question_id]
     if not decided:
         raise GrimoireMissionError(f"{task_id} : aucune décision du pilote pour la question {question_id}")
-    if any(
-        e.event_type == REVERTED_EVENT and e.payload.get("question_id") == question_id
-        for e in service.ledger.events_for(task_id)
-    ):
+    done = reverted_decisions(history)
+    if decided[-1].id in done:  # la reprise porte sur la dernière décision : une décision postérieure reste reprenable
         raise GrimoireMissionError(f"{task_id} : la décision du pilote pour {question_id} est déjà reprise")
     how = _how_to_revert(service, task_id, question_id)
     option = str(decided[-1].payload.get("option") or "")
     if how == "unanswered":
-        pass  # rien n'a été appliqué : la question reste posée, l'entrée est seulement close ci-dessous
+        # Rien n'a été appliqué : la question reste posée, et le pilote ne la retranche plus (report à l'humain, le même
+        # que celui d'une confiance basse : ni précédent ni option par défaut ne la reprennent au tick suivant).
+        service.ledger.append_event(
+            DEFERRED_EVENT,
+            task_id,
+            "task",
+            actor,
+            {
+                "task_id": task_id,
+                "question_id": question_id,
+                "reason": "décision du pilote reprise par l'humain : à lui de trancher",
+            },
+        )
     elif how == "reopen":
         service.transition(task_id, TaskState.READY, actor, f"décision du pilote reprise par l'humain : {option}")
     elif how == "hold":
@@ -269,6 +293,7 @@ def revert(service: TaskService, task_id: str, question_id: str, actor: str) -> 
         {
             "task_id": task_id,
             "question_id": question_id,
+            "decision_id": decided[-1].id,
             "how": how,
             "option": option,
             "at": datetime.now(UTC).isoformat(),

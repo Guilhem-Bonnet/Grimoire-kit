@@ -934,7 +934,7 @@ def test_revenir_sur_une_decision_sans_reponse_clot_l_entree_et_laisse_la_questi
     task = service.require(tid)
     assert task.status is TaskState.WAITING and task.waiting is not None and task.waiting.question is not None
     assert not [e for e in service.ledger.events_for(tid) if e.event_type == HUMAN_ANSWERED_EVENT and e.actor_id != "guilhem"]
-    assert len(service.ledger.list_events(tid)) == before + 1
+    assert len(service.ledger.list_events(tid)) == before + 2  # le report à l'humain, puis la reprise
     (closed,) = journal(service)
     assert closed["reverted_at"] and closed["revert"] == ""
     with pytest.raises(GrimoireMissionError, match="déjà reprise"):
@@ -978,3 +978,93 @@ def test_une_erreur_de_lecture_des_sessions_est_un_refus_journalise(
         answer(service, tid, qid, "reprendre", confidence="low")
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
     assert events(service, tid, osess.ANSWER_REFUSED_EVENT)
+
+
+# ── La reprise porte sur une décision, et laisse la question à l'humain (relecture de #1392) ──
+
+
+def review_entries(service: TaskService) -> list[dict[str, Any]]:
+    from grimoire.missions.autopilot_view import REVERTED_EVENT
+
+    read = wa._ProjectRead.__new__(wa._ProjectRead)
+    read.row = {"slug": "p", "name": "P"}
+    read.tasks = {}
+    pilot_events = [e for e in service.ledger.list_events() if e.event_type in (DECIDED_EVENT, REVERTED_EVENT)]
+    return wa._review_decisions(read, pilot_events, datetime.now(UTC))
+
+
+def applied(service: TaskService, tid: str) -> list[Any]:
+    return [e for e in events(service, tid, HUMAN_ANSWERED_EVENT) if e.payload.get("origin") == ORIGIN_ORCHESTRATOR]
+
+
+@pytest.mark.parametrize("policy", [ON, ON_AND_DEFAULT])
+def test_apres_revenir_sans_reponse_le_pilote_ne_retranche_plus_la_question(
+    project: Path, monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    service = pilot(project, policy)
+    tid, qid = decided_without_answer(service, project, monkeypatch)
+    assert revert(service, tid, qid, "guilhem")["how"] == "unanswered"
+    assert apply(service, project) == []  # tick suivant : ni précédent ni option par défaut
+    assert service.require(tid).status is TaskState.WAITING and not applied(service, tid)
+    assert len(events(service, tid, DECIDED_EVENT)) == 1
+    assert review_entries(service) == []
+
+
+def test_une_decision_posterieure_a_une_reprise_reste_visible_et_reversible(project: Path) -> None:
+    service = pilot(project, ON)
+    ruled(service)
+    tid, qid = again(service)
+    apply(service, project)
+    (first,) = events(service, tid, DECIDED_EVENT)
+    service.ledger.append_event(  # reprise ancienne, sans identifiant de décision
+        "autopilot.reverted", tid, "task", "guilhem", {"task_id": tid, "question_id": qid, "how": "hold"}
+    )
+    service.ledger.append_event(DECIDED_EVENT, tid, "task", "orch", dict(first.payload))  # décision postérieure
+    entries = [e for e in journal(service) if e["task_id"] == tid]
+    assert [bool(e["reverted_at"]) for e in entries] == [False, True]
+    assert entries[0]["revert"] == "hold"
+    assert len(review_entries(service)) == 1
+    assert revert(service, tid, qid, "guilhem")["how"] == "hold"
+    assert review_entries(service) == []
+    with pytest.raises(GrimoireMissionError, match="déjà reprise"):
+        revert(service, tid, qid, "guilhem")
+
+
+def test_une_reprise_entre_la_decision_et_la_reponse_ne_masque_pas_la_reponse_appliquee(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = pilot(project, ON)
+    ruled(service)
+    tid, qid = again(service)
+    real = service.ledger.append_event
+    seen: dict[str, Any] = {}
+
+    def racing(event_type: str, *a: Any, **k: Any) -> Any:
+        if event_type == HUMAN_ANSWERED_EVENT and not seen:
+            seen.update(revert(service, tid, qid, "guilhem"))  # « Revenir » au même instant
+        return real(event_type, *a, **k)
+
+    monkeypatch.setattr(service.ledger, "append_event", racing)
+    apply(service, project)
+    monkeypatch.setattr(service.ledger, "append_event", real)
+    assert seen["how"] == "unanswered" and applied(service, tid)
+    assert len(review_entries(service)) == 1  # la réponse appliquée reste visible
+    assert next(e["revert"] for e in journal(service) if e["task_id"] == tid) in ("hold", "reopen")
+
+
+def test_le_refus_de_lecture_des_sessions_dit_le_type_de_l_erreur_sans_son_message(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = pilot(project, ON)
+    ruled(service)
+    tid, qid = again(service)
+    monkeypatch.setattr(osess, "_read_agents", lambda *_a, **_k: (_ for _ in ()).throw(OSError("/home/secret/claude")))
+    with pytest.raises(GrimoireMissionError, match=r"lecture des sessions impossible \(OSError\)") as caught:
+        answer(service, tid, qid, "reprendre", confidence="low")
+    assert "/home/secret" not in str(caught.value)
+    (refused,) = events(service, tid, osess.ANSWER_REFUSED_EVENT)
+    assert "lecture des sessions impossible (OSError)" in refused.payload["reason"]
+    monkeypatch.setattr(osess, "_read_agents", lambda *_a, **_k: [])  # lecture saine : le même refus ordinaire, sans cette mention
+    with pytest.raises(GrimoireMissionError) as ordinary:
+        answer(service, tid, qid, "reprendre", confidence="low")
+    assert "lecture des sessions" not in str(ordinary.value)

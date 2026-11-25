@@ -991,10 +991,8 @@ class TaskService:
         if decision is not None and authority is not None:  # P82 : la décision est au ledger avant la réponse
             from grimoire.missions.autopilot import DECIDED_EVENT, decided_payload
 
-            self.ledger.append_event(
-                DECIDED_EVENT, task_id, "task", actor,
-                decided_payload(task_id, question, decision, gesture, authority.mandate_id),
-            )
+            decided = decided_payload(task_id, question, decision, gesture, authority.mandate_id)
+            decided_id = self.ledger.append_event(DECIDED_EVENT, task_id, "task", actor, decided).id
         self.ledger.append_event(
             HUMAN_ANSWERED_EVENT, task_id, "task", actor,
             {
@@ -1004,6 +1002,13 @@ class TaskService:
                     "gesture": authority.gesture} if authority else {}),
             },
         )
+        if decision is not None and authority is not None:
+            from grimoire.missions.autopilot_view import reverted_decisions
+
+            # Une reprise « sans réponse » arrivée entre les deux écritures a clos une décision dont la réponse est
+            # pourtant appliquée : on l'inscrit de nouveau, pour qu'elle reste visible et réversible.
+            if decided_id in reverted_decisions(self.ledger.events_for(task_id)):
+                self.ledger.append_event(DECIDED_EVENT, task_id, "task", actor, decided)
         self.ledger.add_directive(
             task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor,
             kind="comment" if authority else "directive", origin=origin,

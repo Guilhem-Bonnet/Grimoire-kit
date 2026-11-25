@@ -389,14 +389,16 @@ def _review_decisions(read: _ProjectRead, pilot_events: list[Any], now: datetime
     def key(event: Any) -> tuple[str, str]:
         return str(event.payload.get("task_id") or event.entity_id or ""), str(event.payload.get("question_id") or "")
 
-    reverted = {key(event) for event in pilot_events if event.event_type != DECIDED_EVENT}
+    from grimoire.missions.autopilot_view import reverted_decisions
+
+    reverted = reverted_decisions(pilot_events)
     found: dict[tuple[str, str], dict[str, Any]] = {}
     for event in pilot_events:
         payload = event.payload
         source = payload.get("recommendation_source")
         if event.event_type != DECIDED_EVENT or source not in (DEFAULT_SOURCE, "recommended", PRECEDENT_SOURCE):
             continue
-        if key(event) in reverted:
+        if event.id in reverted:
             continue
         try:
             at = datetime.fromisoformat(str(event.created_at))
