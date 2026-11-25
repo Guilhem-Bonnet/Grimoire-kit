@@ -98,6 +98,29 @@ def _rust_abi_mismatch() -> str | None:
     )
 
 
+#: Taille des blocs lus par :func:`_count_occurrences` : borne la mémoire, pas le coût (linéaire).
+_COUNT_BLOCK_BYTES = 1 << 20
+
+
+def _count_occurrences(path: Path, needle: bytes) -> int:
+    """Occurrences non chevauchantes de *needle* dans *path*, lues par blocs (mémoire bornée).
+
+    Identique à ``path.read_bytes().count(needle)``. Les ``len(needle) - 1`` derniers
+    octets d'un bloc sont reportés sur le suivant pour compter une occurrence à
+    cheval ; ce report est trop court pour contenir une occurrence entière, donc
+    rien n'est compté deux fois.
+    """
+    keep = len(needle) - 1
+    total = 0
+    tail = b""
+    with open(path, "rb") as fh:
+        while block := fh.read(_COUNT_BLOCK_BYTES):
+            data = tail + block
+            total += data.count(needle)
+            tail = data[-keep:] if keep else b""
+    return total
+
+
 def rust_backend_available() -> bool:
     """Whether a *compatible* compiled ``grimoire_traces_core`` module is importable.
 
@@ -802,7 +825,7 @@ class TraceLedger:
         if not self._traces_path.exists():
             return f"TRC-{run_id}-001"
         needle = f'"run_id": {json.dumps(run_id, ensure_ascii=False)}'.encode()
-        count = self._traces_path.read_bytes().count(needle)
+        count = _count_occurrences(self._traces_path, needle)
         return f"TRC-{run_id}-{count + 1:03d}"
 
     # ── Public write API ───────────────────────────────────────────────────
