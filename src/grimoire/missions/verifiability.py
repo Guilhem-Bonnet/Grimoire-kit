@@ -37,6 +37,7 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, StrEnum
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -544,6 +545,12 @@ def _commande_citee(texte: str, commandes: Sequence[str]) -> str | None:
 
 
 def _classer_critere(texte: str, commandes: Sequence[str] = ()) -> _Verdict:
+    """:func:`_classer_critere_pur`, mémoïsée sur (texte, commandes) : le verdict ne dépend que d'eux."""
+    return _classer_critere_pur(texte, tuple(commandes))
+
+
+@lru_cache(maxsize=8192)
+def _classer_critere_pur(texte: str, commandes: tuple[str, ...]) -> _Verdict:
     """Classe un critère isolé — la revue prime sur le mécanique.
 
     Un critère qui mentionne à la fois une suite de tests et une relecture
@@ -653,6 +660,12 @@ def _commande_declaree(task: MissionTask) -> bool:
     return bool(getattr(task, "checks", ()))
 
 
+@lru_cache(maxsize=4096)
+def _classify_text(criteria: tuple[str, ...], commands: tuple[str, ...]) -> Verifiability:
+    """:func:`classify_criteria` mémoïsée : fonction pure du texte (motifs figés), clé = les textes eux-mêmes."""
+    return classify_criteria(criteria, commands)
+
+
 def classify(task: MissionTask, *, commands_declared: bool = False) -> Verifiability:
     """Dérive la classe — jamais déclarée, toujours recalculée depuis le texte.
 
@@ -675,7 +688,7 @@ def classify(task: MissionTask, *, commands_declared: bool = False) -> Verifiabi
     *commands_declared* : l'appelant détient lui-même une commande à lancer
     (le ``--check`` de ``task dispatch``) — elle vaut déclaration.
     """
-    klass = classify_criteria(_criteres(task), _commandes(task))
+    klass = _classify_text(_criteres(task), _commandes(task))
     if klass is Verifiability.V0 and (_risque_accepte(task) or not (commands_declared or _commande_declaree(task))):
         return Verifiability.V1
     return klass

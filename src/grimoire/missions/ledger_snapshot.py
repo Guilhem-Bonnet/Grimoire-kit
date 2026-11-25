@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -77,6 +78,8 @@ class Cover:
 
     offset: int
     latest: datetime | None
+    #: Empreinte du préfixe couvert, prouvée au chargement ; vide quand on ne l'a pas (cache des événements couverts alors inactif).
+    prefix_sha256: str = ""
 
 
 @dataclass(slots=True)
@@ -141,7 +144,7 @@ def _restore(ledger: MissionLedger, raw: dict[str, Any], offset: int) -> tuple[i
         return None
     ledger._missions, ledger._tasks, ledger._epoch_high = missions, tasks, epoch_high
     ledger._rejected, ledger._idem_seen = rejected, idem
-    ledger._snapshot = Cover(offset, latest)
+    ledger._snapshot = Cover(offset, latest, str(raw.get("prefix_sha256") or ""))
     return unreadable
 
 
@@ -204,13 +207,42 @@ def save_if_slow(ledger: MissionLedger, replay: Replay) -> None:
         logger.debug("instantané du ledger non écrit", exc_info=True)
 
 
+#: Événements couverts, relus une fois par (journal, offset, empreinte du préfixe) : le préfixe d'un journal
+#: en ajout seul est immuable, et son empreinte (déjà prouvée au chargement) change s'il est réécrit.
+_COVERED_MAX = 4
+_covered_cache: dict[tuple[str, int, str], list[LedgerEvent]] = {}
+_covered_lock = threading.Lock()
+
+
+def clear_covered_cache() -> None:
+    """Oublie les événements couverts gardés (tests)."""
+    with _covered_lock:
+        _covered_cache.clear()
+
+
+def _covered_events(ledger: MissionLedger, cover: Cover) -> list[LedgerEvent]:
+    key = (str(ledger._events_path), cover.offset, cover.prefix_sha256)
+    if cover.prefix_sha256:
+        with _covered_lock:
+            known = _covered_cache.get(key)
+        if known is not None:
+            return known
+    # Même découpage que le rejeu (``\n`` seul, une ligne illisible sautée) : un U+2028 brut reste dans sa ligne (K12 x K13).
+    records, _ = parse_jsonl(ledger._events_path.read_bytes()[: cover.offset])
+    covered = [LedgerEvent.from_dict(raw) for raw in records]
+    if cover.prefix_sha256:
+        with _covered_lock:
+            if len(_covered_cache) >= _COVERED_MAX:
+                _covered_cache.clear()
+            _covered_cache[key] = covered
+    return covered
+
+
 def all_events(ledger: MissionLedger) -> list[LedgerEvent]:
     """Tous les événements du journal : ceux que l'instantané couvre sont relus à la demande, une fois."""
     cover = ledger._snapshot
     if cover is not None and cover.offset > 0:
-        # Même découpage que le rejeu (``\n`` seul, une ligne illisible sautée) : un U+2028 brut reste dans sa ligne (K12 x K13).
-        records, _ = parse_jsonl(ledger._events_path.read_bytes()[: cover.offset])
-        covered = [LedgerEvent.from_dict(raw) for raw in records]
+        covered = _covered_events(ledger, cover)
         ledger._events = [*covered, *ledger._events]
-        ledger._snapshot = Cover(0, cover.latest)
+        ledger._snapshot = Cover(0, cover.latest, cover.prefix_sha256)
     return ledger._events
