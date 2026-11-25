@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Vocal : questions et entretien de cadrage
 
 Cette page décrit le comportement de la boîte vocale quand l'orchestrateur pose une question (lot V4).
