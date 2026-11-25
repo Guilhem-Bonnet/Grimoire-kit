@@ -18,6 +18,7 @@ le registre du projet est celui du projet jetable. Ce que ces tests verrouillent
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -752,30 +753,51 @@ def test_un_dossier_de_session_ou_subagents_lien_sortant_n_est_pas_parcouru(
     assert view["totals"]["ignored"] == 2
 
 
-def test_un_tube_nomme_n_est_jamais_lu_ni_bloquant(project: Path, claude_home: Path) -> None:
-    import signal
+def _view_isole(project: Path, claude_home: Path, fifos: tuple[Path, ...] = ()) -> dict[str, Any]:
+    """La vue lue dans un sous-processus à échéance : sur un code fautif, une lecture de tube nommé ou de
+    périphérique ne rend jamais la main, et rien ne doit pouvoir bloquer le test (ni survivre à lui)."""
+    import subprocess
+    import sys
 
+    code = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "from grimoire.tools import workspace_fleet_live as f\n"
+        "print(json.dumps(f.fleet_live_view(Path(sys.argv[1]))))\n"
+    )
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(claude_home)}
+    try:
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", code, str(project)], capture_output=True, timeout=10, env=env, check=False
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("la lecture n'a pas rendu la main : un tube nommé ou un périphérique a été lu")
+    finally:
+        for fifo in fifos:  # débloque un lecteur resté suspendu, au cas où
+            with contextlib.suppress(OSError):
+                os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+    assert done.returncode == 0, done.stderr.decode()[-500:]
+    view: dict[str, Any] = json.loads(done.stdout.decode().splitlines()[-1])
+    return view
+
+
+def test_un_tube_nomme_n_est_jamais_lu_ni_bloquant(project: Path, claude_home: Path) -> None:
     if not hasattr(os, "mkfifo"):
         pytest.skip("pas de mkfifo")
     base = _journal_dir(claude_home, project)
-    os.mkfifo(base / "70000000-0000-0000-0000-000000000006.jsonl")
     subdir = base / "70000000-0000-0000-0000-000000000007" / "subagents"
     subdir.mkdir(parents=True)
+    fifos = (
+        base / "70000000-0000-0000-0000-000000000006.jsonl",
+        subdir / "agent-fifo.jsonl",
+        subdir / "agent-ok.meta.json",
+    )
+    for fifo in fifos:
+        os.mkfifo(fifo)
     _write(base / "70000000-0000-0000-0000-000000000007.jsonl", [_assistant("p", "m1", "claude-sonnet-5-5")])
-    os.mkfifo(subdir / "agent-fifo.jsonl")
-    os.mkfifo(subdir / "agent-ok.meta.json")
     _write(subdir / "agent-ok.jsonl", [_assistant("p", "m2", "claude-sonnet-5-5")])
 
-    def _boom(*_: object) -> None:
-        raise AssertionError("la lecture a bloqué sur un tube nommé")
-
-    previous = signal.signal(signal.SIGALRM, _boom)
-    signal.alarm(5)
-    try:
-        view = fleet.fleet_live_view(project, now=NOW)
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
+    view = _view_isole(project, claude_home, fifos)
 
     assert sorted(row["id"] for row in view["sessions"]) == sorted(["70000000-0000-0000-0000-000000000007", "ok"])
     assert view["totals"]["ignored"] >= 2
@@ -785,7 +807,7 @@ def test_un_peripherique_n_est_pas_lu(project: Path, claude_home: Path) -> None:
     base = _journal_dir(claude_home, project)
     (base / "70000000-0000-0000-0000-000000000008.jsonl").symlink_to("/dev/zero")
 
-    view = fleet.fleet_live_view(project, now=NOW)
+    view = _view_isole(project, claude_home)
 
     assert view["sessions"] == []
     assert view["totals"]["ignored"] == 1
