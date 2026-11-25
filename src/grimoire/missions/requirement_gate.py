@@ -9,7 +9,8 @@ sert une exigence validée. Quatre pièces :
   dérogation de l'arbitre (:mod:`.arbiter`), elle se lit là où le worker n'écrit pas. La fonction établit elle-même
   l'origine (aucun paramètre ne la porte), avec les signaux de ``task comment`` / ``task answer`` : un marqueur de
   session ou de terminal d'agent, ``GRIMOIRE_UNATTENDED`` ou l'orchestrateur en processus refusent d'emblée ; sinon un
-  terminal interactif et un « oui » à l'écran sont exigés. Aucun mandat ne couvre ce geste ;
+  terminal interactif et un « oui » à l'écran sont exigés. Aucun mandat ne couvre ce geste. Ces contrôles
+  (:func:`refuse_agent_origin`, :func:`attest_human_turn`) servent aussi la recette (:mod:`.moa_acceptance`, M4) ;
 - **le sceau** porte le projet (sa racine d'origine), la clé de l'exigence (``REQ-001`` ou ``<chantier>/REQ-001``),
   la MOA déclarée et l'**empreinte** du texte validé (formulation, priorité, critères, périmètre) : modifier
   l'exigence après coup, changer de MOA ou la citer depuis un autre projet retire la validation ;
@@ -56,19 +57,24 @@ if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask
 
 __all__ = [
+    "APPROVE_GESTURE",
     "EXEMPTED_EVENT",
     "EXEMPT_NATURES",
     "FLAGGED_EVENT",
     "REMEDY",
     "VALIDATED_ENTRY",
     "GateMode",
+    "HumanGesture",
     "RequirementCheck",
     "RequirementRefusedError",
     "approve_requirement",
+    "attest_human_turn",
+    "chantier_mismatch",
     "check_task",
     "fingerprint",
     "gate_mode",
     "gate_refusal",
+    "linked_missions",
     "lookup",
     "nature_of",
     "normalize_key",
@@ -77,10 +83,12 @@ __all__ = [
     "queue_refusal",
     "record_ready",
     "record_transition",
+    "refuse_agent_origin",
     "requirement_of",
     "sealed_validations",
     "task_fields",
     "transition_refusal",
+    "validation_in",
     "validation_of",
 ]
 
@@ -273,7 +281,27 @@ def _agent_signal() -> str:
     return f"terminal d'agent ({marker})" if marker else ""
 
 
-def _confirm_human_turn() -> bool:
+@dataclass(frozen=True, slots=True)
+class HumanGesture:
+    """Un geste réservé à la MOA : son nom (dans les refus), la commande à lancer soi-même, la question à l'écran.
+
+    La validation (M3) et la recette (M4) passent par les mêmes contrôles d'origine (:func:`refuse_agent_origin`, puis
+    :func:`attest_human_turn`) : seuls les mots changent.
+    """
+
+    noun: str
+    command: str
+    question: str
+
+
+APPROVE_GESTURE = HumanGesture(
+    "validation",
+    "grimoire cadrage approve",
+    "Cette validation sera enregistrée au nom de la MOA. Est-ce bien vous qui la donnez ? [o/N] ",
+)
+
+
+def _confirm_human_turn(question: str = APPROVE_GESTURE.question) -> bool:
     """Le tour humain : un terminal interactif (entrée et sortie d'erreur) et un « oui » donné à l'écran."""
     import sys
 
@@ -284,7 +312,7 @@ def _confirm_human_turn() -> bool:
     if not interactive:
         return False
     try:
-        sys.stderr.write("Cette validation sera enregistrée au nom de la MOA. Est-ce bien vous qui la donnez ? [o/N] ")
+        sys.stderr.write(question)
         sys.stderr.flush()
         answer = sys.stdin.readline().strip().lower()
     except (OSError, ValueError):
@@ -292,12 +320,27 @@ def _confirm_human_turn() -> bool:
     return answer in ("o", "oui", "y", "yes")
 
 
-def _refuse_origin(why: str) -> RequirementRefusedError:
+def _refuse_origin(why: str, gesture: HumanGesture = APPROVE_GESTURE) -> RequirementRefusedError:
     return RequirementRefusedError(
         "human_required",
-        f"validation refusée : {why}. Seule la MOA, un humain, valide une exigence depuis son terminal — ni un agent, "
-        "ni l'orchestrateur, même sous mandat. Lancez `grimoire cadrage approve` vous-même.",
+        f"{gesture.noun} refusée : {why}. Seule la MOA, un humain, prononce ce geste depuis son terminal — ni un "
+        f"agent, ni l'orchestrateur, même sous mandat. Lancez `{gesture.command}` vous-même.",
     )
+
+
+def refuse_agent_origin(gesture: HumanGesture = APPROVE_GESTURE) -> None:
+    """Refuse d'emblée (avant toute lecture) un appel venu d'un agent, de l'orchestrateur ou sans humain."""
+    why = _agent_signal()
+    if why:
+        raise _refuse_origin(why, gesture)
+
+
+def attest_human_turn(gesture: HumanGesture = APPROVE_GESTURE) -> None:
+    """Exige le tour humain (terminal interactif et « oui » à l'écran) ; sinon rien ne doit être scellé."""
+    if not _confirm_human_turn(gesture.question):
+        raise _refuse_origin(
+            "tour humain non attesté (pas de terminal interactif, ou pas de « oui » à l'écran)", gesture
+        )
 
 
 def approve_requirement(
@@ -314,9 +357,7 @@ def approve_requirement(
     :func:`_confirm_human_turn`), que l'appel vienne de la CLI ou de l'API Python. Un marqueur d'agent refuse
     d'emblée, avant toute lecture ; sans terminal interactif ni « oui » à l'écran, rien n'est scellé.
     """
-    why = _agent_signal()
-    if why:
-        raise _refuse_origin(why)
+    refuse_agent_origin(APPROVE_GESTURE)
     key = normalize_key(key)
     project = origin_root(root)
     mode = gate_mode(project)
@@ -342,8 +383,7 @@ def approve_requirement(
         raise RequirementRefusedError("no_text", f"exigence {key} sans formulation : rien à valider.")
     if not requirement.planned:
         raise RequirementRefusedError("out_of_scope", f"exigence {key} hors périmètre (ou Won't) : rien à valider.")
-    if not _confirm_human_turn():
-        raise _refuse_origin("tour humain non attesté (pas de terminal interactif, ou pas de « oui » à l'écran)")
+    attest_human_turn(APPROVE_GESTURE)
     return _journal(journal).append(
         {
             "type": VALIDATED_ENTRY,
@@ -383,12 +423,19 @@ def validation_of(
         entries = _journal(journal).read()
     except JournalError as exc:
         return None, f"journal d'autorité illisible : {exc}"
-    current = fingerprint(key, requirement)
+    return validation_in(entries, str(project), key, fingerprint(key, requirement), mode.moa)
+
+
+def validation_in(
+    entries: Iterable[dict[str, Any]], project: str, key: str, current: str, moa: str
+) -> tuple[dict[str, Any] | None, str]:
+    """La règle de :func:`validation_of` sur des entrées déjà lues (le cockpit et la recette lisent le journal une
+    fois pour plusieurs exigences) : projet, clé, canal, origine humaine, empreinte *current* et MOA *moa*."""
     stale = other_moa = False
-    for entry in reversed(entries):
+    for entry in reversed(list(entries)):
         if (
             entry.get("type") != VALIDATED_ENTRY
-            or entry.get("project") != str(project)
+            or entry.get("project") != project
             or entry.get("requirement") != key
             or entry.get("origin") != ORIGIN_HUMAN
             or entry.get("channel") != APPROVE_CHANNEL
@@ -396,15 +443,15 @@ def validation_of(
             continue
         if entry.get("fingerprint") != current:
             stale = True
-        elif entry.get("moa") != mode.moa:
+        elif entry.get("moa") != moa:
             other_moa = True
         else:
             return entry, ""
     if stale:
         return None, f"exigence {key} modifiée depuis sa validation : la MOA doit la revalider"
     if other_moa:
-        return None, f"exigence {key} validée par une autre MOA que celle déclarée ({mode.moa}) : à revalider"
-    return None, f"exigence {key} non validée par la MOA ({mode.moa})"
+        return None, f"exigence {key} validée par une autre MOA que celle déclarée ({moa}) : à revalider"
+    return None, f"exigence {key} non validée par la MOA ({moa})"
 
 
 def sealed_validations(root: Path, *, journal: AuthorityJournal | None = None) -> int:
@@ -436,18 +483,28 @@ class RequirementCheck:
         return self.state == "gap"
 
 
-def _chantier_mismatch(home_root: Path, task: MissionTask, key: str) -> str:
-    """Une exigence d'un chantier lié à une autre mission que celle de la tâche, ou l'inverse ; ``""`` si cohérent."""
-    from grimoire.core.cadrage import DEFAULT_CHANTIER
+def linked_missions(home_root: Path) -> dict[str, str]:
+    """Chantier → mission liée (les chantiers sans mission ou illisibles n'y figurent pas ; tout illisible : ``{}``)."""
     from grimoire.core.chantiers import list_chantiers
 
     try:
         chantiers = list_chantiers(home_root)
     except Exception:  # un chantier illisible ne fonde aucune décision ici
-        return ""
+        return {}
+    return {c.slug: c.mission for c in chantiers if c.mission and not c.error}
+
+
+def chantier_mismatch(home_root: Path, task: MissionTask, key: str, linked: dict[str, str] | None = None) -> str:
+    """Une exigence d'un chantier lié à une autre mission que celle de la tâche, ou l'inverse ; ``""`` si cohérent.
+
+    *linked* (:func:`linked_missions`) évite de relire les chantiers pour chaque tâche.
+    """
+    from grimoire.core.cadrage import DEFAULT_CHANTIER
+
+    if linked is None:
+        linked = linked_missions(home_root)
     wanted = _KEY.match(key)
     key_chantier = (wanted.group("chantier") if wanted else None) or DEFAULT_CHANTIER
-    linked = {c.slug: c.mission for c in chantiers if c.mission and not c.error}
     target = linked.get(key_chantier, "")
     if target and task.mission_id != target:
         return f"{key} appartient au chantier {key_chantier!r}, lié à la mission {target}, pas à {task.mission_id}"
@@ -493,7 +550,7 @@ def check_task(home_root: Path, task: MissionTask, *, journal: AuthorityJournal 
         key = normalize_key(raw)
     except GrimoireMissionError as exc:
         return RequirementCheck("gap", str(exc), nature, raw)
-    mismatch = _chantier_mismatch(home_root, task, key)
+    mismatch = chantier_mismatch(home_root, task, key)
     if mismatch:
         return RequirementCheck("gap", mismatch, nature, key)
     entry, reason = validation_of(home_root, key, journal=journal)

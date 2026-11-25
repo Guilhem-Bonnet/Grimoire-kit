@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from grimoire.missions.cadrage_plan import CadragePlan
+    from grimoire.missions.moa_acceptance import RequirementView
 
 console = Console()
 cadrage_app = typer.Typer(help="Cadrage produit : brief → brainstorm → compréhension → exigences → cahier des charges.")
@@ -84,6 +85,30 @@ def cadrage_status(ctx: typer.Context, path: Path = _path_arg, chantier: str | N
             f"[{style}]{r['state']}[/{style}]",
             ", ".join(missing) if missing else "—",
         )
+    console.print(table)
+    _print_requirement_states(root, chantier)
+
+
+def _print_requirement_states(root: Path, chantier: str | None) -> None:
+    """Par exigence : proposée, validée, livrée en attente de recette, recettée (avec réserve), non conforme."""
+    from grimoire.missions.moa_acceptance import STATE_LABELS, requirement_views
+    from grimoire.missions.requirement_gate import origin_root
+    from grimoire.missions.service import TaskService
+
+    try:
+        views = requirement_views(root, chantier, service=TaskService(origin_root(root)))
+    except (ValueError, GrimoireError) as exc:
+        console.print(f"[yellow]exigences illisibles[/yellow] : {escape(str(exc))}")
+        return
+    if not views:
+        return
+    table = Table(title="Exigences — validation et recette par la MOA")
+    for col in ("Exigence", "État", "Tâches", "Formulation"):
+        table.add_column(col)
+    for v in views:
+        style = _STATE_STYLE.get(v.state, "white")
+        tasks = ", ".join(f"{t.id}{'' if t.delivered else ' (' + t.status + ')'}" for t in v.tasks) or "—"
+        table.add_row(v.key, f"[{style}]{STATE_LABELS[v.state]}[/{style}]", tasks, escape(v.title))
     console.print(table)
 
 
@@ -253,6 +278,94 @@ def cadrage_approve(
         f"[green]exigence validée[/green] — {entry['requirement']} par la MOA {escape(str(entry['moa']))} "
         f"[dim](journal d'autorité, entrée {entry['seq']})[/dim]"
     )
+
+
+_STATE_STYLE = {
+    "proposee": "dim", "validee": "cyan", "livree": "yellow", "recettee": "green",
+    "recettee-avec-reserve": "green", "non-conforme": "red",
+}
+
+
+@cadrage_app.command("recette")
+def cadrage_recette(
+    requirement: str = typer.Argument(..., help="L'exigence à recetter : REQ-001, ou <chantier>/REQ-001."),
+    path: Path = _path_opt,
+    chantier: str | None = _chantier_opt,
+    verdict: str = typer.Option(
+        "", "--verdict", help="conforme, conforme-avec-reserve ou non-conforme (sans : présentation seule)."
+    ),
+    motif: str = typer.Option(
+        "", "--motif", "--reserve", help="Le motif (non-conforme) ou la réserve (conforme-avec-reserve) : obligatoire."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="La présentation en JSON, sans verdict (lecture seule)."),
+    actor: str = typer.Option("cli", "--actor", help="Qui prononce (journalisé avec la MOA déclarée)."),
+) -> None:
+    """La MOA recette une exigence : l'exigence validée, son critère de recette, les tâches livrées et leurs preuves,
+    puis le verdict — depuis son terminal seulement, scellé au journal d'autorité (mêmes contrôles que `approve`)."""
+    import json
+
+    from grimoire.missions import moa_acceptance as moa
+    from grimoire.missions.requirement_gate import normalize_key, origin_root
+    from grimoire.missions.service import TaskService
+
+    root = path.resolve()
+    key = _guard(lambda: normalize_key(requirement, chantier))
+    if as_json and verdict:
+        console.print("[red]--json est une lecture : il ne prononce pas de verdict.[/red]")
+        raise typer.Exit(1)
+    service = TaskService(origin_root(root))
+    view = _guard(lambda: moa.requirement_view(root, key, service=service))
+    if as_json:
+        typer.echo(json.dumps(view.to_dict(), indent=2, ensure_ascii=False))
+        return
+    _print_recette(view)
+    if not verdict:
+        console.print(
+            "\n[dim]La MOA prononce, depuis son terminal :[/dim] "
+            f"[cyan]grimoire cadrage recette {key} --verdict conforme|conforme-avec-reserve|non-conforme "
+            '--motif "…"[/cyan]'
+        )
+        return
+    done = _guard(lambda: moa.pronounce(root, key, verdict, motif, actor=actor, service=service))
+    entry = done["entry"]
+    console.print(
+        f"[green]recette scellée[/green] — {key} : {entry['verdict']} par la MOA {escape(str(entry['moa']))} "
+        f"[dim](journal d'autorité, entrée {entry['seq']})[/dim]"
+    )
+    if done["task_id"]:
+        console.print(f"  tâche MOE {done['task_id']} ouverte (proposed), rattachée à {key}")
+    console.print(f"  état : {moa.STATE_LABELS[done['state']]}")
+    if done["error"]:
+        console.print(f"[red]{escape(done['error'])}[/red]")
+        raise typer.Exit(1)
+
+
+def _print_recette(view: RequirementView) -> None:
+    from grimoire.missions.moa_acceptance import STATE_LABELS, acceptance_criterion
+
+    console.print(f"[bold]{view.key}[/bold] — {escape(view.title) or 'sans formulation'}"
+                  + (f" [dim]({view.priority})[/dim]" if view.priority else ""))
+    for criterion in view.criteria:
+        console.print(f"  - {escape(criterion)}")
+    console.print(f"Nature : {view.nature or 'non déclarée'} — critère de recette : "
+                  f"[cyan]{escape(acceptance_criterion(view.nature))}[/cyan]")
+    style = _STATE_STYLE.get(view.state, "white")
+    console.print(f"État : [{style}]{STATE_LABELS[view.state]}[/{style}]"
+                  + (f" [dim]({escape(view.reason)})[/dim]" if view.reason and not view.validated else ""))
+    if not view.tasks:
+        console.print("  [yellow]aucune tâche rattachée[/yellow] (`task add --requirement`)")
+    for task in view.tasks:
+        proofs = [p for p in (f"verdict {task.verdict}" if task.verdict else "",
+                              f"pack {task.pack}" if task.pack else "", task.merged) if p]
+        mark = "[green]livrée[/green]" if task.delivered else f"[yellow]{task.status}[/yellow]"
+        console.print(f"  {task.id} {mark} — {escape(task.title)}"
+                      + (f" [dim]({escape('; '.join(proofs))})[/dim]" if proofs else
+                         (" [dim](aucune preuve enregistrée)[/dim]" if task.delivered else "")))
+    if view.verdict:
+        last = view.verdict
+        console.print(f"Dernier verdict : {last.get('verdict')}"
+                      + (f" — {escape(str(last.get('motif')))}" if last.get("motif") else "")
+                      + f" [dim]({last.get('ts', '')})[/dim]")
 
 
 # ── entretien de cadrage : sept angles, profondeur selon la demande ──────────
