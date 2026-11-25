@@ -19,7 +19,16 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from grimoire.voice.engines import EngineSlot, Kind, Speech, SpeechToText, TextToSpeech, Transcript, get_spec
+from grimoire.voice.engines import (
+    EngineCallError,
+    EngineSlot,
+    Kind,
+    Speech,
+    SpeechToText,
+    TextToSpeech,
+    Transcript,
+    get_spec,
+)
 
 if TYPE_CHECKING:
     from grimoire.voice.settings import EngineChoice, VoiceSettings
@@ -41,9 +50,16 @@ class EnginePool:
         self._slot_kwargs = slot_kwargs
         self._slots: dict[str, OrderedDict[tuple[str, str], EngineSlot]] = {"stt": OrderedDict(), "tts": OrderedDict()}
         self._locks = {"stt": threading.RLock(), "tts": threading.RLock()}
+        self._owners: dict[str, int | None] = {"stt": None, "tts": None}
 
-    def _acquire(self, kind: Kind, choice: EngineChoice, settings: VoiceSettings) -> EngineSlot:
-        """Emplacement de la clé, créé au besoin ; les autres de la même nature au-delà de la capacité sont évincés."""
+    def _acquire(
+        self, kind: Kind, choice: EngineChoice, settings: VoiceSettings, *, nested: bool = False
+    ) -> EngineSlot:
+        """Emplacement de la clé, créé au besoin ; les autres de la même nature au-delà de la capacité sont évincés.
+
+        ``nested`` : le fil courant est déjà dans un appel de cette nature ; seul l'emplacement en cours d'usage
+        peut servir, jamais un autre qui évincerait le moteur de l'appel englobant.
+        """
         spec = get_spec(kind, choice.engine)
         options = dict(choice.options)
         if spec.modules:  # moteurs locaux : l'accord de téléchargement est celui du projet, jamais celui du moteur
@@ -52,6 +68,10 @@ class EnginePool:
         key = (spec.name, _options_key(options))
         slots = self._slots[kind]
         slot = slots.get(key)
+        if nested and (slot is None or next(reversed(slots)) != key):
+            raise EngineCallError(
+                "appel vocal imbriqué avec un autre moteur de même nature : refusé, il déchargerait le moteur en cours"
+            )
         if slot is None:
             slot = slots[key] = EngineSlot(spec, options, idle_unload_s=settings.idle_unload_s, **self._slot_kwargs)
         else:
@@ -64,8 +84,17 @@ class EnginePool:
 
     def run(self, kind: Kind, choice: EngineChoice, settings: VoiceSettings, call: Callable[[Any], _T]) -> _T:
         """Passe ``call`` au moteur ``choice`` (chargé au besoin), sous le verrou de sa nature."""
+        me = threading.get_ident()
         with self._locks[kind]:
-            return self._acquire(kind, choice, settings).run(call)
+            nested = self._owners[kind] == me
+            slot = self._acquire(kind, choice, settings, nested=nested)
+            if nested:
+                return slot.run(call)
+            self._owners[kind] = me
+            try:
+                return slot.run(call)
+            finally:
+                self._owners[kind] = None
 
     def loaded(self, kind: Kind) -> int:
         """Le nombre de moteurs de cette nature actuellement chargés en mémoire."""

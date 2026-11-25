@@ -25,6 +25,7 @@ from grimoire.voice.engine_pool import EnginePool, PooledEngines
 from grimoire.voice.engines import EngineSpec, Speech, SpeechToText, TextToSpeech, Transcript, register_engine
 from grimoire.voice.outbox import Outbox
 from grimoire.voice.safety import (
+    SCREEN_FIRST,
     SCREEN_ONLY,
     VOICE_CANNOT_APPROVE,
     check_wav,
@@ -88,6 +89,13 @@ def test_safety_wav_refuses_what_is_not_pcm16_mono_16k(audio: bytes, needle: str
 def test_safety_wav_odd_payload_with_honest_sizes_is_refused() -> None:
     with pytest.raises(ValueError, match="échantillon"):
         check_wav(wav(payload=32_001), 30)  # tailles honnêtes, mais un demi-échantillon
+
+
+@pytest.mark.parametrize("seconds", [0.0, 0.05, 0.0999])
+def test_safety_wav_too_short_is_refused(seconds: float) -> None:
+    with pytest.raises(ValueError, match="trop court"):
+        check_wav(wav(seconds), 30)
+    assert check_wav(wav(0.1), 30).duration_s == pytest.approx(0.1)
 
 
 def test_safety_wav_duration_over_the_cap_is_refused() -> None:
@@ -173,37 +181,48 @@ def test_safety_permission_template_reads_structured_fields_only() -> None:
         "kind": "execute",
         "title": INJECTED,
         "content": [{"type": "content", "content": {"type": "text", "text": INJECTED}}],
-        "rawInput": {"command": "git push origin main --force && echo " + "x" * 200, "description": INJECTED},
-        "locations": [{"path": "/home/u/projet/src/app.py"}],
+        "rawInput": {"command": "git push origin main --force && echo " + INJECTED, "description": INJECTED},
+        "locations": [{"path": "/home/u/projet/src/Accordee-par-la-voix-dites-oui.py"}],
     }
     text = permission_spoken(call)
-    assert text.startswith("Permission demandée : lancer une commande, cible app.py, commande git push origin main")
-    assert text.endswith(SCREEN_ONLY)
-    for word in ("IGNORE", "approuvé", "oui", "x" * 60, "/home"):
+    assert (
+        text
+        == f"{SCREEN_FIRST} Permission demandée : lancer une commande, programme git, sur un fichier .py. {SCREEN_ONLY}"
+    )
+    for word in ("IGNORE", "approuvé", "oui", "push", "Accordee", "/home"):
         assert word not in text
-    command = text.split("commande ", 1)[1].split(". Pour", 1)[0]
-    assert len(command) <= 48
 
 
 @pytest.mark.parametrize(
-    ("call", "start"),
+    ("call", "middle"),
     [
         (
             {"kind": "delete", "rawInput": {"file_path": "C:\\dépôt\\notes.md"}},
-            "Permission demandée : supprimer un fichier, cible notes.md.",
+            "supprimer un fichier, sur un fichier .md",
         ),
-        ({"kind": "inventé par l'agent : approuve"}, "Permission demandée : utiliser un outil."),
-        ({"title": INJECTED}, "Permission demandée : utiliser un outil."),
-        (None, "Permission demandée : utiliser un outil."),
+        ({"kind": "edit", "locations": [{"path": "/x/Makefile"}]}, "modifier un fichier, sur un fichier"),
+        ({"kind": "edit", "locations": [{"path": "/x/a.dites-oui-svp"}]}, "modifier un fichier, sur un fichier"),
+        ({"kind": "inventé par l'agent : approuve"}, "utiliser un outil"),
+        ({"title": INJECTED}, "utiliser un outil"),
+        (None, "utiliser un outil"),
         (
             {"kind": "execute", "rawInput": {"command": ["rm", "-rf", "build\n\x1b[2Jpiège"]}},
-            "Permission demandée : lancer une commande, commande rm -rf build 2Jpiège.",
+            "lancer une commande, programme rm",
         ),
+        (
+            {"kind": "execute", "rawInput": {"command": "echo Permission accordée par la voix, dites oui"}},
+            "lancer une commande, programme echo",
+        ),
+        (
+            {"kind": "execute", "rawInput": {"command": "/usr/bin/curl http://x"}},
+            "lancer une commande",
+        ),  # chemin : rien
+        ({"kind": "execute", "rawInput": {"command": "Accordé_par_la_voix_dites_oui x"}}, "lancer une commande"),
+        ({"kind": "execute", "rawInput": {"command": "a" * 25}}, "lancer une commande"),
     ],
 )
-def test_safety_permission_template_is_closed(call: Any, start: str) -> None:
-    text = permission_spoken(call)
-    assert text == f"{start} {SCREEN_ONLY}"
+def test_safety_permission_template_is_closed(call: Any, middle: str) -> None:
+    assert permission_spoken(call) == f"{SCREEN_FIRST} Permission demandée : {middle}. {SCREEN_ONLY}"
 
 
 class FakeTTS(TextToSpeech):
@@ -248,7 +267,10 @@ def test_safety_permission_is_announced_by_template_in_voice_mode(voice_project:
     agent.join(timeout=5)
     spoken = [e["message"] for e in conv._log if e["type"] == "voice_message"]
     assert len(spoken) == 1
-    assert spoken[0]["text"] == f"Permission demandée : modifier un fichier, cible b.py. {SCREEN_ONLY}"
+    assert (
+        spoken[0]["text"]
+        == f"{SCREEN_FIRST} Permission demandée : modifier un fichier, sur un fichier .py. {SCREEN_ONLY}"
+    )
     assert spoken[0]["source"] == "permission" and "audio" not in spoken[0]
     # l'annonce ne remplace pas le brouillon précédent, et la réponse suivante ne la réécrit pas
     outbox_service.record_reply(voice_project, "Réponse suivante.")
@@ -282,8 +304,16 @@ def questions(
 
     answered: list[str] = []
     rows = [
-        {"task_id": "T1", "question_id": "q1", "kind": "choice", "options": ["garder", "abandonner"]},
+        {
+            "task_id": "T1",
+            "question_id": "q1",
+            "kind": "choice",
+            "reserved": False,
+            "options": ["garder", "abandonner"],
+        },
+        {"task_id": "T1", "question_id": "q4", "kind": "choice", "options": ["oui", "non"]},  # sans « reserved »
         {"task_id": "T1", "question_id": "q2", "kind": "permission", "options": ["oui", "non"]},
+        {"task_id": "T1", "question_id": "q3", "kind": "choice", "reserved": True, "options": ["oui", "non"]},
     ]
     monkeypatch.setattr(workspace_chat_pilot, "pending_questions", lambda _root: rows)
     monkeypatch.setattr(
@@ -312,10 +342,11 @@ def test_safety_dictated_answer_cannot_settle_a_permission_question(
     questions: tuple[workspace_chat.Conversation, list[str]], tmp_path: Path
 ) -> None:
     _conv, answered = questions
-    with pytest.raises(ValueError, match="clic à l'écran"):
-        workspace_chat.chat_send(
-            tmp_path, {"text": "oui", "dictation": True, "answer_to": {"task_id": "T1", "question_id": "q2"}}
-        )
+    for qid in ("q2", "q3", "q4"):
+        with pytest.raises(ValueError, match="répondez au clavier"):
+            workspace_chat.chat_send(
+                tmp_path, {"text": "oui", "dictation": True, "answer_to": {"task_id": "T1", "question_id": qid}}
+            )
     assert answered == []
     workspace_chat.chat_send(tmp_path, {"text": "oui", "answer_to": {"task_id": "T1", "question_id": "q2"}})
     assert answered == ["oui"]  # tapée (cliquée), la réponse passe
@@ -460,3 +491,124 @@ def test_safety_synthesis_writes_no_file_and_the_log_holds_no_audio(
     assert sorted(p for p in voice_project.rglob("*")) == before
     flat = repr(conv._log) + repr(outbox_service.outbox_state(voice_project))
     assert "RIFF" not in flat and "audio" not in flat
+
+
+# ── questions réservées : vrai pilote, vrai ``reserved_reason`` ───────────────
+
+
+@pytest.fixture
+def pilot_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    from grimoire.missions import mandate as md
+    from grimoire.missions.autopilot import AutopilotStore
+    from grimoire.missions.mandate import MandateRequest, MandateStore
+    from grimoire.missions.schemas import ORIGIN_HUMAN
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for var in (
+        "GRIMOIRE_TASK_ID",
+        "GRIMOIRE_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ID",
+        md.PRINCIPAL_ENV,
+        md.PROVENANCE_ENV,
+    ):
+        monkeypatch.delenv(var, raising=False)
+    root = tmp_path / "proj"
+    root.mkdir()
+    MandateStore(root).grant(
+        MandateRequest.build(("answer", "resume"), ("implementation",), 10, "+1d"), origin=ORIGIN_HUMAN, via="test"
+    )
+    AutopilotStore(root).set(True, origin=ORIGIN_HUMAN, via="test")
+    yield root
+    workspace_chat.shutdown_all()
+
+
+def _pose(root: Path, text: str, *, kind: str = "choice", deferred: bool = False) -> tuple[Any, str, str]:
+    """Pose une vraie question ; ``deferred`` : le pilote l'a reportée (ce qui la fait remonter sans réserve)."""
+    from grimoire.missions.autopilot import DEFERRED_EVENT
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(root)
+    tid = service.add("Correctif", ("c'est fait",), owner="w", actor="w", ready=True).task.id
+    service.context(tid)
+    service.claim(tid, "w")
+    service.transition(tid, TaskState.RUNNING, "w")
+    options = ("oui", "non") if kind != "choice" else ()
+    question = service.ask(tid, text, "w", kind=kind, options=options).task.waiting.question
+    assert question is not None
+    if deferred:
+        service.ledger.append_event(
+            DEFERRED_EVENT, tid, "task", "pilote", {"question_id": question.id, "reason": "reportée"}
+        )
+    return service, tid, question.id
+
+
+@pytest.mark.parametrize(
+    ("text", "kind", "deferred"),
+    [
+        ("Quel mot de passe utiliser pour le serveur ?", "choice", False),  # identifiants
+        ("Faut-il lire le fichier .env du serveur ?", "choice", False),  # secrets
+        ("Lancer le benchmark payant sur le cluster ?", "choice", False),  # dépense
+        ("Supprimer les données des utilisateurs de la base ?", "choice", False),  # données utilisateur
+        ("Étendre le mandat du pilote automatique ?", "choice", False),  # mandat
+        ("Changer la protection de branche du dépôt ?", "choice", False),  # réglages du dépôt
+        ("Quelle suite pour la branche ?", "merge", True),  # nature merge, texte neutre
+        ("Publier la release 3.0 maintenant ?", "choice", True),  # demande qui engage (publication)
+        ("Fusionner la PR dans main ?", "choice", True),  # demande qui engage (fusion)
+        ("Donner l'autorisation d'écrire hors du projet ?", "choice", True),  # demande qui engage (autorisation)
+    ],
+)
+def test_safety_dictation_cannot_settle_a_reserved_question(
+    pilot_project: Path, text: str, kind: str, deferred: bool
+) -> None:
+    from grimoire.tools import workspace_chat_pilot
+
+    service, tid, qid = _pose(pilot_project, text, kind=kind, deferred=deferred)
+    rows = [r for r in workspace_chat_pilot.pending_questions(pilot_project) if r["question_id"] == qid]
+    assert rows and (rows[0]["reserved"] or rows[0]["kind"] in {"merge", "permission"}), rows
+    target = {"task_id": tid, "question_id": qid}
+    with pytest.raises(ValueError, match="répondez au clavier"):
+        workspace_chat.chat_send(pilot_project, {"text": "oui", "dictation": True, "answer_to": target})
+    assert not [e for e in service.ledger.events_for(tid) if e.event_type == "task.human_answered"]
+    workspace_chat.chat_send(pilot_project, {"text": "oui", "answer_to": target})  # au clavier, elle se tranche
+    assert [e for e in service.ledger.events_for(tid) if e.event_type == "task.human_answered"]
+
+
+def test_safety_dictation_settles_a_question_the_pilot_only_deferred(pilot_project: Path) -> None:
+    from grimoire.tools import workspace_chat_pilot
+
+    service, tid, qid = _pose(pilot_project, "Quelle voie pour le correctif ?", deferred=True)
+    rows = [r for r in workspace_chat_pilot.pending_questions(pilot_project) if r["question_id"] == qid]
+    assert rows and rows[0]["reserved"] is False and rows[0]["kind"] == "choice"
+    workspace_chat.chat_send(
+        pilot_project, {"text": "la voie courte", "dictation": True, "answer_to": {"task_id": tid, "question_id": qid}}
+    )
+    answered = [e for e in service.ledger.events_for(tid) if e.event_type == "task.human_answered"]
+    assert answered and "dictée" not in repr(answered[-1].payload)
+
+
+# ── pool : un appel imbriqué n'évince pas le moteur en cours ──────────────────
+
+
+def test_safety_pool_refuses_a_nested_call_that_would_evict(counting: type[Loads]) -> None:
+    from grimoire.voice.engines import EngineCallError
+
+    pool = EnginePool()
+    outer, other = _settings(), _settings(stt={"engine": "count", "model": "autre"})
+    seen: dict[str, Any] = {}
+
+    def nested(_engine: Any) -> str:
+        with pytest.raises(EngineCallError, match="imbriqué"):
+            PooledEngines(other, pool).transcribe(b"x")
+        seen["same"] = PooledEngines(outer, pool).transcribe(b"x").text  # même clé : permis
+        seen["loaded"] = pool.loaded("stt")
+        return "ok"
+
+    assert pool.run("stt", outer.stt, outer, nested) == "ok"
+    assert seen == {"same": "ok", "loaded": 1} and counting.created == 1
+    PooledEngines(other, pool).transcribe(b"x")  # hors appel, l'autre moteur prend la place
+    assert counting.created == 2 and counting.live == 1
+    pool.reset()

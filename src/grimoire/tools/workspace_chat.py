@@ -358,17 +358,24 @@ class Conversation:
     def _answer_question(self, text: str, task_id: str, question_id: str, *, dictation: bool = False) -> dict[str, Any]:
         """La réponse tapée à une question du pilote : un tour humain qui tranche, sans passer par l'agent (ACP4).
 
-        Une question de nature ``permission`` ne se tranche pas par une dictée (lot V5).
+        Une question de nature ``permission`` ou ``merge``, ou d'une catégorie réservée à l'humain, ne se tranche
+        pas par une dictée (lot V5) ; une question que le pilote a seulement reportée, si.
         """
         from grimoire.tools import workspace_chat_pilot
 
-        if dictation and any(
-            r["task_id"] == task_id and r["question_id"] == question_id and r.get("kind") == "permission"
-            for r in workspace_chat_pilot.pending_questions(self.root)
-        ):
-            from grimoire.voice.safety import VOICE_CANNOT_APPROVE
+        if dictation:
+            from grimoire.voice.safety import VOICE_RESERVED_ANSWER, voice_may_answer
 
-            raise ValueError(VOICE_CANNOT_APPROVE)
+            row = next(
+                (
+                    r
+                    for r in workspace_chat_pilot.pending_questions(self.root)
+                    if r["task_id"] == task_id and r["question_id"] == question_id
+                ),
+                None,
+            )
+            if row is not None and not voice_may_answer(row):
+                raise ValueError(VOICE_RESERVED_ANSWER)
         result = workspace_chat_pilot.answer(self.root, task_id, question_id, text)
         self._emit({"type": "user", "text": text, **({"dictation": True} if dictation else {})})
         self.pull_questions(interval=0.0)

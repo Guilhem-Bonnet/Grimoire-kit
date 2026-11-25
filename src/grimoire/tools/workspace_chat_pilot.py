@@ -54,10 +54,12 @@ def _service(root: Path) -> Any:
 def pending_questions(root: Path) -> list[dict[str, Any]]:
     """Les questions ouvertes que le pilote laisse à l'humain — vide si le pilote n'est pas activé.
 
-    Chaque ligne : ``task_id``, ``question_id``, ``text``, ``options``, ``recommended``, ``why`` et ``kept``,
-    la raison pour laquelle la question reste à l'humain.
+    Chaque ligne : ``task_id``, ``question_id``, ``text``, ``options``, ``recommended``, ``why``, ``kind``, ``kept``,
+    la raison pour laquelle la question reste à l'humain, et ``reserved`` : vrai quand elle relève d'une catégorie
+    réservée (liste fermée du pilote, ou demande qui engage : fusion, publication, déploiement, autorisation), faux
+    quand le pilote l'a seulement reportée. Une question réservée ne se tranche pas par une dictée (#1343 V5).
     """
-    from grimoire.missions.autopilot import AutopilotStore, last_deferral, reserved_reason
+    from grimoire.missions.autopilot import AutopilotStore, engaging_reason, last_deferral, reserved_reason
     from grimoire.missions.questions import open_in_group
 
     if not AutopilotStore(root).state().active:
@@ -67,15 +69,15 @@ def pending_questions(root: Path) -> list[dict[str, Any]]:
     for task in service.list_tasks(status="waiting"):
         for record in open_in_group(task):
             question = record.question
-            kept = reserved_reason(question, task, service.project_root) or last_deferral(
-                service.ledger.events_for(task.id), question.id
-            )
+            reserved = reserved_reason(question, task, service.project_root)
+            kept = reserved or last_deferral(service.ledger.events_for(task.id), question.id)
             if not kept:
                 continue
             rows.append({
                 "task_id": task.id, "task_title": task.title, "question_id": question.id,
                 "text": question.text, "options": list(question.options), "recommended": question.recommended,
                 "why": question.why, "kept": kept, "kind": question.kind,
+                "reserved": bool(reserved or engaging_reason(question, task)),
             })
     return rows
 

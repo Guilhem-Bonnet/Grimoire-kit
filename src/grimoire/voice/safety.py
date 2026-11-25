@@ -5,8 +5,9 @@
   tirée de l'en-tête ET celle tirée des octets réellement présents restent sous le plafond du projet, et un
   en-tête qui ment sur une taille est refusé.
 - :func:`permission_spoken` : ce que le message vocal sortant dit d'une demande de permission de l'agent.
-  Un gabarit fixe, rempli à partir des seuls champs structurés de la demande (nature de l'outil, fichier visé,
-  début de la commande) : jamais le titre ni l'explication rédigés par l'agent. Il dit toujours que la
+  Un gabarit fixe, rempli à partir des seuls champs structurés de la demande (nature de l'outil, nom du
+  programme, extension du fichier) : jamais le titre, l'explication, la commande ni le nom de fichier rédigés
+  par l'agent. Il dit toujours que la
   confirmation se fait à l'écran — la voix n'accorde rien (voir ``workspace_chat.Conversation``).
 
 Aucune bibliothèque audio n'est importée ici.
@@ -23,12 +24,15 @@ from typing import Any
 __all__ = [
     "ALLOWED_SAMPLE_RATES",
     "PERMISSION_SPOKEN_SOURCE",
+    "SCREEN_FIRST",
     "SCREEN_ONLY",
     "VOICE_CANNOT_APPROVE",
+    "VOICE_RESERVED_ANSWER",
     "WavInfo",
     "announce_permission",
     "check_wav",
     "permission_spoken",
+    "voice_may_answer",
 ]
 
 #: Fréquences acceptées : 16 kHz seulement, celle que la page enregistre et que les moteurs attendent.
@@ -41,10 +45,17 @@ _BITS = 16
 _BLOCK_ALIGN = _CHANNELS * _BITS // 8
 #: Au plus quelques blocs annexes (LIST, fact…) avant les données : au-delà, le fichier est refusé.
 _MAX_CHUNKS = 8
+#: En deçà, rien à transcrire : un enregistrement vide ou d'un souffle est refusé.
+MIN_SECONDS = 0.1
 
 #: La phrase qu'un refus vocal rend : la voix saisit du texte, elle n'accorde rien.
 VOICE_CANNOT_APPROVE = "une permission attend : elle se confirme par un clic à l'écran, jamais par un message dicté"
+SCREEN_FIRST = "La confirmation se fait à l'écran."
 SCREEN_ONLY = "Pour l'accorder ou la refuser, cliquez à l'écran : la voix ne confirme rien."
+#: Le refus d'une réponse dictée à une question réservée à l'humain.
+VOICE_RESERVED_ANSWER = (
+    "réponse dictée refusée : cette question est réservée à l'humain, répondez au clavier ou par un clic"
+)
 #: Source des messages parlés de permission dans la boîte d'envoi vocale.
 PERMISSION_SPOKEN_SOURCE = "permission"
 
@@ -62,10 +73,12 @@ _KIND_LABEL = {
 }
 _DEFAULT_LABEL = "utiliser un outil"
 _TARGET_KEYS = ("file_path", "path", "notebook_path", "filePath")
-#: Un nom de fichier ou une commande se dit par ses caractères ordinaires seulement, et brièvement.
-_UNSAFE_CHARS = re.compile(r"[^\w .,:=+/@-]", re.UNICODE)
-TARGET_MAX = 40
-COMMAND_MAX = 48
+#: Seul le nom du programme se dit, et seulement s'il a la forme d'un nom d'exécutable (pas de chemin, pas de phrase).
+_BINARY = re.compile(r"[A-Za-z0-9_.-]{1,24}")
+#: D'un fichier, seule l'extension se dit.
+_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,8}")
+#: Les natures de question qu'une dictée ne tranche jamais.
+_VOICE_FORBIDDEN_KINDS = frozenset({"permission", "merge"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,11 +143,14 @@ def _check_data(fmt: tuple[int, int, int, int, int, int], declared: int, actual:
         raise _refuse(f"fréquence {rate} Hz : {allowed} attendu")
     if align != _BLOCK_ALIGN or byte_rate != rate * _BLOCK_ALIGN:
         raise _refuse("en-tête incohérent (débit ou alignement)")
+    # Égalité stricte : un bloc placé APRÈS ``data`` (LIST, id3…) est refusé lui aussi — la page n'en écrit pas.
     if declared != actual:
         raise _refuse("la taille des données de l'en-tête ne correspond pas aux octets reçus")
     if actual % _BLOCK_ALIGN:
         raise _refuse("données tronquées au milieu d'un échantillon")
     info = WavInfo(sample_rate=rate, data_bytes=actual)
+    if info.duration_s < MIN_SECONDS:
+        raise _refuse(f"enregistrement trop court ({info.duration_s:.2f} s, minimum {MIN_SECONDS:g} s)")
     if info.duration_s > max_seconds:
         raise ValueError(f"audio trop long : {info.duration_s:.1f} s, plafond {max_seconds:g} s")
     return info
@@ -143,15 +159,8 @@ def _check_data(fmt: tuple[int, int, int, int, int, int], declared: int, actual:
 # ── Permission lue à la voix ──────────────────────────────────────────────────
 
 
-def _speakable(value: Any, limit: int) -> str:
-    """Une valeur structurée rendue dicible : caractères ordinaires, une ligne, tronquée."""
-    if not isinstance(value, str):
-        return ""
-    text = " ".join(_UNSAFE_CHARS.sub(" ", value).split())
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
-
-
-def _target(call: dict[str, Any]) -> str:
+def _file_label(call: dict[str, Any]) -> str:
+    """« un fichier .py » d'après l'extension du fichier visé, sinon « un fichier » ; jamais son nom (choisi par l'agent)."""
     raw = call.get("rawInput")
     candidates: list[Any] = []
     locations = call.get("locations")
@@ -162,35 +171,49 @@ def _target(call: dict[str, Any]) -> str:
     for value in candidates:
         if isinstance(value, str) and value.strip():
             name = PureWindowsPath(value).name if "\\" in value else PurePosixPath(value).name
-            return _speakable(name, TARGET_MAX)
+            suffix = PurePosixPath(name).suffix
+            return f"un fichier {suffix}" if _EXTENSION.fullmatch(suffix) else "un fichier"
     return ""
 
 
-def _command(call: dict[str, Any]) -> str:
+def _binary(call: dict[str, Any]) -> str:
+    """Le nom du programme lancé (premier mot de la commande), s'il a la forme d'un nom d'exécutable ; sinon rien."""
     raw = call.get("rawInput")
     value = raw.get("command") if isinstance(raw, dict) else None
     if isinstance(value, list):
-        value = " ".join(str(part) for part in value[:8])
-    return _speakable(value, COMMAND_MAX)
+        value = str(value[0]) if value else ""
+    if not isinstance(value, str):
+        return ""
+    words = value.split(maxsplit=1)
+    return words[0] if words and _BINARY.fullmatch(words[0]) else ""
 
 
 def permission_spoken(tool_call: Any) -> str:
     """Le message parlé d'une demande de permission : gabarit fixe, sans texte libre de l'agent.
 
-    Lit ``kind`` (liste fermée), le nom du fichier visé (``locations`` ou ``rawInput``) et le début de
-    ``rawInput.command`` ; ignore ``title``, ``content`` et tout autre champ rédigé par l'agent.
+    Lit ``kind`` (liste fermée), le nom du programme lancé (premier mot de ``rawInput.command``, s'il a la forme
+    d'un nom d'exécutable) et l'extension du fichier visé ; ignore le reste de la commande, le nom du fichier,
+    ``title``, ``content`` et tout autre champ rédigé par l'agent. La consigne de l'écran ouvre et clôt le message ;
+    le détail complet est à l'écran.
     """
     call = tool_call if isinstance(tool_call, dict) else {}
     kind = call.get("kind")
     label = _KIND_LABEL.get(kind, _DEFAULT_LABEL) if isinstance(kind, str) else _DEFAULT_LABEL
-    parts = [f"Permission demandée : {label}"]
-    target = _target(call)
+    parts = [f"{SCREEN_FIRST} Permission demandée : {label}"]
+    binary = _binary(call)
+    if binary:
+        parts.append(f", programme {binary}")
+    target = _file_label(call)
     if target:
-        parts.append(f", cible {target}")
-    command = _command(call)
-    if command:
-        parts.append(f", commande {command}")
+        parts.append(f", sur {target}")
     return "".join(parts) + ". " + SCREEN_ONLY
+
+
+def voice_may_answer(row: dict[str, Any]) -> bool:
+    """Une question du chat peut-elle être tranchée par une réponse dictée ? Non si sa nature engage
+    (``permission``, ``merge``) ou si elle relève d'une catégorie réservée (``reserved`` de ``pending_questions``).
+    Sans ``reserved`` (ligne d'une autre provenance), on ferme : la question est jugée réservée."""
+    return row.get("kind") not in _VOICE_FORBIDDEN_KINDS and row.get("reserved", True) is False
 
 
 def announce_permission(root: Path, tool_call: Any) -> dict[str, Any] | None:
