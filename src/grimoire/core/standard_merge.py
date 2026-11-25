@@ -82,7 +82,7 @@ def _id_list(value: Any) -> bool:
     )
 
 
-def _merge_list(proj: list, base: Any, tmpl: list, where: str, notes: list[str]) -> bool:
+def _merge_list(proj: list[Any], base: Any, tmpl: list[Any], where: str, notes: list[str]) -> bool:
     if not isinstance(base, list):
         return False  # sans base on ne sait pas distinguer « nouveau » de « retiré »
     changed = False
@@ -104,7 +104,7 @@ def _merge_list(proj: list, base: Any, tmpl: list, where: str, notes: list[str])
     return changed
 
 
-def _merge_map(proj: Any, base: Any, tmpl: dict, where: str, notes: list[str]) -> bool:
+def _merge_map(proj: Any, base: Any, tmpl: dict[str, Any], where: str, notes: list[str]) -> bool:
     base = base if isinstance(base, dict) else None
     changed = False
     for key, tv in tmpl.items():
