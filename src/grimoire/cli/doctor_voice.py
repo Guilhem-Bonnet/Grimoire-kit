@@ -69,6 +69,8 @@ def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: 
         else:
             avail = availability(spec)
             ok, reason = avail.ok, avail.reason
+            if ok and spec.memory_hint:
+                reason = f"{reason}, {spec.memory_hint}"
             if ok and not settings.allow_download:
                 cache = model_cache(spec, dict(choice.options))
                 if cache is not None and not cache.ok:

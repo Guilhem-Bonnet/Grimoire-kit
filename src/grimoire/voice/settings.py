@@ -6,7 +6,8 @@
       mode: text            # text | voice — défaut text
     voice:
       stt: faster-whisper   # ou une table : {engine: faster-whisper, model: small}
-      tts: pocket-tts       # ou {engine: pocket-tts, language: french, voice: estelle}
+      tts: qwen3-tts-clone  # défaut si l'extra voice-qwen est installé, sinon pocket-tts ;
+                            # ou {engine: qwen3-tts-clone, voice: /chemin/voix.wav, ref_text: "..."}
       idle_unload_seconds: 300
       language: fr
       max_record_seconds: 120 # plafond d'un enregistrement (1 à 600)
@@ -29,6 +30,7 @@ __all__ = [
     "INTERACTION_MODES",
     "EngineChoice",
     "VoiceSettings",
+    "default_tts",
     "load_voice_settings",
     "settings_from_mapping",
 ]
@@ -38,10 +40,19 @@ INTERACTION_MODES = ("text", "voice")
 #: assez court pour rendre la mémoire quand la conversation est finie.
 DEFAULT_IDLE_UNLOAD_S = 300.0
 DEFAULT_STT = "faster-whisper"
-DEFAULT_TTS = "pocket-tts"
+FALLBACK_TTS = "pocket-tts"
+QWEN_TTS = "qwen3-tts-clone"
 #: Plafond d'un enregistrement : deux minutes tiennent dans un message, et bornent le poids de l'audio.
 DEFAULT_MAX_RECORD_S = 120.0
 MAX_RECORD_CEILING_S = 600.0
+
+
+def default_tts() -> str:
+    """Le moteur de synthèse par défaut : Qwen3-TTS en clonage quand son extra est installé, Pocket TTS sinon."""
+    from grimoire.voice.engines import ENGINES, availability
+
+    spec = ENGINES.get(("tts", QWEN_TTS))
+    return QWEN_TTS if spec is not None and availability(spec).ok else FALLBACK_TTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +69,7 @@ class VoiceSettings:
 
     mode: str = "text"
     stt: EngineChoice = field(default_factory=lambda: EngineChoice(DEFAULT_STT))
-    tts: EngineChoice = field(default_factory=lambda: EngineChoice(DEFAULT_TTS))
+    tts: EngineChoice = field(default_factory=lambda: EngineChoice(default_tts()))
     idle_unload_s: float = DEFAULT_IDLE_UNLOAD_S
     language: str = "fr"
     allow_download: bool = False
@@ -134,7 +145,7 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         allow = False
 
     stt = _engine_choice(voice.get("stt"), "stt", DEFAULT_STT, problems)
-    tts = _engine_choice(voice.get("tts"), "tts", DEFAULT_TTS, problems)
+    tts = _engine_choice(voice.get("tts"), "tts", default_tts(), problems)
     _check_known("stt", stt, problems)
     _check_known("tts", tts, problems)
 

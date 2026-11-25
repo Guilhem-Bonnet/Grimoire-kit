@@ -41,7 +41,7 @@ def test_voice_mode_flags_a_model_missing_from_the_cache(monkeypatch: pytest.Mon
     monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
     monkeypatch.setattr("grimoire.voice.faster_whisper_engine.model_cached", lambda _o: False)
     monkeypatch.setattr("grimoire.voice.pocket_tts_engine.model_cached", lambda _o: True)
-    out = _run({"interaction": {"mode": "voice"}})
+    out = _run({"interaction": {"mode": "voice"}, "voice": {"tts": "pocket-tts"}})
     assert out["voice_stt"]["level"] == "warn" and out["voice_stt"]["available"] is False
     assert "absent du cache" in out["voice_stt"]["detail"]
     assert out["voice_tts"]["level"] == "ok"
@@ -103,3 +103,24 @@ def test_grimoire_doctor_reports_voice_entries(tmp_path: Path) -> None:
     names = {c["name"]: c for c in checks}
     assert {"voice_extra", "voice_stt", "voice_tts"} <= set(names)
     assert names["voice_tts"]["engine"] == "browser" and names["voice_tts"]["level"] == "ok"
+
+
+def test_doctor_names_the_retained_tts_engine_and_its_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
+    monkeypatch.setattr("grimoire.voice.engines.model_cache", lambda *_a: None)
+    out = _run({"interaction": {"mode": "voice"}})
+    assert out["voice_tts"]["engine"] == "qwen3-tts-clone"
+    assert "Go de mémoire" in out["voice_tts"]["detail"]
+
+
+def test_doctor_without_the_qwen_extra_retains_pocket_tts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda m: m != "qwen_tts")
+    monkeypatch.setattr("grimoire.voice.engines.model_cache", lambda *_a: None)
+    assert _run({"interaction": {"mode": "voice"}})["voice_tts"]["engine"] == "pocket-tts"
+
+
+def test_doctor_flags_the_qwen_model_missing_from_the_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
+    monkeypatch.setattr("grimoire.voice.qwen3_tts_engine.model_cached", lambda _o: False)
+    out = _run({"interaction": {"mode": "voice"}, "voice": {"tts": "qwen3-tts-clone"}})
+    assert out["voice_tts"]["available"] is False and "absent du cache" in out["voice_tts"]["detail"]

@@ -54,6 +54,8 @@ __all__ = [
 
 Kind = Literal["stt", "tts"]
 VOICE_EXTRA = "voice"
+#: Extra du moteur Qwen3-TTS : à part, car qwen-tts épingle transformers==4.57.3.
+QWEN_EXTRA = "voice-qwen"
 
 
 def install_hint(extra: str = VOICE_EXTRA) -> str:
@@ -197,6 +199,8 @@ class EngineSpec:
     #: ``"module:fonction"`` : ``f(options) -> bool | None`` dit si le modèle est dans le cache local
     #: (``None`` : on ne sait pas). Appelée par ``grimoire doctor``, jamais au chargement.
     cache_probe: str = ""
+    #: Mémoire vive attendue une fois le moteur chargé, en une phrase (``grimoire doctor`` l'affiche). Vide : inconnue.
+    memory_hint: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +234,16 @@ for _spec in (
         "grimoire.voice.pocket_tts_engine:PocketTextToSpeech",
         ("pocket_tts",),
         cache_probe="grimoire.voice.pocket_tts_engine:model_cached",
+    ),
+    EngineSpec(
+        "qwen3-tts-clone",
+        "tts",
+        "Qwen3-TTS 0.6B (voix clonée)",
+        "grimoire.voice.qwen3_tts_engine:Qwen3CloneTextToSpeech",
+        ("qwen_tts",),
+        extra=QWEN_EXTRA,
+        cache_probe="grimoire.voice.qwen3_tts_engine:model_cached",
+        memory_hint="environ 3 Go de mémoire vive une fois chargé (estimation : modèle 0.6B sur CPU)",
     ),
     EngineSpec("browser", "tts", "Voix du navigateur", f"{__name__}:BrowserTextToSpeech"),
 ):
