@@ -499,7 +499,7 @@ class NeedsConfig:
 # ── Root Config ───────────────────────────────────────────────────────────────
 
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "source", "governance",
+    "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "source", "cockpit", "governance",
 })
 
 

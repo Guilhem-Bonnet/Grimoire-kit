@@ -716,7 +716,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "bad json"})
                 return
             if not self._body_confirms_slug(body):
-                self._send_json(body_mismatch_status(path), {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"})
+                self._send_json(
+                    body_mismatch_status(path), {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"}
+                )
                 return
 
             # Même traduction que l'atelier (``forge_http.py::do_POST``) : sans
@@ -909,12 +911,19 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def _do_put(self) -> None:
         """Le corps de ``do_PUT``, appelé une fois la garde d'écriture passée."""
         path = urlparse(self.path).path
-        if not path.startswith("/api/blueprints/"):
+        from grimoire.tools import workspace_atelier
+
+        atelier = workspace_atelier.handles(path)
+        if not atelier and not path.startswith("/api/blueprints/"):
             self._send_json(404, {"ok": False, "error": "route inconnue"})
             return
         proot = self._enrolled_write_root()
         if proot is None:
             self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+            return
+        if atelier:  # Atelier en test : écriture d'un bloc, 409 si le fichier a changé depuis la lecture
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            self._send_json(*workspace_atelier.put_http(proot, path, raw, self._body_confirms_slug))
             return
         try:
             length = int(self.headers.get("Content-Length", 0))

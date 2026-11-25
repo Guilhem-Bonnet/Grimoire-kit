@@ -773,11 +773,15 @@ def cockpit_workspace(browser: Browser, served_cockpit: tuple[str, str]) -> Iter
         context.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def served_cockpit_upgrade(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[tuple[str, str, Path]]:
     """Un cockpit dédié, sur un projet jetable prêt à produire une proposition (#490).
+
+    Portée « module » : le test qui applique le flow (`test_workspace_cockpit_upgrade_flow`) laisse le projet à
+    jour, et l'écran de mise à jour (`..._update_screen_p44`) y trouverait « rien à écrire » s'il passait derrière
+    lui dans la même part de CI. Un projet par fichier de tests coupe cette dépendance d'ordre.
 
     Dédié plutôt que ``served_cockpit``/``real_project`` (partagés par toute
     la session) : le flow complet que ce lot branche sur le bouton (``apply``
