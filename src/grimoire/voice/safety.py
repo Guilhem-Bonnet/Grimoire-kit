@@ -96,7 +96,15 @@ KNOWN_EXTENSIONS = frozenset(
 #: interpréteurs que suivis de leur drapeau de code en ligne ; seuls, ils sont le programme.
 _WRAPPERS = frozenset({"sudo", "doas", "env", "nohup", "time", "xargs", "timeout", "nice", "stdbuf", "command", "exec"})
 _SHELLS = frozenset({"bash", "sh", "zsh", "dash", "fish"})
-_INLINE_CODE = {"python": "-c", "python3": "-c", "node": "-e", "perl": "-e", "ruby": "-e"}
+_INLINE_CODE = {
+    "python": ("-c",),
+    "python3": ("-c",),
+    "node": ("-e", "-p", "--eval", "--print"),
+    "perl": ("-e", "-E"),
+    "ruby": ("-e",),
+}
+#: Au plus ce nombre de mots de la commande sont lus pour reconnaître une enveloppe.
+_MAX_WORDS = 8
 _SHELL_FLAG = re.compile(r"-[a-z]*c[a-z]*")
 #: Les natures de question qu'une dictée ne tranche jamais.
 _VOICE_FORBIDDEN_KINDS = frozenset({"permission", "merge"})
@@ -197,25 +205,63 @@ def _file_label(call: dict[str, Any]) -> str:
     return ""
 
 
+def _chained(command: str) -> bool:
+    """Vrai si la commande (forme chaîne) enchaîne plusieurs commandes hors guillemets : ``|`` (donc ``||``),
+    ``;``, ``&&``, saut de ligne, ``$(`` ou apostrophe inverse (ces deux-là aussi entre guillemets doubles)."""
+    quote = ""
+    skip = False
+    for i, ch in enumerate(command):
+        if skip:  # le caractère protégé par une barre oblique inverse
+            skip = False
+            continue
+        if quote == "'":
+            quote = "" if ch == "'" else quote
+            continue
+        if ch == "\\":
+            skip = True
+            continue
+        if ch == "`" or (ch == "$" and command[i + 1 : i + 2] == "("):
+            return True
+        if quote == '"':
+            quote = "" if ch == '"' else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "|;\n" or (ch == "&" and command[i + 1 : i + 2] == "&"):
+            return True
+    return False
+
+
+def _inline_code(words: list[str]) -> bool:
+    """Le programme ``words[0]`` reçoit-il du code en ligne ? Le drapeau est cherché dans toute la suite d'options
+    qui suit (jusqu'au premier mot qui ne commence pas par ``-``) : ``bash --norc -c x`` en est un."""
+    first = words[0]
+    options: list[str] = []
+    for word in words[1:]:
+        if not word.startswith("-"):
+            break
+        options.append(word)
+    if first in _SHELLS:
+        return any(_SHELL_FLAG.fullmatch(o) for o in options)
+    return any(o in _INLINE_CODE.get(first, ()) for o in options)
+
+
 def _program(call: dict[str, Any]) -> str:
     """Ce qui se dit du programme lancé : « programme git », « un programme lancé par l'intermédiaire de sudo »,
-    « un programme » (nom à une autre forme qu'un exécutable en minuscules), ou rien sans commande."""
+    « une suite de commandes » (enchaînement shell : aucun nom), « un programme » (nom hors de
+    :data:`KNOWN_PROGRAMS`), ou rien sans commande."""
     raw = call.get("rawInput")
     value = raw.get("command") if isinstance(raw, dict) else None
     words: list[str] = []
     if isinstance(value, list):
-        words = [str(w) for w in value[:2]]
+        words = [str(w) for w in value[:_MAX_WORDS]]
     elif isinstance(value, str):
-        words = value.split(maxsplit=2)[:2]
+        if _chained(value):
+            return "une suite de commandes"
+        words = value.split(maxsplit=_MAX_WORDS)[:_MAX_WORDS]
     if not words:
         return ""
     first = words[0]
-    second = words[1] if len(words) > 1 else ""
-    if (
-        first in _WRAPPERS
-        or (first in _SHELLS and _SHELL_FLAG.fullmatch(second))
-        or (first in _INLINE_CODE and second == _INLINE_CODE[first])
-    ):
+    if first in _WRAPPERS or _inline_code(words):
         return f"un programme lancé par l'intermédiaire de {first}"
     return f"programme {first}" if first in KNOWN_PROGRAMS else "un programme"
 
