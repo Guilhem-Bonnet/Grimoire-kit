@@ -2729,7 +2729,7 @@ async function buildPalette() {
   // l'affectation ci-dessus vient de remplacer.
   if (paletteFiles) paletteItems = [...paletteItems, ...paletteFiles];
   // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
-  if ($('palette').open) renderPalette($('palette-input').value);
+  if ($('palette').open) renderPalette($('palette-input').value, { keepSelection: true });
 }
 
 /** Les entrées « Fichiers » d'une réponse de `api.files()`, bornées comme avant. */
@@ -2753,7 +2753,7 @@ function ensurePaletteFiles() {
       .then((tree) => {
         paletteFiles = filesPaletteItems(tree);
         paletteItems = [...paletteItems, ...paletteFiles];
-        if ($('palette').open) renderPalette($('palette-input').value);
+        if ($('palette').open) renderPalette($('palette-input').value, { keepSelection: true });
       })
       .catch(() => {
         // Route en erreur : l'ouverture suivante réessaiera, sans vider les
@@ -2943,9 +2943,17 @@ function paletteSectionOrder() {
 // commandes, projets, workflows, tâches, fichiers concaténés) : on la
 // regroupe désormais par section titrée, plafonnée par section pour qu'une
 // section bavarde (Commandes) n'évince pas les autres (Projets, Tâches…).
-function renderPalette(query) {
+//
+// `keepSelection` : la liste est redessinée parce que des entrées sont arrivées
+// (projets, tâches, fichiers), pas parce que la personne a tapé. La sélection
+// qu'elle vient de déplacer au clavier reste alors sur la même entrée, au lieu
+// de revenir en tête de liste sous ses doigts.
+const paletteKey = (item) => `${item.section}\u0000${item.label}`;
+
+function renderPalette(query, { keepSelection = false } = {}) {
   const words = fold(query).split(/\s+/).filter(Boolean);
   const list = $('palette-list');
+  const kept = keepSelection && list._matches ? list._matches[paletteIndex] : null;
   list.replaceChildren();
   list.scrollTop = 0;
 
@@ -2988,7 +2996,8 @@ function renderPalette(query) {
     list.append(empty);
   }
   list._matches = matches;
-  selectPaletteIndex(0, { scroll: false });
+  const keptAt = kept ? matches.findIndex((item) => paletteKey(item) === paletteKey(kept)) : -1;
+  selectPaletteIndex(Math.max(keptAt, 0), { scroll: keptAt > 0 });
 }
 
 function movePalette(delta) {

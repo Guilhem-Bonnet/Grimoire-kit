@@ -119,6 +119,28 @@ def _show_chat(page: Page) -> None:
     page.wait_for_function("() => document.documentElement.dataset.atelier === 'on'")
     page.locator("[data-dock-tab='orchestrateur']").click()
     page.wait_for_selector(".chat-input")
+    _wait_idle(page)
+
+
+def _wait_idle(page: Page) -> None:
+    """Le flux est connecté et aucun tour n'est en cours : la saisie part vraiment à l'agent.
+
+    Le champ apparaît avant le flux. Un message envoyé pendant qu'un tour du test précédent court
+    encore (la conversation est partagée par le module) est ignoré par le champ, qui se dit occupé ;
+    envoyé pendant la reprise de l'agent, il attendait un démarrage lent. On attend donc le « bonjour »
+    du flux (`hello`, qui remplace « Connexion… »), puis la fin de tout tour, côté page et côté serveur.
+    """
+    page.wait_for_function(
+        """async () => {
+            const status = document.querySelector('.chat-status');
+            const chat = document.querySelector('.chat');
+            if (!status || !chat || status.textContent.startsWith('Connexion') || chat.getAttribute('aria-busy') !== 'false') return false;
+            const state = await (await fetch('/api/workspace/chat/state')).json();
+            return state.busy === false;
+        }""",
+        polling=250,
+        timeout=30_000,
+    )
 
 
 def _open(browser: Browser, url: str, *, scheme: str = "dark") -> tuple[Page, object]:
