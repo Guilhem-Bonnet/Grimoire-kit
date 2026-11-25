@@ -10,22 +10,6 @@ import { actionStatus, copyText, icon, setActionStatus } from './shell.js';
 import { agoText } from './live.js';
 
 let injected = false;
-function injectStyles() {
-  if (injected) return;
-  injected = true;
-  const style = document.createElement('style');
-  style.textContent = `
-    .wa-activity { display: flex; flex-direction: column; gap: 6px; }
-    .wa-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-    .wa-feed li { display: flex; gap: 8px; align-items: baseline; font-size: 12px; min-width: 0; }
-    .wa-feed .wa-when { color: var(--ink3); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-    .wa-feed .wa-what { min-width: 0; overflow-wrap: anywhere; }
-    .wa-feed li.bad .wa-what { color: var(--bad); }
-    .wa-logs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .wa-logs code { font-size: 12px; overflow-wrap: anywhere; }
-  `;
-  document.head.append(style);
-}
 
 function when(at) {
   const span = document.createElement('span');
@@ -43,7 +27,6 @@ function when(at) {
  * au fil de tâche).
  */
 export function activityBlock(feed, { heading = 'Activité' } = {}) {
-  injectStyles();
   const block = document.createElement('div');
   block.className = 'wa-activity';
   block.dataset.role = 'activity-block';
@@ -117,7 +100,6 @@ export function activityBlock(feed, { heading = 'Activité' } = {}) {
  * l'échec nommé. `load` rend la promesse du fil (`() => ctx.api.taskFeed(id)`).
  */
 export function activityBlockAsync(load, { heading = 'Activité', signal } = {}) {
-  injectStyles();
   const holder = document.createElement('div');
   holder.dataset.role = 'activity-holder';
   const wait = document.createElement('p');

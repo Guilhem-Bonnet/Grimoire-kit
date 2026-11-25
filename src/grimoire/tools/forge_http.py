@@ -22,12 +22,12 @@ from urllib.parse import parse_qs, urlparse
 
 from grimoire.tools.ext_manager import ExtensionError
 from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
+from grimoire.tools.page_security import html_page, serve_session_script
 from grimoire.tools.project_registry import DEFAULT_SCAN_DEPTH, looks_grimoire, register_project
 from grimoire.tools.request_guard import (
     check_host,
     drain_body,
     has_body,
-    inject_session_token,
     new_session_token,
 )
 from grimoire.tools.workspace_legacy import legacy_redirect_target
@@ -352,6 +352,8 @@ class _ForgeHandler(BaseHTTPRequestHandler):
         if self.api.ui_dir is None:
             self._json({"grimoire": "serve", "hint": "API disponible sous /api/"}, 200)
             return
+        if serve_session_script(self, path):
+            return
         rel = path.lstrip("/")
         if rel.startswith("data/"):
             self._data_file(rel[len("data/"):])
@@ -380,13 +382,16 @@ class _ForgeHandler(BaseHTTPRequestHandler):
             ".png": "image/png", ".ico": "image/x-icon",
         }
         body = target.read_bytes()
+        security: list[tuple[str, str]] = []
         if target.suffix == ".html":
-            body = inject_session_token(body)
+            body, security = html_page(body)
         self.send_response(200)
         self.send_header(
             "Content-Type",
             content_types.get(target.suffix, "application/octet-stream"),
         )
+        for name, value in security:
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

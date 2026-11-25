@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 __all__ = [
     "LOOPBACK_NAMES",
     "SESSION_HEADER",
+    "SESSION_SCRIPT",
+    "SESSION_SCRIPT_PATH",
     "check_host",
     "check_mutation",
     "has_body",
@@ -63,25 +65,35 @@ def _token_ok(headers: _Headers) -> bool:
     return hmac.compare_digest(given.encode("utf-8"), _session_token.encode("utf-8"))
 
 
+#: Chemin du script de relais ``fetch`` : même contenu pour tout le monde, le jeton n'y figure pas.
+SESSION_SCRIPT_PATH = "/__grimoire/session.js"
+
+#: Relais ``fetch`` : lit le jeton dans la ``<meta>`` de la page (lisible d'une page de la même origine seulement)
+#: et le pose sur toute écriture vers la même origine. Servi comme fichier (CSP ``script-src 'self'``, #1366) :
+#: sans jeton dans son corps, un tiers qui le chargerait en ``<script src>`` n'y lirait rien.
+SESSION_SCRIPT = (
+    "(function(){var m=document.querySelector('meta[name=\"grimoire-session\"]');"
+    "var t=m&&m.getAttribute('content');if(!t)return;var f=window.fetch;"
+    "window.__grimoireSession=t;"
+    "window.fetch=function(u,o){o=o||{};var m=(o.method||(u&&u.method)||'GET')"
+    ".toUpperCase();if(m!=='GET'&&m!=='HEAD'&&m!=='OPTIONS'){var h=new Headers("
+    "o.headers||(u&&u.headers)||{});if(!h.has('" + SESSION_HEADER + "'))h.set('" + SESSION_HEADER
+    + "',t);o.headers=h;}return f.call(this,u,o);};})();\n"
+).encode("utf-8")
+
+
 def inject_session_token(html: bytes) -> bytes:
-    """Insère dans une page HTML servie le jeton et le relais ``fetch``.
+    """Insère dans une page HTML servie le jeton (``<meta>``) et le script de relais ``fetch``.
 
     Le script patche ``window.fetch`` : toute écriture vers la même origine porte
     l'en-tête, sans que chaque page ait à le savoir. Un jeton dans une page
     n'est lisible que par une page de la même origine (la politique du navigateur
-    interdit à un tiers de lire la réponse).
+    interdit à un tiers de lire la réponse). Le script est externe et bloquant,
+    placé avant tout autre : aucun script en ligne n'est injecté.
     """
     script = (
         '<meta name="grimoire-session" content="' + _session_token + '">'
-        "<script>(function(){var t=" + repr(_session_token) + ";var f=window.fetch;"
-        "window.__grimoireSession=t;"
-        "window.fetch=function(u,o){o=o||{};var m=(o.method||(u&&u.method)||'GET')"
-        ".toUpperCase();if(m!=='GET'&&m!=='HEAD'&&m!=='OPTIONS'){var h=new Headers("
-        "o.headers||(u&&u.headers)||{});if(!h.has('"
-        + SESSION_HEADER
-        + "'))h.set('"
-        + SESSION_HEADER
-        + "',t);o.headers=h;}return f.call(this,u,o);};})();</script>"
+        '<script src="' + SESSION_SCRIPT_PATH + '"></script>'
     ).encode("utf-8")
     lower = html.lower()
     at = lower.find(b"<head>")

@@ -33,34 +33,7 @@ export const DIFF = {
 };
 const FRESH_TONE = { a_jour: 'ok', perime: 'warn', source_disparue: 'bad', non_verifie: '', hypothese: 'warn' };
 
-const STYLE_ID = 'rc-styles';
-const STYLES = `
-.rc-meta { margin: 0; color: var(--ink2); font-size: var(--t-s); overflow-wrap: anywhere; }
-.rc-query { color: var(--ink); font-family: var(--mono); }
-.rc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.rc-item { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 2px 8px; padding: 7px 0; border-top: 1px solid var(--line); }
-.rc-item:first-child { border-top: 0; }
-.rc-item[data-state="superseded"] { background: var(--bad-soft); border-radius: var(--r); }
-.rc-rank { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
-.rc-title { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
-.rc-title.rc-muted { color: var(--ink2); font-weight: 400; font-style: italic; }
-.rc-facts { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ink2); font-size: var(--t-min); }
-.rc-replay { display: flex; flex-direction: column; gap: 8px; }
-.rc-counts { display: flex; flex-wrap: wrap; gap: 6px; }
-.rc-diff { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.rc-diff li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
-.rc-diff li:first-child { border-top: 0; }
-.rc-move { color: var(--ink2); font-size: var(--t-min); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.rc-why { margin: 0; color: var(--ink2); font-size: var(--t-s); }
-`;
 
-export function injectRecallStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = STYLES;
-  document.head.append(style);
-}
 
 export function el(tag, className, text, attrs) {
   const node = document.createElement(tag);

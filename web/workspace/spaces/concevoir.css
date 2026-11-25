@@ -1,0 +1,64 @@
+.cv-projet { padding: var(--sp-4); }
+.cv-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3); }
+.cv-card {
+  text-align: left; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--e1); padding: var(--sp-3); cursor: pointer; display: flex;
+  flex-direction: column; gap: 6px; color: var(--ink);
+}
+.cv-card:hover { background: var(--e2); }
+.cv-card[aria-selected="true"] { outline: 2px solid var(--acc); outline-offset: -2px; }
+.cv-card h3 { margin: 0; font-size: var(--t-s); font-weight: 500; }
+.cv-board { display: flex; gap: var(--sp-4); align-items: flex-start; }
+.cv-board-col { flex: 1; min-width: 220px; }
+.cv-board-col h3 { font-size: var(--t-min); color: var(--ink2); font-weight: 500; margin: 0 0 var(--sp-2); }
+.cv-board-col .cv-cards { grid-template-columns: 1fr; }
+.cv-graph { position: relative; min-height: 100%; padding: var(--sp-4); }
+.cv-toolbar { position: sticky; top: 0; z-index: 6; display: flex; align-items: center;
+  gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bar);
+  border: 1px solid var(--line); border-radius: var(--r); margin-bottom: var(--sp-3); }
+.cv-stage { position: relative; }
+.cv-graph > .action-status:not(:empty) { margin-bottom: var(--sp-3); }
+.cv-svg { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+.cv-node {
+  position: absolute; width: 190px; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--e2); padding: 8px 10px; cursor: pointer; box-shadow: var(--shadow);
+}
+.cv-node:hover { background: var(--e3); }
+.cv-node[aria-selected="true"] { outline: 2px solid var(--acc); outline-offset: 1px; }
+/* --ink2, pas --ink3 (revue 2026-09) : ce texte se pose aussi sur --e3 au
+   survol (.cv-node:hover juste au-dessus), la surface la plus claire des
+   quatre — seul --ink2 y tient 4,5:1 (voir tokens.css). */
+.cv-node .kind { font-size: var(--t-min); text-transform: uppercase; letter-spacing: .04em; color: var(--ink2); }
+.cv-node .label { font-size: var(--t-s); color: var(--ink); margin-top: 2px; }
+.cv-node .ref { font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); margin-top: 2px; }
+.cv-node.dim { opacity: .45; }
+/* Dans la scène, sous la barre et le retour d'action : posée sur la toile,
+   elle masquait Valider, Simuler et Compiler dès qu'on l'ouvrait. */
+.cv-palette {
+  position: absolute; top: 0; right: 0; z-index: 7; width: 220px;
+  background: var(--e1); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow-tip); max-height: 70vh; display: flex; flex-direction: column;
+}
+.cv-palette[data-open="0"] { display: none; }
+.cv-palette-head { display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); }
+.cv-palette-body { overflow: auto; padding: var(--sp-2); display: flex; flex-direction: column; gap: 4px; }
+.cv-prim { text-align: left; border: 1px solid var(--line); border-radius: var(--r); background: var(--e2);
+  padding: 7px 9px; cursor: pointer; }
+.cv-prim:hover { background: var(--e3); }
+.cv-prim .n { font-size: var(--t-s); color: var(--ink); }
+/* --ink2, même raison que .cv-node .kind ci-dessus : posé sur --e3 au survol. */
+.cv-prim .d { font-size: var(--t-min); color: var(--ink2); margin-top: 2px; }
+.cv-noeud { padding: var(--sp-4); display: flex; flex-direction: column; align-items: center; }
+.cv-noeud .cv-graph { width: 100%; min-height: 260px; }
+.cv-tabs { display: flex; border-bottom: 1px solid var(--line); margin-bottom: var(--sp-3); }
+.cv-tab { padding: 0 var(--sp-2); height: 32px; background: none; border: 0; color: var(--ink2);
+  border-bottom: 2px solid transparent; cursor: pointer; font-size: var(--t-s); }
+.cv-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--acc); font-weight: 500; }
+.cv-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px var(--sp-2); font-size: var(--t-s); }
+.cv-kv dt { color: var(--ink3); }
+.cv-kv dd { margin: 0; color: var(--ink); word-break: break-word; }
+.cv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cv-msg { color: var(--ink2); font-size: var(--t-s); padding: var(--sp-2) 0; }
+.cv-json { font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap;
+  background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2); }

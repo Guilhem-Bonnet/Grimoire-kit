@@ -33,110 +33,7 @@
 import { badge, icon, listNav, monogram, undoToast } from '../shell.js';
 import { formatScore } from '../score.js';
 import { parseCodeProjection } from './code-projection.js';
-import { GESTURE_STYLES, INVERSE_GESTURE, historyList, openGesture, undoGesture } from './memoire-gestes.js';
-
-const STYLE_ID = 'kn-styles';
-
-const STYLES = `
-.kn-wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100%; }
-.kn-filters { background: var(--panel); border-right: 1px solid var(--line); padding: 20px 16px;
-  display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-.kn-filters fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
-.kn-filters legend { padding: 0 0 6px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink3); }
-.kn-chk { display: flex; align-items: center; gap: 8px; padding: 4px 0; min-width: 0; cursor: pointer; }
-.kn-chk input { margin: 0; flex: none; accent-color: var(--acc); }
-.kn-chk { align-items: flex-start; }
-.kn-chk input { margin-top: 3px; }
-.kn-chk .kn-lbl { min-width: 0; overflow-wrap: anywhere; }
-.kn-chk .kn-n { margin-left: auto; color: var(--ink3); font-variant-numeric: tabular-nums; }
-.kn-why { margin: 0 0 4px 24px; color: var(--ink3); font-size: var(--t-min); overflow-wrap: anywhere; }
-.kn-filters select { width: 100%; height: var(--h-ctl); padding: 0 9px; border: 1px solid var(--line); border-radius: var(--r); background-color: var(--card); color: var(--ink); }
-.kn-scope-link { align-self: flex-start; margin-top: 4px; }
-.kn-main { min-width: 0; padding: 28px 32px; display: flex; flex-direction: column; gap: 20px; }
-.kn-searchbar { display: flex; gap: 10px; align-items: center; }
-.kn-searchbar label { flex-grow: 1; display: flex; min-width: 0; }
-.kn-searchbar input { flex-grow: 1; height: 36px; font-size: 14px; min-width: 0; padding: 0 12px; }
-.kn-summary { margin: 0; color: var(--ink2); }
-.kn-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); overflow: hidden; }
-.kn-res { display: grid; grid-template-columns: fit-content(130px) minmax(0, 1fr) 92px; gap: 14px; padding: 14px 16px;
-  border-top: 1px solid var(--line); align-items: start; cursor: pointer; }
-.kn-res:first-child { border-top: 0; }
-.kn-res:hover { background: var(--hover); }
-.kn-res[aria-current="true"] { background: var(--acc-soft); }
-.kn-res:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
-/* La colonne du type s'ajuste au libellé (« Apprentissage » entier, jamais ellipsé) ;
- * fit-content(130px) borne les types inconnus trop bavards. */
-.kn-res > .kn-badges { justify-self: start; max-width: 130px; align-self: start; }
-.kn-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.kn-title { font-weight: 600; overflow-wrap: anywhere; }
-.kn-excerpt { color: var(--ink2); overflow-wrap: anywhere; }
-.kn-src { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; color: var(--ink3); font-size: 12px; min-width: 0; }
-.kn-src .kn-sep { color: var(--ink3); }
-.kn-src .kn-path { overflow-wrap: anywhere; }
-.kn-proj { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px 0 3px; border-radius: var(--r-pill);
-  background: var(--hover); color: var(--ink2); font-size: 12px; white-space: nowrap; }
-.kn-proj .mgram { width: 15px; height: 15px; font-size: 8px; }
-.kn-state-old { color: var(--warn); }
-.kn-date { color: var(--ink3); font-size: 12px; text-align: right; white-space: nowrap; }
-.kn-notes { display: flex; flex-direction: column; gap: 6px; }
-.kn-note { margin: 0; color: var(--ink2); font-size: var(--t-s); }
-.kn-more { align-self: flex-start; }
-.kn-more[hidden] { display: none; }
-.kn-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.kn-head { display: flex; flex-direction: column; gap: 6px; }
-.kn-badges { display: flex; gap: 8px; flex-wrap: wrap; }
-.kn-detail h2 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
-.kn-lead { margin: 0; color: var(--ink2); font-size: 14px; line-height: 20px; overflow-wrap: anywhere; white-space: pre-line; }
-.kn-mono { font-family: var(--mono); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
-.kn-sig { color: var(--ink2); }
-.kn-codemeta { margin: 0; color: var(--ink2); }
-.kn-code { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.kn-code-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.kn-code pre:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-.kn-code pre { margin: 0; padding: 10px 12px; max-height: 360px; overflow: auto; max-width: 100%; box-sizing: border-box;
-  background: var(--hover); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r);
-  font-family: var(--mono); font-size: 12px; line-height: 18px; white-space: pre; tab-size: 4; }
-.kn-proj-more { align-self: flex-start; }
-.kn-proj-more[hidden] { display: none; }
-.kn-kv { margin: 0; display: flex; flex-direction: column; }
-.kn-kv > div { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
-.kn-kv dt { margin: 0; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink3); }
-.kn-kv dd { margin: 0; overflow-wrap: anywhere; }
-.kn-kv .kn-linkish { padding: 0; border: 0; background: none; color: var(--acc); cursor: pointer; text-align: left; font: inherit; }
-.kn-kv .kn-linkish:hover { text-decoration: underline; }
-.kn-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.kn-danger { color: var(--bad); }
-.kn-detail > .kn-actions { gap: 6px; }
-.kn-actions .btn.kn-ghost { background: transparent; border-color: transparent; padding: 0 6px; }
-.kn-actions .btn.kn-ghost:hover { background: var(--hover); }
-.kn-confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--r); background: var(--bad-soft); }
-.kn-confirm p { margin: 0; }
-.kn-status { margin: 0; font-size: var(--t-s); }
-.kn-status[data-tone="ok"] { color: var(--ok); }
-.kn-status[data-tone="bad"] { color: var(--bad); }
-.kn-equiv { display: flex; flex-direction: column; gap: 6px; }
-.kn-eyebrow { margin: 0; font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
-.kn-equiv .formula { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.kn-fix { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--r); background: var(--acc-soft); }
-.kn-fix p { margin: 0; }
-.kn-fix .formula { overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; }
-@container canvas (max-width: 720px) {
-  .kn-wrap { grid-template-columns: minmax(0, 1fr); }
-  .kn-filters { border-right: 0; border-bottom: 1px solid var(--line); }
-  .kn-main { padding: var(--sp-4); }
-  .kn-searchbar { flex-wrap: wrap; }
-  .kn-res { grid-template-columns: minmax(0, 1fr) auto; }
-  .kn-res > .kn-badges { grid-column: 1 / -1; }
-}
-`;
-
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = STYLES + GESTURE_STYLES;
-  document.head.append(style);
-}
+import { INVERSE_GESTURE, historyList, openGesture, undoGesture } from './memoire-gestes.js';
 
 function el(tag, className, text, attrs) {
   const node = document.createElement(tag);
@@ -261,7 +158,6 @@ function stateText(entry) {
 // ── L'espace ────────────────────────────────────────────────────────────────
 
 export async function mount(root, ctx) {
-  injectStyles();
   ctx.docbar.setBreadcrumb([]);
   ctx.docbar.setViews([], null);
 
