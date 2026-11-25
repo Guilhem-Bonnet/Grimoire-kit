@@ -106,6 +106,8 @@ REVIEW_DECISION = "review_decision"
 #: #1342 (M3) : des tâches passées ``ready`` sans exigence validée par la MOA (mode ``warn``), ou des incidents exemptés
 #: dont l'exigence reste à poser au post-mortem — un item par projet qui déclare une MOA.
 REQUIREMENT_UNVALIDATED = "requirement_unvalidated"
+#: #1342 (M4) : des exigences validées dont toutes les tâches sont livrées, qui attendent la recette de la MOA.
+REQUIREMENT_RECETTE = "requirement_recette"
 REVIEW_DECISIONS_LABEL = "Décisions à revoir"
 #: Le bloc montre ces décisions récentes et non reprises, jamais un historique sans fin (le journal « Décidé par le
 #: pilote » les garde toutes).
@@ -119,7 +121,7 @@ MAX_ARBITRATIONS = 20
 #: Les sections, de la plus urgente à la moins urgente, et les types de chacune
 #: dans leur ordre. Un type n'apparaît que dans une section.
 SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("decide", "À décider", (BREAKER, CHECKPOINT, QUESTION, PROPOSAL)),
+    ("decide", "À décider", (BREAKER, CHECKPOINT, QUESTION, REQUIREMENT_RECETTE, PROPOSAL)),
     ("review", "PR à revoir", (PR_REVIEW,)),
     ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
@@ -442,15 +444,21 @@ def _orphan_reason(task: Any, card: dict[str, Any], now: datetime) -> str:
 
 
 def _requirement_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> None:
-    """L'item « exigence à faire valider » (#1342, M3) ; une lecture qui échoue n'efface pas le reste de la vue.
+    """Les items « exigence à faire valider » (#1342, M3) et « exigence à recetter » (M4) ; une lecture qui échoue
+    n'efface pas le reste de la vue.
 
-    Le mode se lit d'abord : un projet sans MOA déclarée ne paie pas la lecture de tous les événements du ledger.
+    Le mode se lit d'abord : un projet sans MOA déclarée ne paie ni la lecture de tous les événements du ledger, ni
+    celle du journal d'autorité.
     """
     from grimoire.missions.requirement_gate import gate_mode, pending_review
 
     try:
         if not gate_mode(service.home_root).declared:
             return
+    except Exception:
+        return
+    _recette_item(read, service, tasks)
+    try:
         pending = pending_review(service.home_root, tasks, service.ledger.list_events())
     except Exception:
         return
@@ -468,6 +476,24 @@ def _requirement_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> Non
         read, REQUIREMENT_UNVALIDATED, "requirements", " ; ".join(parts),
         "`grimoire cadrage interview`, puis la MOA valide depuis son terminal : `grimoire cadrage approve <exigence>`",
         task_ids=unvalidated, questions=questions, postmortem=postmortem,
+    )
+
+
+def _recette_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> None:
+    """Les exigences livrées en attente de la recette de la MOA (#1342, M4) : un item par projet."""
+    from grimoire.missions.moa_acceptance import pending_acceptance
+
+    try:
+        keys = pending_acceptance(service.home_root, tasks)
+    except Exception:
+        return
+    if not keys:
+        return
+    _item(
+        read, REQUIREMENT_RECETTE, "recette",
+        f"{len(keys)} exigence(s) livrée(s) en attente de recette : {', '.join(keys)}",
+        f"la MOA recette depuis son terminal : `grimoire cadrage recette {keys[0]}`",
+        requirements=keys,
     )
 
 
