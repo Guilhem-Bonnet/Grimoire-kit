@@ -8,7 +8,8 @@ Lecture et gestes de relecture seulement : l'activation reste dans :class:`~grim
 - :func:`journal` — les :data:`~grimoire.missions.autopilot.DECIDED_EVENT` du ledger, du plus récent au plus ancien,
   avec ce que « Revenir » ferait.
 - :func:`revert` — « Revenir » quand le geste l'est : une tâche abandonnée par le pilote est réouverte, une tâche rendue
-  prête (réponse pas encore reprise par un worker) est bloquée pour que l'humain tranche ; sinon refus, rien d'écrit.
+  prête (réponse pas encore reprise par un worker) est bloquée pour que l'humain tranche ; une décision dont la réponse
+  n'a jamais été inscrite est seulement close (la question reste à l'humain) ; sinon refus, rien d'écrit.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from grimoire.missions.autopilot import (
 )
 from grimoire.missions.mandate import AuthorityJournal, JournalError
 from grimoire.missions.schemas import TaskState
+from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
 
 if TYPE_CHECKING:
     from grimoire.missions.decisions import PendingDecision
@@ -147,11 +149,32 @@ def partition(service: TaskService) -> tuple[bool, list[Held]]:
 # ── Journal ──────────────────────────────────────────────────────────────────
 
 
-def _how_to_revert(service: TaskService, task_id: str) -> str:
-    """Ce que « Revenir » ferait maintenant (``""`` : le geste n'est plus réversible)."""
+def _unanswered(service: TaskService, task_id: str, question_id: str) -> bool:
+    """La décision est inscrite mais sa réponse ne l'a jamais été (arrêt entre les deux) : la question attend encore."""
+    after_decision = False
+    for event in service.ledger.events_for(task_id):
+        if event.event_type == DECIDED_EVENT and event.payload.get("question_id") == question_id:
+            after_decision = True
+        elif (
+            after_decision
+            and event.event_type == HUMAN_ANSWERED_EVENT
+            and event.payload.get("question_id") == question_id
+        ):
+            return False
+    return after_decision
+
+
+def _how_to_revert(service: TaskService, task_id: str, question_id: str = "") -> str:
+    """Ce que « Revenir » ferait maintenant (``""`` : le geste n'est plus réversible).
+
+    ``unanswered`` : la décision n'a jamais été suivie de sa réponse et la tâche attend toujours cette question ;
+    « Revenir » ne fait alors que clore l'entrée, la question reste à l'humain.
+    """
     task = service.ledger.get_task(task_id)
     if task is None:
         return ""
+    if question_id and task.status is TaskState.WAITING and _unanswered(service, task_id, question_id):
+        return "unanswered"
     if task.status is TaskState.FAILED:
         return "reopen"
     if task.status is TaskState.READY:
@@ -174,7 +197,11 @@ def journal(service: TaskService, limit: int = 200) -> list[dict[str, Any]]:
         p = event.payload
         key = (p.get("task_id"), p.get("question_id"))
         task = service.ledger.get_task(str(p.get("task_id") or ""))
-        undo = "" if key in reverted else _how_to_revert(service, str(p.get("task_id") or ""))
+        undo = (
+            ""
+            if key in reverted
+            else _how_to_revert(service, str(p.get("task_id") or ""), str(p.get("question_id") or ""))
+        )
         out.append(
             {
                 "id": event.id,
@@ -217,9 +244,11 @@ def revert(service: TaskService, task_id: str, question_id: str, actor: str) -> 
         for e in service.ledger.events_for(task_id)
     ):
         raise GrimoireMissionError(f"{task_id} : la décision du pilote pour {question_id} est déjà reprise")
-    how = _how_to_revert(service, task_id)
+    how = _how_to_revert(service, task_id, question_id)
     option = str(decided[-1].payload.get("option") or "")
-    if how == "reopen":
+    if how == "unanswered":
+        pass  # rien n'a été appliqué : la question reste posée, l'entrée est seulement close ci-dessous
+    elif how == "reopen":
         service.transition(task_id, TaskState.READY, actor, f"décision du pilote reprise par l'humain : {option}")
     elif how == "hold":
         service.transition(

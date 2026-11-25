@@ -334,7 +334,10 @@ def _states(service: TaskService, claude_bin: str = "claude") -> dict[str, str] 
     held = _TICK_STATES.get()
     if held is not None:
         return held[0]
-    return session_states(_read_agents(default_exec, service.home_root, claude_bin))
+    try:
+        return session_states(_read_agents(default_exec, service.home_root, claude_bin))
+    except Exception:  # une lecture qui échoue n'est pas une preuve d'arrêt : ``None`` (le worker reste « au travail »)
+        return None
 
 
 def _defaults_taken(events: list[LedgerEvent]) -> int:

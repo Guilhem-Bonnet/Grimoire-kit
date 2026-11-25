@@ -897,3 +897,84 @@ def test_la_jurisprudence_n_ajoute_rien_au_mandat() -> None:
     """Ni nouvelle provenance, ni nouveau geste : un précédent appliqué est un geste ``answer`` ou ``resume`` existant."""
     assert md.PROVENANCE_KINDS == ("rule", "verdict", "receipt")
     assert not [g for g in md.GESTURES if "preced" in g]
+
+
+# ── « Revenir » sur une décision inscrite dont la réponse n'a jamais été appliquée (#1255, point 4) ──
+
+
+def decided_without_answer(service: TaskService, project: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """Un arrêt entre l'inscription de la décision et celle de la réponse : ``autopilot.decided`` sans réponse."""
+    ruled(service)
+    tid, qid = again(service)
+    real = service.ledger.append_event
+
+    def stop_before_answer(event_type: str, *args: Any, **kwargs: Any) -> Any:
+        if event_type == HUMAN_ANSWERED_EVENT:
+            raise RuntimeError("arrêt avant la réponse")
+        return real(event_type, *args, **kwargs)
+
+    monkeypatch.setattr(service.ledger, "append_event", stop_before_answer)
+    apply(service, project)  # le tick avale l'arrêt : la décision est inscrite, la réponse jamais
+    monkeypatch.setattr(service.ledger, "append_event", real)
+    assert events(service, tid, DECIDED_EVENT)
+    assert not [e for e in events(service, tid, HUMAN_ANSWERED_EVENT) if e.payload.get("origin") == ORIGIN_ORCHESTRATOR]
+    return tid, qid
+
+
+def test_revenir_sur_une_decision_sans_reponse_clot_l_entree_et_laisse_la_question(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = pilot(project, ON)
+    tid, qid = decided_without_answer(service, project, monkeypatch)
+    assert service.require(tid).status is TaskState.WAITING
+    (entry,) = journal(service)
+    assert entry["revert"] == "unanswered" and not entry["reverted_at"]
+    before = len(service.ledger.list_events(tid))
+    assert revert(service, tid, qid, "guilhem")["how"] == "unanswered"
+    task = service.require(tid)
+    assert task.status is TaskState.WAITING and task.waiting is not None and task.waiting.question is not None
+    assert not [e for e in service.ledger.events_for(tid) if e.event_type == HUMAN_ANSWERED_EVENT and e.actor_id != "guilhem"]
+    assert len(service.ledger.list_events(tid)) == before + 1
+    (closed,) = journal(service)
+    assert closed["reverted_at"] and closed["revert"] == ""
+    with pytest.raises(GrimoireMissionError, match="déjà reprise"):
+        revert(service, tid, qid, "guilhem")
+
+
+def test_une_decision_sans_reponse_reprise_sort_de_decisions_a_revoir(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = pilot(project, ON)
+    tid, qid = decided_without_answer(service, project, monkeypatch)
+    read = wa._ProjectRead.__new__(wa._ProjectRead)
+    read.row = {"slug": "p", "name": "P"}
+    read.tasks = {}
+    now = datetime.now(UTC)
+    pilot_events = [e for e in service.ledger.list_events() if e.event_type == DECIDED_EVENT]
+    assert len(wa._review_decisions(read, pilot_events, now)) == 1
+    revert(service, tid, qid, "guilhem")
+    from grimoire.missions.autopilot_view import REVERTED_EVENT
+
+    pilot_events = [e for e in service.ledger.list_events() if e.event_type in (DECIDED_EVENT, REVERTED_EVENT)]
+    assert wa._review_decisions(read, pilot_events, now) == []
+
+
+# ── Lecture de la liste des sessions : une erreur inattendue est un refus journalisé (#1255, point 5) ──
+
+
+@pytest.mark.parametrize("failure", [OSError("claude introuvable"), RuntimeError("inattendu"), KeyError("id")])
+def test_une_erreur_de_lecture_des_sessions_est_un_refus_journalise(
+    project: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    service = pilot(project, ON)
+    ruled(service)
+    tid, qid = again(service)
+
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(osess, "_read_agents", broken)
+    with pytest.raises(GrimoireMissionError, match="Réponse refusée"):
+        answer(service, tid, qid, "reprendre", confidence="low")
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+    assert events(service, tid, osess.ANSWER_REFUSED_EVENT)
