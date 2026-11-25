@@ -14,7 +14,6 @@ Elle borne le nombre de questions par angle et fixe les angles obligatoires. L'�
 from __future__ import annotations
 
 import contextlib
-import itertools
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +36,8 @@ __all__ = [
 STATE_FILE = "entretien.json"
 DEPTHS: tuple[str, ...] = ("express", "standard", "approfondi")
 STATES: tuple[str, ...] = ("ouvert", "couvert", "ecarte")
+#: Un état d'entretien tient en quelques Kio ; au-delà, il est refusé (il est relu à chaque lecture du cockpit).
+MAX_STATE_BYTES = 1_048_576
 UNKNOWN_PREFIX = "À valider (je ne sais pas) : "
 
 
@@ -130,8 +131,10 @@ def _load(root: Path, chantier: str | None) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
+        if path.stat().st_size > MAX_STATE_BYTES:
+            raise ValueError(f"{STATE_FILE} dépasse {MAX_STATE_BYTES // 1024} Kio : refusé")
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         raise ValueError(f"{STATE_FILE} illisible ({exc.__class__.__name__}) : corrigez-le ou supprimez-le") from exc
     if not isinstance(data, dict) or data.get("depth") not in DEPTHS:
         raise ValueError(f"{STATE_FILE} invalide : profondeur absente ou inconnue ({', '.join(DEPTHS)})")
@@ -362,11 +365,17 @@ def interview_states(root: Path) -> list[dict[str, Any]]:
     (``principal`` pour le dossier historique) et la vue de ``interview_plan`` (angles, ouverts, complet).
     """
     base = cadrage_dir(root)
-    if not base.is_dir():
+    if base.is_symlink() or not base.is_dir():
+        return [{"chantier": "principal", "error": "dossier de cadrage en lien symbolique : refusé"}] if base.is_symlink() else []
+    try:
+        if not base.resolve().is_relative_to(root.resolve()):
+            return [{"chantier": "principal", "error": "dossier de cadrage hors du projet : refusé"}]
+    except OSError:
         return []
     names: list[str | None] = [None]
     with contextlib.suppress(OSError):
-        names += sorted(d.name for d in itertools.islice(base.iterdir(), MAX_STATE_DIRS) if d.is_dir() and not d.is_symlink())
+        found = sorted(d.name for d in base.iterdir() if d.is_dir() and not d.is_symlink())
+        names += found[:MAX_STATE_DIRS]
     out: list[dict[str, Any]] = []
     for name in names:
         label = name or "principal"

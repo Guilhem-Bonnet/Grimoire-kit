@@ -3567,6 +3567,21 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   opacity: 0.7;
 }
 
+.chat-voice-text.is-folded:not(.is-open) {
+  max-height: 6em;
+  overflow: hidden;
+}
+
+.chat-voice-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-voice-fold[hidden],
+.chat-voice-older[hidden] {
+  display: none;
+}
+
 .chat-voice-badge {
   grid-column: 1 / -1;
   color: var(--termink);

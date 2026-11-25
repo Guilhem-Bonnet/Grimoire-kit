@@ -319,12 +319,11 @@ export function createChat({ readOnly = () => false } = {}) {
     if (entry) setTarget(entry); else input.focus({ preventScroll: true });
   }
 
-  /** Un clic sur une option d'une question vocale : la réponse part comme celle d'un clic dans le fil. */
-  async function answerVoiceQuestion(message, option) {
-    if (!message.ref || readOnly()) throw new Error('cette question ne se tranche pas par un clic');
-    await api.chatSend(option, { task_id: message.ref.task_id, question_id: message.ref.question_id }, { dictation: false });
-    const entry = questions.get(`${message.ref.task_id}/${message.ref.question_id}`);
-    if (entry) { entry.state.textContent = 'Réponse transmise : tranchée par vous.'; if (target === entry) setTarget(null); }
+  /** Un clic sur une option d'une question vocale ne répond pas : il cible la question et préremplit la saisie. L'envoi reste un geste explicite. */
+  function answerVoiceQuestion(message, option) {
+    replyToVoiceQuestion(message);
+    input.value = option;
+    input.focus({ preventScroll: true });
   }
 
   function questionResolved(event) {

@@ -61,6 +61,7 @@ def test_une_question_reservee_est_posee_dans_le_chat_puis_tranchee_par_le_canal
     service, tid = _ask(project, "Quel mot de passe utiliser pour le serveur ?")
     rows = workspace_chat_pilot.pending_questions(project)
     assert [r["task_id"] for r in rows] == [tid] and "identifiants" in rows[0]["kept"]
+    assert rows[0]["reserved"] is True  # catégorie réservée : la boîte vocale n'y met aucune option cliquable
 
     conv = workspace_chat._conversation(project)
     events = conv.events_after(0, 0.01)

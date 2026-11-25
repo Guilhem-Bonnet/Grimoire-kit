@@ -16,7 +16,7 @@ from grimoire.core.cadrage_interview import interview_states
 
 __all__ = ["interview_view", "open_interview"]
 
-_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
 def _compact(row: dict[str, Any]) -> dict[str, Any]:
@@ -57,6 +57,6 @@ def open_interview(root: Path) -> str | None:
         name = str(row["chantier"])
         if "error" in row or row.get("complete", True) or not row.get("blocking", True):
             continue
-        if name == "principal" or _SLUG_RE.match(name):
+        if name == "principal" or _SLUG_RE.fullmatch(name):
             return name
     return None

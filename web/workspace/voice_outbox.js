@@ -4,9 +4,32 @@
 // qu'à la lecture. La lecture est interruptible : le même bouton devient « Arrêter ».
 //
 // Lot V4 : une question de l'orchestrateur est un message distinct, marqué « Question », en tête de la boîte
-// tant qu'elle n'a pas de réponse ; ses options sont des boutons (un clic répond), « Répondre » cible la
+// tant qu'elle n'a pas de réponse. Le cockpit en affiche toujours le texte COMPLET d'origine (`full_text`),
+// jamais le texte parlé (nettoyé et coupé : il ne sert qu'à l'audio). Un clic sur une option ne répond pas :
+// il cible la question et préremplit la saisie, l'envoi reste un geste explicite. Une question réservée à
+// l'humain (permission, fusion, destructif…) n'a aucune option cliquable. « Répondre » cible la
 // saisie (dictée ou texte, corrigeable avant l'envoi). L'état des angles d'un entretien de cadrage est
 // affiché à côté. Tout texte passe par textContent.
+
+/** Au-delà de ces bornes, le texte d'une question est replié (et dépliable). */
+export const FOLD_LINES = 4;
+export const FOLD_CHARS = 280;
+
+/** Les options cliquables d'un message : jamais pour une question réservée à l'humain, ni sans référence. */
+export function clickableOptions(message) {
+  if (message.kind !== 'question' || message.answered || message.reserved || !message.ref) return [];
+  return Array.isArray(message.options) ? message.options : [];
+}
+
+/** Le texte que la boîte affiche : le texte complet d'une question, le texte tel quel sinon. */
+export function shownText(message) {
+  return message.kind === 'question' && message.full_text ? message.full_text : message.text;
+}
+
+/** Vrai si le texte dépasse les bornes de repli. */
+export function needsFold(text) {
+  return text.length > FOLD_CHARS || text.split('\n').length > FOLD_LINES;
+}
 
 const ANGLE_STATE = { ouvert: 'ouvert', couvert: 'couvert', ecarte: 'écarté' };
 
@@ -61,7 +84,7 @@ function speakText(text, lang) {
   return { done: new Promise((resolve) => { utterance.onend = resolve; utterance.onerror = resolve; synth.speak(utterance); }), stop: () => synth.cancel() };
 }
 
-export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, onOption = async () => {} }) {
+export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, onOption = () => {} }) {
   const element = document.createElement('section');
   element.className = 'chat-voice-out';
   element.setAttribute('aria-label', 'Messages parlés de l’orchestrateur');
@@ -70,6 +93,10 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
   interview.className = 'chat-voice-interview';
   interview.setAttribute('aria-label', 'Entretien de cadrage');
   interview.hidden = true;
+  const older = document.createElement('p');
+  older.className = 'chat-voice-older';
+  older.hidden = true;
+  element.append(older);
   const rows = new Map();
   const messages = new Map();
   let counter = 0;
@@ -115,10 +142,21 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
       reply.className = 'btn pri chat-voice-reply';
       reply.textContent = 'Répondre';
       reply.hidden = true;
-      node.append(badge, text, meta, button, reply, choices);
+      const fold = document.createElement('button');
+      fold.type = 'button';
+      fold.className = 'btn chat-voice-fold';
+      fold.hidden = true;
+      fold.setAttribute('aria-expanded', 'false');
+      fold.textContent = 'Tout afficher';
+      fold.addEventListener('click', () => {
+        const open = text.classList.toggle('is-open');
+        fold.setAttribute('aria-expanded', String(open));
+        fold.textContent = open ? 'Replier' : 'Tout afficher';
+      });
+      node.append(badge, text, fold, meta, button, reply, choices);
       element.append(node);
       counter += 1;
-      row = { node, text, meta, button, badge, choices, reply, order: counter };
+      row = { node, text, meta, button, badge, choices, reply, fold, order: counter };
       rows.set(message.id, row);
       button.addEventListener('click', () => toggle(message.id));
       reply.addEventListener('click', () => onReply(messages.get(message.id)));
@@ -126,7 +164,10 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
     messages.set(message.id, message);
     const isQuestion = message.kind === 'question';
     const waiting = isQuestion && !message.answered;
-    row.text.textContent = message.text;
+    const shown = shownText(message);
+    row.text.textContent = shown;
+    row.fold.hidden = !(isQuestion && needsFold(shown));
+    row.text.classList.toggle('is-folded', !row.fold.hidden);
     const state = isQuestion
       ? (message.answered ? ' · répondue' : ' · question en attente de votre réponse')
       : (message.played ? ' · écouté' : ' · brouillon, mis à jour tant qu’il n’est pas lu');
@@ -137,20 +178,16 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
     row.badge.hidden = !isQuestion;
     row.reply.hidden = !waiting;
     row.choices.replaceChildren();
-    row.choices.hidden = !(waiting && message.ref && (message.options || []).length);
+    const options = clickableOptions(message);
+    row.choices.hidden = options.length === 0;
     if (!row.choices.hidden) {
-      for (const option of message.options) {
+      for (const option of options) {
         const choice = document.createElement('button');
         choice.type = 'button';
         choice.className = 'btn chat-voice-option';
         choice.textContent = option;
-        choice.addEventListener('click', async () => {
-          for (const b of row.choices.querySelectorAll('button')) b.disabled = true;
-          try { await onOption(messages.get(message.id), option); } catch (error) {
-            for (const b of row.choices.querySelectorAll('button')) b.disabled = false;
-            note(`Réponse non transmise : ${error.message}`, 'error');
-          }
-        });
+        // Un clic ne répond pas : il cible la question et préremplit la saisie (le texte complet reste sous les yeux).
+        choice.addEventListener('click', () => onOption(messages.get(message.id), option));
         row.choices.append(choice);
       }
     }
@@ -215,6 +252,8 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
       try {
         const state = await api.voiceOutbox();
         for (const message of state.messages || []) paint(message);
+        older.hidden = !(state.older_questions > 0);
+        older.textContent = `${state.older_questions} question${state.older_questions > 1 ? 's' : ''} plus ancienne${state.older_questions > 1 ? 's' : ''} dans le fil.`;
       } catch { /* sans vocal, rien à montrer */ }
       await this.refreshInterview();
     },

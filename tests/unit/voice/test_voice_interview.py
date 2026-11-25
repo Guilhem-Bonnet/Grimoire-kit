@@ -291,3 +291,80 @@ def test_interview_question_message_is_json_serialisable(project: Path) -> None:
         project, {"task_id": "T", "question_id": "q", "text": "Choix ?", "options": ["A", "B"]}
     )
     assert asked is not None and json.loads(json.dumps(asked))["options"] == ["A", "B"]
+
+
+# ── relecture adversariale : le texte affiché est le texte complet, les bornes tiennent ───────────────────────
+
+
+DANGEROUS = (
+    "Puis-je lancer `rm -rf ~/projets` et pousser en force sur /home/guilhem/prod/repo ? "
+    "Cela supprime tout l'historique distant, ce qui est irréversible."
+)
+
+
+def test_interview_question_shows_the_full_original_text_not_the_spoken_one(project: Path) -> None:
+    row = {
+        "task_id": "T",
+        "question_id": "q",
+        "text": DANGEROUS,
+        "options": ["Oui", "Non"],
+        "why": "nettoyage du dépôt",
+        "kept": "catégorie réservée à l'humain",
+        "reserved": True,
+    }
+    message = outbox_service.record_pilot_question(project, row)
+    assert message is not None
+    assert "rm -rf ~/projets" in message["full_text"] and "/home/guilhem/prod/repo" in message["full_text"]
+    assert "nettoyage du dépôt" in message["full_text"] and "catégorie réservée" in message["full_text"]
+    assert "rm -rf" not in message["text"] and "/home/" not in message["text"]  # le parlé est nettoyé
+    assert message["reserved"] is True
+
+
+def test_interview_question_without_reserved_flag_is_treated_as_reserved(project: Path) -> None:
+    message = outbox_service.record_pilot_question(
+        project, {"task_id": "T", "question_id": "q", "text": "Ok ?", "options": ["Oui"]}
+    )
+    assert message is not None and message["reserved"] is True
+
+
+def test_interview_options_and_waiting_questions_are_bounded() -> None:
+    box = Outbox(lambda text: Speech(text=text, audio=b"x", sample_rate=1))
+    first = box.submit_question("Q0 ?", tuple("o" * 1000 for _ in range(50)), ("t", "q0"))
+    assert first is not None and len(first.options) == 8 and all(len(o) == 200 for o in first.options)
+    for i in range(1, 60):
+        box.submit_question(f"Q{i} ?", (), ("t", f"q{i}"))
+    state = box.state()
+    waiting = [m for m in state["messages"] if m["kind"] == "question"]
+    assert len(waiting) == 20 and state["older_questions"] == 40
+    assert waiting[0]["text"] == "Q40 ?"  # les plus anciennes sont évincées
+
+
+def test_interview_state_refuses_deep_nesting_oversize_and_symlinked_base(project: Path, tmp_path: Path) -> None:
+    base = project / "_grimoire" / "cadrage"
+    base.mkdir(parents=True)
+    (base / "entretien.json").write_text("[" * 100_000, encoding="utf-8")
+    view = interview.interview_view(project)
+    assert view["interviews"][0]["chantier"] == "principal" and "error" in view["interviews"][0]
+    (base / "entretien.json").write_text(json.dumps({"depth": "standard", "pad": "x" * 1_100_000}), encoding="utf-8")
+    assert "error" in interview.interview_view(project)["interviews"][0]
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "entretien.json").write_text(json.dumps({"depth": "standard", "angles": {}}), encoding="utf-8")
+    elsewhere = tmp_path / "p2"
+    (elsewhere / "_grimoire").mkdir(parents=True)
+    (elsewhere / "_grimoire" / "cadrage").symlink_to(outside, target_is_directory=True)
+    rows = interview.interview_view(elsewhere)["interviews"]
+    assert len(rows) == 1 and "error" in rows[0] and "kind_label" not in rows[0]
+    assert interview.open_interview(elsewhere) is None
+
+
+def test_interview_chantier_name_is_matched_in_full(project: Path) -> None:
+    named = project / "_grimoire" / "cadrage" / "refonte\n"
+    named.mkdir(parents=True)
+    cadrage_interview.interview_plan(project, depth="standard", text="Un tableau de bord")
+    (named / "entretien.json").write_text(
+        (project / "_grimoire" / "cadrage" / "entretien.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    for angle in cadrage_interview.interview_plan(project)["open_required"]:
+        cadrage_interview.answer(project, None, angle, "ok")  # le principal est terminé
+    assert interview.open_interview(project) is None  # « refonte\n » n'est pas un nom sûr

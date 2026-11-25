@@ -49,6 +49,11 @@ CHARS_PER_WORD = 8
 DETAIL_ON_SCREEN = "Le détail est à l'écran."
 #: Plafond d'une question vocale (lot V4) : bien plus court qu'un compte rendu.
 QUESTION_MAX_S = 15.0
+#: Questions sans réponse gardées dans la boîte ; au-delà, la plus ancienne est évincée (elle reste dans le fil).
+MAX_WAITING_QUESTIONS = 20
+MAX_OPTIONS = 8
+MAX_OPTION_CHARS = 200
+MAX_FULL_TEXT_CHARS = 4000
 OPTIONS_ON_SCREEN = "Les autres options sont à l'écran."
 
 _FENCE_RE = re.compile(r"```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|<pre\b.*?(?:</pre>|\Z)", re.DOTALL | re.IGNORECASE)
@@ -267,6 +272,8 @@ class OutboxMessage:
     options: tuple[str, ...] = ()
     ref: tuple[str, str] | None = None  # (tâche, question) du pilote ; None pour une question de l'entretien
     answered: bool = False
+    full_text: str = ""  # texte d'origine, complet et non nettoyé : c'est lui que le cockpit affiche (``text`` n'est que l'audio)
+    reserved: bool = False  # catégorie réservée à l'humain : aucune option cliquable
 
     @property
     def duration_s(self) -> float:
@@ -284,6 +291,8 @@ class OutboxMessage:
             "options": list(self.options),
             "ref": {"task_id": self.ref[0], "question_id": self.ref[1]} if self.ref else None,
             "answered": self.answered,
+            "full_text": self.full_text or self.text,
+            "reserved": self.reserved,
         }
 
 
@@ -296,6 +305,7 @@ class Outbox:
         self._lock = threading.RLock()
         self._messages: list[OutboxMessage] = []
         self._ids = itertools.count(1)
+        self._dropped = 0  # questions sans réponse évincées (au-delà de MAX_WAITING_QUESTIONS)
 
     def submit(self, text: str, source: str = "rules") -> OutboxMessage | None:
         """Dépose le texte d'une nouvelle réponse : remplace le message non écouté, sinon en ouvre un."""
@@ -313,7 +323,14 @@ class Outbox:
             return self._open(text, source)
 
     def submit_question(
-        self, text: str, options: tuple[str, ...] = (), ref: tuple[str, str] | None = None, source: str = "question"
+        self,
+        text: str,
+        options: tuple[str, ...] = (),
+        ref: tuple[str, str] | None = None,
+        source: str = "question",
+        *,
+        full_text: str = "",
+        reserved: bool = False,
     ) -> OutboxMessage | None:
         """Dépose une question : toujours un message distinct, jamais fusionné dans un compte rendu.
 
@@ -327,7 +344,15 @@ class Outbox:
                 known = next((m for m in self._messages if m.ref == ref), None)
                 if known is not None:
                     return known
-            return self._open(text, source, kind="question", options=tuple(options), ref=ref)
+            options = tuple(o[:MAX_OPTION_CHARS] for o in options[:MAX_OPTIONS])
+            message = self._open(text, source, kind="question", options=options, ref=ref)
+            message.full_text = full_text[:MAX_FULL_TEXT_CHARS]
+            message.reserved = reserved
+            waiting = [m for m in self._messages if m.kind == "question" and not m.answered]
+            for old in waiting[: max(0, len(waiting) - MAX_WAITING_QUESTIONS)]:
+                self._messages.remove(old)
+                self._dropped += 1
+            return message
 
     def resolve_question(self, ref: tuple[str, str] | None = None) -> list[OutboxMessage]:
         """Marque répondue la question du pilote ``ref`` ; sans ``ref``, celles de l'entretien (la personne vient de répondre)."""
@@ -394,4 +419,4 @@ class Outbox:
             # Les questions sans réponse d'abord (la plus ancienne en tête), puis le reste dans l'ordre.
             waiting = [m for m in self._messages if m.kind == "question" and not m.answered]
             rest = [m for m in self._messages if m not in waiting]
-            return {"messages": [m.public() for m in (*waiting, *rest)]}
+            return {"messages": [m.public() for m in (*waiting, *rest)], "older_questions": self._dropped}
