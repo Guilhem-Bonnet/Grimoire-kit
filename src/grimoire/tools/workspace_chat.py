@@ -425,9 +425,10 @@ class Conversation:
             client = self._client
             if client is None:
                 return
+            prompt = self._with_spoken_brief(text)  # avant turn_started : un arrêt annoncé trouve le tour envoyé
             self._emit({"type": "turn_started"})
             self._turn_text = []
-            for event in client.prompt(self._with_spoken_brief(text), on_permission=self._ask):
+            for event in client.prompt(prompt, on_permission=self._ask):
                 if event["type"] == "turn_ended":
                     self._propose_gestures()
                     self._emit({"type": "turn_ended", "stop_reason": event["stop_reason"]})
