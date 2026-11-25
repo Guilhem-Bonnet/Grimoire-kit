@@ -34,6 +34,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.costs import Cost
 from grimoire.missions.lease import DEFAULT_LEASE_TTL_SECONDS, LeaseFile, parse_instant
 from grimoire.missions.liveness import (
@@ -58,6 +59,7 @@ __all__ = [
     "PRIORITY_BY_RISK",
     "SCHEMA_VERSION",
     "annotate_cards",
+    "journal_fields",
     "portfolio_tasks",
     "resolve_registry_root",
     "resume_command",
@@ -167,6 +169,27 @@ def _parse_iso(value: str | None) -> datetime | None:
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
+_JOURNAL_FIELDS = ("session_id", "updated_at", "started_at", "ended_at", "task_id", "host", "host_id")
+
+
+def _journal_fields(data: bytes) -> dict[str, Any] | None:
+    """Les seuls champs lus d'un journal de session ; ``None`` si ce n'est pas un objet. ``ValueError`` remonte."""
+    parsed = json.loads(data.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        return None
+    return {name: parsed.get(name) for name in _JOURNAL_FIELDS}
+
+
+def journal_fields(path: Path) -> dict[str, Any] | None:
+    """Les champs de *path* (journal ``session-*.json``), relus seulement si le fichier a pu changer.
+
+    Un projet de longue vie porte des milliers de journaux de ~40 Ko : les reparser à chaque lecture du
+    cockpit coûtait plusieurs secondes. Gardé par (date, taille, inode) via :mod:`grimoire.core.file_memo`
+    (jamais pour un fichier récent, jamais pour une erreur). ``OSError`` et ``ValueError`` remontent.
+    """
+    return file_memo.derived(path, "session-journal", _journal_fields)
+
+
 def sessions_index(project_root: Path) -> dict[str, dict[str, Any]]:
     """``session_id → journal`` des sessions de hooks du projet, best-effort."""
     runs = project_root / RUNS_RELPATH
@@ -175,10 +198,10 @@ def sessions_index(project_root: Path) -> dict[str, dict[str, Any]]:
         return index
     for path in sorted(runs.glob("session-*.json")):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = journal_fields(path)
         except (OSError, ValueError):
             continue
-        if not isinstance(data, dict):
+        if data is None:
             continue
         session_id = str(data.get("session_id") or path.stem.removeprefix("session-"))
         index[session_id] = {
