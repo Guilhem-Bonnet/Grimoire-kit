@@ -11,7 +11,7 @@
                             # (voix = WAV local avec un .txt voisin ; sinon la voix livrée)
       idle_unload_seconds: 300
       language: fr
-      max_record_seconds: 120 # plafond d'un enregistrement (1 à 600)
+      max_record_seconds: 120 # plafond d'un enregistrement (1 à 300)
       spoken_max_seconds: 45  # durée plafond du message parlé (5 à 300)
       allow_download: false # true = l'utilisateur accepte le téléchargement des modèles
                             # (le seul interrupteur : il prime sur toute option d'un moteur)
@@ -62,7 +62,9 @@ def default_tts() -> str:
 
 #: Plafond d'un enregistrement : deux minutes tiennent dans un message, et bornent le poids de l'audio.
 DEFAULT_MAX_RECORD_S = 120.0
-MAX_RECORD_CEILING_S = 600.0
+#: Cinq minutes au plus : 300 s de WAV 16 kHz mono 16 bits, en base64, tiennent sous le plafond du corps HTTP
+#: de la transcription (16 Mio, ``stt_service.MAX_BODY_BYTES``) ; 600 s ne tenaient pas (~25,6 Mo).
+MAX_RECORD_CEILING_S = 300.0
 #: Durée cible du message parlé de l'orchestrateur : au-delà, on n'écoute plus, on lit.
 DEFAULT_SPOKEN_MAX_S = 45.0
 SPOKEN_MAX_RANGE_S = (5.0, 300.0)

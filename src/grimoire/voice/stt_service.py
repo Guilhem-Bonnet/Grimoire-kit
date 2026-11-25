@@ -4,9 +4,13 @@ Deux entrées pour les routes du cockpit (``voice/config`` en lecture, ``voice/t
 
 - :func:`voice_config` dit si le bouton d'enregistrement doit exister. Sans l'extra ``voice``, avec le
   mode ``text`` ou avec un moteur client (navigateur), la réponse est ``available: false`` et sa raison.
-- :func:`transcribe` décode l'audio (WAV en base64, JSON comme toute écriture du cockpit), le borne, le
-  confie au moteur choisi (lot V1) avec une amorce tirée du projet, puis le supprime — y compris en cas
-  d'échec. Le texte rendu est celui du moteur, tel quel : aucun LLM ne le réécrit.
+- :func:`transcribe` décode l'audio (WAV en base64, JSON comme toute écriture du cockpit), contrôle son
+  en-tête et sa durée (:func:`grimoire.voice.safety.check_wav`), le confie au moteur choisi (lot V1) avec une
+  amorce tirée du projet, puis supprime le fichier temporaire — y compris en cas d'échec. Le texte rendu est
+  celui du moteur, tel quel : aucun LLM ne le réécrit. Seules des métadonnées (texte, langue, durée) en sortent.
+
+Les moteurs sont ceux du pool du processus (:mod:`grimoire.voice.engine_pool`) : un seul modèle de
+reconnaissance chargé pour tous les projets enrôlés.
 
 Aucune bibliothèque audio n'est importée ici : le moteur ne se charge qu'au premier appel.
 """
@@ -18,17 +22,19 @@ import binascii
 import contextlib
 import subprocess
 import tempfile
-import threading
 from pathlib import Path
 from typing import Any
 
-from grimoire.voice.engines import VoiceEngines, VoiceError, availability, get_spec
-from grimoire.voice.settings import VoiceSettings, load_voice_settings
+from grimoire.voice.engine_pool import PooledEngines, pool
+from grimoire.voice.engines import VoiceError, availability, get_spec
+from grimoire.voice.safety import ALLOWED_SAMPLE_RATES, check_wav
+from grimoire.voice.settings import MAX_RECORD_CEILING_S, VoiceSettings, load_voice_settings
 
 __all__ = [
     "MAX_BODY_BYTES",
     "SAMPLE_RATE",
     "VoiceUnavailableError",
+    "ceiling_body_bytes",
     "declared_length",
     "discard_body",
     "project_vocabulary",
@@ -37,15 +43,14 @@ __all__ = [
     "voice_config",
 ]
 
-SAMPLE_RATE = 16_000
+SAMPLE_RATE = ALLOWED_SAMPLE_RATES[0]
 _WAV_BYTES_PER_SECOND = SAMPLE_RATE * 2  # mono, 16 bits
-_WAV_SLACK = 4096  # l'en-tête WAV et quelques échantillons de bord
+_WAV_SLACK = 4096  # l'en-tête WAV et ses blocs annexes
 #: Plafond absolu du corps d'une requête de transcription (base64 compris), quel que soit le réglage.
+#: Il doit laisser passer la durée maximale réglable (voir :func:`ceiling_body_bytes`), sinon une durée
+#: autorisée serait refusée par le serveur HTTP avant d'être lue.
 MAX_BODY_BYTES = 16 * 1024 * 1024
 _VOCAB_MAX = 24
-
-_lock = threading.Lock()
-_engines: dict[str, tuple[VoiceSettings, VoiceEngines]] = {}
 
 
 class VoiceUnavailableError(FileNotFoundError):
@@ -69,12 +74,8 @@ def discard_body(rfile: Any, declared: int, *, limit: int = 64 * 1024 * 1024) ->
 
 
 def reset_engines() -> None:
-    """Décharge et oublie les moteurs de tous les projets (tests, arrêt)."""
-    with _lock:
-        held = list(_engines.values())
-        _engines.clear()
-    for _settings, engines in held:
-        engines.unload()
+    """Décharge et oublie les moteurs du processus (tests, arrêt)."""
+    pool.reset()
 
 
 def _unavailable_reason(settings: VoiceSettings) -> str | None:
@@ -108,6 +109,12 @@ def max_audio_bytes(settings: VoiceSettings) -> int:
     return int(settings.max_record_s * _WAV_BYTES_PER_SECOND) + _WAV_SLACK
 
 
+def ceiling_body_bytes(max_record_s: float = MAX_RECORD_CEILING_S) -> int:
+    """Taille du corps JSON d'un enregistrement de ``max_record_s`` secondes, base64 compris (marge de 1 Kio)."""
+    raw = int(max_record_s * _WAV_BYTES_PER_SECOND) + _WAV_SLACK
+    return -(-raw // 3) * 4 + 1024
+
+
 def project_vocabulary(root: Path) -> list[str]:
     """L'amorce du moteur : nom du projet, branche, fichiers récemment touchés. Au mieux, jamais bloquant."""
     words: list[str] = [root.name]
@@ -129,17 +136,9 @@ def project_vocabulary(root: Path) -> list[str]:
     return list(seen)[:_VOCAB_MAX]
 
 
-def _engines_for(root: Path, settings: VoiceSettings) -> VoiceEngines:
-    key = str(root)
-    with _lock:
-        held = _engines.get(key)
-        if held is not None and held[0] == settings:
-            return held[1]
-        engines = VoiceEngines.from_settings(settings)
-        _engines[key] = (settings, engines)
-    if held is not None:
-        held[1].unload()
-    return engines
+def _engines_for(_root: Path, settings: VoiceSettings) -> PooledEngines:
+    """Les moteurs d'un projet : ceux du pool du processus, partagés par clé (moteur, options)."""
+    return PooledEngines(settings)
 
 
 def _decode(body: dict[str, Any], limit: int) -> bytes:
@@ -166,6 +165,7 @@ def transcribe(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     if reason is not None:
         raise VoiceUnavailableError(f"vocal indisponible : {reason}")
     data = _decode(body, max_audio_bytes(settings))
+    check_wav(data, settings.max_record_s)
     engines = _engines_for(root, settings)
     handle = tempfile.NamedTemporaryFile(prefix="grimoire-stt-", suffix=".wav", delete=False)  # noqa: SIM115
     path = Path(handle.name)

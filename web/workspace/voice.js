@@ -56,19 +56,36 @@ export function toBase64(bytes) {
   return btoa(binary);
 }
 
+/** Les mots d'un texte, en minuscules, lettres et chiffres seulement. */
+function words(text) {
+  return String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+}
+
+/**
+ * Le texte qui part contient-il encore la dictée ? Faux quand il ne reste aucun mot dicté : le contenu
+ * a été entièrement réécrit au clavier (ou effacé). Une correction partielle garde la mention.
+ */
+export function stillDictated(text, dictatedParts) {
+  const kept = new Set(words(text));
+  if (kept.size === 0) return false;
+  return dictatedParts.some((part) => words(part).some((word) => kept.has(word)));
+}
+
 export const MIC_CONSTRAINTS = {
   audio: { channelCount: 1, sampleRate: SAMPLE_RATE, echoCancellation: true, noiseSuppression: true },
 };
 
 /**
  * Monte la saisie vocale. `input` est la zone de texte du chat ; `slot` reçoit le bouton (s'il y a lieu).
- * Retourne `consumeDictation()` : vrai si le texte qui part contient une dictée (à signaler à
- * l'orchestrateur), et remet le compteur à zéro.
+ * Retourne `dictationPending(text)` : vrai si le texte qui part contient encore une dictée (à signaler
+ * à l'orchestrateur), et `commitDictation()`, à appeler après un envoi RÉUSSI seulement : un envoi
+ * refusé rend le texte à la saisie avec sa mention. La dictée tombe si le texte est entièrement réécrit.
+ * Rien de ceci n'approuve quoi que ce soit : une permission se confirme par un clic (lot V5).
  */
 export function createVoiceInput({ api, input, slot, note, setStatus, readOnly = () => false }) {
   let config = null;
   let recording = null;
-  let dictated = false;
+  let dictated = [];
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'btn chat-mic';
@@ -142,7 +159,7 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
       const text = (result.text || '').trim();
       if (!text) { setStatus('Rien de reconnu : réessayez, ou tapez le message.'); return; }
       input.value = input.value.trim() ? `${input.value.trim()} ${text}` : text;
-      dictated = true;
+      dictated.push(text);
       setStatus('Dictée transcrite : relisez et corrigez avant d’envoyer.');
       input.focus({ preventScroll: true });
     } catch (error) {
@@ -154,6 +171,9 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
   }
 
   button.addEventListener('click', () => { (recording ? stop() : start()); });
+  input.addEventListener('input', () => {
+    if (dictated.length && !stillDictated(input.value, dictated)) dictated = [];
+  });
 
   return {
     /** À l'ouverture de l'onglet : demande au serveur si le vocal est disponible, sinon le bouton reste absent. */
@@ -167,10 +187,11 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
       button.hidden = !on;
       if (!on) button.remove(); else if (!button.isConnected) slot.append(button);
     },
-    consumeDictation() {
-      const was = dictated;
-      dictated = false;
-      return was;
+    dictationPending(text = input.value) {
+      return dictated.length > 0 && stillDictated(text, dictated);
+    },
+    commitDictation() {
+      dictated = [];
     },
     /** Coupe le micro si l'onglet se ferme en plein enregistrement. */
     abort() {

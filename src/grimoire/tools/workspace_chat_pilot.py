@@ -75,7 +75,7 @@ def pending_questions(root: Path) -> list[dict[str, Any]]:
             rows.append({
                 "task_id": task.id, "task_title": task.title, "question_id": question.id,
                 "text": question.text, "options": list(question.options), "recommended": question.recommended,
-                "why": question.why, "kept": kept,
+                "why": question.why, "kept": kept, "kind": question.kind,
             })
     return rows
 

@@ -174,6 +174,37 @@ def test_stt_body_over_the_absolute_ceiling_is_413(served: Any, calls: Calls) ->
     assert calls.paths == []
 
 
+def _wav_at(rate: int, bits: int = 16, seconds: float = 0.1) -> bytes:
+    align = bits // 8
+    n = int(rate * seconds) * align
+    fmt = struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * align, align, bits)
+    return b"RIFF" + struct.pack("<I", 36 + n) + b"WAVEfmt " + fmt + b"data" + struct.pack("<I", n) + b"\0" * n
+
+
+@pytest.mark.parametrize(
+    ("audio", "needle"), [(_wav_at(8_000), "8000 Hz"), (_wav_at(16_000, bits=8), "16 bits")], ids=["8khz", "8bits"]
+)
+def test_stt_route_checks_the_wav_header_before_the_engine(
+    served: Any, calls: Calls, audio: bytes, needle: str
+) -> None:
+    port, _ = served(VOICE_ON)
+    status, body = _cockpit_http.post(port, TRANSCRIBE, {"audio": b64(audio)})
+    assert status == 400 and needle in body["error"]
+    assert calls.paths == []
+
+
+def test_stt_route_leaves_no_audio_in_journals_or_project(served: Any, calls: Calls, tmp_path: Path) -> None:
+    port, _ = served(VOICE_ON)
+    audio = wav(0.2)
+    status, body = _cockpit_http.post(port, TRANSCRIBE, {"audio": b64(audio)})
+    assert status == 200 and "audio" not in body
+    marker = b64(audio)[:64].encode()
+    for path in tmp_path.rglob("*"):
+        if path.is_file():
+            content = path.read_bytes()
+            assert b"RIFF" not in content and marker not in content, path
+
+
 @pytest.mark.parametrize("audio", ["", "pas du base64 !!", b64(b"pas un wav, mais assez long" * 5)])
 def test_stt_rejects_unreadable_audio(served: Any, calls: Calls, audio: str) -> None:
     port, _ = served(VOICE_ON)
@@ -199,16 +230,14 @@ def test_stt_vocabulary_names_project_branch_and_recent_files(tmp_path: Path) ->
 def test_stt_dictation_adds_the_notice_and_keeps_the_text(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from grimoire.tools import workspace_chat
 
-    seen: list[str] = []
-
-    class Conv:
-        def send(self, text: str, *_a: Any) -> dict[str, Any]:
-            seen.append(text)
-            return {"ok": True}
-
-    monkeypatch.setattr(workspace_chat, "_conversation", lambda _root: Conv())
+    monkeypatch.setattr(workspace_chat, "chat_mode", lambda _root: ("acp", ("agent",), ""))
+    monkeypatch.setattr(workspace_chat.Conversation, "_run_turn", lambda self, text: None)
+    conv = workspace_chat.Conversation(tmp_path)
+    monkeypatch.setattr(workspace_chat, "_conversation", lambda _root: conv)
     workspace_chat.chat_send(tmp_path, {"text": "ouvre la tâche 12", "dictation": True})
+    conv._busy = False
     workspace_chat.chat_send(tmp_path, {"text": "tapé au clavier"})
+    seen = [e["text"] for e in conv._log if e["type"] == "user"]
     assert seen[0] == f"ouvre la tâche 12\n\n{workspace_chat.DICTATION_NOTICE}"
     assert "dictée vocale, erreurs de reconnaissance possibles" in seen[0]
     assert seen[1] == "tapé au clavier"
