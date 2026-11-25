@@ -122,6 +122,43 @@ Code de sortie 1 quand une exigence reste sans critère vérifiable ou en confli
 Corriger le fichier suffit à rendre une question caduque, sans réponse
 fabriquée.
 
+## De l'exigence au code, et retour : `grimoire cadrage trace`
+
+`grimoire cadrage trace [REQ-001] [--json]` rend, pour chaque exigence, la chaîne
+entière : validation par la MOA, tâches rattachées (`task add --requirement`),
+commits et PR, fichiers touchés (dont les tests), preuves, recette. Lecture
+seule, rien n'est stocké : tout est dérivé du cadrage, du journal d'autorité, du
+ledger (`task.worktree_created`, `task.merged`, `task.merged_externally`) et de
+git. Une exigence est *proposée*, *validée*, *en cours*, *livrée* ou *recette
+prononcée*. Trois trous sont dits : exigence validée sans tâche, tâche livrée
+sans preuve, exigence sans critère.
+
+```text
+$ grimoire cadrage trace
+REQ-001 — Camille reçoit un rappel par mail la veille de l'arrosage proposée
+  modifiée depuis la validation — formulation : « … le jour d'arrosage » → « … la veille de l'arrosage »
+    tâches concernées : GAO-req-001-rapp-001
+    fichiers concernés : src/rappel.py, tests/test_rappel.py
+  tâche GAO-req-001-rapp-001 (proposed) — 1 commit(s), 2 fichier(s)
+REQ-002 — export CSV des plantes validée
+  trou : exigence validée sans tâche — REQ-002 est validée par la MOA mais aucune tâche ne la sert
+```
+
+Le sens inverse : `grimoire cadrage trace --file src/rappel.py` rend les
+exigences servies par ce fichier, via les commits des tâches rattachées ; un
+fichier qu'aucune de ces tâches n'a touché est dit sans exigence.
+
+**Dérive.** La validation scelle l'empreinte du texte validé (formulation,
+priorité, critères, périmètre) et son titre. Si l'exigence a changé depuis,
+la trace la signale « modifiée depuis la validation », avec ses tâches et
+fichiers, et dit si c'est la formulation. Elle ne dit pas *quel critère* a
+changé : le texte validé n'est pas conservé, seulement son empreinte.
+
+Limites : un fichier « touché » par une tâche n'est pas forcément « servi » au
+sens fonctionnel ; les preuves sont celles que la MOE déclare ; un commit ou une
+branche absents du dépôt local sont signalés, jamais devinés ; une PR fusionnée
+en rebase ne remonte que son dernier commit.
+
 ## L'entretien de cadrage : `grimoire cadrage interview`
 
 Le kit n'appelle aucun modèle : il tient la structure de l'entretien, l'agent
