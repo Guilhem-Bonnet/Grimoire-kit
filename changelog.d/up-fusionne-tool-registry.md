@@ -1,0 +1,1 @@
+- fix(upgrade): `grimoire up` fusionne `tool-registry.yaml` au lieu de le figer ou de le réécrire : les choix du projet (MCP `out_of_scope`, `error_capture`, valeurs changées, outils ajoutés) survivent, les nouveautés du kit arrivent, un registre illisible ou d'un autre schéma est copié à côté et jamais écrasé (#702)

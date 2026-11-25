@@ -80,6 +80,7 @@ from grimoire.core.standard_generation import (
     _render_template,
     normalize_task_id,
 )
+from grimoire.core.standard_merge import sync_registry
 from grimoire.core.standard_profile_manifest import read_artifact_paths, read_profile
 from grimoire.core.standard_state import board_home, board_omits_task, invalidate_cache, task_from_board
 from grimoire.core.yaml_io import load_yaml_with_retry
@@ -165,14 +166,12 @@ class StandardSetupResult:
     written: list[Path] = field(default_factory=list)
     skipped: list[Path] = field(default_factory=list)
     dry_run: bool = False
+    notices: list[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
         """True when files were written or would be written."""
         return bool(self.written)
-
-
-
 
 
 
@@ -771,7 +770,6 @@ def setup_standard_profile(
 
     manifest = gen.load_generation_manifest(root)
     generated: dict[str, str] = {}
-
     for artifact in artifacts:
         dst = root / artifact.destination
         _ensure_inside_root(root, dst, label=f"Artifact {artifact.artifact_type!r}")
@@ -781,6 +779,8 @@ def setup_standard_profile(
         # the manifest is JSON, so its keys are always strings.
         key = str(artifact.destination)
         action = gen.decide(root, key, content, force=force, refresh=refresh, manifest=manifest)
+        if artifact.artifact_type == "tool_registry" and sync_registry(root, artifact.destination, content, action, refresh, dry_run, result):
+            continue
         if action != "write":
             result.skipped.append(artifact.destination)
             if action == "adopt":
