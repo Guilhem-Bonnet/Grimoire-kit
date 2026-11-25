@@ -13,6 +13,7 @@
 // (nouvel onglet), où l'humain fusionne. Un `gh` absent ou non authentifié
 // s'écrit « état des PR inconnu », jamais une liste vide.
 
+import { safeWebUrl } from '../markdown.js';
 import { badge, glyph, icon, kpiRow, spaceHead } from '../shell.js';
 
 const STYLE_ID = 'rv-styles';
@@ -108,7 +109,8 @@ const keyOf = (pr) => `${(pr.project && pr.project.slug) || ''}#${pr.number}`;
 /** Un lien qui ouvre GitHub dans un nouvel onglet, sans lien de retour vers le cockpit. */
 function external(label, href, cls) {
   const link = node('a', cls, label);
-  link.href = href;
+  const safe = safeWebUrl(href);
+  if (safe) link.href = safe;
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
   return link;

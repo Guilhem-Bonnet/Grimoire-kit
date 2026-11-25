@@ -47,6 +47,7 @@ __all__ = [
     "engine_names",
     "get_spec",
     "install_hint",
+    "installed",
     "model_cache",
     "register_engine",
     "voice_extra_installed",
@@ -262,6 +263,11 @@ def _module_installed(module: str) -> bool:
         return importlib.util.find_spec(module) is not None
     except (ImportError, ValueError):  # module présent dans sys.modules sans spec, chemin cassé
         return False
+
+
+def installed(spec: EngineSpec) -> bool:
+    """Les modules du moteur sont-ils présents ? ``find_spec`` seul : ni import, ni sous-processus."""
+    return all(_module_installed(m) for m in spec.modules)
 
 
 def availability(spec: EngineSpec) -> Availability:

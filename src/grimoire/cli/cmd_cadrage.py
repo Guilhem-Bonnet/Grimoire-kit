@@ -227,6 +227,34 @@ def _print_plan(plan: CadragePlan, *, check_only: bool = False, writes: bool = F
         )
 
 
+@cadrage_app.command("approve")
+def cadrage_approve(
+    requirement: str = typer.Argument(..., help="L'exigence à valider : REQ-001, ou <chantier>/REQ-001."),
+    path: Path = _path_opt,
+    chantier: str | None = _chantier_opt,
+    actor: str = typer.Option("cli", "--actor", help="Qui valide (journalisé avec la MOA déclarée)."),
+) -> None:
+    """La MOA valide une exigence — depuis son terminal seulement (mêmes signaux que `task comment`/`task answer`).
+
+    La validation est scellée au journal d'autorité, avec l'empreinte du texte validé : un agent ou l'orchestrateur,
+    même sous mandat, ne peut pas la poser, et modifier l'exigence ensuite la retire (la MOA a validé ce texte-là).
+    """
+    from grimoire.missions.requirement_gate import approve_requirement, lookup, normalize_key, origin_root
+
+    root = path.resolve()
+    key = _guard(lambda: normalize_key(requirement, chantier))
+    found = _guard(lambda: lookup(origin_root(root), key))
+    if found is not None:  # la MOA lit ce qu'elle valide avant d'attester
+        console.print(f"[bold]{key}[/bold] — {escape(found.title)}" + (f" [dim]({found.priority})[/dim]" if found.priority else ""))
+        for criterion in found.criteria:
+            console.print(f"  - {escape(criterion)}")
+    entry = _guard(lambda: approve_requirement(root, key, actor=actor))  # l'origine s'établit dedans
+    console.print(
+        f"[green]exigence validée[/green] — {entry['requirement']} par la MOA {escape(str(entry['moa']))} "
+        f"[dim](journal d'autorité, entrée {entry['seq']})[/dim]"
+    )
+
+
 # ── entretien de cadrage : sept angles, profondeur selon la demande ──────────
 
 interview_app = typer.Typer(help="Entretien de cadrage : questions par angle, profondeur selon la demande.")

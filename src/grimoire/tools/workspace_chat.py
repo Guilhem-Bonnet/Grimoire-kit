@@ -163,6 +163,7 @@ class Conversation:
         self._pilot_open: dict[tuple[str, str], dict[str, Any]] = {}
         self._pilot_polled = float("-inf")
         self._turn_text: list[str] = []
+        self._spoken_token: str | None = None  # jeton du message parlé du tour en cours, un par tour
 
     # ── journal ──────────────────────────────────────────────────────────
 
@@ -425,9 +426,13 @@ class Conversation:
             client = self._client
             if client is None:
                 return
-            self._emit({"type": "turn_started"})
+            prompt = self._with_spoken_brief(text)  # avant turn_started : un arrêt annoncé trouve le tour envoyé
+            started: dict[str, Any] = {"type": "turn_started"}
+            if self._spoken_token:  # le navigateur masque cette balise-là, et elle seule
+                started["spoken_token"] = self._spoken_token
+            self._emit(started)
             self._turn_text = []
-            for event in client.prompt(text, on_permission=self._ask):
+            for event in client.prompt(prompt, on_permission=self._ask):
                 if event["type"] == "turn_ended":
                     self._propose_gestures()
                     self._emit({"type": "turn_ended", "stop_reason": event["stop_reason"]})
@@ -444,11 +449,35 @@ class Conversation:
                 self._cond.notify_all()
             self._maybe_schedule_close()
 
+    def _with_spoken_brief(self, text: str) -> str:
+        """En mode vocal, la consigne du message parlé suit le message de la personne (le fil, lui, ne l'affiche pas)."""
+        from grimoire.voice.outbox import new_spoken_token, spoken_instruction
+        from grimoire.voice.settings import load_voice_settings
+
+        settings = load_voice_settings(self.root)
+        self._spoken_token = new_spoken_token() if settings.enabled else None
+        if self._spoken_token is None:
+            return text
+        return f"{text}\n\n{spoken_instruction(settings.spoken_max_s, self._spoken_token)}"
+
+    def _record_spoken(self, reply: str) -> None:
+        """Dépose le message parlé de la réponse dans la boîte d'envoi vocale ; le fil reçoit l'événement."""
+        from grimoire.voice import outbox_service
+
+        token, self._spoken_token = self._spoken_token, None  # jamais réutilisé
+        try:
+            message = outbox_service.record_reply(self.root, reply, token)
+        except Exception:  # le vocal est un confort : il ne casse jamais un tour
+            return
+        if message is not None:
+            self._emit({"type": "voice_message", "message": message})
+
     def _propose_gestures(self) -> None:
         """L'agent propose « active le pilote » / « coupe le pilote » : le fil en fait un bouton, rien n'est écrit ici."""
         from grimoire.tools import workspace_chat_pilot
 
         text, self._turn_text = "".join(self._turn_text), []
+        self._record_spoken(text)
         for on in dict.fromkeys(workspace_chat_pilot.proposals(text)):
             self._emit({"type": "pilot_gesture", "on": on})
 

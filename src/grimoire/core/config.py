@@ -15,6 +15,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -354,6 +355,9 @@ def _parse_preserve(raw: Any) -> tuple[str, ...]:
 
 
 DEFAULT_MOE = "orchestrateur"
+REQUIREMENT_GATE_BLOCK = "block"
+REQUIREMENT_GATE_WARN = "warn"
+REQUIREMENT_GATE_MODES = (REQUIREMENT_GATE_BLOCK, REQUIREMENT_GATE_WARN)
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,6 +372,16 @@ class GovernanceConfig:
     moa: str = ""
     moe: str = DEFAULT_MOE
     declared: bool = False
+    #: La bascule du gate « exigence validée » (#1342, lot M3) : ``block`` ou ``warn`` ; vide (absente) vaut ``warn``.
+    requirement_gate: str = ""
+
+    @property
+    def requirement_mode(self) -> str:
+        """Le mode effectif du gate ``proposed → ready`` : ``block`` seulement si la MOA est nommée **et** la bascule
+        déclarée ``block`` ; sinon ``warn`` — un projet sans ``governance.roles`` n'est jamais bloqué."""
+        return REQUIREMENT_GATE_BLOCK if self.declared and self.requirement_gate == REQUIREMENT_GATE_BLOCK else (
+            REQUIREMENT_GATE_WARN
+        )
 
     @classmethod
     def from_dict(cls, data: Any) -> GovernanceConfig:
@@ -375,14 +389,43 @@ class GovernanceConfig:
             return cls()
         if not isinstance(data, dict):
             raise GrimoireConfigError("'governance' must be a mapping", error_code=CONFIG_PARSE_ERROR.code)
+        gate = data.get("requirement_gate")
+        if gate is not None and gate not in REQUIREMENT_GATE_MODES:
+            raise GrimoireConfigError(
+                f"'governance.requirement_gate' must be one of {', '.join(REQUIREMENT_GATE_MODES)}, got {gate!r}",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
         roles = data.get("roles")
         if roles is None:
-            return cls()
+            return cls(requirement_gate=gate or "")
         if not isinstance(roles, dict):
             raise GrimoireConfigError("'governance.roles' must be a mapping", error_code=CONFIG_PARSE_ERROR.code)
         moa = _role_name(roles.get("moa"), "moa", required=True)
         moe = _role_name(roles.get("moe"), "moe", required=False) or DEFAULT_MOE
-        return cls(moa=moa, moe=moe, declared=True)
+        problem = moa_name_problem(moa)
+        if problem:
+            raise GrimoireConfigError(f"'governance.roles.moa' {problem}", error_code=CONFIG_PARSE_ERROR.code)
+        return cls(moa=moa, moe=moe, declared=True, requirement_gate=gate or "")
+
+
+#: Des comptes de service, pas des humains : jamais MOA (#1342, relecture de M1).
+_BOT_NAMES = frozenset({
+    "github-actions", "dependabot", "renovate", "renovate-bot", "copilot", "orchestrateur", "orchestrator",
+})
+
+
+def moa_name_problem(name: str) -> str:
+    """Pourquoi *name* ne peut pas être la MOA (``""`` s'il le peut) : la MOA est un humain, nommé sur une ligne.
+
+    Refusés : un nom sur plusieurs lignes, un compte de bot (``…[bot]``, ``github-actions``…) ou le nom de la MOE
+    par défaut — l'orchestrateur ne valide pas ses propres exigences.
+    """
+    if "\n" in name or "\r" in name:
+        return "must be a single line (one human's name)"
+    folded = name.strip().casefold()
+    if folded.endswith("[bot]") or folded in _BOT_NAMES or folded.startswith("github-actions"):
+        return f"must name a human, not a bot or service account ({name.strip()!r})"
+    return ""
 
 
 def _role_name(raw: Any, role: str, *, required: bool) -> str:
@@ -456,7 +499,7 @@ class NeedsConfig:
 # ── Root Config ───────────────────────────────────────────────────────────────
 
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "source", "governance",
+    "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "source", "cockpit", "governance",
 })
 
 
@@ -590,3 +633,23 @@ class GrimoireConfig:
             f"No 'project-context.yaml' found in {current} or any parent directory",
             error_code=CONFIG_NOT_FOUND.code,
         )
+
+
+def governance_block(moa: str, *, confirmed: bool = False) -> str:
+    """La section ``governance`` (#1342) ; vide quand aucune MOA humaine n'est nommée : le doctor avertira.
+
+    *confirmed* : un humain a nommé la MOA (l'assistant interactif) — le gate d'exigence (lot M3) part en ``block``.
+    Sinon (``init -y``, nom git deviné), la section est écrite mais le gate reste en ``warn`` : un nom deviné ne
+    bloque personne tant qu'un humain ne l'a pas confirmé en passant ``requirement_gate`` à ``block``.
+    """
+    if not moa or moa_name_problem(moa):
+        return ""
+    quoted = json.dumps(moa, ensure_ascii=False)
+    gate = "block" if confirmed else "warn"
+    note = "" if confirmed else (
+        "  # MOA déduite du nom git, non confirmée : vérifiez-la, puis passez requirement_gate à block\n"
+    )
+    return (
+        f"\ngovernance:\n{note}  roles:\n    moa: {quoted}\n    moe: \"orchestrateur\"\n"
+        f"  requirement_gate: {gate}\n"
+    )

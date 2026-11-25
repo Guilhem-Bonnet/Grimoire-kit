@@ -92,6 +92,17 @@ def _roundtrip_yaml() -> Any:
     return yaml
 
 
+def load_yaml_text(raw: bytes | str) -> Any:
+    """Comme :func:`load_yaml`, sur un contenu déjà lu (pour ``file_memo`` : un seul ``read``, pas deux)."""
+    loader, backend = _get_yaml_loader()
+    try:
+        if backend == "ruamel":
+            return loader(typ="safe").load(raw)
+        return loader.safe_load(raw)
+    except Exception as exc:
+        raise OSError(f"Cannot parse YAML: {exc}") from exc
+
+
 def load_yaml_roundtrip(path: Path) -> Any:
     """Load a YAML file preserving comments, quote style, inline collections
     and indentation, so it can later be rewritten with :func:`save_yaml`
