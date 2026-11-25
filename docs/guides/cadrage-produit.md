@@ -198,3 +198,18 @@ Les identifiants émis, `cadrage.gate_incomplete` et
 - [Référence CLI — Cadrage produit](../reference/cli/projet.md#cadrage-produit)
 - [Standard agentique gouverné](rendre-la-preuve-bloquante.md)
 - [Installer par needs](installer-par-besoins.md)
+
+### La nature de la demande (`--kind`)
+
+L'intake propose, avec sa raison, l'une des douze natures (nouveau projet, nouvelle
+fonctionnalité, évolution, anomalie, incident, investigation, analyse, recherche,
+maintenance, migration, sécurité, question), en français comme en anglais, sans modèle.
+`grimoire cadrage interview --kind <nature>` la corrige et rend les questions propres,
+le livrable attendu et la recette de la MOA. Une question ne déclenche aucun entretien
+et n'efface jamais un entretien déjà entamé, qui reste contrôlé. Un incident rend trois
+questions au plus et ne bloque jamais l'action immédiate : le cadrage complet est reporté
+au post-mortem, que `grimoire cadrage check` signale comme dû (« Post-mortem dû ») tant
+que les angles obligatoires restent ouverts. Une demande interrogative ou étiquetée qui
+porte un verbe d'action (« Comment ajouter un export CSV ? », « incident: ajouter… »)
+reste classée par ce verbe. Changer de nature en cours conserve les réponses déjà
+consignées.
