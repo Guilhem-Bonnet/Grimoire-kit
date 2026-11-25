@@ -1,0 +1,1 @@
+- fix(cockpit): un message tapé pendant que l'orchestrateur reprend sa conversation attend la fin du démarrage de l'agent au lieu d'être refusé à tort (« un tour est déjà en cours »), et la palette de commandes garde l'entrée choisie aux flèches quand projets, tâches ou fichiers arrivent et redessinent la liste (#1386)
