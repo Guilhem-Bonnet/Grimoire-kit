@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.112.0] - 2026-11-25
+
+- perf(cockpit): « À traiter » à chaud passe de ~1,45 s à ~1,0 s sur un poste réel de cinq projets (machine chargée) — pour la seule lecture d'affichage, les preuves et verdicts du gate des tâches à relire et le journal d'événements du kernel des runs ne sont plus reparsés pour chaque tâche ou chaque run : `file_memo.view_scope` / `view_derived` ne gardent que dans le scope ouvert par le cockpit (clé : date, ctime, taille, inode ; rien de gardé sous 2 s, ni sous Windows) ; le gate d'une transition, la reprise d'un run et toute écriture relisent toujours le fichier (#1243) (#1383)
+- fix(cockpit): un message tapé pendant que l'orchestrateur reprend sa conversation attend la fin du démarrage de l'agent au lieu d'être refusé à tort (« un tour est déjà en cours »), et la palette de commandes garde l'entrée choisie aux flèches quand projets, tâches ou fichiers arrivent et redessinent la liste (#1386) (#1387)
+- fix(cockpit): la flotte en direct ne lit que des journaux ordinaires — un journal de session, de sous-agent ou une méta qui est un lien symbolique, un tube nommé ou un périphérique n'est plus ouvert (ni suivi, ni bloquant), un dossier de session ou `subagents/` lien n'est pas parcouru, un journal illisible ne fait plus échouer la route ; `totals.ignored` compte les journaux ignorés ; ouverture factorisée dans `grimoire.core.regular_file` (#1385)
+
 ## [3.111.0] - 2026-11-25
 
 - fix(cockpit): les deux serveurs (`grimoire cockpit serve`, `grimoire serve`) envoient `Content-Security-Policy`, `X-Content-Type-Options: nosniff` et `Referrer-Policy: no-referrer` sur toute page HTML ; la coque `workspace/` n'a plus rien d'en ligne (script de thème dans `theme-boot.js`, relais `fetch` servi en fichier, feuilles des modules en `.css`, classes à la place des `style=`) et reçoit une politique stricte sans `'unsafe-inline'` ; les pages historiques et vitrine, qui gardent des scripts et styles en ligne, reçoivent un nonce par réponse ; un dossier sans `index.html` n'est plus listé (Closes #1366) (#1374)
