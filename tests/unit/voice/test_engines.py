@@ -80,7 +80,7 @@ def fake_engines(fake_module, isolated_registry) -> tuple[EngineSpec, EngineSpec
 
 def test_registry_lists_the_three_engine_families() -> None:
     assert engines.engine_names("stt") == ["browser", "faster-whisper"]
-    assert engines.engine_names("tts") == ["browser", "pocket-tts"]
+    assert engines.engine_names("tts") == ["browser", "pocket-tts", "qwen3-tts-clone"]
     assert get_spec("stt", "faster-whisper").modules == ("faster_whisper",)
     assert get_spec("tts", "pocket-tts").modules == ("pocket_tts",)
     assert get_spec("tts", "browser").modules == ()
