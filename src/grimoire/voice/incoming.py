@@ -13,8 +13,8 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import secrets
 import stat
-import tempfile
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -26,6 +26,9 @@ PREFIX = "grimoire-stt-"
 SUFFIX = ".wav"
 _NAME = re.compile(rf"{re.escape(PREFIX)}[A-Za-z0-9_]+{re.escape(SUFFIX)}")
 _IGNORE_ALL = "# Enregistrements vocaux entrants, éphémères : jamais versionnés.\n*\n"
+_UNWRITABLE = "transcription impossible : dossier vocal non inscriptible"
+#: Création ou troncature, jamais à travers un lien symbolique (O_NOFOLLOW, absent sous Windows).
+_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
 
 
 def _refuse_links(root: Path, path: Path) -> None:
@@ -44,6 +47,8 @@ def incoming_dir(root: Path) -> Path:
     _refuse_links(root, path)
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     _refuse_links(root, path)  # créé entre-temps par un autre
+    with contextlib.suppress(OSError):  # au mieux : un dossier déjà là, créé plus ouvert, se referme
+        path.chmod(0o700)
     ignore = path / ".gitignore"
     if not ignore.exists() and not ignore.is_symlink():
         with contextlib.suppress(OSError):
@@ -78,12 +83,26 @@ def purge(root: Path, ttl_s: float, *, clock: Callable[[], float] = time.time) -
 
 @contextlib.contextmanager
 def recording(root: Path, data: bytes) -> Iterator[Path]:
-    """Écrit ``data`` dans un fichier 0600 du dossier entrant, le rend, puis le supprime quoi qu'il arrive."""
-    fd, name = tempfile.mkstemp(prefix=PREFIX, suffix=SUFFIX, dir=incoming_dir(root))
-    path = Path(name)
+    """Écrit ``data`` dans un fichier 0600 du dossier entrant, le rend, puis le supprime quoi qu'il arrive.
+
+    Pas d'écriture atomique (le fichier est éphémère, jamais remplacé) : un nom aléatoire de 128 bits dans un
+    dossier 0700, ouvert sans suivre de lien (``O_NOFOLLOW``), mis en 0600 par ``fchmod`` quoi qu'il existât.
+    Un dossier non inscriptible devient un refus lisible.
+    """
     try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
+        folder = incoming_dir(root)
+    except OSError:
+        raise ValueError(_UNWRITABLE) from None
+    path = folder / f"{PREFIX}{secrets.token_hex(16)}{SUFFIX}"
+    try:
+        try:
+            fd = os.open(path, _OPEN_FLAGS, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                if hasattr(os, "fchmod"):
+                    os.fchmod(handle.fileno(), 0o600)
+                handle.write(data)
+        except OSError:
+            raise ValueError(_UNWRITABLE) from None
         yield path
     finally:
         path.unlink(missing_ok=True)

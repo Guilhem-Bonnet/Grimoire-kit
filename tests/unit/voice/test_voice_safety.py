@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import struct
 import tempfile
 import threading
@@ -826,3 +827,38 @@ def test_safety_template_program_name(command: Any, said: str) -> None:
 def test_safety_template_file_extension(path: str, said: str) -> None:
     text = permission_spoken({"kind": "edit", "locations": [{"path": path}]})
     assert text == f"{SCREEN_FIRST} Permission demandée : modifier un fichier, sur {said}. {SCREEN_ONLY}"
+
+
+# ── dossier vocal : refermé, et refus lisible s'il est non inscriptible ───────
+
+
+def test_safety_existing_incoming_dir_is_closed_to_0700(stt_project: Path) -> None:
+    folder = stt_project / INCOMING_RELPATH
+    folder.mkdir(parents=True, mode=0o755)
+    folder.chmod(0o755)
+    stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
+    if hasattr(os, "fchmod"):
+        assert folder.stat().st_mode & 0o777 == 0o700
+
+
+def test_safety_unwritable_incoming_dir_is_a_readable_refusal(stt_project: Path) -> None:
+    (stt_project / INCOMING_RELPATH).parent.parent.mkdir(parents=True)
+    (stt_project / INCOMING_RELPATH).parent.write_text("pas un dossier", encoding="utf-8")
+    with pytest.raises(ValueError, match="dossier vocal non inscriptible"):
+        stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
+    assert FailingSTT.seen == []
+
+
+def test_safety_failed_write_is_a_readable_refusal_and_leaves_nothing(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import incoming
+
+    def refuse(*_a: Any, **_k: Any) -> int:
+        raise PermissionError("refusé")
+
+    monkeypatch.setattr(incoming.os, "open", refuse)
+    with pytest.raises(ValueError, match="dossier vocal non inscriptible"):
+        stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
+    assert FailingSTT.seen == []
+    assert not [p for p in (stt_project / INCOMING_RELPATH).iterdir() if p.suffix == ".wav"]
