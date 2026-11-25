@@ -102,3 +102,15 @@ def test_unreadable_file_gives_defaults_and_a_reason(tmp_path: Path) -> None:
     s = load_voice_settings(tmp_path)
     assert s.mode == "text"
     assert s.problems and "illisible" in s.problems[0]
+
+
+def test_interaction_given_as_a_string_is_reported() -> None:
+    s = settings_from_mapping({"interaction": "voice"})
+    assert s.mode == "text"
+    assert len(s.problems) == 1 and "interaction" in s.problems[0] and "table" in s.problems[0]
+
+
+@pytest.mark.parametrize("kind", ["stt", "tts"])
+def test_unknown_engine_is_reported(kind: str) -> None:
+    s = settings_from_mapping({"voice": {kind: "qwen9"}})
+    assert len(s.problems) == 1 and f"voice.{kind}" in s.problems[0] and "inconnu" in s.problems[0]

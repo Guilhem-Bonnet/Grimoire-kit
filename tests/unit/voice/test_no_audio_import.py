@@ -49,7 +49,7 @@ from grimoire.voice.engines import VoiceEngines
 from grimoire.voice.settings import settings_from_mapping
 
 results = []
-apply_voice_check({"interaction": {"mode": "voice"}}, results, fmt="json", console=Console(quiet=True))
+apply_voice_check({"interaction": {"mode": "voice"}, "voice": {"allow_download": True}}, results, fmt="json", console=Console(quiet=True))
 VoiceEngines.from_settings(settings_from_mapping({"interaction": {"mode": "voice"}}))
 
 print(json.dumps({

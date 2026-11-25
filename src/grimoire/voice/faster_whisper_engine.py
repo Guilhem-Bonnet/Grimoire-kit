@@ -7,7 +7,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from grimoire.voice.engines import EngineUnavailableError, SpeechToText, Transcript
+from grimoire.voice._offline import is_cache_miss
+from grimoire.voice.engines import EngineUnavailableError, SpeechToText, Transcript, _one_line
 
 DEFAULT_MODEL = "small"
 
@@ -38,10 +39,12 @@ class FasterWhisperSpeechToText(SpeechToText):
         except Exception as exc:
             if allow_download:
                 raise
-            raise EngineUnavailableError(
-                f"modèle Whisper « {model} » introuvable dans le cache local, et rien n'est téléchargé sans "
-                f"votre accord (voice.allow_download: true) — {type(exc).__name__}"
-            ) from None
+            if is_cache_miss(exc):
+                raise EngineUnavailableError(
+                    f"modèle Whisper « {model} » introuvable dans le cache local, et rien n'est téléchargé sans "
+                    f"votre accord (voice.allow_download: true) — {type(exc).__name__}"
+                ) from None
+            raise EngineUnavailableError(f"Whisper « {model} » n'a pas pu se charger ({_one_line(exc)})") from None
 
     def transcribe(
         self,
@@ -65,3 +68,42 @@ class FasterWhisperSpeechToText(SpeechToText):
 
     def close(self) -> None:
         self._model = None
+
+
+_SYSTRAN_SIZES = frozenset(
+    {
+        "tiny",
+        "tiny.en",
+        "base",
+        "base.en",
+        "small",
+        "small.en",
+        "medium",
+        "medium.en",
+        "large-v1",
+        "large-v2",
+        "large-v3",
+    }
+)
+
+
+def model_cached(options: dict[str, Any]) -> bool | None:
+    """Le modèle choisi est-il dans le cache local ? Ne charge ni faster-whisper ni le modèle.
+
+    ``None`` : on ne sait pas (nom de modèle hors des tailles connues, huggingface_hub absent).
+    """
+    model = str(options.get("model", DEFAULT_MODEL))
+    if Path(model).is_dir():
+        return True
+    repo = model if "/" in model else (f"Systran/faster-whisper-{model}" if model in _SYSTRAN_SIZES else None)
+    if repo is None:
+        return None
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        return None
+    try:
+        snapshot_download(repo, local_files_only=True)
+    except Exception as exc:
+        return False if is_cache_miss(exc) else None
+    return True

@@ -1,43 +1,29 @@
-"""Garde « pas de téléchargement » autour du chargement d'un modèle Hugging Face.
+"""Distinguer « absent du cache local » des autres pannes de chargement.
 
-faster-whisper prend ``local_files_only`` ; pocket-tts non, il appelle
-``hf_hub_download`` directement. ``huggingface_hub`` relit
-``constants.HF_HUB_OFFLINE`` à chaque requête (1.x) : le basculer le temps du
-chargement suffit, le cache local reste servi, toute requête réseau échoue.
-La variable d'environnement couvre un ``huggingface_hub`` pas encore importé.
+Aucun état global n'est basculé ici : ``HF_HUB_OFFLINE`` est partagé par tout le
+processus (le modèle d'embedding de la mémoire s'en sert aussi), et aucun verrou ne
+l'isole des autres threads. L'absence du cache se prouve donc avant le chargement
+(``local_files_only`` pour faster-whisper, contrôle du cache pour pocket-tts), et
+se reconnaît après coup à l'exception précise de huggingface_hub.
 """
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator
-from contextlib import contextmanager
-from typing import Any
-
-_ENV = "HF_HUB_OFFLINE"
+#: Seules exceptions de huggingface_hub qui disent « pas dans le cache local, et pas de réseau ».
+_CACHE_MISS = frozenset({"LocalEntryNotFoundError", "OfflineModeIsEnabled"})
 
 
-@contextmanager
-def hub_offline(enabled: bool = True) -> Iterator[None]:
-    if not enabled:
-        yield
-        return
-    previous_env = os.environ.get(_ENV)
-    os.environ[_ENV] = "1"
-    hub: Any = None
-    try:
-        from huggingface_hub import constants as hub
-    except ImportError:  # pas de huggingface_hub : rien ne téléchargera par lui
-        hub = None
-    previous_flag = getattr(hub, "HF_HUB_OFFLINE", None)
-    if hub is not None:
-        hub.HF_HUB_OFFLINE = True
-    try:
-        yield
-    finally:
-        if hub is not None:
-            hub.HF_HUB_OFFLINE = previous_flag
-        if previous_env is None:
-            os.environ.pop(_ENV, None)
-        else:
-            os.environ[_ENV] = previous_env
+def is_cache_miss(exc: BaseException) -> bool:
+    """Vrai quand ``exc`` est une absence du cache local, ou en a été levée explicitement (``raise … from``).
+
+    ``__context__`` est ignoré : une autre panne survenue dans un ``except`` n'est pas une absence du cache.
+    Ni ``FileNotFoundError`` (fichier local), ni ``RepositoryNotFoundError`` (dépôt inexistant, même en ligne).
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if any(cls.__name__ in _CACHE_MISS for cls in type(current).__mro__):
+            return True
+        current = current.__cause__
+    return False

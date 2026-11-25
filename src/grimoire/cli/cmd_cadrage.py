@@ -239,6 +239,9 @@ def cadrage_interview(
     path: Path = _path_opt,
     chantier: str | None = _chantier_opt,
     depth: str | None = typer.Option(None, "--depth", help="Force la profondeur : express, standard ou approfondi."),
+    kind: str | None = typer.Option(
+        None, "--kind", help="Nature de la demande (sinon celle que l'intake propose) : incident, anomalie, question…"
+    ),
     output: str = typer.Option("", "--output", "-o", help="text ou json (remplace le --output global)."),
 ) -> None:
     """Rend le plan d'entretien : les sept angles, leur état, la profondeur et les questions d'amorce."""
@@ -249,7 +252,7 @@ def cadrage_interview(
     from grimoire.core.cadrage_interview import interview_plan
 
     root = path.resolve()
-    plan = _guard(lambda: interview_plan(root, chantier, depth=depth))
+    plan = _guard(lambda: interview_plan(root, chantier, depth=depth, kind=kind))
     if (output or str((ctx.obj or {}).get("output", "text"))) == "json":
         typer.echo(json.dumps(plan, indent=2, ensure_ascii=False))
         return
@@ -257,6 +260,15 @@ def cadrage_interview(
         f"[bold]Entretien de cadrage[/bold] — profondeur [cyan]{plan['depth']}[/cyan] "
         f"({plan['depth_source']}), {plan['questions_per_angle']} question(s) par angle"
     )
+    if plan.get("kind"):
+        console.print(f"Nature : [cyan]{plan['kind_label']}[/cyan] ({plan['kind_source']}) — corrigez avec --kind")
+        console.print(f"  livrable : {plan['deliverable']} ; recette MOA : {plan['acceptance']}")
+        for q in plan["kind_questions"]:
+            console.print(f"  ? {q}")
+    if plan.get("note"):
+        console.print(f"[dim]{plan['note']}[/dim]")
+    if plan.get("deferred"):
+        console.print(f"[yellow]{plan['deferred']}[/yellow]")
     for a in plan["angles"]:
         style = {"couvert": "green", "ecarte": "dim"}.get(a["state"], "yellow")
         req = "obligatoire" if a["required"] else "facultatif"
