@@ -26,6 +26,7 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
@@ -639,10 +640,15 @@ def _run_wizard(
     project_name = Prompt.ask("  [bold]Project name[/bold]", default=target.name)
     git_name = _git_user_name()
     user_name = Prompt.ask("  [bold]Your name[/bold]", default=git_name or "Developer")
+    from grimoire.core.config import moa_name_problem
+
     moa = Prompt.ask(
         "  [bold]Who owns the need (MOA — the human who validates requirements and signs off)?[/bold]",
         default=user_name,
     ).strip()
+    while moa and moa_name_problem(moa):  # un bot ou un compte de service n'est jamais MOA (#1342)
+        console.print(f"  [yellow]{escape(moa_name_problem(moa))}[/yellow]")
+        moa = Prompt.ask("  [bold]MOA (a human's name, empty to skip)[/bold]", default="").strip()
 
     # ── Step 2/5 · Preferences ────────────────────────────────────────
     console.print()
@@ -1228,9 +1234,11 @@ def run_init(
     project_name = name or target.name
     git_name = _git_user_name()
     user_name = git_name or "Developer"
-    # MOA (#1342) : sans question possible, le nom git est le seul humain connu ; sans lui, la section
-    # reste absente et `grimoire doctor` avertit plutôt que d'inventer un nom.
+    # MOA (#1342) : sans question possible, le nom git est le seul humain connu ; sans lui (ou si c'est un bot),
+    # la section reste absente et `grimoire doctor` avertit plutôt que d'inventer un nom. Deviné, il n'est pas
+    # confirmé : la section est écrite avec le gate d'exigence en `warn` (M3), jamais `block`.
     moa = git_name
+    moa_confirmed = False
     language = "Français"
     skill_level = "intermediate"
     offline = False
@@ -1262,6 +1270,7 @@ def run_init(
         project_name = wizard_result["project_name"]
         user_name = wizard_result["user_name"]
         moa = str(wizard_result.get("moa", ""))
+        moa_confirmed = bool(moa)  # un humain l'a saisie ou acceptée à l'écran
         language = wizard_result["language"]
         skill_level = wizard_result["skill_level"]
         offline = bool(wizard_result.get("offline", False))
@@ -1322,8 +1331,17 @@ def run_init(
         profile=memory_profile,
         collection_prefix=collection_prefix,
         moa=moa,
+        moa_confirmed=moa_confirmed,
     )
     plan = scaffolder.plan()
+    if moa and not moa_confirmed and not dry_run and fmt != "json":
+        from grimoire.core.config import moa_name_problem
+
+        if not moa_name_problem(moa):
+            console.print(
+                f"[yellow]MOA déduite du nom git : {escape(moa)}, non confirmée[/yellow] — le gate d'exigence reste "
+                "en `warn` ; vérifiez `governance.roles.moa` puis passez `governance.requirement_gate` à `block`."
+            )
 
     # Dry-run — show plan and exit
     if dry_run:

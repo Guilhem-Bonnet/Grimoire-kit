@@ -547,9 +547,19 @@ def _validate_governance(section: Any, errors: list[ValidationError]) -> None:
     if not isinstance(section, dict):
         errors.append(ValidationError(path="governance", message="'governance' must be a mapping."))
         return
+    from grimoire.core.config import REQUIREMENT_GATE_MODES, moa_name_problem
+
+    gate = section.get("requirement_gate")
+    if gate is not None and gate not in REQUIREMENT_GATE_MODES:
+        errors.append(ValidationError(
+            path="governance.requirement_gate",
+            message=f"'governance.requirement_gate' must be one of {', '.join(REQUIREMENT_GATE_MODES)}.",
+            suggestion="requirement_gate: warn",
+        ))
+    known = frozenset({"roles", "requirement_gate"})
     roles = section.get("roles")
     if roles is None:
-        _check_unknown_keys(section, frozenset({"roles"}), "governance", errors)
+        _check_unknown_keys(section, known, "governance", errors)
         return
     if not isinstance(roles, dict):
         errors.append(ValidationError(path="governance.roles", message="'governance.roles' must be a mapping."))
@@ -568,8 +578,10 @@ def _validate_governance(section: Any, errors: list[ValidationError]) -> None:
             errors.append(ValidationError(path=path, message=f"'{path}' must be a string (a name)."))
         elif not value.strip():
             errors.append(ValidationError(path=path, message=f"'{path}' must not be empty."))
+        elif role == "moa" and (problem := moa_name_problem(value)):
+            errors.append(ValidationError(path=path, message=f"'{path}' {problem}."))
     _check_unknown_keys(roles, frozenset({"moa", "moe"}), "governance.roles", errors)
-    _check_unknown_keys(section, frozenset({"roles"}), "governance", errors)
+    _check_unknown_keys(section, known, "governance", errors)
 
 
 def _validate_hosts(section: Any, errors: list[ValidationError]) -> None:

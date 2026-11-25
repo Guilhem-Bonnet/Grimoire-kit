@@ -24,6 +24,7 @@ from grimoire.__version__ import __version__ as _grimoire_version
 from grimoire.archetypes import bundled_path as archetypes_path
 from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
+from grimoire.core.config import governance_block as _governance_block
 from grimoire.core.expertises import _safe_skill_source
 from grimoire.core.scanner import ScanResult
 from grimoire.core.stack_skills import detected_stack_skill_slugs
@@ -262,14 +263,6 @@ $governance_block
 installed_archetypes: [$archetype_list]
 """
 
-def _governance_block(moa: str) -> str:
-    """La section ``governance.roles`` (#1342) ; vide quand aucune MOA n'est nommée : le doctor avertira."""
-    if not moa:
-        return ""
-    quoted = json.dumps(moa, ensure_ascii=False)
-    return f"\ngovernance:\n  roles:\n    moa: {quoted}\n    moe: \"orchestrateur\"\n"
-
-
 _MEMORY_CONFIG_TPL = """\
 # Grimoire Memory Configuration — auto-generated
 user_name: "$user_name"
@@ -445,9 +438,9 @@ class ProjectScaffolder:
         force: bool = False,
         profile: str = "",
         collection_prefix: str = "",
-        moa: str = "",
+        moa: str = "", moa_confirmed: bool = False,
     ) -> None:
-        self._moa = moa.strip()
+        self._moa, self._moa_confirmed = moa.strip(), moa_confirmed
         self._offline = offline
         self._profile = profile
         self._target = target.resolve()
@@ -658,7 +651,7 @@ class ProjectScaffolder:
             "archetype": ", ".join(archetypes),
             "archetype_list": archetype_list,
             "hosts_enabled_list": hosts_enabled_list,
-            "governance_block": _governance_block(self._moa),
+            "governance_block": _governance_block(self._moa, confirmed=self._moa_confirmed),
             "backend": self._backend,
             "memory_extra": memory_extra,
             "memory_layers": memory_layers,

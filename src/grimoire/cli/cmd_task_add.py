@@ -69,6 +69,20 @@ def task_add(
             help="Classe des données que la tâche fait lire. Sans option, `routing.default_data_class` du registre ; sans les deux, aucun fournisseur externe (#1133).",
         ),
     ] = "",
+    requirement: Annotated[
+        str,
+        typer.Option(
+            "--requirement",
+            help="L'exigence que la tâche sert (REQ-001, ou <chantier>/REQ-001) : le gate `ready` exige qu'elle soit validée par la MOA (#1342).",
+        ),
+    ] = "",
+    nature: Annotated[
+        str,
+        typer.Option(
+            "--nature",
+            help="Nature de la demande (anomalie, incident, question…) ; `question` et `incident` sont exemptées du gate d'exigence (#1342).",
+        ),
+    ] = "",
     intake: Annotated[
         str,
         typer.Option(
@@ -140,6 +154,7 @@ def task_add(
             expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
             checks=checks, files=tuple(files or ()), test_depth=test_depth,
             description=description, finition=finition, data_class=data_class,
+            requirement=requirement, nature=nature,
         )
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
