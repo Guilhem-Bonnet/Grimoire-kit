@@ -49,7 +49,7 @@ def _own_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(home))
     for name in _AGENT_ENVS:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(rg, "_confirm_human_turn", lambda: True)
+    monkeypatch.setattr(rg, "_confirm_human_turn", lambda *_: True)
 
 
 def _project(

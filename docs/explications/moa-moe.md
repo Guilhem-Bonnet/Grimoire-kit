@@ -11,6 +11,16 @@ Grimoire sépare deux rôles, avec les mots du métier du bâtiment et de l'info
 | **MOA**, maîtrise d'ouvrage | un humain | porte le besoin, valide les exigences, prononce la recette |
 | **MOE**, maîtrise d'œuvre | l'orchestrateur et ses workers | conçoit, réalise, apporte les preuves |
 
+## Le parcours complet
+
+1. **Entretien** : l'orchestrateur conduit l'entretien de cadrage (`grimoire cadrage interview`), proportionné à la nature de la demande, et consigne réponses et hypothèses.
+2. **Exigences** : il en tire des exigences `REQ-001` dans `04-exigences.md` ou `05-cahier-des-charges.md`. Il les propose, il ne les valide pas.
+3. **Validation** : la MOA valide chaque exigence depuis son terminal (`grimoire cadrage approve`), scellée avec l'empreinte du texte.
+4. **Tâches** : `grimoire cadrage plan` ou `task add --requirement` rattache chaque tâche à l'exigence qu'elle sert ; le gate `ready` vérifie que l'exigence est validée.
+5. **Recette** : une fois les tâches livrées, la MOA prononce la recette contre l'exigence (`grimoire cadrage recette`), pas contre les critères que l'agent s'est donnés. Les écarts repartent en MOE sous forme de tâches.
+
+`grimoire cadrage status` montre où en est chaque exigence : proposée, validée, livrée en attente de recette, recettée, recettée avec réserve, non conforme.
+
 ## Pourquoi les déclarer
 
 Une tâche livrée par des agents reste la décision de quelqu'un. Écrire le nom de la MOA dans le projet dit à qui revient la validation des exigences et la recette, et évite qu'un agent les prononce à sa place.
@@ -68,6 +78,48 @@ Limites connues :
 
 - le gate passe par le service des tâches ; les adaptateurs qui transitent sans lui (task-flow, unification, pont A2A) ne sont rattrapés qu'à l'admission et au claim, en mode `block` ;
 - une exigence d'un chantier qui n'est lié à aucune mission peut être citée par n'importe quelle tâche.
+
+## La recette
+
+L'agent écrit les critères d'une tâche puis les vérifie : il est juge et partie. La recette l'en sort : elle porte sur le **besoin**, l'exigence que la MOA a validée.
+
+```bash
+grimoire cadrage recette REQ-001                     # présentation seule
+grimoire cadrage recette REQ-001 --json              # la même, en JSON (lecture, jamais de verdict)
+grimoire cadrage recette REQ-001 --verdict conforme
+grimoire cadrage recette REQ-001 --verdict conforme-avec-reserve --reserve "libellé du bouton à revoir"
+grimoire cadrage recette REQ-001 --verdict non-conforme --motif "le lien n'expire pas"
+```
+
+La commande présente l'exigence validée et ses critères, le critère de recette fixé par la nature de la demande (une anomalie : « le cas ne se reproduit plus » ; une migration : « bascule faite, retour arrière prouvé »…), puis chaque tâche rattachée avec son état et ses preuves : dernier verdict et pack de preuve, PR fusionnée. Ces preuves sont étiquetées « déclaré par la MOE, non vérifié par le kit » (champ `source` en JSON). Les textes venus du ledger, du cadrage ou de la saisie sont débarrassés de leurs caractères de contrôle (séquences d'échappement, contrôles bidirectionnels) avant d'être affichés ou scellés. La nature est celle des tâches si elles s'accordent, sinon celle de l'entretien de cadrage ; sans nature déclarée, la MOA recette l'exigence telle qu'elle l'a validée.
+
+Le verdict passe par les mêmes contrôles que la validation, par le même code : refus d'emblée pour une session d'agent, l'orchestrateur ou une exécution sans humain, puis terminal interactif et « oui » à l'écran. Il est refusé aussi quand :
+
+- l'exigence n'est pas validée, ou son texte a changé depuis la validation ;
+- une tâche qui la sert reste ouverte : la commande la nomme, il n'y a pas de recette partielle ; une tâche annulée ne sert plus l'exigence ;
+- aucune tâche livrée ne la sert.
+
+Le verdict s'inscrit au journal d'autorité avec le projet, le chantier, l'exigence, l'empreinte de son texte, le verdict, le motif et les tâches jugées. Puis :
+
+| Verdict | Effet | État de l'exigence |
+|---|---|---|
+| `conforme` | aucun | recettée |
+| `conforme-avec-reserve` (réserve obligatoire) | une tâche `proposed` pour la réserve, rattachée à l'exigence | recettée avec réserve, tant que la réserve est en cours |
+| `non-conforme` (motif obligatoire) | une tâche MOE `proposed`, rattachée à l'exigence, le motif pour critère d'acceptation | non conforme, tant que la reprise est en cours |
+
+Une tâche close ne se rouvre pas : la reprise est une tâche nouvelle qui cite celles qu'elle reprend. Cette tâche de suite cite l'exigence déjà validée : elle peut passer `ready` sans nouvelle validation. Si le motif ou la réserve change le périmètre, la MOA fait évoluer l'exigence elle-même, ce qui change son empreinte et redemande une validation. Si la tâche de suite n'a pas pu être créée, la commande donne la ligne `grimoire task add … --requirement <exigence>` à lancer, et `grimoire cadrage status` signale l'exigence comme « suite à créer ».
+
+Une tâche rattachée après un verdict `conforme` ne fait pas oublier la recette : l'exigence s'affiche « recettée, nouvelle tâche en cours », puis revient en attente de recette quand cette tâche est livrée. Quand elle est livrée, l'exigence revient « livrée, en attente de recette » et la MOA recette de nouveau : une exigence n'est recettée qu'à `conforme`. Une tâche livrée après le dernier verdict remet de même l'exigence en attente.
+
+Comme pour la validation, seul le sceau compte : une ligne écrite au ledger ou un statut ajouté dans un fichier du cadrage ne vaut pas recette. Modifier l'exigence après coup retire validation et recette ; une fois l'exigence revalidée, l'ancienne recette ne vaut pas pour le nouveau texte.
+
+Le cockpit liste, dans « À décider », les exigences livrées en attente de recette. Il lit le mode du gate avant tout : un projet sans MOA déclarée ne paie ni la lecture du ledger ni celle du journal.
+
+Limites, les mêmes que pour la validation :
+
+- les contrôles d'origine lisent l'environnement et le terminal du processus ; un programme du même compte qui efface ces signaux, ou qui écrit lui-même au journal d'autorité, peut forger un verdict ; seule la garde de zone de l'hôte l'en empêche ;
+- les preuves affichées viennent du ledger et du registre de preuves du projet, que le worker écrit : elles informent la MOA, elles ne jugent pas à sa place ;
+- si la tâche de suite ne peut pas être créée après le verdict, le verdict reste scellé et la commande le dit (code de sortie 1) : la tâche est à ouvrir à la main.
 
 ## Ce que vérifie `grimoire doctor`
 
