@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.108.0] - 2026-11-25
+
+- fix(cockpit): le rendu Markdown du cockpit n'acceptait que par omission les schémas d'URL actifs dans les liens ; seuls http, https, mailto et les cibles sans schéma restent des liens, le reste n'affiche que le texte (aussi pour les liens de PR et de CI de Fils et Revue) (#1367)
+- feat(cadrage): `grimoire cadrage approve <exigence>` — la MOA valide une exigence depuis son terminal, validation scellée au journal d'autorité avec l'empreinte du texte ; `task add --requirement` et `--nature` (repris par `cadrage plan`), gate `proposed → ready` sur l'exigence validée, bloquant si `governance.requirement_gate: block`, signalé sinon (question et incident exemptés) ; MOA bot ou multi-ligne refusée, `init -y` laisse le gate en `warn`, section governance mal formée visible dans `doctor` (Refs #1342) (#1362)
+
 ## [3.107.0] - 2026-11-25
 
 - feat(agents): skill livré `grimoire-cadrage` (posé par `grimoire up` pour Claude Code, Copilot et les autres hôtes à skills) : l'orchestrateur mène l'entretien de cadrage (une question à la fois, réponses consignées, challenge, arrêt quand les angles obligatoires sont couverts) sans jamais valider à la place de la MOA ; la persona d'entrée y renvoie (Refs #1342) (#1361)
