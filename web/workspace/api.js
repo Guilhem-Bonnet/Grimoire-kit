@@ -290,6 +290,7 @@ export const api = {
   voiceConfig: () => get(WS + 'voice/config'),
   // Lot V3 : le message parlé de l'orchestrateur. La synthèse n'a lieu qu'à la lecture (`play`).
   voiceOutbox: () => get(WS + 'voice/outbox'),
+  voiceInterview: () => get(WS + 'voice/interview'),
   voiceOutboxPlay: (id) => post(WS + 'voice/outbox/play', { id, ...projectBody() }),
   voiceTranscribe: (audio) => post(WS + 'voice/transcribe', { audio, ...projectBody() }),
   // ACP4 : le geste du pilote automatique. Un bouton que la personne clique, avec la clé de contrôle

@@ -164,6 +164,7 @@ class Conversation:
         self._pilot_polled = float("-inf")
         self._turn_text: list[str] = []
         self._spoken_token: str | None = None  # jeton du message parlé du tour en cours, un par tour
+        self._interview: str | None = None  # chantier dont l'entretien de cadrage est en cours pour ce tour (lot V4)
 
     # ── journal ──────────────────────────────────────────────────────────
 
@@ -384,9 +385,30 @@ class Conversation:
         for key, row in current.items():
             if key not in self._pilot_open:
                 self._emit({"type": "question", **row})
+                self._voice_question(row)
         for key in self._pilot_open.keys() - current.keys():
             self._emit({"type": "question_resolved", "task_id": key[0], "question_id": key[1]})
+            self._voice_resolved(key)
         self._pilot_open = current
+
+    def _voice_question(self, row: dict[str, Any]) -> None:
+        """En mode vocal, la question à options devient un message vocal bref marqué question (lot V4)."""
+        from grimoire.voice import outbox_service
+
+        try:
+            message = outbox_service.record_pilot_question(self.root, row)
+        except Exception:  # le vocal est un confort : il ne casse jamais le fil
+            return
+        if message is not None:
+            self._emit_voice([message])
+
+    def _voice_resolved(self, key: tuple[str, str]) -> None:
+        from grimoire.voice import outbox_service
+
+        try:
+            self._emit_voice(outbox_service.resolve_pilot_question(self.root, *key))
+        except Exception:
+            return
 
     def pilot_opening(self) -> list[dict[str, Any]]:
         """Ce qu'une page qui s'ouvre doit voir de la part du pilote : le résumé, puis les questions encore posées."""
@@ -477,17 +499,32 @@ class Conversation:
 
         settings = load_voice_settings(self.root)
         self._spoken_token = new_spoken_token() if settings.enabled else None
+        self._interview = None
         if self._spoken_token is None:
             return text
-        return f"{text}\n\n{spoken_instruction(settings.spoken_max_s, self._spoken_token)}"
+        from grimoire.voice import outbox_service
+        from grimoire.voice.interview import open_interview
+
+        self._interview = open_interview(self.root)  # entretien de cadrage en cours : une question par message
+        if self._interview is not None:  # la personne vient de répondre aux questions de l'entretien
+            self._emit_voice(outbox_service.settle_interview_questions(self.root))
+        return f"{text}\n\n{spoken_instruction(settings.spoken_max_s, self._spoken_token, self._interview)}"
+
+    def _emit_voice(self, messages: list[dict[str, Any]]) -> None:
+        for message in messages:
+            self._emit({"type": "voice_message", "message": message})
 
     def _record_spoken(self, reply: str) -> None:
         """Dépose le message parlé de la réponse dans la boîte d'envoi vocale ; le fil reçoit l'événement."""
         from grimoire.voice import outbox_service
 
         token, self._spoken_token = self._spoken_token, None  # jamais réutilisé
+        interview, self._interview = self._interview, None
         try:
-            message = outbox_service.record_reply(self.root, reply, token)
+            if interview is not None:
+                message = outbox_service.record_reply(self.root, reply, token, interview=True)
+            else:
+                message = outbox_service.record_reply(self.root, reply, token)
         except Exception:  # le vocal est un confort : il ne casse jamais un tour
             return
         if message is not None:
