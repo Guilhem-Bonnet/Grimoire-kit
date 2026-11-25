@@ -522,12 +522,13 @@ export function createChat({ readOnly = () => false } = {}) {
   async function submit() {
     const text = input.value.trim();
     if (!text || busy || readOnly()) return;
-    input.value = '';
     const answering = target;
-    const dictation = voice.consumeDictation();
+    const dictation = voice.dictationPending(text); // consommée après un envoi réussi seulement
+    input.value = '';
     if (answering) {
       try {
         await api.chatSend(text, { task_id: answering.task_id, question_id: answering.question_id }, { dictation });
+        voice.commitDictation();
         answering.state.textContent = 'Réponse transmise : tranchée par vous.';
         setTarget(null);
       } catch (error) {
@@ -539,6 +540,7 @@ export function createChat({ readOnly = () => false } = {}) {
     setBusy(true);
     try {
       await api.chatSend(text, null, { dictation });
+      voice.commitDictation();
     } catch (error) {
       setBusy(false);
       input.value = text;

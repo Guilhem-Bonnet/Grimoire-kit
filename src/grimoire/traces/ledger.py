@@ -21,6 +21,7 @@ from typing import Any
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import locked
 from grimoire.costs import Cost
+from grimoire.traces.blockcount import count_occurrences
 from grimoire.traces.intervals import ratio_interval95, wilson_interval95
 from grimoire.traces.otel_conventions import (
     ATTR_AGENT_NAME,
@@ -802,8 +803,7 @@ class TraceLedger:
         if not self._traces_path.exists():
             return f"TRC-{run_id}-001"
         needle = f'"run_id": {json.dumps(run_id, ensure_ascii=False)}'.encode()
-        count = self._traces_path.read_bytes().count(needle)
-        return f"TRC-{run_id}-{count + 1:03d}"
+        return f"TRC-{run_id}-{count_occurrences(self._traces_path, needle) + 1:03d}"
 
     # ── Public write API ───────────────────────────────────────────────────
 

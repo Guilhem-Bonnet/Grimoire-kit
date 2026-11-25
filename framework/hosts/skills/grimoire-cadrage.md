@@ -7,7 +7,8 @@ tools: ["read", "execute"]
 
 L'orchestrateur est l'interlocuteur : il fait émerger le besoin, le challenge,
 puis le met en exigences. Il propose et rédige ; la MOA (l'humain qui porte le
-besoin) valide. Voir `docs/explications/moa-moe.md`.
+besoin) valide. Voir `docs/explications/moa-moe.md`, et le guide de bout en bout
+`docs/guides/du-besoin-a-la-recette.md`.
 
 ## Quand mener l'entretien
 

@@ -474,3 +474,87 @@ def test_interview_states_list_only_safe_chantier_names(project: Path) -> None:
         (base / name).mkdir()
         (base / name / "entretien.json").write_text(payload, encoding="utf-8")
     assert [r["chantier"] for r in cadrage_interview.interview_states(project)] == ["principal", "ok-1"]
+
+
+# ── V5 : une dictée ne tranche jamais une question réservée ; l'entretien non réservé la consigne ─────────────
+
+
+def _pilot_question(root: Path, text: str) -> tuple[str, str]:
+    from grimoire.missions.autopilot import AutopilotStore
+    from grimoire.missions.mandate import MandateRequest, MandateStore
+    from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
+    from grimoire.missions.service import TaskService
+
+    MandateStore(root).grant(
+        MandateRequest.build(("answer", "resume"), ("implementation",), 10, "+1d"), origin=ORIGIN_HUMAN, via="test"
+    )
+    AutopilotStore(root).set(True, origin=ORIGIN_HUMAN, via="test")
+    service = TaskService(root)
+    tid = service.add("Correctif", ("la PR est fusionnée",), owner="w", actor="w", ready=True).task.id
+    service.context(tid)
+    service.claim(tid, "w")
+    service.transition(tid, TaskState.RUNNING, "w")
+    service.ask(tid, text, "w")
+    row = workspace_chat_pilot.pending_questions(root)[0]
+    return row["task_id"], row["question_id"]
+
+
+def test_interview_dictated_answer_to_a_reserved_voice_question_is_refused(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice.safety import VOICE_RESERVED_ANSWER
+
+    task_id, question_id = _pilot_question(project, "Quel mot de passe utiliser pour le serveur ?")
+    row = workspace_chat_pilot.pending_questions(project)[0]
+    assert row["reserved"] is True  # la définition unique est celle de main (reserved_reason + engaging_reason)
+    events: list[dict[str, Any]] = []
+    conv = conversation(project, Agent(), events)
+    conv.pull_questions(interval=0.0)
+    box = [e["message"] for e in events if e["type"] == "voice_message"]
+    assert len(box) == 1 and box[0]["kind"] == "question" and box[0]["reserved"] is True and box[0]["options"] == []
+    with pytest.raises(ValueError, match=VOICE_RESERVED_ANSWER[:20]):
+        conv.send("utilise le coffre", None, (task_id, question_id), dictation=True)
+    assert [m["answered"] for m in outbox_service.outbox_state(project)["messages"]] == [False]  # rien n'est tranché
+    conv.send("utilise le coffre", None, (task_id, question_id))  # la saisie au clavier, elle, tranche
+    assert any(e["type"] == "voice_message" and e["message"]["answered"] for e in events)
+
+
+def test_interview_engaging_question_has_no_option_button(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    row = {
+        "task_id": "T",
+        "question_id": "q",
+        "text": "Fusionner la PR ?",
+        "options": ["Oui", "Non"],
+        "kept": "engage",
+        "reserved": True,
+        "kind": "merge",
+    }
+    monkeypatch.setattr(workspace_chat_pilot, "pending_questions", lambda _root: [row])
+    events: list[dict[str, Any]] = []
+    conversation(project, Agent(), events).pull_questions(interval=0.0)
+    message = next(e["message"] for e in events if e["type"] == "voice_message")
+    assert message["reserved"] is True and message["kind"] == "question"
+
+
+def test_interview_dictated_answer_to_an_unreserved_interview_question_is_recorded(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cadrage_interview.interview_plan(project, depth="standard", text="Un tableau de bord pour l'équipe")
+    events: list[dict[str, Any]] = []
+    agent = Agent()
+    conv = conversation(project, agent, events)
+    agent.speak = QUESTION
+    conv._run_turn("Je veux un tableau de bord")
+    asked = outbox_service.outbox_state(project)["messages"][0]
+    assert asked["kind"] == "question" and asked["ref"] is None and asked["options"] == []
+    agent.speak = ""
+    monkeypatch.setattr(workspace_chat, "chat_mode", lambda _root: ("acp", "agent", ""))
+    agent.act = lambda _text: cadrage_interview.answer(project, None, "utilisateurs", "L'équipe support")
+    conv.send("L'équipe support", None, None, dictation=True)  # dictée marquée, question d'entretien non réservée
+    for _ in range(100):
+        if len(agent.prompts) > 1 and not conv._busy:
+            break
+        time.sleep(0.05)
+    assert "L'équipe support" in agent.prompts[1]
+    brief = (project / "_grimoire" / "cadrage" / "01-brief.md").read_text(encoding="utf-8")
+    assert "L'équipe support" in brief

@@ -320,10 +320,27 @@ class Conversation:
     # ── tour ─────────────────────────────────────────────────────────────
 
     def send(
-        self, text: str, task_id: str | None = None, answer_to: tuple[str, str] | None = None
+        self,
+        text: str,
+        task_id: str | None = None,
+        answer_to: tuple[str, str] | None = None,
+        *,
+        dictation: bool = False,
     ) -> dict[str, Any]:
+        """Un message de la personne. ``dictation`` : le texte vient d'une dictée vocale (lot V5).
+
+        Une dictée ne résout jamais une permission : tant qu'une demande attend, elle est refusée (seul le
+        clic à l'écran, ``decide``, la tranche). Répondant à une question, le texte part tel quel — la mention
+        de dictée fausserait la comparaison aux options ; ailleurs, la mention suit le texte.
+        """
+        if dictation and self._decision_ready:
+            from grimoire.voice.safety import VOICE_CANNOT_APPROVE
+
+            raise ValueError(VOICE_CANNOT_APPROVE)
         if answer_to is not None:
-            return self._answer_question(text, *answer_to)
+            return self._answer_question(text, *answer_to, dictation=dictation)
+        if dictation:
+            text = f"{text.rstrip()}\n\n{DICTATION_NOTICE}"
         mode, _command, reason = chat_mode(self.root)
         if mode == "kanban":
             return self._send_kanban(text, task_id, reason)
@@ -339,12 +356,16 @@ class Conversation:
         threading.Thread(target=self._run_turn, args=(text,), name="chat-turn", daemon=True).start()
         return {"ok": True, "accepted": True}
 
-    def _answer_question(self, text: str, task_id: str, question_id: str) -> dict[str, Any]:
-        """La réponse tapée à une question du pilote : un tour humain qui tranche, sans passer par l'agent (ACP4)."""
+    def _answer_question(self, text: str, task_id: str, question_id: str, *, dictation: bool = False) -> dict[str, Any]:
+        """La réponse tapée à une question du pilote : un tour humain qui tranche, sans passer par l'agent (ACP4).
+
+        Une question de nature ``permission`` ou ``merge``, ou d'une catégorie réservée à l'humain, ne se tranche
+        pas par une dictée (lot V5) ; une question que le pilote a seulement reportée, si.
+        """
         from grimoire.tools import workspace_chat_pilot
 
-        result = workspace_chat_pilot.answer(self.root, task_id, question_id, text)
-        self._emit({"type": "user", "text": text})
+        result = workspace_chat_pilot.answer(self.root, task_id, question_id, text, dictation=dictation)
+        self._emit({"type": "user", "text": text, **({"dictation": True} if dictation else {})})
         self.pull_questions(interval=0.0)
         return result
 
@@ -523,14 +544,16 @@ class Conversation:
         key = str(request.request_id)
         ready = threading.Event()
         self._decision_ready[key] = ready
+        call = self._raw_permissions.pop(key, {"toolCallId": request.tool_call_id})
         self._emit(
             {
                 "type": "permission",
                 "request_id": key,
-                "tool_call": self._raw_permissions.pop(key, {"toolCallId": request.tool_call_id}),
+                "tool_call": call,
                 "options": [dict(o) for o in request.options],
             }
         )
+        self._announce_permission(call)
         ready.wait()
         self._decision_ready.pop(key, None)
         kinds = _DECISIONS.get(self._decisions.pop(key, "") or "", ())
@@ -544,6 +567,17 @@ class Conversation:
             }
         )
         return option
+
+    def _announce_permission(self, call: dict[str, Any]) -> None:
+        """En mode vocal, le message parlé de la demande : gabarit fixe, la confirmation reste à l'écran (V5)."""
+        from grimoire.voice.safety import announce_permission
+
+        try:
+            message = announce_permission(self.root, call)
+        except Exception:  # le vocal est un confort : il ne bloque jamais une demande
+            return
+        if message is not None:
+            self._emit({"type": "voice_message", "message": message})
 
     def decide(self, request_id: str, decision: str) -> dict[str, Any]:
         if decision not in _DECISIONS:
@@ -653,8 +687,9 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     text = body.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("text requis : le message ne peut pas être vide")
-    if body.get("dictation") is True:  # le texte corrigé par la personne part tel quel, la mention en plus
-        text = f"{text.rstrip()}\n\n{DICTATION_NOTICE}"
+    from grimoire.voice.safety import marked_dictation
+
+    dictation = marked_dictation(body)  # le texte corrigé par la personne part tel quel, la mention en plus
     task_id = body.get("task_id")
     target = body.get("answer_to")
     answer_to = None
@@ -663,13 +698,19 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
                 and isinstance(target.get("question_id"), str)):
             raise ValueError("answer_to : {task_id, question_id} attendus")
         answer_to = (target["task_id"], target["question_id"])
-    return _conversation(root).send(text, task_id if isinstance(task_id, str) and task_id else None, answer_to)
+    return _conversation(root).send(
+        text, task_id if isinstance(task_id, str) and task_id else None, answer_to, dictation=dictation
+    )
 
 
 def chat_permission(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     request_id, decision = body.get("request_id"), body.get("decision")
     if not isinstance(request_id, (str, int)) or not isinstance(decision, str):
         raise ValueError("request_id et decision requis")
+    from grimoire.voice.safety import VOICE_CANNOT_APPROVE, marked_dictation
+
+    if marked_dictation(body):  # lot V5 : seul le clic à l'écran tranche
+        raise ValueError(VOICE_CANNOT_APPROVE)
     return _conversation(root).decide(str(request_id), decision)
 
 

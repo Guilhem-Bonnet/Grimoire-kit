@@ -284,6 +284,7 @@ class OutboxMessage:
     source: str
     revisions: int = 1
     played: bool = False  # figé : plus aucune révision
+    fixed: bool = False  # annonce à gabarit fixe (permission, V5) : jamais révisée par une réponse
     audio: Speech | None = field(default=None, repr=False)
     kind: str = "report"  # « report » (compte rendu) ou « question » (lot V4)
     options: tuple[str, ...] = ()
@@ -336,12 +337,22 @@ class Outbox:
         with self._lock:
             # Un compte rendu ne remplace que le dernier COMPTE RENDU : une question reste un message distinct.
             last = next((m for m in reversed(self._messages) if m.kind == "report"), None)
-            if last is not None and not last.played:
+            if last is not None and not last.played and not last.fixed:
                 last.text, last.source = text, source
                 last.revisions += 1
                 last.audio = None  # jamais d'audio d'un texte périmé
                 return last
             return self._open(text, source)
+
+    def announce(self, text: str, source: str) -> OutboxMessage | None:
+        """Dépose une annonce à gabarit fixe : un message à part, que ni ``submit`` ni une autre annonce ne révise."""
+        text = text.strip()
+        if not text:
+            return None
+        with self._lock:
+            message = self._open(text, source)
+            message.fixed = True
+            return message
 
     def submit_question(
         self,

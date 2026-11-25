@@ -13,11 +13,15 @@ Lecture et gestes de relecture seulement : l'activation reste dans :class:`~grim
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.core.file_memo import COARSE_CLOCK_NS
 from grimoire.missions.autopilot import (
     DECIDED_EVENT,
     AutopilotStore,
@@ -25,13 +29,14 @@ from grimoire.missions.autopilot import (
     load_autopilot_policy,
     reserved_reason,
 )
+from grimoire.missions.mandate import AuthorityJournal, JournalError
 from grimoire.missions.schemas import TaskState
 
 if TYPE_CHECKING:
     from grimoire.missions.decisions import PendingDecision
     from grimoire.missions.service import TaskService
 
-__all__ = ["REVERTED_EVENT", "Held", "journal", "partition", "revert"]
+__all__ = ["REVERTED_EVENT", "Held", "ViewJournal", "journal", "partition", "revert"]
 
 REVERTED_EVENT = "autopilot.reverted"
 
@@ -41,6 +46,59 @@ LOW_CONFIDENCE_KIND = "low_confidence"
 OUT_OF_MANDATE_KIND = "out_of_mandate"
 
 _OUT_OF_MANDATE = "le pilote ne peut pas la trancher : hors du périmètre du mandat"
+
+
+_view_lock = threading.Lock()
+_view_verified: dict[str, tuple[tuple[int, int, int, int], list[dict[str, Any]]]] = {}
+_VIEW_MAX = 8
+#: Sous Windows, ``st_ctime_ns`` est la date de création et non de changement : la clé ne verrait pas une réécriture en place.
+_WINDOWS = os.name == "nt"
+
+
+class ViewJournal(AuthorityJournal):
+    """Le journal d'autorité pour la **lecture du cockpit** seulement : la chaîne n'est revérifiée que si le fichier a bougé.
+
+    Mesuré le 2026-11-25 sur un poste réel : ~9 400 entrées, la chaîne de hash vérifiée plusieurs fois par projet et
+    par requête, soit ~0,8 s de CPU à chaque ouverture de « À traiter ». Ici, une chaîne vérifiée est resservie tant
+    que (date, taille, inode) du journal tiennent et que sa date avait déjà plus de deux secondes à la lecture
+    (:data:`~grimoire.core.file_memo.COARSE_CLOCK_NS`). La tête, elle, est relue et comparée à chaque appel.
+
+    Garanties : la clé comprend ``st_ctime_ns`` (que l'espace utilisateur ne peut pas fixer : restaurer la date d'un
+    journal réécrit ne suffit pas), et rien n'est gardé tant que la date de modification OU de changement est dans la
+    fenêtre d'horloge grossière. Toute écriture (:meth:`AuthorityJournal.append`) vérifie la chaîne complète par la lecture
+    de la classe mère, jamais par celle-ci : un journal rompu n'est jamais prolongé, même par une écriture d'office
+    (révocation) déclenchée depuis la vue. Les lecteurs de la vue (état du mandat, du pilote) voient ce que la lecture
+    complète leur aurait donné, à l'octet près, tant que ctime, taille, inode et date tiennent.
+    """
+
+    def read(self) -> list[dict[str, Any]]:
+        if _WINDOWS:
+            return super().read()  # pas de ctime de changement : la vue relit le journal en entier
+        head = self._read_head()
+        try:
+            info = self.path.stat()
+        except OSError:
+            return super().read()  # absent ou illisible : les refus de la classe mère, tels quels
+        sig = (info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino)
+        key = str(self.path)
+        with _view_lock:
+            known = _view_verified.get(key)
+        if known is not None and known[0] == sig:
+            entries = known[1]
+            if entries and head is None:
+                raise JournalError("journal d'autorité non vide sans tête : tête retirée ou journal remplacé")
+            if head is not None and (len(entries) <= head[0] or entries[head[0]]["hash"] != head[1]):
+                raise JournalError(
+                    f"journal d'autorité tronqué : {len(entries)} entrée(s) pour une tête à l'entrée {head[0] + 1}"
+                )
+            return [dict(entry) for entry in entries]
+        entries = super().read()
+        if time.time_ns() - max(info.st_mtime_ns, info.st_ctime_ns) > COARSE_CLOCK_NS:
+            with _view_lock:
+                if len(_view_verified) >= _VIEW_MAX:
+                    _view_verified.clear()
+                _view_verified[key] = (sig, entries)
+        return [dict(entry) for entry in entries]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +120,7 @@ def partition(service: TaskService) -> tuple[bool, list[Held]]:
     from grimoire.missions.orchestrator_session import eligible_questions
 
     root = service.project_root
-    store = MandateStore(root)
+    store = MandateStore(root, ViewJournal())  # lecture du cockpit : chaîne vérifiée gardée par empreinte de fichier
     if not AutopilotStore(root, store.journal).state().active:
         return False, []
     eligible = {(q.task_id, q.question_id) for q in eligible_questions(service, store)}

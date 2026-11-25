@@ -53,7 +53,6 @@ seule.
 from __future__ import annotations
 
 import copy
-import json
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -72,6 +71,7 @@ from grimoire.tools.workspace_portfolio import (
     DEFAULT_LIVE_MINUTES,
     RUNS_RELPATH,
     annotate_cards,
+    journal_fields,
     unread_directives,
 )
 
@@ -443,6 +443,22 @@ def _orphan_reason(task: Any, card: dict[str, Any], now: datetime) -> str:
     return ""
 
 
+def _cited_keys(tasks: list[Any], task_ids: list[str]) -> list[str]:
+    """Les exigences que citent les tâches listées (clés normalisées), pour afficher la commande de validation."""
+    from grimoire.core.exceptions import GrimoireMissionError
+    from grimoire.missions.requirement_gate import normalize_key, requirement_of
+
+    wanted, keys = set(task_ids), set()
+    for task in tasks:
+        raw = requirement_of(task) if task.id in wanted else ""
+        if raw:
+            try:
+                keys.add(normalize_key(raw))
+            except GrimoireMissionError:
+                continue
+    return sorted(keys)
+
+
 def _requirement_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> None:
     """Les items « exigence à faire valider » (#1342, M3) et « exigence à recetter » (M4) ; une lecture qui échoue
     n'efface pas le reste de la vue.
@@ -475,25 +491,35 @@ def _requirement_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> Non
     _item(
         read, REQUIREMENT_UNVALIDATED, "requirements", " ; ".join(parts),
         "`grimoire cadrage interview`, puis la MOA valide depuis son terminal : `grimoire cadrage approve <exigence>`",
-        task_ids=unvalidated, questions=questions, postmortem=postmortem,
+        stage="validation", task_ids=unvalidated, questions=questions, postmortem=postmortem,
+        requirement_keys=_cited_keys(tasks, unvalidated),
     )
 
 
 def _recette_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> None:
     """Les exigences livrées en attente de la recette de la MOA (#1342, M4) : un item par projet."""
-    from grimoire.missions.moa_acceptance import pending_acceptance
+    from grimoire.missions.moa_acceptance import pending_acceptance, pending_follow_up
 
     try:
         keys = pending_acceptance(service.home_root, tasks)
+        follow_ups = pending_follow_up(service.home_root, tasks)
     except Exception:
         return
+    if follow_ups:
+        _item(
+            read, REQUIREMENT_RECETTE, "suite",
+            f"{len(follow_ups)} exigence(s) recettée(s) dont la tâche de suite est à créer : "
+            + ", ".join(key for key, _ in follow_ups),
+            f"la MOE crée la suite : `{follow_ups[0][1]}`",
+            stage="suite", requirements=[key for key, _ in follow_ups], commands=[cmd for _, cmd in follow_ups],
+        )
     if not keys:
         return
     _item(
         read, REQUIREMENT_RECETTE, "recette",
         f"{len(keys)} exigence(s) livrée(s) en attente de recette : {', '.join(keys)}",
         f"la MOA recette depuis son terminal : `grimoire cadrage recette {keys[0]}`",
-        requirements=keys,
+        stage="recette", requirements=keys,
     )
 
 
@@ -712,7 +738,9 @@ def _live_journal(root: Path, now: datetime) -> bool:
     window = timedelta(minutes=DEFAULT_LIVE_MINUTES)
     for path in runs.glob("session-*.json"):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = journal_fields(path)
+            if data is None:
+                continue
             moment = datetime.fromisoformat(str(data.get("updated_at") or data.get("started_at")))
         except (OSError, ValueError, AttributeError, TypeError):
             continue

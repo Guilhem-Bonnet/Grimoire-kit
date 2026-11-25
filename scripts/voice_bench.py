@@ -17,6 +17,7 @@ cache », pas récupéré.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import os
@@ -213,12 +214,118 @@ def _qwen3_tts(size: str) -> TtsEngine:
     return TtsEngine(f"qwen3-tts-{size.lower()}", "qwen_tts", load)
 
 
+def _intelligibility(size: str, download: bool) -> Callable[[Path], str] | None:
+    """Transcripteur faster-whisper pour la colonne « erreurs de mots » ; ``None`` s'il manque."""
+    eng = _faster_whisper(size)
+    if not eng.installed():
+        print("intelligibilité ignorée : faster-whisper n'est pas installé", file=sys.stderr)
+        return None
+    try:
+        transcribe = eng.load(download)
+    except EngineUnavailableError as exc:
+        print(f"intelligibilité ignorée : {exc}", file=sys.stderr)
+        return None
+    return lambda path: transcribe(path)[0]
+
+
 def default_stt_engines() -> list[SttEngine]:
     return [_faster_whisper(s) for s in ("base", "small", "large-v3-turbo")]
 
 
-def default_tts_engines() -> list[TtsEngine]:
-    return [_pocket_tts(), _qwen3_tts("0.6B"), _qwen3_tts("1.7B"), _qwen3_tts_design(), _kokoro()]
+@dataclass(frozen=True)
+class CloneOptions:
+    """Réglages d'un essai de clonage Qwen3-TTS : le modèle reste le même, seul le calcul change."""
+
+    threads: int | None = None
+    """Fils de calcul torch ; ``None`` laisse la valeur par défaut de torch."""
+    reuse_prompt: bool = False
+    """Calcule l'invite de clonage une fois (``create_voice_clone_prompt``) au lieu de réencoder la référence."""
+    xvector_only: bool = False
+    """Empreinte de locuteur seule, sans transcription ni codes de référence (plus léger, voix moins fidèle)."""
+    int8: bool = False
+    """Quantification dynamique int8 des couches linéaires de torch."""
+    bf16: bool = False
+    """Poids en bfloat16 (utile seulement si le processeur le calcule vite : AVX512-BF16, AMX, Apple)."""
+    inference_mode: bool = False
+    """Enveloppe la génération de ``torch.inference_mode()``."""
+    device: str | None = None
+    """Périphérique torch (``cuda:0`` : CUDA ou ROCm) ; ``None`` = processeur."""
+
+
+CLONE_VARIANTS: dict[str, CloneOptions] = {
+    "": CloneOptions(),
+    "threads4": CloneOptions(threads=4),
+    "threads8": CloneOptions(threads=8),
+    "threads16": CloneOptions(threads=16),
+    "inference": CloneOptions(inference_mode=True),
+    "prompt": CloneOptions(reuse_prompt=True),
+    "xvector": CloneOptions(reuse_prompt=True, xvector_only=True),
+    "int8": CloneOptions(int8=True),
+    "prompt-int8": CloneOptions(reuse_prompt=True, int8=True),
+    "bf16": CloneOptions(bf16=True),
+    "prompt-bf16": CloneOptions(reuse_prompt=True, bf16=True),
+    "gpu": CloneOptions(reuse_prompt=True, bf16=True, device="cuda:0"),
+}
+
+
+def _qwen3_tts_clone(variant: str, ref_audio: str | None, ref_text: str | None) -> TtsEngine:
+    """Qwen3-TTS 0.6B Base en clonage d'une voix de référence (``--ref-audio`` + ``--ref-text``).
+
+    Le mode ``non_streaming_mode=False`` de qwen-tts ne simule que l'entrée texte en flux : il ne
+    produit aucun son avant la fin du calcul, donc le premier son vaut la durée totale."""
+    opts = CLONE_VARIANTS[variant]
+    name = "qwen3-tts-0.6b-clone" + (f"-{variant}" if variant else "")
+
+    def load(download: bool) -> Callable[[str], tuple[Any, int, float | None]]:
+        if not ref_audio or not ref_text:
+            raise EngineUnavailableError("voix de référence manquante : passez --ref-audio et --ref-text")
+        if not Path(ref_audio).is_file():
+            raise EngineUnavailableError(f"fichier de référence introuvable : {ref_audio}")
+        _offline_env(download)
+        import torch  # type: ignore[import-not-found]
+        from qwen_tts import Qwen3TTSModel  # type: ignore[import-not-found]
+
+        if opts.threads:
+            torch.set_num_threads(opts.threads)
+        try:
+            kwargs: dict[str, Any] = {"dtype": torch.bfloat16} if opts.bf16 else {}
+            if opts.device:
+                kwargs["device_map"] = opts.device
+            model = Qwen3TTSModel.from_pretrained("Qwen/Qwen3-TTS-12Hz-0.6B-Base", **kwargs)
+        except Exception as exc:
+            raise EngineUnavailableError(f"absent du cache (relancer avec --download) : {exc}") from exc
+        if opts.int8:
+            # en place : la copie profonde par défaut échoue sur ce modèle (objets non sérialisables)
+            torch.ao.quantization.quantize_dynamic(model.model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True)
+        prompt = None
+        if opts.reuse_prompt:
+            prompt = model.create_voice_clone_prompt(
+                ref_audio=ref_audio, ref_text=ref_text, x_vector_only_mode=opts.xvector_only
+            )
+        args: dict[str, Any] = (
+            {"voice_clone_prompt": prompt} if prompt is not None else {"ref_audio": ref_audio, "ref_text": ref_text}
+        )
+
+        def synth(text: str) -> tuple[Any, int, float | None]:
+            ctx = torch.inference_mode() if opts.inference_mode else contextlib.nullcontext()
+            with ctx:
+                wavs, rate = model.generate_voice_clone(text=text, language="French", **args)
+            return wavs[0], int(rate), None
+
+        return synth
+
+    return TtsEngine(name, "qwen_tts", load)
+
+
+def default_tts_engines(ref_audio: str | None = None, ref_text: str | None = None) -> list[TtsEngine]:
+    return [
+        _pocket_tts(),
+        _qwen3_tts("0.6B"),
+        _qwen3_tts("1.7B"),
+        _qwen3_tts_design(),
+        *(_qwen3_tts_clone(v, ref_audio, ref_text) for v in CLONE_VARIANTS),
+        _kokoro(),
+    ]
 
 
 # --------------------------------------------------------------------------------------------
@@ -254,6 +361,14 @@ def peak_rss_mb() -> float | None:
         return None
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return round(peak / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
+
+
+def _load_avg() -> float | None:
+    """Charge moyenne sur une minute : une machine occupée fausse les temps, autant le consigner."""
+    try:
+        return round(os.getloadavg()[0], 1)
+    except (AttributeError, OSError):  # Windows
+        return None
 
 
 def _flatten(samples: Any) -> list[float]:
@@ -307,10 +422,13 @@ class Report:
             cols = [
                 ("moteur", "engine"),
                 ("statut", "status"),
+                ("charge s", "load_s"),
                 ("1er son s", "first_audio_s"),
                 ("RTF", "rtf"),
                 ("phrases", "files"),
+                ("erreurs de mots", "word_errors"),
                 ("RAM pic Mo", "peak_rss_mb"),
+                ("charge machine", "load_avg"),
             ]
         rows = [[h for h, _ in cols]]
         for r in self.results:
@@ -378,9 +496,25 @@ def run_stt(folder: Path, engines: Sequence[SttEngine], download: bool) -> Repor
     return report
 
 
+def _word_errors(phrases: Sequence[str], made: Sequence[tuple[int, Path]], transcribe: Callable[[Path], str]) -> str:
+    """« fautes/mots » sur l'ensemble des phrases d'un moteur."""
+    errors = words = 0
+    for i, wav in made:
+        n = len(normalize(phrases[i]))
+        errors += round(word_error_rate(phrases[i], transcribe(wav)) * n)
+        words += n
+    return f"{errors}/{words}"
+
+
 def run_tts(
-    out: Path, engines: Sequence[TtsEngine], download: bool, phrases: Sequence[str] = PHRASES, seed: int | None = None
+    out: Path,
+    engines: Sequence[TtsEngine],
+    download: bool,
+    phrases: Sequence[str] = PHRASES,
+    seed: int | None = None,
+    transcribe: Callable[[Path], str] | None = None,
 ) -> Report:
+    """``transcribe`` (facultatif) retranscrit chaque WAV : le nombre de mots faux mesure l'intelligibilité."""
     out.mkdir(parents=True, exist_ok=True)
     report = Report("tts")
     rng = random.Random(seed)  # noqa: S311
@@ -391,10 +525,13 @@ def run_tts(
             report.results.append({"engine": eng.name, "status": "non installé"})
             continue
         try:
+            t_load = time.perf_counter()
             synth = eng.load(download)
+            load_s = time.perf_counter() - t_load
             firsts: list[float] = []
             compute = audio_total = 0.0
             files = 0
+            made: list[tuple[int, Path]] = []
             for i, phrase in enumerate(phrases):
                 t0 = time.perf_counter()
                 samples, rate, first = synth(phrase)
@@ -404,6 +541,7 @@ def run_tts(
                 audio_total += write_wav(tmp, samples, rate)
                 compute += elapsed
                 jobs.append((eng.name, i, tmp))
+                made.append((i, tmp))
                 files += 1
         except EngineUnavailableError as exc:
             report.results.append({"engine": eng.name, "status": str(exc)})
@@ -415,12 +553,24 @@ def run_tts(
             {
                 "engine": eng.name,
                 "status": "ok",
+                "load_s": load_s,
                 "first_audio_s": _mean(firsts),
                 "rtf": compute / audio_total if audio_total else None,
                 "files": files,
                 "peak_rss_mb": peak_rss_mb(),
+                "load_avg": _load_avg(),
+                "_made": made,
             }
         )
+    if transcribe is not None:  # après la synthèse : le pic de mémoire des moteurs reste propre
+        for row in report.results:
+            made = row.get("_made") or []
+            try:
+                row["word_errors"] = _word_errors(phrases, made, transcribe) if made else None
+            except Exception as exc:  # une retranscription qui plante ne perd pas les mesures déjà prises
+                row["word_errors"] = f"erreur : {type(exc).__name__}"
+    for row in report.results:
+        row.pop("_made", None)
     # Écoute à l'aveugle : noms anonymes, ordre mélangé, correspondance dans un fichier à part.
     rng.shuffle(jobs)
     for n, (name, i, tmp) in enumerate(jobs, 1):
@@ -452,6 +602,15 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("folder", type=Path, help="dossier d'enregistrements <nom>.wav + <nom>.txt")
         else:
             s.add_argument("--out", type=Path, required=True, help="dossier des WAV anonymisés")
+            s.add_argument("--ref-audio", type=Path, help="voix de référence (WAV) des moteurs de clonage")
+            s.add_argument("--ref-text", help="transcription exacte de la voix de référence")
+            s.add_argument(
+                "--intelligibilite",
+                nargs="?",
+                const="small",
+                metavar="TAILLE",
+                help="retranscrit chaque WAV avec faster-whisper (défaut : small) et compte les mots faux",
+            )
     return p
 
 
@@ -468,10 +627,15 @@ def main(
             engines = [e for e in engines if e.name in args.engine]
         report = run_stt(args.folder, engines, args.download)
     else:
-        engines = list(tts_engines if tts_engines is not None else default_tts_engines())
+        engines = list(
+            tts_engines
+            if tts_engines is not None
+            else default_tts_engines(str(args.ref_audio) if args.ref_audio else None, args.ref_text)
+        )
         if args.engine:
             engines = [e for e in engines if e.name in args.engine]
-        report = run_tts(args.out, engines, args.download)
+        transcribe = _intelligibility(args.intelligibilite, args.download) if args.intelligibilite else None
+        report = run_tts(args.out, engines, args.download, transcribe=transcribe)
     print(report.table())
     if args.json:
         args.json.write_text(json.dumps(report.as_json(), ensure_ascii=False, indent=2), encoding="utf-8")

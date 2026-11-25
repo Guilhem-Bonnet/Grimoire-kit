@@ -94,6 +94,10 @@
    "version": "3.32.0",
    "path": "archetypes/infra-ops/agents/backup-dr-specialist.md"
   },
+  "060ad458aaa9a22b7ea2ec25a7ad2ce98433a1896a3df8cad0145fac89084b39": {
+   "version": "3.108.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
+  },
   "062aed0afb7f167d583be3966f07052793aa1046ad077ccdda91d50c4ba0f15a": {
    "version": "3.16.0",
    "path": "framework/tools/early-warning.py"
@@ -1717,6 +1721,10 @@
   "6b0371771e824804bd04b86bdc4ceb9b0becd8933c1ca39ef858ec3ce63962b3": {
    "version": "3.27.0",
    "path": "framework/tools/expert-tool-chain.py"
+  },
+  "6b21d22d4c186c8c31f6117e9a2dea5299c84127cc08f1c5640977cbfe70d5e2": {
+   "version": "3.109.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
   },
   "6b2fb62f579d879f6c93dfb9f900517c872ebf80658f6497617d2047c04dd2af": {
    "version": "3.4.2",
