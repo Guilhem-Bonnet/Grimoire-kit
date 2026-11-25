@@ -1,0 +1,1 @@
+- perf(voice): le moteur de synthèse par défaut se choisit par `find_spec` seul, sans lancer les sous-processus de détection du gestionnaire de paquets (~0,4 s à chaque lecture des réglages, donc à chaque tour du chat en mode vocal) (#1343 V3).

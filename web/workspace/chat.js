@@ -17,6 +17,7 @@
 import { api, host, projectName } from './api.js';
 import { renderMarkdown } from './markdown.js';
 import { createVoiceInput } from './voice.js';
+import { createVoiceOutbox, withoutSpokenTag } from './voice_outbox.js';
 
 function mk(tag, attrs, ...children) {
   const node = document.createElement(tag);
@@ -90,10 +91,11 @@ export function createChat({ readOnly = () => false } = {}) {
     api, input, slot: form.querySelector('.chat-actions'), readOnly,
     note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text),
   });
+  const voiceOut = createVoiceOutbox({ note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text), api });
   const hostSelect = mk('select', { class: 'chat-host', id: 'chat-host', 'aria-label': 'Hôte de l’orchestrateur' });
   const hostBar = mk('div', { class: 'chat-hostbar' },
     mk('label', { for: 'chat-host', class: 'chat-host-label', text: 'Hôte' }), hostSelect);
-  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, form);
+  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, voiceOut.element, form);
 
   let stream = null;
   let lastSeq = 0;
@@ -134,6 +136,8 @@ export function createChat({ readOnly = () => false } = {}) {
   }
 
   // ── Messages : le texte arrive par morceaux, le markdown se rend sur le tout ─
+  let spokenToken = null; // jeton de la balise parlée du tour en cours (donné par le serveur)
+
   function addText(role, text) {
     const follow = nearBottom();
     if (!current || current.role !== role) {
@@ -151,7 +155,7 @@ export function createChat({ readOnly = () => false } = {}) {
     current.text += text;
     if (role === 'agent') current.text = current.text.replace(/\[\[pilote:(on|off)\]\]/g, '');
     if (role === 'user') current.body.textContent = current.text;
-    else markdownInto(current.body, current.text);
+    else markdownInto(current.body, role === 'agent' ? withoutSpokenTag(current.text, spokenToken) : current.text);
     if (follow) scrollDown();
   }
 
@@ -421,6 +425,7 @@ export function createChat({ readOnly = () => false } = {}) {
         current = null;
         break;
       case 'turn_started':
+        spokenToken = event.spoken_token || null; // jeton du message parlé de ce tour
         setBusy(true);
         break;
       case 'update': {
@@ -442,6 +447,9 @@ export function createChat({ readOnly = () => false } = {}) {
         break;
       case 'question_resolved':
         questionResolved(event);
+        break;
+      case 'voice_message':
+        voiceOut.receive(event.message);
         break;
       case 'pilot_gesture':
         gesture(event);
@@ -540,6 +548,7 @@ export function createChat({ readOnly = () => false } = {}) {
           setStatus('Connexion à l’orchestrateur…');
           loadHosts();
           voice.refresh();
+          voiceOut.refresh();
           connect();
         }
       }
@@ -548,6 +557,7 @@ export function createChat({ readOnly = () => false } = {}) {
     },
     close() {
       voice.abort();
+      voiceOut.abort();
       if (stream) stream.close();
       stream = null;
       opened = false;
