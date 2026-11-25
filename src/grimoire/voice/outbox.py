@@ -43,9 +43,12 @@ DETAIL_ON_SCREEN = "Le détail est à l'écran."
 _TAG_RE = re.compile(rf"<{SPOKEN_TAG}>(.*?)</{SPOKEN_TAG}>", re.DOTALL | re.IGNORECASE)
 _FENCE_RE = re.compile(r"```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|<pre\b.*?(?:</pre>|\Z)", re.DOTALL | re.IGNORECASE)
 _FENCE_LINE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
-_FINAL_TAG_RE = re.compile(
-    rf"(?:\A|\n)<{SPOKEN_TAG}>((?:(?!</?{SPOKEN_TAG}>).)*)</{SPOKEN_TAG}>\s*\Z", re.DOTALL | re.IGNORECASE
-)
+_OPEN_TAG_RE = re.compile(rf"^<{SPOKEN_TAG}>", re.IGNORECASE | re.MULTILINE)
+_CLOSE_TAG = f"</{SPOKEN_TAG}>"
+_ANY_TAG_RE = re.compile(rf"</?{SPOKEN_TAG}>", re.IGNORECASE)
+_QUOTE_LINE_RE = re.compile(r"^ {0,3}>")
+#: Au plus deux resynthèses si le texte est révisé pendant la synthèse ; ensuite on lit la dernière synthèse.
+MAX_RESYNTHESES = 2
 _INLINE_CODE_RE = re.compile(r"(`+)[^`\n]*?\1")
 _LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 _URL_RE = re.compile(r"https?://\S+")
@@ -69,9 +72,10 @@ def spoken_instruction(max_seconds: float) -> str:
     """La consigne ajoutée au message de la personne en mode vocal."""
     words = int(max_seconds * WORDS_PER_SECOND)
     return (
-        f"[Mode vocal] En plus de ta réponse écrite habituelle, termine par un message parlé dans une balise "
-        f"<{SPOKEN_TAG}>…</{SPOKEN_TAG}> : deux ou trois phrases, {words} mots au plus (~{max_seconds:g} s), "
-        f"sans code, sans tableau, sans chemin de fichier, et dis que le détail est à l'écran s'il y en a."
+        f"[Mode vocal] En plus de ta réponse écrite habituelle, termine ta réponse par la balise "
+        f"<{SPOKEN_TAG}>…</{SPOKEN_TAG}>, seule sur ses lignes et rien après elle : un message parlé de deux ou "
+        f"trois phrases, {words} mots au plus (~{max_seconds:g} s), sans code, sans tableau, sans chemin de "
+        f"fichier, et dis que le détail est à l'écran s'il y en a. N'écris cette balise nulle part ailleurs."
     )
 
 
@@ -122,7 +126,7 @@ def _cap(text: str, max_seconds: float) -> tuple[str, bool]:
 
 
 def _open_block_at(prefix: str) -> bool:
-    """Vrai si ``prefix`` s'achève dans un bloc de code non fermé (clôture ``` ou ~~~, ou ``<pre>``)."""
+    """Vrai si ``prefix`` s'achève dans un bloc non fermé : clôture ``` ou ~~~, ``<pre>``, ``<code>``, commentaire HTML."""
     fence = ""
     for line in prefix.splitlines():
         m = _FENCE_LINE_RE.match(line)
@@ -136,21 +140,40 @@ def _open_block_at(prefix: str) -> bool:
     if fence:
         return True
     lowered = prefix.lower()
-    return lowered.count("<pre") > lowered.count("</pre>")
+    return any(
+        lowered.count(o) > lowered.count(c) for o, c in (("<pre", "</pre>"), ("<code", "</code>"), ("<!--", "-->"))
+    )
+
+
+def _top_level(reply: str, start: int) -> bool:
+    """Vrai si la balise ouvrante en ``start`` (début de ligne, sans retrait) n'est ni dans un bloc ouvert ni la suite d'une citation."""
+    prefix = reply[:start]
+    if _open_block_at(prefix):
+        return False
+    previous = next((line for line in reversed(prefix.splitlines()) if line.strip()), "")
+    return not _QUOTE_LINE_RE.match(previous)  # continuation paresseuse d'un ``>`` : encore la citation
 
 
 def _final_tag(reply: str) -> str | None:
-    """Le contenu de la balise parlée, seulement en position non ambiguë.
+    """Le contenu de la balise parlée, seulement quand elle termine la réponse sans ambiguïté.
 
-    Non ambiguë : dernier bloc de la réponse, en début de ligne sans retrait (ni code indenté, ni citation),
-    hors de tout bloc de code ouvert. Le reste — balise citée, recopiée, au milieu — retombe sur les règles
-    déterministes : on ne devine pas la grammaire Markdown, on ne prend que ce qu'elle ne peut pas faire
-    passer pour du code ou une citation.
+    Règle de position, pas de grammaire Markdown devinée : la réponse (espaces finaux retirés) se termine par
+    ``</voix>`` ; la balise ouvrante correspondante commence une ligne, sans retrait (donc ni code indenté ni
+    code en ligne ni citation), hors de tout bloc ouvert ; c'est la **seule** balise ouvrante de ce genre dans la
+    réponse ; son contenu ne contient ni autre balise ni clôture de bloc. Sinon ``None`` : repli déterministe.
+    Une balise recopiée dans un bloc de code ou une citation ne compte pas ; une balise recopiée en clair en début
+    de ligne, en plus de la vraie, rend la réponse ambiguë et on ne lit aucune des deux.
     """
-    m = _FINAL_TAG_RE.search(reply)
-    if not m or _open_block_at(reply[: m.start()]):
+    body = reply.rstrip()
+    if not body.lower().endswith(_CLOSE_TAG):
         return None
-    return m.group(1)
+    starts = [m.start() for m in _OPEN_TAG_RE.finditer(body) if _top_level(body, m.start())]
+    if len(starts) != 1:
+        return None
+    content = body[starts[0] + len(SPOKEN_TAG) + 2 : -len(_CLOSE_TAG)]
+    if _ANY_TAG_RE.search(content) or "```" in content or "~~~" in content:
+        return None
+    return content
 
 
 def spoken_from_reply(reply: str, max_seconds: float) -> tuple[str, str]:
@@ -218,10 +241,14 @@ class Outbox:
                 last.revisions += 1
                 last.audio = None  # jamais d'audio d'un texte périmé
                 return last
-            message = OutboxMessage(id=f"v{next(self._ids)}", text=text, source=source)
-            self._messages.append(message)
-            del self._messages[: -self._keep]
-            return message
+            return self._open(text, source)
+
+    def _open(self, text: str, source: str) -> OutboxMessage:
+        """Ouvre un nouveau message (verrou tenu par l'appelant)."""
+        message = OutboxMessage(id=f"v{next(self._ids)}", text=text, source=source)
+        self._messages.append(message)
+        del self._messages[: -self._keep]
+        return message
 
     def get(self, message_id: str) -> OutboxMessage | None:
         with self._lock:
@@ -231,8 +258,11 @@ class Outbox:
         """Fige le message et rend son audio, synthétisé à ce moment-là seulement, une fois.
 
         La synthèse tourne hors verrou (elle ne bloque pas ``submit``) ; le message n'est figé qu'après
-        une synthèse réussie, et si le texte a été révisé pendant ce temps on resynthétise le nouveau.
+        une synthèse réussie. Si le texte a été révisé pendant ce temps, on resynthétise le nouveau, au plus
+        :data:`MAX_RESYNTHESES` fois : ensuite on lit la dernière version synthétisée et le texte plus récent
+        devient un nouveau message.
         """
+        attempt = 0
         while True:
             with self._lock:
                 message = self.get(message_id)
@@ -241,13 +271,20 @@ class Outbox:
                 if message.audio is not None:
                     message.played = True
                     return message, message.audio
-                text, revisions = message.text, message.revisions
+                text, source, revisions = message.text, message.source, message.revisions
             speech = self._synthesize(text)  # échec : le message reste révisable
             with self._lock:
                 if message.revisions == revisions or message.played:
                     message.audio = message.audio or speech
                     message.played = True
                     return message, message.audio
+                if attempt >= MAX_RESYNTHESES:
+                    newer, newer_source = message.text, message.source
+                    message.text, message.source, message.revisions = text, source, revisions
+                    message.audio, message.played = speech, True
+                    self._open(newer, newer_source)
+                    return message, speech
+            attempt += 1
 
     def state(self) -> dict[str, Any]:
         with self._lock:

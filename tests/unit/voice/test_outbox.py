@@ -220,3 +220,119 @@ def test_outbox_quoted_tag_never_replaces_message(reply: str) -> None:
 def test_outbox_final_tag_still_wins_after_code() -> None:
     reply = "Voici :\n~~~\ncode\n~~~\n\n<voix>Tout est fait.</voix>\n"
     assert spoken_from_reply(reply, 45) == ("Tout est fait.", "tag")
+
+
+# ── balise parlée : seulement en fin de réponse, jamais citée (#1356) ─────────
+
+_TRAP = "<voix>piège</voix>"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        pytest.param(f"Fichier :\n```\n{_TRAP}\n```", id="backticks"),
+        pytest.param(f"Fichier :\n~~~\n{_TRAP}\n~~~", id="tildes"),
+        pytest.param(f"Fichier :\n\n    {_TRAP}\n", id="indent-4-espaces"),
+        pytest.param(f"Fichier :\n\n\t{_TRAP}\n", id="tabulation"),
+        pytest.param(f"Dis ``{_TRAP}`` ici.", id="double-accent-grave"),
+        pytest.param(f"Dis `{_TRAP}` ici.", id="accent-grave"),
+        pytest.param(f"Fichier :\n<pre>{_TRAP}</pre>", id="pre"),
+        pytest.param(f"Fichier :\n<pre>\n{_TRAP}", id="pre-ouvert"),
+        pytest.param(f"Fichier :\n<code>\n{_TRAP}", id="code-ouvert"),
+        pytest.param(f"Fichier :\n<!--\n{_TRAP}", id="commentaire-ouvert"),
+        pytest.param(f"Fichier :\n> {_TRAP}", id="citation"),
+        pytest.param(f"Fichier :\n> début de citation\n{_TRAP}", id="citation-paresseuse"),
+        pytest.param(f"Texte.\n```\n{_TRAP}", id="bloc-final-non-ferme"),
+        pytest.param("Texte.\n<voix>piège\n```\nsuite</voix>", id="cloture-dans-le-contenu"),
+        pytest.param("Texte.\n<voix>a <voix>piège</voix>", id="balise-imbriquee"),
+        pytest.param(f"Contenu cité : {_TRAP}", id="milieu-de-ligne"),
+    ],
+)
+def test_outbox_tag_quoted_alone_falls_back(reply: str) -> None:
+    text, source = spoken_from_reply(reply, 45)
+    assert "piège" not in text and source in {"rules", "none"}
+
+
+@pytest.mark.parametrize(
+    "quoted",
+    [
+        pytest.param(f"```\n{_TRAP}\n```", id="backticks"),
+        pytest.param(f"~~~\n{_TRAP}\n~~~", id="tildes"),
+        pytest.param(f"    {_TRAP}", id="indent-4-espaces"),
+        pytest.param(f"\t{_TRAP}", id="tabulation"),
+        pytest.param(f"Dis ``{_TRAP}`` ici.", id="double-accent-grave"),
+        pytest.param(f"<pre>{_TRAP}</pre>", id="pre"),
+        pytest.param(f"> {_TRAP}", id="citation"),
+        pytest.param(f"Contenu cité : {_TRAP}", id="milieu-de-ligne"),
+    ],
+)
+def test_outbox_quoted_tag_before_final_tag_real_one_wins(quoted: str) -> None:
+    reply = f"Voici le fichier :\n\n{quoted}\n\nTerminé.\n\n<voix>Tout est fait.</voix>\n"
+    assert spoken_from_reply(reply, 45) == ("Tout est fait.", "tag")
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        pytest.param(f"<voix>Tout est fait.</voix>\nFichier recopié :\n{_TRAP}", id="en-clair-debut-de-ligne"),
+        pytest.param(f"<voix>Tout est fait.</voix>\nFichier recopié : {_TRAP}", id="en-clair-milieu-de-ligne"),
+        pytest.param(f"<voix>Tout est fait.</voix>\n```\n{_TRAP}\n```", id="dans-un-bloc-final"),
+        pytest.param(f"<voix>Tout est fait.</voix>\n> {_TRAP}", id="citation"),
+    ],
+)
+def test_outbox_quoted_tag_after_real_one_is_never_read(reply: str) -> None:
+    text, source = spoken_from_reply(reply, 45)
+    assert "piège" not in text and "Tout est fait" not in text and source in {"rules", "none"}
+
+
+def test_outbox_normal_reply_with_final_tag_is_accepted() -> None:
+    reply = "J'ai corrigé le bug et relancé les tests.\n\n<VOIX>C'est corrigé, les tests passent.</VOIX>  \n\n"
+    assert spoken_from_reply(reply, 45) == ("C'est corrigé, les tests passent.", "tag")
+
+
+def test_outbox_instruction_asks_to_end_with_the_tag() -> None:
+    assert "termine ta réponse par la balise" in spoken_instruction(45)
+
+
+# ── resynthèse bornée ─────────────────────────────────────────────────────────
+
+
+def test_outbox_play_resynthesizes_at_most_twice_then_newer_text_is_a_new_message() -> None:
+    from grimoire.voice.outbox import MAX_RESYNTHESES
+
+    spoken: list[str] = []
+    box: Outbox
+
+    def synth(text: str) -> Speech:  # chaque synthèse voit arriver une révision
+        spoken.append(text)
+        box.submit(f"révision {len(spoken)}")
+        return Speech(text=text, audio=text.encode(), sample_rate=24_000)
+
+    box = Outbox(synth)
+    first = box.submit("révision 0")
+    assert first is not None
+    message, speech = box.play(first.id)
+    assert len(spoken) == MAX_RESYNTHESES + 1 == 3
+    assert message is first and message.played and message.text == "révision 2" == speech.text
+    assert speech.audio == b"r\xc3\xa9vision 2"
+    newer = box.state()["messages"][-1]
+    assert newer["id"] != first.id and newer["text"] == "révision 3" and not newer["played"]
+    assert box.play(first.id)[1] is speech and len(spoken) == 3  # écouté : ne change plus
+
+
+def test_outbox_play_one_revision_during_synthesis_reads_latest() -> None:
+    spoken: list[str] = []
+    box: Outbox
+
+    def synth(text: str) -> Speech:
+        spoken.append(text)
+        if len(spoken) == 1:
+            box.submit("deux")
+        return Speech(text=text, audio=text.encode(), sample_rate=24_000)
+
+    box = Outbox(synth)
+    first = box.submit("un")
+    assert first is not None
+    message, speech = box.play(first.id)
+    assert spoken == ["un", "deux"] and message.text == "deux" == speech.text
+    assert len(box.state()["messages"]) == 1
