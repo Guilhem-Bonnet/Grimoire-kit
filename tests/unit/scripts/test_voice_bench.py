@@ -171,3 +171,32 @@ def test_qwen3_tts_a_un_moteur_a_voix_decrite_en_francais() -> None:
     names = [e.name for e in vb.default_tts_engines()]
     assert "qwen3-tts-1.7b-design" in names
     assert "français" in vb._VOICE_DESIGN.lower() or "française" in vb._VOICE_DESIGN.lower()
+
+
+def test_qwen3_clone_et_variantes_allegees_sont_au_banc() -> None:
+    names = [e.name for e in vb.default_tts_engines()]
+    for n in ("qwen3-tts-0.6b-clone", "qwen3-tts-0.6b-clone-bf16", "qwen3-tts-0.6b-clone-int8"):
+        assert n in names
+
+
+def test_clone_sans_voix_de_reference_n_est_pas_une_erreur(tmp_path: Path) -> None:
+    vb._clone_ref.update(audio=None, text=None)
+    engine = vb._qwen3_tts_clone("int8")
+    engine.module = "os"
+    report = vb.run_tts(tmp_path, [engine], download=False)
+    assert report.results[0]["status"].startswith("voix de référence absente")
+
+
+def test_ports_gguf_onnx_absents_listes_non_installes(tmp_path: Path) -> None:
+    ports = [e for e in vb.clone_engines() if e.name.endswith(("-gguf", "-onnx"))]
+    assert len(ports) == 2
+    report = vb.run_tts(tmp_path, ports, download=False)
+    assert [r["status"] for r in report.results] == ["non installé"] * 2
+
+
+def test_cli_accepte_la_voix_de_reference(tmp_path: Path) -> None:
+    rc = vb.main(
+        ["tts", "--out", str(tmp_path), "--ref-audio", "ref.wav", "--ref-text", "Bonjour."],
+        tts_engines=[_tts("a")],
+    )
+    assert rc == 0 and vb._clone_ref == {"audio": "ref.wav", "text": "Bonjour."}

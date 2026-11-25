@@ -213,12 +213,77 @@ def _qwen3_tts(size: str) -> TtsEngine:
     return TtsEngine(f"qwen3-tts-{size.lower()}", "qwen_tts", load)
 
 
+_CLONE_REPO = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+
+# Voix de référence du clonage (même voix pour toutes les variantes) : réglée par la CLI.
+_clone_ref: dict[str, str | None] = {"audio": None, "text": None}
+
+
+def _qwen3_tts_clone(variant: str) -> TtsEngine:
+    """Qwen3-TTS 0.6B Base en clonage ; ``variant`` : fp32, bf16 ou int8 (quantification dynamique torch)."""
+
+    def load(download: bool) -> Callable[[str], tuple[Any, int, float | None]]:
+        _offline_env(download)
+        ref_audio = _clone_ref["audio"]
+        if not ref_audio:
+            raise EngineUnavailableError("voix de référence absente (passer --ref-audio, et --ref-text si possible)")
+        import torch  # type: ignore[import-not-found]
+        from qwen_tts import Qwen3TTSModel  # type: ignore[import-not-found]
+
+        try:
+            kwargs: dict[str, Any] = {"torch_dtype": torch.bfloat16} if variant == "bf16" else {}
+            model = Qwen3TTSModel.from_pretrained(_CLONE_REPO, **kwargs)
+            if variant == "int8":
+                inner = getattr(model, "model", model)
+                quantized = torch.ao.quantization.quantize_dynamic(inner, {torch.nn.Linear}, dtype=torch.qint8)
+                if inner is not model:
+                    model.model = quantized
+                else:
+                    model = quantized
+        except Exception as exc:
+            raise EngineUnavailableError(f"absent du cache (relancer avec --download) : {exc}") from exc
+        ref_text = _clone_ref["text"]
+
+        def synth(text: str) -> tuple[Any, int, float | None]:
+            wavs, rate = model.generate_voice_clone(
+                text=text,
+                language="French",
+                ref_audio=ref_audio,
+                ref_text=ref_text,
+                x_vector_only_mode=not ref_text,
+            )
+            return wavs[0], int(rate), None
+
+        return synth
+
+    return TtsEngine(f"qwen3-tts-0.6b-clone{'' if variant == 'fp32' else '-' + variant}", "qwen_tts", load)
+
+
+def _qwen3_tts_clone_port(suffix: str, module: str) -> TtsEngine:
+    """Port communautaire (GGUF, ONNX) : n'existe sur PyPI sous aucun nom vérifié ; listé « non installé »."""
+
+    def load(download: bool) -> Callable[[str], tuple[Any, int, float | None]]:
+        raise EngineUnavailableError("pas d'adaptateur : aucun port installable par pip n'a été vérifié")
+
+    return TtsEngine(f"qwen3-tts-0.6b-clone-{suffix}", module, load)
+
+
 def default_stt_engines() -> list[SttEngine]:
     return [_faster_whisper(s) for s in ("base", "small", "large-v3-turbo")]
 
 
 def default_tts_engines() -> list[TtsEngine]:
-    return [_pocket_tts(), _qwen3_tts("0.6B"), _qwen3_tts("1.7B"), _qwen3_tts_design(), _kokoro()]
+    return [_pocket_tts(), _qwen3_tts("0.6B"), _qwen3_tts("1.7B"), _qwen3_tts_design(), _kokoro(), *clone_engines()]
+
+
+def clone_engines() -> list[TtsEngine]:
+    return [
+        _qwen3_tts_clone("fp32"),
+        _qwen3_tts_clone("bf16"),
+        _qwen3_tts_clone("int8"),
+        _qwen3_tts_clone_port("gguf", "qwen3_tts_gguf"),
+        _qwen3_tts_clone_port("onnx", "qwen3_tts_onnx"),
+    ]
 
 
 # --------------------------------------------------------------------------------------------
@@ -452,6 +517,8 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("folder", type=Path, help="dossier d'enregistrements <nom>.wav + <nom>.txt")
         else:
             s.add_argument("--out", type=Path, required=True, help="dossier des WAV anonymisés")
+            s.add_argument("--ref-audio", help="voix de référence du clonage (qwen3-tts-0.6b-clone*), même fichier partout")
+            s.add_argument("--ref-text", help="transcription de la voix de référence (qualité de clonage meilleure)")
     return p
 
 
@@ -468,6 +535,7 @@ def main(
             engines = [e for e in engines if e.name in args.engine]
         report = run_stt(args.folder, engines, args.download)
     else:
+        _clone_ref.update(audio=args.ref_audio, text=args.ref_text)
         engines = list(tts_engines if tts_engines is not None else default_tts_engines())
         if args.engine:
             engines = [e for e in engines if e.name in args.engine]
