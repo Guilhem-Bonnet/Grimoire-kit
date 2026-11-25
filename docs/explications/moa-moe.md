@@ -19,7 +19,7 @@ Grimoire sépare deux rôles, avec les mots du métier du bâtiment et de l'info
 4. **Tâches** : `grimoire cadrage plan` ou `task add --requirement` rattache chaque tâche à l'exigence qu'elle sert ; le gate `ready` vérifie que l'exigence est validée.
 5. **Recette** : une fois les tâches livrées, la MOA prononce la recette contre l'exigence (`grimoire cadrage recette`), pas contre les critères que l'agent s'est donnés. Les écarts repartent en MOE sous forme de tâches.
 
-`grimoire cadrage status` montre où en est chaque exigence : proposée, validée, livrée en attente de recette, recettée, recettée avec réserve, non conforme.
+`grimoire cadrage status` montre où en est chaque exigence : proposée, validée, livrée en attente de recette, recettée, recettée avec réserve, non conforme ; `--json` donne la même chose pour un programme. Pour suivre ce parcours sur un exemple, avec les commandes et leurs sorties, voir le guide [Du besoin à la recette](../guides/du-besoin-a-la-recette.md).
 
 ## Pourquoi les déclarer
 
@@ -113,7 +113,7 @@ Une tâche rattachée après un verdict `conforme` ne fait pas oublier la recett
 
 Comme pour la validation, seul le sceau compte : une ligne écrite au ledger ou un statut ajouté dans un fichier du cadrage ne vaut pas recette. Modifier l'exigence après coup retire validation et recette ; une fois l'exigence revalidée, l'ancienne recette ne vaut pas pour le nouveau texte.
 
-Le cockpit liste, dans « À décider », les exigences livrées en attente de recette. Il lit le mode du gate avant tout : un projet sans MOA déclarée ne paie ni la lecture du ledger ni celle du journal.
+Le cockpit liste, dans « À décider », les exigences livrées en attente de recette (« À recetter par la MOA ») et les recettes scellées dont la tâche de suite reste à créer (« Suite à créer »), chacune avec la commande exacte à lancer dans un terminal et un bouton pour la copier ; il ne prononce jamais le verdict. Il lit le mode du gate avant tout : un projet sans MOA déclarée ne paie ni la lecture du ledger ni celle du journal.
 
 Limites, les mêmes que pour la validation :
 
@@ -129,5 +129,7 @@ Le contrôle `moa_moe` n’échoue jamais :
 - section mal formée : avertissement, avec l'erreur, au lieu de disparaître derrière l'erreur générale de configuration ;
 - section présente : `OK`, avec le nom de la MOA et le mode du gate ;
 - validations d'exigence scellées pour ce projet alors que le gate n'est plus en `block` (repassé à `warn`, section retirée) : avertissement.
+
+Quand une MOA est déclarée et que le projet a des exigences, une ligne de synthèse suit : combien sont proposées, validées, en attente de recette, recettées (et à reprendre). Un projet sans MOA ne paie aucune lecture pour cette ligne.
 
 `grimoire init` pose la question (« Qui porte le besoin ? », le nom saisi pour vous par défaut) et écrit la section avec `requirement_gate: block`. Avec `-y`, la MOA est le nom git de la machine, mais personne ne l'a confirmée : la section est écrite avec `requirement_gate: warn` et un commentaire, et l'init le dit. Passez à `block` une fois le nom vérifié. Sans nom git, ou si c'est celui d'un bot, la section est omise et le doctor avertit.

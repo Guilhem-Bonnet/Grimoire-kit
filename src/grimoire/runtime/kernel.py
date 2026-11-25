@@ -156,7 +156,7 @@ class RuntimeKernel:
         instances: dict[str, WorkflowInstance] = {}
         if not self._instances_path.exists():
             return instances
-        for line in self._instances_path.read_text(encoding="utf-8").splitlines():
+        for line in self._instances_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue
@@ -675,7 +675,7 @@ class RuntimeKernel:
         out: list[Checkpoint] = []
         if not self._checkpoints_path.exists():
             return out
-        for line in self._checkpoints_path.read_text(encoding="utf-8").splitlines():
+        for line in self._checkpoints_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue
@@ -695,7 +695,7 @@ class RuntimeKernel:
         events: list[RunEvent] = []
         if not self._events_path.exists():
             return events
-        for line in self._events_path.read_text(encoding="utf-8").splitlines():
+        for line in self._events_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue

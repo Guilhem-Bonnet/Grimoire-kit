@@ -57,7 +57,7 @@ class EvidenceService:
         packs: dict[str, EvidencePack] = {}
         if not self._packs_path.exists():
             return packs
-        for line in self._packs_path.read_text(encoding="utf-8").splitlines():
+        for line in self._packs_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue
@@ -228,7 +228,7 @@ class EvidenceService:
         verdicts: list[VerificationVerdict] = []
         if not self._verdicts_path.exists():
             return verdicts
-        for line in self._verdicts_path.read_text(encoding="utf-8").splitlines():
+        for line in self._verdicts_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue
@@ -249,7 +249,7 @@ class EvidenceService:
         """
         if not self._verdicts_path.exists():
             return False
-        for line in self._verdicts_path.read_text(encoding="utf-8").splitlines():
+        for line in self._verdicts_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue

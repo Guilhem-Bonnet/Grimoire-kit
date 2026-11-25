@@ -691,7 +691,8 @@ def test_moa_requirement_doctor_check_prints(tmp_path: Path) -> None:
     console = Console(record=True, width=200)
     apply_moa_moe_check(results, root, fmt="text", console=console)
     apply_moa_moe_check(results, tmp_path / "absent", fmt="text", console=console)
-    assert [r["level"] for r in results] == ["ok"]
+    assert [r["name"] for r in results] == ["moa_moe", "moa_journey"]
+    assert [r["level"] for r in results] == ["ok", "ok"]
     assert "gate d'exigence : block" in console.export_text()
 
 
