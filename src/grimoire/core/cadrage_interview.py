@@ -17,12 +17,12 @@ import contextlib
 import json
 import os
 import re
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.cadrage import PHASES, PLACEHOLDER, cadrage_dir
+from grimoire.core.regular_file import open_regular
 from grimoire.missions.request_kind import KIND_PROFILES, RequestKind, parse_kind
 
 __all__ = [
@@ -134,22 +134,11 @@ def read_regular(path: Path, *, limit: int | None = None) -> str | None:
     bloquerait le tour). Ouvert sans suivre de lien et sans bloquer, puis revérifié sur le descripteur ouvert.
     """
     try:
-        before = path.lstat()
+        handle = open_regular(path)
     except FileNotFoundError:
         return None
-    except OSError as exc:
-        raise ValueError(f"{path.name} illisible ({exc.__class__.__name__})") from exc
-    if not stat.S_ISREG(before.st_mode):
-        raise ValueError(f"{path.name} n'est pas un fichier ordinaire : refusé")
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
-    except OSError as exc:
-        raise ValueError(f"{path.name} illisible ({exc.__class__.__name__})") from exc
-    with os.fdopen(fd, "rb") as handle:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError(f"{path.name} n'est pas un fichier ordinaire : refusé")
-        if limit is not None and info.st_size > limit:
+    with handle:
+        if limit is not None and os.fstat(handle.fileno()).st_size > limit:
             raise ValueError(f"{path.name} dépasse {limit // 1024} Kio : refusé")
         return handle.read().decode("utf-8", errors="replace")
 
