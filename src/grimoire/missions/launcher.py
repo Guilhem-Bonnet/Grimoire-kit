@@ -985,6 +985,11 @@ class WorkerLauncher:
             if host == GEMINI_HOST and (unproven := self._gemini_refusal()):
                 # Sans frein prouvé pour cette version de gemini, rien n'est créé ni réclamé : la raison est dite.
                 return LaunchOutcome(tid, "skipped", f"worker Gemini CLI non lancé : {unproven}")
+            from grimoire.missions.requirement_gate import gate_refusal
+
+            if (missing := gate_refusal(service.home_root, ahead)) is not None:
+                # #1342 (M3) : refusé au claim de toute façon — rien n'est créé, la raison est dite.
+                return LaunchOutcome(tid, "skipped", f"exigence non validée par la MOA : {missing.reason}")
             wt = create_task_worktree(service, tid, repo=service.home_root, base=base, into=into, actor=WORKER_ACTOR)
             bundle = service.context(tid)
             service.claim(tid, WORKER_ACTOR, host=self._claim_host(host))

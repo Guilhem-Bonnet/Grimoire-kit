@@ -19,8 +19,6 @@ import { renderMarkdown } from './markdown.js';
 import { createVoiceInput } from './voice.js';
 import { createVoiceOutbox } from './voice_outbox.js';
 
-const SAFE_HREF = /^(https?:|mailto:|#)/i;
-
 function mk(tag, attrs, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -32,13 +30,10 @@ function mk(tag, attrs, ...children) {
   return node;
 }
 
-/** Du markdown de l'agent vers le DOM : le texte est échappé d'abord, les liens non sûrs perdent leur cible. */
+/** Du markdown de l'agent vers le DOM : le texte est échappé d'abord, les liens à schéma non sûr perdent leur cible (liste blanche dans markdown.js). */
 function markdownInto(node, source) {
   node.innerHTML = renderMarkdown(source);
-  for (const link of node.querySelectorAll('a')) {
-    if (!SAFE_HREF.test(link.getAttribute('href') || '')) link.removeAttribute('href');
-    else link.setAttribute('target', '_blank');
-  }
+  for (const link of node.querySelectorAll('a')) link.setAttribute('target', '_blank');
 }
 
 const STATUS_LABEL = {

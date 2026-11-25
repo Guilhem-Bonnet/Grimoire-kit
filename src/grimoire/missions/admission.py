@@ -707,11 +707,14 @@ def build_plan(
     autonomous: bool = False,
     mission_id: str | None = None,
     pause: PauseState | None = None,
+    refuse_of: Callable[[MissionTask], str] | None = None,
 ) -> QueuePlan:
     """La file triée, passée une fois à l'admission ; chaque tâche admise réserve son créneau pour la suivante.
 
     *pause* (K11) est l'union des drapeaux du projet et de la machine : une tâche qu'un drapeau couvre est
     différée (``Defer(pause)``), les autres suivent leur chemin. *paused* force la pause pour toutes.
+    *refuse_of* (#1342, M3) : la raison qui interdit le claim d'une tâche (gate d'exigence en mode bloquant) ; une
+    tâche refusée est écartée de la file (``excluded``), jamais admise puis refusée au lancement à chaque tick.
     """
     pause = pause or PauseState()
     view = derive_view(ledger, capacity, now=now, host=host)
@@ -726,6 +729,8 @@ def build_plan(
             excluded.append((task.id, f"dépend de {'; '.join(waiting)}"))
         elif (backoff := ledger.backoff_until(task.id)) is not None and backoff > now:
             excluded.append((task.id, f"backoff jusqu'à {backoff.isoformat()}"))
+        elif refuse_of is not None and (refused := refuse_of(task)):
+            excluded.append((task.id, refused))
         else:
             candidates.append(task)
     ordered = queue_order(candidates, since, now=now, aging_hours=capacity.aging_hours)
