@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -11,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
 from grimoire.runtime.schemas import (
@@ -123,6 +125,17 @@ def _slug_for_recipe_id(recipe_id: str) -> str:
     digest = hashlib.sha256(recipe_id.encode("utf-8")).hexdigest()[:8]
     keep = _MAX_SLUG_LEN - len(digest) - 1
     return f"{raw[:keep]}-{digest}"
+
+
+def _parse_run_events(data: bytes) -> list[RunEvent]:
+    events: list[RunEvent] = []
+    for line in data.decode("utf-8").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        with contextlib.suppress(json.JSONDecodeError, KeyError):
+            events.append(RunEvent.from_dict(json.loads(line)))
+    return events
 
 
 class RuntimeKernel:
@@ -692,9 +705,14 @@ class RuntimeKernel:
         return checkpoints[-1] if checkpoints else None
 
     def get_run_events(self, wfi_id: str | None = None) -> list[RunEvent]:
-        events: list[RunEvent] = []
         if not self._events_path.exists():
-            return events
+            return []
+        # Dans une lecture d'affichage du cockpit (``file_memo.view_scope``), le journal immobile n'est parsé qu'une
+        # fois pour tous les runs ; partout ailleurs (reprise, décisions du moteur), c'est une lecture simple.
+        events = file_memo.view_derived(self._events_path, "kernel-run-events", _parse_run_events)
+        if wfi_id is None:
+            return list(events)
+        return [evt for evt in events if evt.workflow_instance_id == wfi_id]
         for line in self._events_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:

@@ -61,6 +61,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.missions.liveness import INCONNU, TERMINE, VIVANT, SessionProbe
 from grimoire.tools import workspace_reviews
 from grimoire.tools.memory_setup import SERVICE_FAILED, SERVICE_ONLINE, SERVICE_STOPPED, service_state
@@ -577,7 +578,8 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
                 _item(read, CLAIM_ORPHANED, task.id, task.title, orphan, since=since, task_id=task.id)
         if task.status is TaskState.NEEDS_VERIFICATION:
             try:
-                verdict = service.gate(task, TaskState.CLOSED)
+                with file_memo.view_scope():  # affichage seul : preuves et verdicts relus une fois par fichier immobile
+                    verdict = service.gate(task, TaskState.CLOSED)
             except Exception as exc:  # un gate illisible ne laisse pas passer la revue en silence
                 _item(read, REVIEW_BLOCKED, task.id, task.title, f"verdict du gate illisible : {exc}",
                       since=since, task_id=task.id)
