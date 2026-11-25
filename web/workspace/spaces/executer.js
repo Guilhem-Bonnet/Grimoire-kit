@@ -50,7 +50,6 @@
 // que copier `claude --resume <id>` (hôte Claude Code) ou afficher
 // l'identifiant : jamais d'exécution depuis la webview (ADR-007).
 
-const STYLE_ID = 'ex-styles';
 
 // Portée et filtres du portefeuille — au niveau du module, comme
 // `timelineFilter` : revenir sur l'espace garde le dernier réglage.
@@ -109,7 +108,7 @@ import { newTaskBlock, newTaskButton } from './task-create.js';
 import { appendQuestionV2, isV2 } from './decision-card.js';
 import { pilotJournalBlock } from './pilote-journal.js';
 import { ideaBlock, ideaButton, requestIdeaFocus } from './task-intake.js';
-import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
+import { el as rcEl, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
 
 const COLUMN_LABEL = {
   proposed: 'Proposée', ready: 'Prête', in_progress: 'En cours', blocked: 'Bloquée',
@@ -213,282 +212,6 @@ function ageText(iso) {
   return hours < 48 ? `depuis ${hours} h` : `depuis ${Math.round(hours / 24)} j`;
 }
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .ex-wrap { padding: var(--sp-4) var(--sp-5); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
-    @container canvas (max-width: 720px) { .ex-wrap { padding: var(--sp-3); } }
-    /* I4 : le board défile seul ; les colonnes s'étirent à la hauteur du contenu pour que chaque en-tête reste collé en haut (un sticky ne dépasse jamais sa colonne) ; sous 720 px, une colonne pleine largeur à la fois. */
-    .ex-board-shell { display: flex; flex-direction: column; gap: var(--sp-2); flex: 1 1 auto; min-height: 0; min-width: 0; }
-    .ex-board { display: flex; gap: var(--sp-3); align-items: stretch; overflow: auto; flex: 1 1 auto; min-height: 0; position: relative; }
-    .ex-tabs { display: none; flex: none; gap: var(--sp-2); overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
-    .ex-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: 999px; background: var(--e2); color: var(--ink2); font-size: var(--t-s); cursor: pointer; }
-    .ex-tab .ico { width: 16px; height: 16px; }
-    .ex-tab .mono { color: var(--ink3); }
-    .ex-tab[aria-selected="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--ink); font-weight: 600; }
-    .ex-tab:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-    @container canvas (max-width: 720px) {
-      .ex-tabs { display: flex; }
-      .ex-board { scroll-snap-type: x mandatory; overscroll-behavior-x: contain; gap: var(--sp-3); }
-      .ex-board .ex-col { flex: 0 0 100%; max-width: 100%; scroll-snap-align: start; scroll-snap-stop: always; }
-    }
-    .ex-col { flex: 1 0 240px; max-width: 340px; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
-    .ex-col-head { padding: 6px 2px; position: sticky; top: 0; z-index: 2; background: var(--e2); }
-    .ex-more { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 var(--sp-3); border: 1px dashed var(--line); border-radius: var(--r); background: transparent; color: var(--ink2); font-size: var(--t-s); cursor: pointer; }
-    .ex-more:hover { background: var(--hover); }
-    .ex-more:focus-visible, .ex-older-row:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-    .ex-older { display: flex; flex-direction: column; gap: 4px; }
-    .ex-older[hidden] { display: none; }
-    .ex-older-row { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); color: var(--ink); font-size: var(--t-s); text-align: left; cursor: pointer; min-width: 0; }
-    .ex-older-row:hover { background: var(--hover); }
-    .ex-older-row > .ex-older-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ex-older-row > time { flex: none; color: var(--ink3); font-size: var(--t-min); }
-    .ex-col-title { font-size: var(--t-s); font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 6px; }
-    .ex-col-title > .mono { color: var(--rub); font-weight: 600; }
-    .ex-col-title .ico { width: 16px; height: 16px; color: var(--ink2); }
-    .ex-col-gate { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
-    .ex-col-body { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
-    .ex-col-body[hidden] { display: none; }
-    .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
-    /* P72v2 : bloquées du board compact — compteur discret de ton warn (jamais une alarme), section repliée par défaut. */
-    .ex-blocked-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 2px 8px; font-size: var(--t-min); border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); cursor: pointer; }
-    .ex-blocked-toggle:hover { background: var(--hover); }
-    .ex-blocked-body { display: flex; flex-direction: column; gap: 6px; }
-    .ex-blocked-body[hidden] { display: none; }
-    .ex-blocked-title { font-size: var(--t-min); font-weight: 600; color: var(--ink2); }
-    .ex-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); box-shadow: var(--shadow); padding: var(--sp-3); cursor: pointer; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
-    /* P74 : liseré gauche stable par « ouverte par » (hash → --owner-N de tokens.css).
-       Un repère de balayage, jamais le seul porteur de sens : le nom est écrit sur la carte. */
-    .ex-card { border-left: 3px solid var(--owner-tone, var(--line)); }
-    /* P74 : badge de type (code / design / doc / infra / autre) — pastille + mot, jamais la couleur seule. */
-    .ex-type { display: inline-flex; align-items: center; gap: 5px; }
-    .ex-type .ex-type-sw { width: 8px; height: 8px; border-radius: 2px; background: var(--type-tone, var(--ink3)); flex: none; }
-    /* P74 : l'âge situé de la carte — un fait nommé, élidé s'il manque de place. */
-    .ex-card .ex-card-age { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .ex-card-owner { display: inline-flex; align-items: center; gap: 4px; }
-    .ex-card-owner > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ex-card:hover { background: var(--hover); }
-    .ex-card[aria-current="true"] { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
-    .ex-card-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
-    .ex-card-top .badge { flex: none; }
-    .ex-card-top .ex-card-id { flex: 1 1 0; min-width: 4ch; }
-    .ex-card-top .badge[data-role="route"] { flex: 0 1 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
-    .ex-card-id { color: var(--ink3); font-size: var(--t-min); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-    .ex-proof { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ink2); font-size: var(--t-min); flex: none; }
-    .ex-ring { width: 16px; height: 16px; transform: rotate(-90deg); }
-    .ex-ring circle { fill: none; stroke-width: 2.6; }
-    .ex-ring .ok { stroke: var(--ok-mark); }
-    .ex-ring .bad { stroke: var(--bad-mark); }
-    .ex-ring .todo { stroke: var(--ink3); opacity: 0.4; }
-    .ex-card-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-    .ex-card-flag { display: block; max-width: 100%; }
-    .ex-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
-    .ex-head .space-title { margin: 0; }
-    .ex-head .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
-    .ex-head .seg > button { flex: none; white-space: nowrap; }
-    .ex-head-end { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
-    .ex-ask { gap: 6px; }
-    .ex-ask[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--acc); }
-    .ex-formula { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); white-space: nowrap; }
-    .ex-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
-    .ex-insp-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--sp-3); }
-    .ex-insp-head h3 { margin: 0; font-size: var(--t-l); line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
-    .ex-gate-card { background: var(--e2); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); padding: var(--sp-4); display: flex; flex-direction: column; gap: 10px; margin-bottom: var(--sp-4); }
-    .ex-gate-card .micro { font-size: var(--t-min); font-weight: 500; color: var(--ink2); }
-    /* P68 : une carte d'une seule ligne n'empile plus les marges de blocs vides. */
-    .ex-gate-card > :empty { display: none; }
-    .ex-gate-card p { margin: 0; }
-    .ex-prio-row > select { flex: 1 1 auto; width: auto; min-width: 0; }
-    .ex-prio-row > .lbl { flex: none; white-space: nowrap; }
-    .ex-gate-card .micro strong { color: var(--ink); }
-    .ex-conds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-    .ex-cond { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--sp-2); padding: 6px 0; font-size: var(--t-s); }
-    .ex-cond-strong { font-weight: 600; }
-    .ex-cond-why { display: block; color: var(--ink2); font-size: var(--t-min); }
-    .ex-cond-remedy { color: var(--ink); }
-    .ex-gates { display: flex; flex-direction: column; }
-    .ex-gates-sub { padding-top: 8px; border-top: 1px solid var(--line); margin-top: 4px; }
-    .ex-last-refusal { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--sp-2); padding: 6px 8px; margin-bottom: 4px; border-radius: var(--r); background: var(--bad-soft); color: var(--bad); font-size: var(--t-min); }
-    .ex-cond > .sico { align-self: start; margin-top: 1px; }
-    .ex-last-refusal > .sico { align-self: start; }
-    /* Les gestes sous les gates, en une rangée comme l'artboard : un seul primaire (le passage suivant). */
-    .ex-moves { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
-    .ex-moves .ex-gate-row { border: 0; padding: 0; }
-    .ex-moves .ex-gate-row[data-target="blocked"] { flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); border-radius: 0; }
-    .ex-moves .ex-gate-row[data-target="blocked"] .input { flex: 1 1 160px; min-width: 0; }
-    .ex-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--hover); }
-    .ex-confirm .lbl { flex: 1 1 100%; margin: 0; }
-    .ex-insp-idrow > .badge { margin-left: auto; }
-    .ex-kv { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
-    .ex-event { font-size: var(--t-min); color: var(--ink2); padding: 2px 0; }
-    .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-    /* Sur la carte (artboard Travail), une ligne par fait : rien ne se casse au
-       milieu d'un mot ou d'un identifiant — ce qui déborde s'élide, le texte
-       entier reste au survol. */
-    .ex-card .ex-card-meta { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
-    .ex-card .ex-card-meta > * { flex: none; }
-    /* P69v2 : la dernière entrée du fil d'activité — une seule ligne, élidée. */
-    .ex-card-feed { display: flex; align-items: center; gap: 4px; min-width: 0; }
-    .ex-card-feed .ex-card-feed-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-    /* P74 : la ligne « ouverte par … · dans <colonne> depuis … » — mêmes règles
-       de tenue qu'une méta de carte (une ligne, élision, texte entier au survol). */
-    .ex-card-who { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 4px 6px; }
-    .ex-card .ex-card-who { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
-    .ex-card .ex-card-who > * { flex: none; }
-    .ex-card .ex-card-who > .ex-card-owner { flex: 0 1 auto; min-width: 14ch; overflow: hidden; text-overflow: ellipsis; }
-    .ex-card .ex-card-who > .ex-card-age { flex: 0 3 auto; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; }
-    .ex-card-flags { display: flex; flex-wrap: wrap; gap: 4px; }
-    .ex-card .ex-session { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; color: var(--ink2); font-family: inherit; font-size: var(--t-min); }
-    .ex-card .ex-session > * { flex: none; }
-    .ex-card .ex-session code { border: 0; background: none; padding: 0; color: var(--ink); word-break: normal; }
-    .ex-card .ex-session .ex-session-lbl { display: none; }
-    .ex-card .ex-facts > * { white-space: nowrap; }
-    .ex-card .ex-wait { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; min-width: 0; }
-    .ex-card .ex-wait > * { flex: none; }
-    .ex-card .ex-wait > .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .ex-card .ex-wait.flag > span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-    .ex-card-next { font-size: var(--t-min); color: var(--ink2); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
-    /* P59 : un libellé d'action ne se casse jamais ; faute de place, ce sont les boutons qui passent à la ligne. */
-    .ex-card-next > span:first-child, .ex-card-next .btn { white-space: nowrap; }
-    .ex-card-next > .row { flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
-    .ex-card-next .btn { height: 24px; min-height: 24px; padding: 0 10px; font-size: var(--t-min); }
-    .ex-card-next .row-act, .ex-card-next .more-btn { width: 24px; min-width: 24px; padding: 0; }
-    .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
-    .ex-cost { font-size: var(--t-min); }
-    .ex-presence { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: var(--t-s); color: var(--ink2); }
-    .ex-presence .ex-presence-word { font-weight: 600; color: var(--ink); }
-    .ex-presence.acc .glyph { color: var(--acc); }
-    .ex-presence.warn .glyph { color: var(--warn); }
-    .ex-presence-sub { flex: 1 0 100%; font-size: var(--t-min); color: var(--ink2); padding-left: 22px; }
-    .ex-presence-act { flex: 1 0 100%; padding-left: 22px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; font-size: var(--t-min); }
-    .ex-presence-act .btn { margin-left: auto; }
-    .ex-presence-act .btn { height: 24px; min-height: 24px; padding: 0 10px; font-size: var(--t-min); }
-    .ex-presence-filter { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    .ex-presence-filter .chip[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--ink); }
-    .ex-resume-group { display: flex; flex-direction: column; gap: var(--sp-2); border-left: 2px solid var(--warn); padding-left: var(--sp-2); }
-    .ex-col-count-resume { font-size: var(--t-min); color: var(--warn); background: var(--warn-soft); font-weight: 600; margin-left: 6px; padding: 2px 8px; border-radius: 999px; }
-    .ex-card[data-presence="resume"] { border-color: var(--warn); }
-    .ex-queue-title { font-size: var(--t-min); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); margin-top: var(--sp-2); }
-    .ex-resume-title { display: flex; align-items: center; gap: 6px; font-size: var(--t-min); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--warn); }
-    .ex-list-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
-    .ex-list { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
-    .ex-list th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); background: var(--bar); }
-    .ex-list td { padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); }
-    .ex-list tbody tr { cursor: pointer; }
-    .ex-list tbody tr:hover { background: var(--e2); }
-    .ex-list tbody tr[aria-current="true"] { background: var(--acc-soft); }
-    .ex-list tbody tr:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
-    .ex-list .ex-list-actions { width: 1%; white-space: nowrap; text-align: right; }
-    .ex-timeline { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) 0; }
-    .ex-tl-filters { display: flex; gap: var(--sp-2); align-items: center; padding-bottom: var(--sp-2); }
-    .ex-tl-filters select { font-size: var(--t-min); }
-    .ex-tl-count { font-size: var(--t-min); color: var(--ink3); margin-left: auto; }
-    .ex-tl-entry { display: flex; flex-direction: column; gap: 4px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); cursor: pointer; }
-    .ex-tl-entry:hover { background: var(--e2); }
-    .ex-tl-entry.fail { border-color: var(--bad); }
-    .ex-tl-row { display: flex; gap: var(--sp-3); align-items: flex-start; min-width: 0; }
-    /* P68 : la date lisible tient dans sa colonne (largeur au contenu, jamais fixe) ; l'ISO complet est au survol. */
-    .ex-tl-at { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--t-min); color: var(--ink3); flex: none; min-width: 16ch; white-space: nowrap; }
-    .ex-tl-body { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-    .ex-tl-detail { margin: 0; padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line); background: var(--e2); font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap; word-break: break-word; }
-    .ex-insp-block { margin-bottom: var(--sp-4); }
-    .ex-insp-block h4 { font-size: var(--t-min); color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
-    .ex-insp-block ul { margin: 0; padding-left: 18px; font-size: var(--t-s); }
-    .ex-recall { margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap; word-break: break-word; }
-    .ex-gate-row { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r); }
-    .ex-gate-req { font-size: var(--t-min); color: var(--ink3); }
-    .ex-session { font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
-    .ex-session code { font-family: var(--mono); font-size: var(--t-min); padding: 1px 4px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); word-break: break-all; }
-    .ex-refusal { color: var(--bad); font-size: var(--t-s); margin-top: 6px; }
-    .ex-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); font-size: var(--t-s); color: var(--ink2); }
-    .ex-toolbar label { display: inline-flex; align-items: center; gap: 6px; }
-    .ex-toolbar select, .ex-toolbar input[type="checkbox"] { font-size: var(--t-s); }
-    .ex-toolbar .ex-count { margin-left: auto; color: var(--ink3); font-size: var(--t-min); }
-    .ex-notice { display: flex; flex-direction: column; gap: 4px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); font-size: var(--t-s); }
-    .ex-card-project { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-    .ex-card-project .chip { font-size: var(--t-s); }
-    .ex-session-cmd { margin: 6px 0 0; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); font-family: var(--mono); font-size: var(--t-s); white-space: pre-wrap; word-break: break-all; }
-    .ex-directive { display: flex; flex-direction: column; gap: 2px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); margin-bottom: 6px; font-size: var(--t-s); }
-    .ex-directive.unread { border-color: var(--acc); }
-    .ex-directive-meta { font-size: var(--t-min); color: var(--ink3); display: flex; gap: 6px; align-items: center; }
-    .ex-steer-form { display: flex; flex-direction: column; gap: 6px; }
-    .ex-steer-form textarea { min-height: 56px; font: inherit; font-size: var(--t-s); }
-    .ex-steer-row { display: flex; gap: 6px; align-items: center; }
-    .ex-wait { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-    .ex-wait.flag { padding: 2px 8px; border-radius: var(--r); }
-    .ex-wait.flag.bad { background: var(--bad-soft); color: var(--bad); }
-    .ex-wait.flag.warn { background: var(--warn-soft); color: var(--warn); }
-    .ex-wait.human { color: var(--ink); font-weight: 500; }
-    .ex-banner { display: flex; align-items: center; gap: var(--sp-3); padding: 8px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--e1); font-size: var(--t-s); }
-    .ex-banner > span:not(.glyph) { flex: 1 1 auto; min-width: 0; }
-    .ex-banner > .btn { flex: none; white-space: nowrap; }
-    /* Décisions (P68) : une colonne à la largeur utile, une carte par type, une seule action primaire. */
-    .ex-decisions { display: flex; flex-direction: column; gap: var(--sp-4); width: 100%; max-width: 960px; }
-    .ex-dec-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-    .ex-dec-filter { display: flex; flex-wrap: wrap; gap: 6px; }
-    .ex-dec-filter .chip[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--acc); }
-    .ex-dec-n { font-variant-numeric: tabular-nums; font-weight: 600; }
-    .ex-dec-section { display: flex; flex-direction: column; gap: var(--sp-3); }
-    .ex-dec-section[hidden] { display: none; }
-    .ex-dec-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-height: var(--h-ctl); }
-    .ex-dec-section-head h3 { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-s); font-weight: 600; color: var(--ink2); }
-    .ex-dec-section-head h3 .ex-dec-n { color: var(--ink3); font-weight: 500; }
-    .ex-dec-bulk { margin-left: auto; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-    .ex-dec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
-    .ex-dec-refusals { margin: 6px 0 0; padding-left: 18px; }
-    .ex-decision { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); min-width: 0; }
-    .ex-decision[data-type="reprise"] { gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
-    .ex-decision-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-    .ex-decision-title { margin: 0; font-size: var(--t-l); font-weight: 600; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere; }
-    .ex-decision-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .ex-decision-chips .chip { cursor: default; }
-    .ex-decision-question { margin: 0; font-size: var(--t-s); line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
-    .ex-choices { display: flex; flex-direction: column; gap: 6px; }
-    .ex-choice { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-height: var(--h-ctl); padding: 7px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); color: var(--ink); font: inherit; font-size: var(--t-s); line-height: 1.45; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
-    .ex-choice:hover { background: var(--hover); }
-    .ex-choice[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
-    .ex-choice:disabled { color: var(--ink3); border-style: dashed; cursor: not-allowed; }
-    .ex-choice-mark { flex: none; width: 14px; height: 14px; margin-top: 3px; border: 2px solid var(--ink3); border-radius: 50%; }
-    .ex-choice[aria-pressed="true"] .ex-choice-mark { border-color: var(--acc); background: var(--acc); box-shadow: inset 0 0 0 2px var(--card); }
-    .ex-dec-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-    .ex-dec-free { display: flex; flex-direction: column; gap: var(--sp-2); }
-    .ex-dec-free[hidden] { display: none; }
-    .ex-decision textarea { width: 100%; height: auto; min-height: 64px; padding: 6px 9px; font: inherit; font-size: var(--t-s); resize: vertical; }
-    .ex-dec-more { font-size: var(--t-min); color: var(--ink2); }
-    .ex-dec-more > summary { width: fit-content; cursor: pointer; color: var(--ink2); padding: 2px 0; }
-    .ex-dec-more[open] > summary { margin-bottom: var(--sp-2); }
-    .ex-dec-more dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px var(--sp-3); margin: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
-    .ex-dec-more dt { color: var(--ink3); }
-    .ex-dec-more dd { margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
-    .ex-dec-more code { font-family: var(--mono); font-size: var(--t-min); word-break: break-all; }
-    .ex-dec-cmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; white-space: normal; }
-    .ex-decision-note { font-size: var(--t-min); color: var(--ink3); }
-    .ex-decision-item { display: flex; flex-direction: column; gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
-    /* P47 : panneau Assigner une session — plan de lancement en lecture seule, section de l'inspecteur. */
-    .ex-assign-panel { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-2); }
-    .ex-assign-panel h4 { font-size: var(--t-s); color: var(--ink); margin: 0; font-weight: 600; }
-    .ex-assign-sub { margin: 0; font-size: var(--t-s); color: var(--ink2); }
-    .ex-assign-notready { display: flex; align-items: flex-start; gap: 6px; padding: 6px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); font-size: var(--t-s); }
-    .ex-assign-panel .skeleton { padding: var(--sp-2) 0; }
-    .ex-assign-rows { display: flex; flex-direction: column; }
-    .ex-assign-verifs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-    .ex-assign-verif { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-s); }
-    .ex-assign-verif > .sico { align-self: start; margin-top: 1px; }
-    .ex-assign-verif > span:not(.sico) { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
-    .ex-assign-launch { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-    .ex-assign-cmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-    .ex-assign-cmd code { font-family: var(--mono); font-size: var(--t-min); padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); word-break: break-all; }
-    @container canvas (max-width: 900px) {
-      .ex-dec-bulk { margin-left: 0; width: 100%; }
-      .ex-decision { padding: var(--sp-3); }
-      .ex-dec-more dl { grid-template-columns: minmax(0, 1fr); }
-    }
-  `;
-  document.head.append(style);
-}
 
 // Le glyphe d'état ne dit plus qu'un ÉTAT (colonne d'une tâche, échec d'une
 // ligne de timeline, ledger absent) : les catégories ont leur icône, la
@@ -2567,7 +2290,6 @@ function restoreFields(container, kept) {
 // relance la même lecture (GET, aucune écriture) et rend le différentiel. Sans
 // reçu, la phrase le dit : jamais une liste vide.
 function receiptBlock(ctx, taskId, payload, project) {
-  injectRecallStyles();
   const block = rcEl('div', 'ex-insp-block');
   block.dataset.role = 'recall-receipt';
   block.append(rcEl('h4', null, 'Mémoire servie'));
@@ -3738,7 +3460,6 @@ function restoreView(wrap, kept) {
 }
 
 export async function mount(root, ctx) {
-  injectStyles();
   // Le bilan d'un lot de décisions ne survit pas à un retour sur l'espace (sauf lot en cours).
   if (decisionUi.bulk && !decisionUi.bulk.running) decisionUi.bulk = null;
   decisionUi.confirm = '';

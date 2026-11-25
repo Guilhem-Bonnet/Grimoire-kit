@@ -1,0 +1,28 @@
+.ats { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow);
+  padding: var(--sp-3) var(--sp-4) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); }
+.ats[hidden] { display: none; }
+.ats-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.ats-head h3 { margin: 0; font-size: var(--t-s); font-weight: 600; display: flex; align-items: center; gap: var(--sp-2); }
+.ats-head h3 .ico { color: var(--ink2); }
+.ats-when { color: var(--ink2); font-size: var(--t-s); }
+.ats-counts { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
+.ats-close { margin-left: auto; }
+.ats-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--sp-3) var(--sp-4); }
+.ats-group h4 { margin: 0 0 var(--sp-1); font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
+.ats-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ats-line { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: var(--sp-2); align-items: center;
+  padding: var(--sp-1) var(--sp-2); border-radius: var(--r); }
+.ats-line:hover { background: var(--hover); }
+.ats-ico { width: 24px; height: 24px; border-radius: var(--r); display: flex; align-items: center; justify-content: center;
+  background: var(--hover); color: var(--ink2); }
+.ats-ico .glyph, .ats-ico .glyph.ok, .ats-ico .glyph.bad, .ats-ico .glyph.warn { color: inherit; }
+.ats-ico[data-tone="ok"] { background: var(--ok-soft); color: var(--ok); }
+.ats-ico[data-tone="bad"] { background: var(--bad-soft); color: var(--bad); }
+.ats-ico[data-tone="warn"] { background: var(--warn-soft); color: var(--warn); }
+.ats-text { display: flex; flex-direction: column; min-width: 0; }
+.ats-link { font-weight: 600; color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ats-link:hover { text-decoration: underline; }
+.ats-link:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 2px; }
+.ats-sub { color: var(--ink2); font-size: var(--t-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ats-at { color: var(--ink3); font-size: var(--t-min); white-space: nowrap; }
+.ats-more, .ats-note { margin: 0; color: var(--ink2); font-size: var(--t-s); padding-left: var(--sp-2); }

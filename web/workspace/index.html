@@ -14,24 +14,38 @@
   est montée par son module (spaces/*.js), qui expose `mount(root, ctx)` —
   voir README.md.
 -->
-<!-- Thème et contraste avant le premier paint : la clé par projet du choix n'est
-     lisible qu'après `boot()`, shell.js en recopie donc une version non scopée. -->
-<script>
-(function () {
-  try {
-    var d = document.documentElement;
-    var get = function (k) { try { return localStorage.getItem('grimoire.workspace.' + k); } catch (e) { return null; } };
-    var t = get('theme');
-    d.dataset.theme = t === 'light' || t === 'dark' ? t
-      : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    var c = get('contrast');
-    d.dataset.contrast = c === 'high' || c === 'standard' ? c
-      : (matchMedia('(prefers-contrast: more)').matches ? 'high' : 'standard');
-  } catch (e) { /* sans script : le CSS suit prefers-color-scheme */ }
-})();
-</script>
+<!-- Thème et contraste avant le premier paint : voir theme-boot.js (script externe, bloquant). -->
+<script src="./theme-boot.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <link rel="stylesheet" href="./shell.css">
+<!-- Feuilles des modules : après shell.css, comme leur ancienne injection par JS (#1366). Un module qui en importe
+     un autre passe avant lui : l'injection du second suivait celle du premier. -->
+<link rel="stylesheet" href="./spaces/a-traiter.css">
+<link rel="stylesheet" href="./spaces/a-traiter-since.css">
+<link rel="stylesheet" href="./spaces/atelier.css">
+<link rel="stylesheet" href="./spaces/carte.css">
+<link rel="stylesheet" href="./spaces/concevoir.css">
+<link rel="stylesheet" href="./spaces/configurer.css">
+<link rel="stylesheet" href="./spaces/demarrer.css">
+<link rel="stylesheet" href="./spaces/executer.css">
+<link rel="stylesheet" href="./spaces/decision-card.css">
+<link rel="stylesheet" href="./spaces/fils.css">
+<link rel="stylesheet" href="./spaces/fonctions-test.css">
+<link rel="stylesheet" href="./spaces/memoire.css">
+<link rel="stylesheet" href="./spaces/observer.css">
+<link rel="stylesheet" href="./spaces/pilote-journal.css">
+<link rel="stylesheet" href="./spaces/piloter.css">
+<link rel="stylesheet" href="./spaces/capacite.css">
+<link rel="stylesheet" href="./spaces/donnees.css">
+<link rel="stylesheet" href="./spaces/rappel.css">
+<link rel="stylesheet" href="./spaces/recall-receipt.css">
+<link rel="stylesheet" href="./spaces/registre.css">
+<link rel="stylesheet" href="./spaces/revue.css">
+<link rel="stylesheet" href="./spaces/sante.css">
+<link rel="stylesheet" href="./spaces/sessions.css">
+<link rel="stylesheet" href="./activity.css">
+<link rel="stylesheet" href="./spaces/task-intake.css">
+<link rel="stylesheet" href="./spaces/task-create.css">
 </head>
 <body>
 
@@ -81,7 +95,7 @@
     <!-- Panneau gauche : explorateur -->
     <aside class="panel panel-left" id="panel-explorer" data-state="pinned" data-detail="off" aria-label="Explorateur">
       <div class="panel-head">
-        <span style="font-weight:500">Explorateur</span>
+        <span class="panel-title">Explorateur</span>
         <span class="grow"></span>
         <span class="kbd">1</span>
         <button class="panel-close" type="button" data-close="explorer" aria-label="Fermer l'explorateur">
@@ -121,7 +135,7 @@
     <!-- Panneau droit : inspecteur -->
     <aside class="panel panel-right" id="panel-inspector" data-state="pinned" data-detail="off" aria-label="Inspecteur">
       <div class="panel-head">
-        <span style="font-weight:500">Inspecteur</span>
+        <span class="panel-title">Inspecteur</span>
         <span class="grow"></span>
         <span class="kbd">4</span>
         <button class="panel-close" type="button" data-close="inspector" aria-label="Fermer l'inspecteur">
@@ -139,7 +153,7 @@
          espace, pour rester utilisable depuis n'importe lequel des cinq. -->
     <aside class="panel panel-right" id="panel-evidence" data-state="collapsed" aria-label="Preuves">
       <div class="panel-head">
-        <span style="font-weight:500">Preuves</span>
+        <span class="panel-title">Preuves</span>
         <span class="grow"></span>
         <span class="kbd">3</span>
         <button class="panel-close" type="button" data-close="evidence" aria-label="Fermer les preuves">
@@ -159,9 +173,9 @@
   <footer id="statusbar">
     <span id="st-kit" class="st-extra">grimoire-kit —</span>
     <span id="st-api" class="st-extra">API locale</span>
-    <span class="row" style="gap:6px"><span class="dot" id="st-standard-dot"></span><span id="st-standard">standard —</span></span>
+    <span class="row row-tight"><span class="dot" id="st-standard-dot"></span><span id="st-standard">standard —</span></span>
     <span id="st-host" class="st-extra">—</span>
-    <span class="row" id="st-live" style="gap:6px" title="Actualisation automatique">
+    <span class="row row-tight" id="st-live" title="Actualisation automatique">
       <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#refresh"/></svg><span id="st-live-text">actualisation…</span><span id="st-reloads" class="live-pre"></span>
     </span>
     <span id="st-autopilot" class="st-autopilot" role="status" hidden></span>

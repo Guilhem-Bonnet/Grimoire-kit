@@ -28,7 +28,6 @@ import {
   WINDOW_CHOICES, WINDOW_DEFAULT_MINUTES, clockLabel, layoutFleetThreads, modelLabel, providerToken, threadName,
 } from './fils-geometry.js';
 
-const STYLE_ID = 'fl-styles';
 
 const WINDOW_LABEL = { 60: '1 h', 240: '4 h', 1440: '24 h' };
 
@@ -39,91 +38,7 @@ const LIVENESS = {
   ended: { label: 'terminée', tone: 'ok', icon: 'i-session-done' },
 };
 
-const CSS = `
-.fl-wrap { padding: var(--sp-6); max-width: 1440px; width: 100%; box-sizing: border-box; margin: 0 auto;
-  display: flex; flex-direction: column; gap: var(--sp-4); }
-.fl-attention { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--line); border-radius: var(--r); background: var(--card); color: var(--ink2); font-size: var(--t-s); }
-.fl-attention strong { color: var(--ink); font-weight: 600; }
-.fl-attention .btn { margin-left: auto; }
-.fl-seg { display: flex; }
-.fl-board { position: relative; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card);
-  box-shadow: var(--shadow); overflow-x: auto; }
-.fl-svg { display: block; width: 100%; min-width: 720px; height: auto; }
-.fl-thread { fill: none; stroke-linecap: round; }
-.fl-thread.pale { opacity: 0.45; }
-.fl-dim { opacity: 0.18; }
-.fl-edge { fill: none; stroke: var(--ink3); stroke-width: 1.2; stroke-dasharray: 4 4; opacity: 0.8; }
-.fl-now { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
-.fl-sep { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; }
-.fl-project { fill: var(--ink3); font-size: var(--t-s); font-weight: 500; }
-.fl-change-diamond { fill: var(--card); stroke: var(--ink); stroke-width: 1.3; }
-.fl-change-label { fill: var(--ink2); font-size: var(--t-min); }
-.fl-end-silent { fill: var(--card); stroke: var(--ink3); stroke-width: 1.5; }
-.fl-end-live { stroke: none; }
-.fl-end-ended { fill: var(--ink3); }
-.fl-loop { fill: var(--bad); stroke: var(--card); stroke-width: 1.5; }
-.fl-loop-label { fill: var(--bad); font-size: var(--t-min); font-weight: 500; }
-.fl-marker { fill: var(--ink3); }
-.fl-name { cursor: pointer; outline: none; }
-.fl-name-hit { fill: transparent; }
-.fl-name:focus-visible .fl-name-hit { stroke: var(--acc); stroke-width: 1.5; }
-.fl-name[aria-current="true"] .fl-name-hit { fill: var(--acc-soft); }
-.fl-name-text { fill: var(--ink); font-size: var(--t-s); font-weight: 500; }
-.fl-name-model { fill: var(--ink3); font-size: var(--t-min); }
-.fl-name-ring { fill: none; stroke-width: 2; }
-.fl-terms { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-3); }
-.fl-terminal { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow);
-  display: flex; flex-direction: column; min-width: 0; overflow: hidden; cursor: pointer; }
-.fl-terminal:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-.fl-term-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
-  border-bottom: 1px solid var(--line); }
-.fl-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.fl-term-name { font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.fl-term-model { color: var(--ink3); font-size: var(--t-min); }
-.fl-term-body { margin: 0; padding: var(--sp-2) var(--sp-3); background: var(--term); color: var(--termink);
-  font-family: var(--mono); font-size: var(--t-min); line-height: 1.5; max-height: 220px; overflow: auto; white-space: pre-wrap;
-  overflow-wrap: anywhere; }
-.fl-term-empty { padding: var(--sp-3); color: var(--ink3); font-size: var(--t-s); }
-.fl-insp { display: flex; flex-direction: column; gap: var(--sp-4); min-height: 100%; }
-.fl-insp h3 { margin: 0; font-size: var(--t-l); font-weight: 600; display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-.fl-insp-sub { margin: 0; color: var(--ink2); font-size: var(--t-s); }
-.fl-kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line);
-  font-size: var(--t-s); overflow-wrap: anywhere; }
-.fl-kv > :first-child { color: var(--ink3); font-size: var(--t-min); font-weight: 500; }
-.fl-kv b { font-weight: 500; color: var(--ink); }
-.fl-journey { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
-.fl-journey li { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: var(--sp-2); padding: 6px 0;
-  border-top: 1px solid var(--line); font-size: var(--t-s); }
-.fl-journey time { color: var(--ink3); font-family: var(--mono); font-size: var(--t-min); }
-.fl-term { margin: 0; padding: var(--sp-2); border-radius: var(--r); background: var(--term); color: var(--termink);
-  font-family: var(--mono); font-size: var(--t-min); line-height: 1.5; max-height: 260px; overflow: auto;
-  white-space: pre-wrap; overflow-wrap: anywhere; }
-.fl-actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.fl-actions .row { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.fl-form { display: flex; flex-direction: column; gap: var(--sp-2); }
-.fl-form textarea { font: inherit; font-size: var(--t-s); padding: 6px 8px; border: 1px solid var(--line);
-  border-radius: var(--r); background: var(--e1); color: var(--ink); resize: vertical; min-height: 64px; }
-.fl-note { margin: 0; color: var(--ink2); font-size: var(--t-s); }
-.fl-error { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
-  border: 1px dashed var(--line); border-radius: var(--r); color: var(--ink2); font-size: var(--t-s); }
-@container canvas (max-width: 720px) {
-  .fl-wrap { padding: var(--sp-3); }
-  .fl-terms { grid-template-columns: minmax(0, 1fr); }
-}
-@media (prefers-reduced-motion: no-preference) {
-  .fl-thread { stroke-dasharray: 2400; stroke-dashoffset: 2400; animation: fl-draw 900ms ease-out forwards; }
-  @keyframes fl-draw { to { stroke-dashoffset: 0; } }
-}
-`;
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = CSS;
-  document.head.append(style);
-}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -435,15 +350,17 @@ function renderThreads(ctx, data, state, rootWidth) {
     // Le tick : pointillé gris, comme sur l'artboard ; les fils de session
     // prennent la teinte de leur fournisseur.
     const tint = thread.tick ? 'var(--ink3)' : `var(${thread.label.token})`;
-    const dash = thread.tick ? '; stroke-dasharray: 5 5' : '';
     const segments = thread.segments.length ? thread.segments : [{ path: thread.path, pale: false }];
     for (const segment of segments) {
-      drawing.append(svg('path', {
+      const line = svg('path', {
         class: `fl-thread${thread.tick ? ' tick' : ''}${segment.pale ? ' pale' : ''}`,
         d: segment.path,
         'data-session': thread.id,
-        style: `stroke: ${tint}; stroke-width: ${thread.tick ? 1.5 : thread.label.stroke}${dash}`,
-      }));
+      });
+      line.style.stroke = tint;
+      line.style.strokeWidth = String(thread.tick ? 1.5 : thread.label.stroke);
+      if (thread.tick) line.style.strokeDasharray = '5 5';
+      drawing.append(line);
     }
     // Le losange au point de bascule et son étiquette directe.
     for (const change of thread.changes) {
@@ -475,7 +392,9 @@ function renderThreads(ctx, data, state, rootWidth) {
     } else if (thread.end.kind === 'ended') {
       drawing.append(svg('circle', { class: 'fl-end-ended', cx: thread.end.x, cy: thread.end.y, r: 3.5 }));
     } else {
-      drawing.append(svg('circle', { class: 'fl-end-live', cx: thread.end.x, cy: thread.end.y, r: 4, style: `fill: ${tint}` }));
+      const live = svg('circle', { class: 'fl-end-live', cx: thread.end.x, cy: thread.end.y, r: 4 });
+      live.style.fill = tint;
+      drawing.append(live);
     }
     // L'étiquette directe, au bout du fil : nom et modèle, sans légende.
     const name = svg('g', {
@@ -488,7 +407,8 @@ function renderThreads(ctx, data, state, rootWidth) {
     name.append(svg('rect', {
       class: 'fl-name-hit', x: layout.plot_right + 6, y: thread.y - 17, width: layout.width - layout.plot_right - 10, height: 34, rx: 6,
     }));
-    const ring = svg('circle', { class: 'fl-name-ring', cx: layout.plot_right - 5, cy: thread.y, r: 5, style: `stroke: ${tint}` });
+    const ring = svg('circle', { class: 'fl-name-ring', cx: layout.plot_right - 5, cy: thread.y, r: 5 });
+    ring.style.stroke = tint;
     const nameText = svg('text', { class: 'fl-name-text', x: layout.plot_right + 12, y: thread.y - 3 });
     nameText.textContent = thread.label.short;
     const modelText = svg('text', { class: 'fl-name-model', x: layout.plot_right + 12, y: thread.y + 11 });
@@ -601,7 +521,6 @@ function renderTerminals(ctx, data, state) {
 }
 
 export async function mount(root, ctx) {
-  injectStyles();
   const wanted = Number(ctx.params && ctx.params.window);
   let windowMinutes = WINDOW_CHOICES.includes(wanted) ? wanted : WINDOW_DEFAULT_MINUTES;
   let view = ctx.params && ctx.params.vue === 'terminaux' ? 'terminaux' : 'fils';

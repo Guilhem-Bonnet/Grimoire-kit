@@ -84,7 +84,7 @@ def test_flag_off_no_tab_and_404(browser: Browser, project_off: tuple[str, Path]
         assert page.locator("#tab-space-atelier").count() == 0
         assert "atelier" not in page.evaluate("window.GrimoireWorkspace.spaces")
         loaded = page.evaluate("performance.getEntriesByType('resource').map(e => e.name)")
-        assert not [name for name in loaded if "/spaces/atelier" in name]
+        assert not [name for name in loaded if "/spaces/atelier.js" in name]
         # La rubrique de réglage, elle, existe et propose l'interrupteur.
         page.evaluate("window.GrimoireWorkspace.goto('fonctions-test')")
         switch = page.locator("[data-feature='atelier']")

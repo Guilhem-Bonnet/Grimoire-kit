@@ -128,6 +128,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
   gap: var(--sp-2);
 }
 
+.row-tight {
+  gap: 6px;
+}
+
 .grow {
   flex-grow: 1;
 }
@@ -1521,6 +1525,10 @@ body[data-active-space="source"] {
   margin-left: -2px;
 }
 
+.panel-title {
+  font-weight: 500;
+}
+
 .panel-head {
   height: var(--h-doc);
   display: flex;
@@ -1911,6 +1919,7 @@ body[data-active-space] .panel-head {
    compteur de décisions de la barre du haut. */
 #st-live {
   white-space: nowrap;
+  gap: 6px;
 }
 
 #st-live[data-state="error"],
