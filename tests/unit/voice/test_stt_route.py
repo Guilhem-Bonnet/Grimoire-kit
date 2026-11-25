@@ -42,7 +42,7 @@ class Calls:
     """Ce que le moteur simulé a reçu."""
 
     def __init__(self) -> None:
-        self.paths: list[Path] = []
+        self.paths: list[Any] = []  # ce que le moteur a reçu : les octets de l'enregistrement
         self.existed: list[bool] = []
         self.vocabulary: list[Sequence[str]] = []
         self.language: list[str | None] = []
@@ -59,7 +59,7 @@ def calls(fake_module: Callable[..., Any], isolated_registry: dict) -> Iterator[
 
         def transcribe(self, audio: Any, *, language: str | None = None, vocabulary: Sequence[str] = ()) -> Transcript:
             log.paths.append(audio)
-            log.existed.append(Path(audio).is_file())
+            log.existed.append(isinstance(audio, bytes) and audio == wav())
             log.vocabulary.append(tuple(vocabulary))
             log.language.append(language)
             if log.fail:
@@ -112,22 +112,22 @@ def test_stt_config_offers_the_button_in_voice_mode(served: Any, calls: Calls) -
 
 
 def test_stt_transcribes_with_project_vocabulary_then_deletes_the_audio(served: Any, calls: Calls) -> None:
-    port, _ = served(VOICE_ON)
+    port, home = served(VOICE_ON)
     status, body = _cockpit_http.post(port, TRANSCRIBE, {"audio": b64(wav())})
     assert status == 200, body
     assert body["text"] == "bonjour   le monde"
-    assert calls.existed == [True]  # l'audio existait pendant l'appel…
-    assert not calls.paths[0].exists()  # … et plus après
+    assert calls.existed == [True]  # le moteur a reçu exactement les octets écrits…
+    assert not list(home.rglob("grimoire-stt-*.wav"))  # … et le fichier n'existe plus après
     assert "home" in calls.vocabulary[0]  # nom du projet
     assert calls.language == ["fr"]
 
 
 def test_stt_audio_is_deleted_when_the_engine_fails(served: Any, calls: Calls) -> None:
-    port, _ = served(VOICE_ON)
+    port, home = served(VOICE_ON)
     calls.fail = True
     status, body = _cockpit_http.post(port, TRANSCRIBE, {"audio": b64(wav())})
     assert status == 400 and "le moteur simulé a échoué" in body["error"]
-    assert not calls.paths[0].exists()
+    assert not list(home.rglob("grimoire-stt-*.wav"))
 
 
 def test_stt_route_is_404_with_a_reason_when_the_extra_is_missing(served: Any, calls: Calls) -> None:

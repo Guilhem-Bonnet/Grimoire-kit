@@ -16,7 +16,7 @@ globalThis.document = { createElement: () => element() };
 const { createVoiceInput, stillDictated } = await import('../../web/workspace/voice.js');
 
 /** Monte la saisie avec une transcription simulée, puis dicte `said` : rien n'enregistre vraiment. */
-async function dictate(said, before = '') {
+async function dictate(said, before = '', token = '') {
   const input = element();
   input.value = before;
   const recorded = [new Float32Array(1600)];
@@ -37,7 +37,7 @@ async function dictate(said, before = '') {
   });
   const buttons = [];
   globalThis.document = { createElement: () => { const b = element(); buttons.push(b); return b; } };
-  const api = { voiceConfig: async () => ({ available: true, max_seconds: 5 }), voiceTranscribe: async () => ({ text: said }) };
+  const api = { voiceConfig: async () => ({ available: true, max_seconds: 5 }), voiceTranscribe: async () => ({ text: said, dictation_token: token }) };
   const voice = createVoiceInput({ api, input, slot: element(), note() {}, setStatus() {} });
   await voice.refresh();
   const button = buttons[0];
@@ -85,4 +85,27 @@ test('une correction partielle au clavier garde la mention', async () => {
   input.value = 'ouvre la tâche 12';
   input.fire('input');
   assert.equal(voice.dictationPending(), true);
+});
+
+test('tokensToSend : les jetons partent avec une dictée encore présente, jamais sinon', async () => {
+  const { tokensToSend, MAX_DICTATION_TOKENS } = await import('../../web/workspace/voice.js');
+  assert.deepEqual(tokensToSend(true, ['a', 'b']), ['a', 'b']);
+  assert.deepEqual(tokensToSend(false, ['a']), []);
+  assert.deepEqual(tokensToSend(true, []), []);
+  assert.deepEqual(tokensToSend(true, undefined), []);
+  assert.deepEqual(tokensToSend(true, ['a', '', null, 3, 'b']), ['a', 'b']);
+  const many = Array.from({ length: MAX_DICTATION_TOKENS + 3 }, (_, i) => `t${i}`);
+  assert.equal(tokensToSend(true, many).length, MAX_DICTATION_TOKENS);
+  assert.equal(tokensToSend(true, many).at(-1), many.at(-1));
+});
+
+test('la saisie garde le jeton du serveur avec la dictée et le perd avec elle', async () => {
+  const { voice, input } = await dictate('ouvre la tâche douze', '', 'jeton-opaque');
+  assert.deepEqual(voice.dictationTokens(input.value), ['jeton-opaque']);
+  input.value = 'garder';
+  input.fire('input');
+  assert.deepEqual(voice.dictationTokens(), []);
+  const again = await dictate('ouvre la tâche douze', '', 'jeton-deux');
+  again.voice.commitDictation();
+  assert.deepEqual(again.voice.dictationTokens(again.input.value), []);
 });

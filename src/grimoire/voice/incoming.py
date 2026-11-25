@@ -17,9 +17,10 @@ import secrets
 import stat
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["INCOMING_RELPATH", "PREFIX", "SUFFIX", "incoming_dir", "purge", "recording"]
+__all__ = ["INCOMING_RELPATH", "PREFIX", "SUFFIX", "Recorded", "incoming_dir", "purge", "recording"]
 
 INCOMING_RELPATH = Path("_grimoire-runtime-output") / "voice" / "incoming"
 PREFIX = "grimoire-stt-"
@@ -28,7 +29,7 @@ _NAME = re.compile(rf"{re.escape(PREFIX)}[A-Za-z0-9_]+{re.escape(SUFFIX)}")
 _IGNORE_ALL = "# Enregistrements vocaux entrants, éphémères : jamais versionnés.\n*\n"
 _UNWRITABLE = "transcription impossible : dossier vocal non inscriptible"
 #: Création ou troncature, jamais à travers un lien symbolique (O_NOFOLLOW, absent sous Windows).
-_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+_OPEN_FLAGS = os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
 
 
 def _refuse_links(root: Path, path: Path) -> None:
@@ -133,16 +134,29 @@ def purge(root: Path, ttl_s: float, *, clock: Callable[[], float] = time.time) -
     return removed
 
 
-def _write(folder: Path, name: str, data: bytes, dir_fd: int | None) -> None:
+@dataclass(frozen=True, slots=True)
+class Recorded:
+    """Un enregistrement écrit : son ``path`` (pour l'audit, jamais pour le relire) et ses ``audio`` octets,
+    relus du descripteur qui a servi à l'écriture, rembobiné : ce que le moteur transcrit est exactement le fichier créé."""
+
+    path: Path
+    audio: bytes
+
+
+def _write(folder: Path, name: str, data: bytes, dir_fd: int | None) -> bytes:
+    """Écrit ``data`` puis le relit par le même descripteur (``O_RDWR``, rembobiné) : les octets du fichier créé."""
     fd = os.open(name if dir_fd is not None else folder / name, _OPEN_FLAGS, 0o600, dir_fd=dir_fd)
-    with os.fdopen(fd, "wb") as handle:
+    with os.fdopen(fd, "r+b") as handle:
         if hasattr(os, "fchmod"):
             os.fchmod(handle.fileno(), 0o600)
         handle.write(data)
+        handle.flush()
+        handle.seek(0)
+        return handle.read()
 
 
 @contextlib.contextmanager
-def recording(root: Path, data: bytes) -> Iterator[Path]:
+def recording(root: Path, data: bytes) -> Iterator[Recorded]:
     """Écrit ``data`` dans un fichier 0600 du dossier entrant, le rend, puis le supprime quoi qu'il arrive.
 
     Pas d'écriture atomique (le fichier est éphémère, jamais remplacé) : un nom aléatoire de 128 bits dans un
@@ -173,10 +187,10 @@ def recording(root: Path, data: bytes) -> Iterator[Path]:
     path = folder / name
     try:
         try:
-            _write(folder, name, data, dir_fd)
+            audio = _write(folder, name, data, dir_fd)
         except OSError:
             raise ValueError(_UNWRITABLE) from None
-        yield path
+        yield Recorded(path, audio)
     finally:
         if dir_fd is None:
             path.unlink(missing_ok=True)

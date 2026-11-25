@@ -9,7 +9,7 @@ Deux entrées pour les routes du cockpit (``voice/config`` en lecture, ``voice/t
   amorce tirée du projet, puis supprime le fichier (0600, sous le dossier d'exécution du projet,
   :mod:`grimoire.voice.incoming`) — y compris en cas d'échec ; les orphelins d'un arrêt brutal sont purgés passé
   ``voice.incoming_ttl_seconds``. Le texte rendu est celui du moteur, tel quel : aucun LLM ne le réécrit. Seules
-  des métadonnées (texte, langue, durée) en sortent.
+  des métadonnées (texte, langue, durée, jeton de dictée) en sortent.
 
 Les moteurs sont ceux du pool du processus (:mod:`grimoire.voice.engine_pool`) : un seul modèle de
 reconnaissance chargé pour tous les projets enrôlés.
@@ -26,6 +26,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from grimoire.voice import dictation
 from grimoire.voice.engine_pool import PooledEngines, pool
 from grimoire.voice.engines import VoiceError, availability, get_spec
 from grimoire.voice.incoming import purge, recording
@@ -97,6 +98,7 @@ def voice_config(root: Path, _query: Any = None) -> dict[str, Any]:
     """Ce que la page doit savoir pour montrer (ou non) le bouton d'enregistrement."""
     settings = load_voice_settings(root)
     reason = _unavailable_reason(settings)
+    dictation.expire()  # les transcriptions échues ne restent pas en mémoire
     purge(root, settings.incoming_ttl_s)  # démarrage du service vocal : les orphelins d'un arrêt brutal partent
     return {
         "available": reason is None,
@@ -171,10 +173,12 @@ def transcribe(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     check_wav(data, settings.max_record_s)
     engines = _engines_for(root, settings)
     purge(root, settings.incoming_ttl_s)
-    with recording(root, data) as path:  # sous le dossier d'exécution du projet, 0600, supprimé quoi qu'il arrive
+    with recording(root, data) as recorded:  # sous le dossier d'exécution du projet, 0600, supprimé quoi qu'il arrive
         del data
         try:
-            transcript = engines.transcribe(path, vocabulary=project_vocabulary(root))
+            # Les octets relus du descripteur d'écriture, jamais un chemin rejouable : un dossier parent remplacé
+            # par un lien après l'écriture ne change pas ce que le moteur transcrit.
+            transcript = engines.transcribe(recorded.audio, vocabulary=project_vocabulary(root))
         except VoiceError as exc:
             raise ValueError(f"transcription impossible : {exc.reason}") from None
     return {
@@ -182,4 +186,6 @@ def transcribe(root: Path, body: dict[str, Any]) -> dict[str, Any]:
         "text": transcript.text,
         "language": transcript.language,
         "duration_s": transcript.duration_s,
+        # Jeton opaque à renvoyer avec le texte dicté (``dictation_tokens``) : voir :mod:`grimoire.voice.dictation`.
+        "dictation_token": dictation.issue(root, transcript.text),
     }

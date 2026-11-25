@@ -82,3 +82,13 @@ def clock() -> FakeClock:
 @pytest.fixture
 def timers() -> TimerLog:
     return TimerLog()
+
+
+@pytest.fixture(autouse=True)
+def _forget_transcriptions() -> Iterator[None]:
+    """Les transcriptions retenues par le serveur (jeton de dictée) ne passent pas d'un test à l'autre."""
+    from grimoire.voice import dictation
+
+    dictation.reset()
+    yield
+    dictation.reset()

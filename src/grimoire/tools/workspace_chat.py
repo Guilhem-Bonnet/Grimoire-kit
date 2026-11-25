@@ -694,9 +694,11 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     text = body.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("text requis : le message ne peut pas être vide")
-    from grimoire.voice.safety import marked_dictation
+    from grimoire.voice import dictation as transcriptions
 
-    dictation = marked_dictation(body)  # le texte corrigé par la personne part tel quel, la mention en plus
+    # Marqueur, jeton de transcription ou texte transcrit à l'instant (#1378) ; le texte part tel quel, mention en plus.
+    recognized = transcriptions.recognize(root, body)
+    dictation = recognized.dictated
     task_id = body.get("task_id")
     target = body.get("answer_to")
     answer_to = None
@@ -705,18 +707,21 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
                 and isinstance(target.get("question_id"), str)):
             raise ValueError("answer_to : {task_id, question_id} attendus")
         answer_to = (target["task_id"], target["question_id"])
-    return _conversation(root).send(
+    result = _conversation(root).send(
         text, task_id if isinstance(task_id, str) and task_id else None, answer_to, dictation=dictation
     )
+    transcriptions.consume(recognized.keys)  # consommées par un envoi accepté seulement : un refus les laisse vivantes
+    return result
 
 
 def chat_permission(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     request_id, decision = body.get("request_id"), body.get("decision")
     if not isinstance(request_id, (str, int)) or not isinstance(decision, str):
         raise ValueError("request_id et decision requis")
-    from grimoire.voice.safety import VOICE_CANNOT_APPROVE, marked_dictation
+    from grimoire.voice.dictation import sent_as_dictation
+    from grimoire.voice.safety import VOICE_CANNOT_APPROVE
 
-    if marked_dictation(body):  # lot V5 : seul le clic à l'écran tranche
+    if sent_as_dictation(root, body):  # lot V5 : seul le clic à l'écran tranche
         raise ValueError(VOICE_CANNOT_APPROVE)
     return _conversation(root).decide(str(request_id), decision)
 

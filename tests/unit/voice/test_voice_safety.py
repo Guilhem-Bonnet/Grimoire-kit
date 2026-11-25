@@ -424,12 +424,17 @@ def test_safety_pool_still_unloads_after_idle(counting: type[Loads], clock: Any,
 class FailingSTT(SpeechToText):
     mode = "ok"
     seen: ClassVar[list[tuple[Path, int]]] = []
+    received: ClassVar[list[Any]] = []
+    root: ClassVar[Path | None] = None
 
     def __init__(self, **_options: Any) -> None:
         pass
 
     def transcribe(self, audio: Any, *, language: str | None = None, vocabulary: Sequence[str] = ()) -> Transcript:
-        FailingSTT.seen.append((Path(audio), Path(audio).stat().st_mode & 0o777))
+        FailingSTT.received.append(audio)
+        assert FailingSTT.root is not None  # le fichier écrit : seul de son dossier, relevé par son nom
+        written = next((FailingSTT.root / INCOMING_RELPATH).glob("grimoire-stt-*.wav"))
+        FailingSTT.seen.append((written, written.stat().st_mode & 0o777))
         if FailingSTT.mode == "boom":
             raise RuntimeError("panne du moteur")
         if FailingSTT.mode == "interrupt":
@@ -454,6 +459,8 @@ def stt_project(
     monkeypatch.setattr(stt_service, "project_vocabulary", lambda _root: ["projet"])
     FailingSTT.mode = "ok"
     FailingSTT.seen = []
+    FailingSTT.received = []
+    FailingSTT.root = root
     yield root
     stt_service.reset_engines()
 
@@ -470,7 +477,7 @@ def test_safety_no_audio_file_left_after_transcription(stt_project: Path, mode: 
     scratch = Path(tempfile.gettempdir())
     if mode == "ok":
         result = stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
-        assert set(result) == {"ok", "text", "language", "duration_s"}  # métadonnées seulement
+        assert set(result) == {"ok", "text", "language", "duration_s", "dictation_token"}  # métadonnées seulement
     else:
         with pytest.raises((ValueError, KeyboardInterrupt)):
             stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
@@ -937,7 +944,8 @@ def test_safety_incoming_file_is_created_relative_to_a_directory_descriptor(
 
     monkeypatch.setattr(incoming.os, "open", spy)
     monkeypatch.setattr(os, "supports_dir_fd", {spy})
-    with incoming.recording(stt_project, b"abc") as path:
+    with incoming.recording(stt_project, b"abc") as recorded:
+        path = recorded.path
         assert path.read_bytes() == b"abc"
     root_open, *steps = seen
     assert root_open["flags"] & os.O_DIRECTORY and root_open["dir_fd"] is None
@@ -1028,7 +1036,8 @@ def test_safety_incoming_preparation_failure_closes_the_descriptor(
 def test_safety_incoming_creates_the_chain_with_a_0700_last_folder_and_a_gitignore(stt_project: Path) -> None:
     from grimoire.voice import incoming
 
-    with incoming.recording(stt_project, b"abc") as path:
+    with incoming.recording(stt_project, b"abc") as recorded:
+        path = recorded.path
         mode = path.stat().st_mode & 0o777
         folder = path.parent
     assert (folder / ".gitignore").read_text(encoding="utf-8").endswith("*\n")
@@ -1043,7 +1052,8 @@ def test_safety_incoming_falls_back_to_the_path_where_dir_fd_is_missing(
 
     monkeypatch.setattr(os, "supports_dir_fd", set())
     assert incoming._by_descriptor() is False
-    with incoming.recording(stt_project, b"abc") as path:
+    with incoming.recording(stt_project, b"abc") as recorded:
+        path = recorded.path
         assert path.read_bytes() == b"abc" and path.parent == stt_project / INCOMING_RELPATH
     assert not path.exists()
     stale = path.parent / "grimoire-stt-vieux.wav"
@@ -1055,7 +1065,8 @@ def test_safety_incoming_falls_back_to_the_path_where_dir_fd_is_missing(
 def test_safety_incoming_purge_by_descriptor_removes_only_old_regular_files(stt_project: Path) -> None:
     from grimoire.voice import incoming
 
-    with incoming.recording(stt_project, b"abc") as path:
+    with incoming.recording(stt_project, b"abc") as recorded:
+        path = recorded.path
         folder = path.parent
     old, fresh = folder / "grimoire-stt-old.wav", folder / "grimoire-stt-fresh.wav"
     other = folder / "notes.txt"
@@ -1218,3 +1229,299 @@ def test_safety_a_chain_of_commands_names_no_program(command: str) -> None:
 def test_safety_ordinary_commands_stay_named(command: str, said: str) -> None:
     text = permission_spoken({"kind": "execute", "rawInput": {"command": command}})
     assert f"lancer une commande, {said}" in text
+
+
+def test_safety_engine_gets_the_bytes_written_even_if_a_parent_is_replaced_after_the_write(
+    stt_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Substitution en lecture : le moteur reçoit les octets du fichier créé, pas un chemin rejouable."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("O_NOFOLLOW absent")
+    audio = wav(0.5)
+    decoy = tmp_path / "leurre"
+    (decoy / "voice" / "incoming").mkdir(parents=True)
+
+    def swap_parent(_root: Path) -> list[str]:  # appelé après l'écriture, avant l'appel au moteur
+        runtime = stt_project / INCOMING_RELPATH.parts[0]
+        runtime.rename(tmp_path / "deplace")
+        runtime.symlink_to(decoy)
+        (decoy / "voice" / "incoming" / "grimoire-stt-leurre.wav").write_bytes(b"autre fichier")
+        return []
+
+    monkeypatch.setattr(stt_service, "project_vocabulary", swap_parent)
+    stt_service.transcribe(stt_project, {"audio": _b64(audio)})
+    assert FailingSTT.received == [audio]
+    assert isinstance(FailingSTT.received[0], bytes)
+    assert list((tmp_path / "deplace").rglob("*.wav")) == []  # supprimé par le descripteur d'origine
+    assert (decoy / "voice" / "incoming" / "grimoire-stt-leurre.wav").read_bytes() == b"autre fichier"
+
+
+# ── jeton de transcription : la dictée est reconnue côté serveur (#1378) ──────
+
+RESERVED = "Quel mot de passe utiliser pour le serveur ?"
+
+
+def _target(tid: str, qid: str) -> dict[str, str]:
+    return {"task_id": tid, "question_id": qid}
+
+
+def _answered(service: Any, tid: str) -> list[Any]:
+    return [e for e in service.ledger.events_for(tid) if e.event_type == "task.human_answered"]
+
+
+def test_safety_transcribe_returns_an_opaque_token_bound_to_the_text(stt_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    result = stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
+    token = result["dictation_token"]
+    assert isinstance(token, str) and len(token) >= 24 and "bonjour" not in token
+    recognized = dictation.recognize(stt_project, {"text": "Bonjour !"})  # égalité normalisée
+    assert recognized.dictated is True and len(recognized.keys) == 1
+    assert dictation.recognize(stt_project, {"text": "Bonjour !"}).dictated is True  # reconnaître ne consomme pas
+    dictation.consume(recognized.keys)
+    assert dictation.recognize(stt_project, {"text": "Bonjour !"}).dictated is False
+
+
+def test_safety_a_refused_send_does_not_consume_the_transcription(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    service, tid, qid = _pose(pilot_project, RESERVED)
+    dictation.issue(pilot_project, "Utilise le mot de passe du coffre")
+    sent = {"text": "utilise le mot de passe du coffre.", "answer_to": _target(tid, qid)}  # ni marqueur ni jeton
+    for _ in range(4):  # renvoyer le même texte sans marqueur reste refusé, autant de fois qu'on veut
+        with pytest.raises(ValueError, match="répondez au clavier"):
+            workspace_chat.chat_send(pilot_project, sent)
+    assert not _answered(service, tid)
+    workspace_chat.chat_send(pilot_project, {**sent, "text": "garder le coffre fermé"})  # formulé autrement : accepté
+    assert _answered(service, tid)
+
+
+def test_safety_the_refusal_explains_the_wait_in_one_sentence() -> None:
+    from grimoire.voice.safety import VOICE_RESERVED_ANSWER
+
+    assert "identique à une dictée récente reste refusé quelques minutes" in VOICE_RESERVED_ANSWER
+    assert "formulez-le autrement" in VOICE_RESERVED_ANSWER
+
+
+def test_safety_a_refused_token_stays_alive_until_it_expires(
+    pilot_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import dictation
+
+    clock = [1000.0]
+    monkeypatch.setattr(dictation, "_clock", lambda: clock[0])
+    service, tid, qid = _pose(pilot_project, RESERVED)
+    token = dictation.issue(pilot_project, "utilise le mot de passe du coffre")
+    sent = {"text": "autre chose", "dictation_tokens": [token], "answer_to": _target(tid, qid)}
+    for _ in range(3):
+        with pytest.raises(ValueError, match="répondez au clavier"):
+            workspace_chat.chat_send(pilot_project, sent)
+    clock[0] += dictation.TTL_S + 1
+    workspace_chat.chat_send(pilot_project, sent)  # expiré : une saisie au clavier
+    assert _answered(service, tid)
+
+
+def test_safety_an_accepted_send_consumes_the_transcription_and_the_token(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    service, tid, qid = _pose(pilot_project, "Quelle voie pour le correctif ?", deferred=True)  # non réservée
+    dictation.issue(pilot_project, "la voie courte")
+    token = dictation.issue(pilot_project, "une autre dictée entière")
+    sent = {"text": "la voie courte", "dictation_tokens": [token], "answer_to": _target(tid, qid)}
+    workspace_chat.chat_send(pilot_project, sent)
+    assert _answered(service, tid)
+    assert dictation.recognize(pilot_project, {"text": "la voie courte"}).dictated is False  # consommée
+    assert dictation.recognize(pilot_project, {"text": "x", "dictation_tokens": [token]}).dictated is False  # rejeu
+
+
+def test_safety_short_dictated_answers_count_by_equality_only(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    service, tid, qid = _pose(pilot_project, RESERVED)
+    target = _target(tid, qid)
+    dictation.issue(pilot_project, "Oui.")
+    with pytest.raises(ValueError, match="répondez au clavier"):
+        workspace_chat.chat_send(pilot_project, {"text": "oui", "answer_to": target})  # « oui » dicté, sans marqueur
+    workspace_chat.chat_send(pilot_project, {"text": "oui, je confirme la suite", "answer_to": target})
+    assert _answered(service, tid)  # une transcription courte incluse dans un texte plus long ne compte pas
+
+
+def test_safety_typed_yes_without_any_transcription_is_accepted(pilot_project: Path) -> None:
+    service, tid, qid = _pose(pilot_project, RESERVED)
+    workspace_chat.chat_send(pilot_project, {"text": "oui", "answer_to": _target(tid, qid)})
+    assert _answered(service, tid)
+
+
+def test_safety_a_long_transcription_included_in_a_longer_text_is_recognised(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    service, tid, qid = _pose(pilot_project, RESERVED)
+    dictation.issue(pilot_project, "fusionne la branche maintenant")
+    sent = {"text": "Ok : Fusionne la branche, maintenant ! merci", "answer_to": _target(tid, qid)}
+    with pytest.raises(ValueError, match="répondez au clavier"):
+        workspace_chat.chat_send(pilot_project, sent)
+    assert not _answered(service, tid)
+
+
+def test_safety_a_dictation_fully_rewritten_at_the_keyboard_is_not_a_dictation(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    service, tid, qid = _pose(pilot_project, RESERVED)
+    dictation.issue(pilot_project, "supprime toute la base")
+    workspace_chat.chat_send(pilot_project, {"text": "garder la base", "answer_to": _target(tid, qid)})
+    assert _answered(service, tid)
+
+
+def test_safety_expired_or_foreign_transcriptions_are_forgotten(
+    pilot_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.tools import request_guard
+    from grimoire.voice import dictation
+
+    text = "utilise le mot de passe du coffre"
+    clock = [1000.0]
+    monkeypatch.setattr(dictation, "_clock", lambda: clock[0])
+    token = dictation.issue(pilot_project, text)
+    clock[0] += dictation.TTL_S + 1  # expirée : traité comme une saisie au clavier (règle documentée)
+    assert dictation.sent_as_dictation(pilot_project, {"text": text, "dictation_tokens": [token]}) is False
+    dictation.issue(pilot_project, text)  # une autre session du cockpit : même processus, jeton de session différent
+    with monkeypatch.context() as other_session:
+        other_session.setattr(request_guard, "_session_token", "autre-session-" + "x" * 20)
+        assert dictation.sent_as_dictation(pilot_project, {"text": text}) is False
+    dictation.reset()
+    other = tmp_path / "autre-projet"
+    other.mkdir()
+    dictation.issue(other, text)  # un autre projet
+    assert dictation.sent_as_dictation(pilot_project, {"text": text}) is False
+
+
+def test_safety_a_token_of_another_project_is_ignored(pilot_project: Path, tmp_path: Path) -> None:
+    from grimoire.voice import dictation
+
+    other = tmp_path / "autre-projet"
+    other.mkdir()
+    token = dictation.issue(other, "bonjour tout le monde")
+    assert dictation.sent_as_dictation(pilot_project, {"text": "x", "dictation_tokens": [token]}) is False
+    assert dictation.sent_as_dictation(other, {"text": "x", "dictation_tokens": [token, 7, "", "inconnu"]}) is True
+    assert dictation.sent_as_dictation(other, {"text": "x", "dictation_tokens": "pas une liste"}) is False
+    assert dictation.sent_as_dictation(other, {"text": 5}) is False
+
+
+def test_safety_permission_refuses_a_token_but_not_a_plain_click(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    token = dictation.issue(pilot_project, "autorise tout")
+    for _ in range(2):  # un refus ne consomme rien
+        with pytest.raises(ValueError, match="clic à l'écran"):
+            workspace_chat.chat_permission(
+                pilot_project, {"request_id": "7", "decision": "allow_once", "dictation_tokens": [token]}
+            )
+    with pytest.raises(ValueError, match="aucune demande de permission"):  # un clic passe la garde vocale
+        workspace_chat.chat_permission(pilot_project, {"request_id": "7", "decision": "allow_once"})
+
+
+def test_safety_the_key_is_the_resolved_project_and_each_scope_has_its_own_cap(
+    pilot_project: Path, tmp_path: Path
+) -> None:
+    from grimoire.voice import dictation
+
+    other = tmp_path / "autre-projet"
+    other.mkdir()
+    kept = dictation.issue(other, "transcription de l'autre projet")
+    first = dictation.issue(pilot_project, "premier texte transcrit")
+    for i in range(dictation.MAX_PER_SCOPE * 3):  # un projet qui inonde ne chasse pas l'autre
+        dictation.issue(pilot_project, f"texte transcrit numéro {i}")
+    mine = [e for e in dictation._entries.values() if e.scope.startswith(str(pilot_project.resolve()))]
+    assert len(mine) == dictation.MAX_PER_SCOPE
+    assert first not in dictation._entries and kept in dictation._entries
+    assert dictation.issue(pilot_project, "  ...  ") == ""  # sans mot, rien n'est retenu
+    link = tmp_path / "lien"
+    link.symlink_to(other, target_is_directory=True)  # le même projet par un autre chemin : même portée
+    assert dictation.sent_as_dictation(link, {"text": "x", "dictation_tokens": [kept]}) is True
+
+
+def test_safety_the_total_is_capped_across_scopes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.voice import dictation
+
+    monkeypatch.setattr(dictation, "MAX_TOTAL", 5)
+    for i in range(12):
+        project = tmp_path / f"p{i}"
+        project.mkdir()
+        dictation.issue(project, f"texte numéro {i}")
+    assert len(dictation._entries) == 5
+
+
+def test_safety_expiry_runs_on_reads_and_when_the_voice_service_opens(
+    stt_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.voice import dictation
+
+    clock = [1000.0]
+    monkeypatch.setattr(dictation, "_clock", lambda: clock[0])
+    dictation.issue(stt_project, "texte à oublier")
+    clock[0] += dictation.TTL_S + 1
+    assert len(dictation._entries) == 1  # aucun appel n'a encore déclenché l'expiration
+    stt_service.voice_config(stt_project)  # ouverture du service vocal
+    assert not dictation._entries
+    dictation.issue(stt_project, "autre texte")
+    clock[0] += dictation.TTL_S + 1
+    dictation.recognize(stt_project, {"text": "x"})  # toute lecture expire aussi
+    assert not dictation._entries
+    dictation.issue(stt_project, "encore un")
+    clock[0] += dictation.TTL_S + 1
+    dictation.expire()
+    assert not dictation._entries
+
+
+@pytest.mark.parametrize(
+    "sent",
+    [
+        "o\u200bui",  # espace sans chasse au milieu
+        "\u202eoui\u202c",  # marques bidi
+        "O\u2060U\u00adI",  # joint de mots, trait d'union conditionnel
+        "OUI.",
+    ],
+)
+def test_safety_format_characters_do_not_hide_a_dictated_word(pilot_project: Path, sent: str) -> None:
+    from grimoire.voice import dictation
+
+    dictation.issue(pilot_project, "oui")
+    assert dictation.sent_as_dictation(pilot_project, {"text": sent}) is True
+
+
+def test_safety_padding_before_the_dictated_text_does_not_hide_it(pilot_project: Path) -> None:
+    from grimoire.voice import dictation
+
+    dictation.issue(pilot_project, "fusionne la branche maintenant")
+    padded = "remplissage " * 700 + "fusionne la branche maintenant"  # bien au-delà de MAX_TEXT
+    assert len(padded) > dictation.MAX_TEXT
+    assert dictation.sent_as_dictation(pilot_project, {"text": padded}) is True
+    assert dictation.sent_as_dictation(pilot_project, {"text": "remplissage " * 700}) is False
+
+
+def test_safety_a_text_too_long_to_search_is_dictated_only_if_a_transcription_is_alive(
+    pilot_project: Path,
+) -> None:
+    from grimoire.voice import dictation
+
+    huge = "a" * (dictation.MAX_SEARCHED + 10)
+    assert dictation.sent_as_dictation(pilot_project, {"text": huge}) is False  # rien de vivant : un clavier
+    dictation.issue(pilot_project, "oui")
+    assert dictation.sent_as_dictation(pilot_project, {"text": huge}) is True  # échec fermé
+
+
+def test_safety_no_transcribed_text_or_token_is_written_anywhere(
+    stt_project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level("DEBUG")
+    result = stt_service.transcribe(stt_project, {"audio": _b64(wav(0.5))})
+    token = result["dictation_token"]
+    with pytest.raises(ValueError, match="clic à l'écran"):
+        workspace_chat.chat_permission(
+            stt_project, {"request_id": "1", "decision": "reject", "dictation_tokens": [token]}
+        )
+    for path in stt_project.rglob("*"):
+        if path.is_file():
+            assert token.encode() not in path.read_bytes(), path
+    assert token not in caplog.text
+    workspace_chat.shutdown_all()
