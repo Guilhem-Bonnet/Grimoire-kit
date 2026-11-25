@@ -16,6 +16,7 @@ et se reprennent ; le mandat n'est pas touché.
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1166,7 +1167,7 @@ def test_le_jugement_assume_sur_une_decision_posterieure_ne_rouvre_pas_la_decisi
     assert [e["option"] for e in review_entries(service)] == []  # un jugement assumé n'est pas une décision à revoir
     assert first.payload["option"] not in [e["option"] for e in review_entries(service)]
 
-def test_une_erreur_de_lecture_des_sessions_dans_le_tick_ne_plante_pas_et_ne_decide_rien(
+def test_une_erreur_de_lecture_des_sessions_interrompt_l_etape_sans_rien_decider(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     service = pilot(project, ON + "orchestrator:\n  roles:\n    orchestrator:\n      enabled: true\n      wip: 1\n")
@@ -1187,3 +1188,47 @@ def test_une_erreur_de_lecture_des_sessions_dans_le_tick_ne_plante_pas_et_ne_dec
     healthy = tick()
     assert all("lecture des sessions" not in o.detail for o in healthy)
     assert applied(service, tid), "contrôle : sur lecture saine, le même tick applique le précédent"
+
+
+POLICY_ORCH = ON + "orchestrator:\n  roles:\n    orchestrator:\n      enabled: true\n      wip: 1\n"
+
+
+def absent_binary(argv: Any, _cwd: Any, _env: Any = None) -> Any:
+    """Le binaire ``claude`` est absent : le lanceur rend 127, sans exception."""
+    return subprocess.CompletedProcess(list(argv), 127, "", "introuvable")
+
+
+def test_le_refus_de_lecture_des_sessions_entre_dans_la_liste_d_attention_du_tick(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.missions.orchestrate import run_tick
+
+    service = pilot(project, POLICY_ORCH)
+    ruled(service)
+    tid, _ = again(service)
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise OSError("lecture impossible")
+
+    monkeypatch.setattr(osess, "_read_agents", boom)
+    report = run_tick(project, apply=True, exec_=absent_binary)  # le tick complet, par la boucle `orchestrate`
+    shown = [line for line in report.attention if "lecture des sessions impossible" in line]
+    assert len(shown) == 1 and "(OSError)" in shown[0] and "lecture impossible" not in shown[0]
+    assert not applied(service, tid)
+
+
+def test_une_lecture_illisible_des_sessions_entre_aussi_dans_la_liste_d_attention(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.missions.orchestrate import run_tick
+
+    service = pilot(project, POLICY_ORCH)
+    ruled(service)
+    tid, _ = again(service)
+    from grimoire.missions.launcher import _read_agents
+
+    monkeypatch.setattr(osess, "_read_agents", _read_agents)  # la vraie lecture, sur un hôte dont le binaire est absent (127)
+    report = run_tick(project, apply=True, exec_=absent_binary)
+    shown = [line for line in report.attention if "lecture des sessions impossible" in line]
+    assert len(shown) == 1 and "(illisible)" in shown[0]
+    assert not applied(service, tid)

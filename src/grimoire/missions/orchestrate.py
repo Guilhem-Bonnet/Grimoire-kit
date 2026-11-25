@@ -325,6 +325,7 @@ def _one_pass(
     usage = _usage_stage(service, mode, attention)
     answers = _orchestrator_session_stage(service, policy, mode, exec_, now, attention)
     from grimoire.missions.breaker import read_breaker
+    from grimoire.missions.orchestrator_session import READ_FAILED
 
     state_of_breaker = read_breaker(service.home_root)
     breaker = state_of_breaker if (state_of_breaker.open or state_of_breaker.failures) else None  # fermé et intact : rien à dire
@@ -346,7 +347,7 @@ def _one_pass(
         if external.status == "failed":
             attention.append(f"fusion externe : {external.task_id} {external.status} ({external.detail})")
     for answer in answers:
-        if answer.status == "failed" or "laissées à l'humain" in answer.detail:
+        if answer.status == "failed" or "laissées à l'humain" in answer.detail or answer.detail.startswith(READ_FAILED):
             attention.append(f"orchestrateur : {answer.action} {answer.status} ({answer.detail})")
     for arbitration in arbitrations:
         if arbitration.status == "failed" or arbitration.action == "fallback":
