@@ -267,22 +267,42 @@ def test_chaque_feuille_de_la_coque_est_liee_par_la_page() -> None:
     assert on_disk - {"spaces/source.css"} == linked
 
 
-def strip_comments(js: str) -> str:
-    """Le JavaScript sans ses commentaires `//` et `/* */` (chaînes et gabarits gardés, lignes conservées).
+_REGEX_AFTER_WORD = {"return", "typeof", "case", "do", "else", "in", "of", "void", "delete", "throw", "new"}
 
-    Un suivi d'état, pas un test sur le début de ligne : une ligne de code qui commence par `*` (continuation d'une
-    multiplication) ou par `//` dans un gabarit n'est pas un commentaire.
+
+def tokenize(js: str) -> tuple[str, str]:
+    """`(code, littéraux)` : le JavaScript sans ses commentaires, et ce même texte où tout ce qui n'est pas dans une
+    chaîne ou un gabarit est blanchi (lignes gardées).
+
+    Un suivi d'état, pas un test sur le début de ligne : une ligne de code qui commence par `*` n'est pas un
+    commentaire. Un littéral d'expression régulière (`/'/`, `/["`]/g`) est reconnu comme tel : son guillemet n'ouvre
+    pas de chaîne et ne décale pas le suivi du reste du fichier.
     """
-    out: list[str] = []
+    code: list[str] = []
+    lits: list[str] = []
     i, n = 0, len(js)
     quote = ""  # ' " ` quand on est dans un littéral
+
+    def emit(text: str, literal: bool) -> None:
+        code.append(text)
+        lits.append(text if literal else "".join("\n" if ch == "\n" else " " for ch in text))
+
+    def regex_allowed() -> bool:
+        tail = "".join(code).rstrip()
+        if not tail:
+            return True
+        if tail[-1] in "(,=:[!&|?{};+-*%<>~^":
+            return True
+        word = tail.split()[-1] if tail[-1].isalpha() else ""
+        return word.split("(")[-1].split(";")[-1] in _REGEX_AFTER_WORD
+
     while i < n:
         c = js[i]
         two = js[i : i + 2]
         if quote:
-            out.append(c)
+            emit(c, True)
             if c == "\\" and i + 1 < n:
-                out.append(js[i + 1])
+                emit(js[i + 1], True)
                 i += 2
                 continue
             if c == quote:
@@ -294,14 +314,38 @@ def strip_comments(js: str) -> str:
         elif two == "/*":
             end = js.find("*/", i + 2)
             end = n if end < 0 else end + 2
-            out.append("\n" * js.count("\n", i, end))
+            emit("\n" * js.count("\n", i, end), False)
             i = end
+        elif c == "/" and regex_allowed():
+            j, in_class = i + 1, False
+            while j < n and js[j] != "\n":
+                if js[j] == "\\":
+                    j += 2
+                    continue
+                if js[j] == "[":
+                    in_class = True
+                elif js[j] == "]":
+                    in_class = False
+                elif js[j] == "/" and not in_class:
+                    break
+                j += 1
+            j += 1
+            while j < n and js[j].isalpha():
+                j += 1
+            emit(js[i:j], False)
+            i = j
         else:
             if c in "'\"`":
                 quote = c
-            out.append(c)
+                emit(c, True)
+            else:
+                emit(c, False)
             i += 1
-    return "".join(out)
+    return "".join(code), "".join(lits)
+
+
+def strip_comments(js: str) -> str:
+    return tokenize(js)[0]
 
 
 # Les formes qui contournent `script-src`/`style-src` : feuille ou balise fabriquée, attribut style ou gestionnaire
@@ -310,7 +354,8 @@ def strip_comments(js: str) -> str:
 _FORBIDDEN_JS = {
     "balise <style> ou <script> dans un littéral": r"<\s*(?:style|script)\b",
     "feuille ou script fabriqué": r"createElement\(\s*['\"`](?:style|script)['\"`]",
-    "setAttribute style ou on*": r"setAttribute\(\s*['\"`](?:style|on\w+)",
+    "setAttribute style ou on*": r"setAttribute\(\s*['\"`](?:style|on\w+)['\"`]|setAttributeNS\([^,]*,\s*['\"`](?:style|on\w+)['\"`]",
+    "createAttribute style ou on*": r"createAttribute\(\s*['\"`](?:style|on\w+)['\"`]",
     "cssText": r"\bcssText\b",
     "attribut style= (gabarit)": r"(?<!\bconst )(?<!\blet )(?<!\bvar )(?<![\w.$-])style\s*=(?!=)",
     "clé style d'un helper d'éléments": r"(?<![\w.$-])['\"`]?style['\"`]?\s*:",
@@ -325,28 +370,6 @@ _FORBIDDEN_JS = {
 _FORBIDDEN_RE = {label: re.compile(pattern, re.IGNORECASE) for label, pattern in _FORBIDDEN_JS.items()}
 
 
-def literals_only(code: str) -> str:
-    """`code` où tout ce qui n'est pas dans une chaîne ou un gabarit est remplacé par des espaces (lignes gardées)."""
-    out: list[str] = []
-    quote = ""
-    i, n = 0, len(code)
-    while i < n:
-        c = code[i]
-        if quote:
-            out.append(c)
-            if c == "\\" and i + 1 < n:
-                out.append(code[i + 1])
-                i += 1
-            elif c == quote:
-                quote = ""
-        else:
-            if c in "'\"`":
-                quote = c
-            out.append("\n" if c == "\n" else " ")
-        i += 1
-    return "".join(out)
-
-
 #: Ces motifs n'ont de sens que dans le texte d'un littéral (un gabarit HTML) : `onOpen = null` est du code.
 _IN_LITERAL = {
     "balise <style> ou <script> dans un littéral",
@@ -358,8 +381,8 @@ _IN_LITERAL = {
 
 def violations(js: str, labels: tuple[str, ...] | None = None) -> list[tuple[int, str]]:
     """`(ligne, motif)` de chaque contournement trouvé dans `js`, commentaires exclus."""
-    code = strip_comments(js)
-    texts = {False: code, True: literals_only(code)}
+    code, literals = tokenize(js)
+    texts = {False: code, True: literals}
     found = []
     for label, regex in _FORBIDDEN_RE.items():
         if labels is not None and label not in labels:
@@ -386,6 +409,7 @@ def test_le_javascript_de_la_coque_ne_contourne_pas_la_politique(label: str) -> 
 _LEGACY_LABELS = (
     "feuille ou script fabriqué",
     "setAttribute style ou on*",
+    "createAttribute style ou on*",
     "eval",
     "new Function",
     "minuterie à chaîne",
@@ -417,6 +441,12 @@ _DETECTED = [
     "el.innerHTML = '<script>f()</script>';",
     'el.setAttribute("STYLE", "color:red");',
     "el.setAttribute('onclick', 'f()');",
+    "el.setAttributeNS(null, 'style', 'color:red');",
+    "el.setAttributeNS('http://www.w3.org/1999/xhtml', `ONCLICK`, 'f()');",
+    "const a = document.createAttribute('style');",
+    'document.createAttribute("onerror");',
+    "const re = /'/; el.setAttribute('style', 'a:b');",  # le `'` de la regex ne décale pas le suivi
+    'const re = /["`]/g; const h = `<style>x</style>`;',
     "el.setAttribute(`ONERROR`, 'f()');",
     "const h = `<p style=${css}>x</p>`;",
     'const h = `<p style = "color:red">x</p>`;',
@@ -435,6 +465,9 @@ _PERMITTED = [
     "el.style.left = '3px';",
     "const style = getComputedStyle(root);",
     "audio.onended = resolve;",
+    "const q = s.replace(/'/g, ''); el.style.top = '0';",  # un littéral regex avec apostrophe
+    "const ok = a / b; const t = 'x' / 2; el.style.left = '0';",
+    "el.setAttribute('data-style', '1'); el.setAttributeNS(null, 'class', 'a');",
     '// <style> style="x" onclick=f() eval(x)',
     "/* <script> setAttribute('style', x) */ const a = 1;",
     '/**\n * style="x"\n */',
@@ -470,3 +503,34 @@ def test_html_page_ne_recoit_que_des_fichiers_du_kit() -> None:
     # `body` n'est, dans forge_http, que `target.read_bytes()` : un fichier résolu sous `ui_dir`.
     forge = (root / "tools" / "forge_http.py").read_text(encoding="utf-8")
     assert "body = target.read_bytes()" in forge
+
+
+# `_InlineScan.handle_starttag` est un rappel de `HTMLParser` : aucun code du dépôt ne l'appelle par son nom. Ces tests
+# l'exercent par ce nom (doctrine #275 : un accesseur public a un appelant ou un test) et couvrent ses cas.
+def test_inline_scan_marque_une_balise_en_majuscules_et_ignore_celle_qui_a_un_nonce() -> None:
+    from grimoire.tools.page_security import _InlineScan
+
+    scan = _InlineScan()
+    scan.feed("<HTML><BODY>")
+    scan.handle_starttag("script", [("src", "/a.js")])
+    scan.handle_starttag("script", [("nonce", "deja")])
+    scan.handle_starttag("style", [])
+    assert [tag for _line, _col, tag in scan.tags] == ["script", "style"], "le script qui a un nonce n'est pas remarqué"
+    assert scan.inline is True
+
+
+def test_inline_scan_ne_voit_pas_une_balise_dans_un_commentaire_et_voit_un_script_en_ligne() -> None:
+    from grimoire.tools.page_security import _InlineScan
+
+    scan = _InlineScan()
+    scan.feed("<!-- <script>x</script> --><p>ok</p><script src='/a.js'></script>")
+    assert [tag for _line, _col, tag in scan.tags] == ["script"]  # celui du fichier, pas celui du commentaire
+    assert scan.inline is False  # `src` : rien d'en ligne
+    scan.handle_starttag("script", [])  # un script sans `src`, ou un attribut on*/style, est du contenu en ligne
+    assert scan.inline is True
+    other = _InlineScan()
+    other.handle_starttag("p", [("onclick", "f()")])
+    assert other.inline is True
+    third = _InlineScan()
+    third.handle_starttag("p", [("style", "color:red")])
+    assert third.inline is True
