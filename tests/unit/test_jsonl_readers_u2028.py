@@ -25,8 +25,8 @@ def _line(obj: dict[str, object]) -> str:
 
 
 def test_next_id_chunked_count_matches_whole_file_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from grimoire.traces import ledger as ledger_mod
-    from grimoire.traces.ledger import _count_occurrences
+    from grimoire.traces import blockcount as ledger_mod
+    from grimoire.traces.blockcount import count_occurrences as _count_occurrences
 
     path = tmp_path / "traces.jsonl"
     rows = [
@@ -39,12 +39,12 @@ def test_next_id_chunked_count_matches_whole_file_count(tmp_path: Path, monkeypa
     assert expected > 500
     # Blocs plus petits que l'aiguille, puis de taille quelconque : une occurrence à cheval est comptée une fois.
     for block in (1, 7, len(needle), len(needle) + 1, 97, 4096, 1 << 20):
-        monkeypatch.setattr(ledger_mod, "_COUNT_BLOCK_BYTES", block)
+        monkeypatch.setattr(ledger_mod, "COUNT_BLOCK_BYTES", block)
         assert _count_occurrences(path, needle) == expected, block
 
 
 def test_next_id_equivalent_on_a_journal_of_thousands_of_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from grimoire.traces import ledger as ledger_mod
+    from grimoire.traces import blockcount as ledger_mod
     from grimoire.traces.ledger import TraceLedger
 
     ledger = TraceLedger(tmp_path)
@@ -54,7 +54,7 @@ def test_next_id_equivalent_on_a_journal_of_thousands_of_lines(tmp_path: Path, m
     ]
     ledger._traces_path.parent.mkdir(parents=True, exist_ok=True)
     ledger._traces_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
-    monkeypatch.setattr(ledger_mod, "_COUNT_BLOCK_BYTES", 251)
+    monkeypatch.setattr(ledger_mod, "COUNT_BLOCK_BYTES", 251)
     assert ledger._next_id("RUN-a") == "TRC-RUN-a-1001"
     assert ledger._next_id("RUN-é") == "TRC-RUN-é-2001"
     assert ledger._next_id("RUN-neuf") == "TRC-RUN-neuf-001"
