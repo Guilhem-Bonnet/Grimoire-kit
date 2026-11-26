@@ -613,6 +613,10 @@ export const api = {
   atelierChantier: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug)),
   atelierBloc: (slug, id, text, expected) =>
     put(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/blocs/' + encodeURIComponent(id), { text, expected }),
+  // Suggestions (lot 2) : l'agent dépose, l'humain tranche ici. `decision` : 'accept' | 'reject' ; un bloc changé
+  // depuis le dépôt répond 409 (suggestion périmée, rien n'est écrit).
+  atelierDecision: (slug, id, decision, motif) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/suggestions/' + encodeURIComponent(id), { decision, motif }),
   // Boîte à idées (I13) : garder sans trier ; « annuler » d'un écart est `undo: true`, un événement de plus.
   ideas: () => get(WS + 'ideas'),
   ideaAdd: (text) => post(WS + 'ideas/add', { text }),

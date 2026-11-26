@@ -695,10 +695,8 @@ class _CockpitHandler(SecureHandlerMixin, SimpleHTTPRequestHandler):
             # registre seul. Depuis le lot 5 (2026-11-12), tout projet enrôlé se
             # pilote comme le projet d'ouverture : plus de confirmation nommée
             # pour `file/write`, `file/override` et `command`.
-            from grimoire.tools.workspace_routes import (
-                WORKSPACE_UNHANDLED,
-                workspace_post,
-            )
+            from grimoire.tools import workspace_atelier
+            from grimoire.tools.workspace_routes import WORKSPACE_UNHANDLED, workspace_post
 
             # Un slug d'URL non enrôlé est un 404, un corps qui contredit l'URL
             # un 400 ; une écriture sans slug garde le 403 « lecture seule »
@@ -730,6 +728,9 @@ class _CockpitHandler(SecureHandlerMixin, SimpleHTTPRequestHandler):
             # hors étage éditable) remontait comme une exception non attrapée
             # jusqu'à ``http.server``, qui coupe la connexion sans réponse JSON
             # au lieu du 400/403/404 explicable que l'atelier rend déjà.
+            if path.startswith(workspace_atelier.ATELIER):  # Atelier en test : 404 drapeau, 409 bloc changé
+                self._send_json(*workspace_atelier.post_http(proot, path, body))
+                return
             try:
                 result = workspace_post(proot, path, body)
             except FileNotFoundError as exc:

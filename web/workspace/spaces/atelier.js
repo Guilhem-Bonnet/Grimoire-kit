@@ -4,9 +4,11 @@
 // maquette Atelier. Absent tant que le drapeau `cockpit.test_features.atelier` est éteint : la coque ne
 // l'importe qu'au montage de l'espace, et l'espace n'existe pas sans le drapeau.
 //
-// Hors de ce lot : l'assistant (sa place reste vide), les suggestions, « Valider et découper », la voix.
+// Lot 2 : un bloc qui porte une suggestion de l'agent l'affiche dessous (avant / après, motif, posture) avec
+// « Accepter » et « Refuser » ; l'agent ne modifie jamais un bloc, l'humain tranche ici. Compteur en bibliothèque.
+// Hors de ces lots : l'assistant flottant, les commentaires, « Valider et découper », la voix.
 // Données : `GET atelier/chantiers`, `POST atelier/chantiers`, `GET atelier/chantiers/<slug>`,
-// `PUT atelier/chantiers/<slug>/blocs/<id>` (voir `src/grimoire/tools/workspace_atelier.py`).
+// `PUT atelier/chantiers/<slug>/blocs/<id>`, `POST atelier/chantiers/<slug>/suggestions/<id>` (voir `src/grimoire/tools/workspace_atelier.py`).
 
 import { renderMarkdown } from '../markdown.js';
 import { badge, icon } from '../shell.js';
@@ -83,6 +85,12 @@ function chantierRow(ctx, row) {
   link.addEventListener('click', (event) => { event.preventDefault(); open(ctx, row.slug); });
   const name = el('span', 'at-name');
   name.append(badge(STATE_LABEL[row.etat] || row.etat, STATE_TONE[row.etat] || ''), el('b', null, row.titre || row.slug));
+  if (row.suggestions > 0) {
+    const n = row.suggestions;
+    const waiting = badge(`${n} suggestion${n > 1 ? 's' : ''}`, 'acc', `${n} suggestion${n > 1 ? 's' : ''} en attente de ta décision`);
+    waiting.setAttribute('data-role', 'sugg-count');
+    name.append(waiting);
+  }
   const { segs, done } = segments(row);
   const progress = el('span', 'at-cell');
   progress.append(segs, el('span', 'at-muted', done >= 5 ? 'Cahier des charges complet' : `${done} étape${done > 1 ? 's' : ''} sur 5`));
@@ -279,6 +287,70 @@ function blockTitle(block) {
   return bare(block.text).split('\n')[0].slice(0, 60);
 }
 
+const POSTURE_LABEL = { explorer: 'Explorer', sceptique: 'Sceptique', simplificateur: 'Simplificateur' };
+
+/** Une suggestion de l'agent sous son bloc : avant / après en texte brut, motif, et le geste humain. */
+function suggestionNode(sug, decide) {
+  const mark = el('span', 'at-ai', null, { 'aria-hidden': 'true' });
+  mark.append(icon('i-act-add'));
+  const who = el('span', 'at-sugg-who');
+  who.append(mark, `${sug.auteur || 'agent'} propose`);
+  const head = el('div', 'at-sugg-head');
+  head.append(who, badge(POSTURE_LABEL[sug.posture] || sug.posture, ''));
+  const before = el('div', 'at-diff del');
+  before.append(el('span', 'at-diff-tag', 'Avant'), el('del', null, sug.avant));
+  const after = el('div', 'at-diff ins');
+  after.append(el('span', 'at-diff-tag', 'Proposé'), el('ins', null, sug.texte));
+  const reason = el('p', 'at-sugg-why', sug.motif ? `Pourquoi : ${sug.motif}` : '');
+  reason.hidden = !sug.motif;
+  const accept = el('button', 'at-btn pri', null, { type: 'button', 'data-act': 'accept' });
+  accept.append(icon('i-act-approve'), 'Accepter');
+  const refuse = el('button', 'at-btn', null, { type: 'button', 'data-act': 'reject' });
+  refuse.append(icon('i-act-reject'), 'Refuser');
+  const actions = el('div', 'at-edit-bar');
+  actions.append(accept, refuse);
+  const error = el('p', 'at-error', '', { role: 'alert' });
+  error.hidden = true;
+  const node = el('div', 'at-sugg', null, {
+    role: 'group', 'data-sugg': sug.id, 'data-block-of': sug.block_id,
+    'aria-label': `Suggestion de ${sug.auteur || 'l’agent'}, posture ${POSTURE_LABEL[sug.posture] || sug.posture}`,
+  });
+  node.append(head, before, after, reason, actions, error);
+
+  const run = async (decision, motif) => {
+    accept.disabled = true;
+    refuse.disabled = true;
+    error.hidden = true;
+    try {
+      await decide(sug, decision, motif);
+    } catch (cause) {
+      error.textContent = cause.message || String(cause);
+      error.hidden = false;
+      accept.disabled = false;
+      refuse.disabled = false;
+    }
+  };
+  accept.addEventListener('click', () => run('accept'));
+  refuse.addEventListener('click', () => {
+    if (node.querySelector('.at-refuse')) return;
+    const input = el('input', 'at-input', null, { type: 'text', 'aria-label': 'Motif du refus (facultatif)', placeholder: 'Motif (facultatif)', maxlength: '300' });
+    const confirm = el('button', 'at-btn pri', 'Confirmer le refus', { type: 'button' });
+    const cancel = el('button', 'at-btn ghost', 'Annuler', { type: 'button' });
+    const form = el('div', 'at-form at-refuse');
+    form.append(input, confirm, cancel);
+    const close = () => { form.remove(); refuse.focus(); };
+    confirm.addEventListener('click', () => run('reject', input.value.trim()));
+    cancel.addEventListener('click', close);
+    form.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); close(); }
+      else if (event.key === 'Enter') { event.preventDefault(); run('reject', input.value.trim()); }
+    });
+    actions.after(form);
+    input.focus();
+  });
+  return node;
+}
+
 function documentView(ctx, root, slug, doc, phaseFocus) {
   const state = { doc };
   const chantier = doc.chantier;
@@ -286,6 +358,11 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const nav = el('nav', 'at-phases', null, { 'aria-label': 'Étapes du cadrage' });
   const status = el('p', 'at-muted at-status', '', { role: 'status', 'aria-live': 'polite', 'data-role': 'atelier-status' });
   let focusId = phaseFocus || state.doc.phases[0].id;
+  const pendingNote = el('span', 'at-pending', null, { 'data-role': 'doc-sugg-count' });
+  const countNote = () => {
+    const waiting = state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0);
+    pendingNote.textContent = waiting ? ` ${waiting} suggestion${waiting > 1 ? 's' : ''} en attente.` : '';
+  };
 
   const phaseNav = () => {
     nav.replaceChildren();
@@ -314,6 +391,25 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     if (ctx.signal.aborted) return;
     drawAll();
     status.textContent = message || '';
+  };
+
+  const decide = async (sug, decision, motif) => {
+    try {
+      await ctx.api.atelierDecision(slug, sug.id, decision, motif);
+    } catch (cause) {
+      if (ctx.signal.aborted) return;
+      if (cause.code === 409) {
+        // Deux causes de 409, dites séparément : déjà tranchée (autre onglet, autre geste) ou bloc changé.
+        const done = cause.payload && cause.payload.reason === 'deja-tranchee';
+        await reload(done
+          ? 'Cette suggestion a déjà été tranchée ailleurs : le document a été rechargé, rien n’a été écrit de plus.'
+          : 'Le bloc a changé depuis la suggestion : elle est périmée, rien n’a été écrit.');
+        return;
+      }
+      throw cause;
+    }
+    if (ctx.signal.aborted) return;
+    await reload(decision === 'accept' ? 'Suggestion acceptée : le bloc est réécrit.' : 'Suggestion refusée : le document n’a pas changé.');
   };
 
   const editBlock = (host, phase, block) => {
@@ -346,7 +442,11 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       try {
         const result = await ctx.api.atelierBloc(slug, block.id, area.value, phase.fingerprint);
         if (ctx.signal.aborted) return;
+        // La vue d'un bloc réécrit n'embarque pas les suggestions : celles des autres blocs restent, celles du
+        // bloc modifié sont périmées (le serveur le dira de même au prochain chargement).
+        result.phase.suggestions = (phase.suggestions || []).filter((x) => x.block_id !== block.id);
         state.doc.phases = state.doc.phases.map((p) => (p.id === phase.id ? result.phase : p));
+        countNote();
         phaseNav();
         drawSection(result.phase);
         status.textContent = 'Bloc enregistré.';
@@ -405,11 +505,13 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       }
       intro = false;
       section.append(blockNode(phase, block));
+      for (const sug of (phase.suggestions || []).filter((x) => x.block_id === block.id)) section.append(suggestionNode(sug, decide));
     }
     if (old) old.replaceWith(section); else sheet.append(section);
   };
 
   const drawAll = () => {
+    countNote();
     sheet.replaceChildren();
     phaseNav();
     for (const phase of state.doc.phases) drawSection(phase);
@@ -425,6 +527,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     opened ? `Ouvert le ${opened}.` : 'Chantier historique du projet.',
     chantier.modifie ? `Modifié le ${formatDate(chantier.modifie, { withTime: true })}.` : '',
   ].filter(Boolean).join(' '));
+  meta.append(pendingNote);
   const head = el('div', 'at-head');
   const left = el('div');
   left.append(back, title, meta);
