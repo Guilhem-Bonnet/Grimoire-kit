@@ -1,0 +1,1 @@
+- fix(cockpit): chat, rouvrir un fil qui a déjà des tours ne fait plus clignoter « Stop » ni ignorer le message tapé pendant le rejeu de l’historique (un `turn_started` rejoué allumait l’état occupé ; seul l’état annoncé par `hello` et les tours vécus comptent) (#1386)

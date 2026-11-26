@@ -103,6 +103,7 @@ export function createChat({ readOnly = () => false } = {}) {
 
   let stream = null;
   let lastSeq = 0;
+  let replayUntil = 0; // dernier numéro de l'historique annoncé par `hello` : ce qui le précède est rejoué, pas vécu
   let busy = false;
   let opened = false;
   /** Ce que le fil est en train d'accumuler : un message d'agent / de la personne / une réflexion. */
@@ -433,6 +434,7 @@ export function createChat({ readOnly = () => false } = {}) {
     if (event.seq) lastSeq = event.seq;
     switch (event.type) {
       case 'hello':
+        replayUntil = Number((event.state && event.state.seq) || 0);
         setBusy(Boolean(event.state && event.state.busy));
         setStatus(event.state && event.state.running ? 'Orchestrateur connecté.' : 'Orchestrateur au repos : le premier message le lance.');
         break;
@@ -450,7 +452,8 @@ export function createChat({ readOnly = () => false } = {}) {
         break;
       case 'turn_started':
         spokenToken = event.spoken_token || null; // jeton du message parlé de ce tour
-        setBusy(true);
+        // Un tour rejoué est déjà fini ou déjà compté par `hello` : l'allumer ferait clignoter Stop et ignorerait la saisie.
+        if (!(event.seq && event.seq <= replayUntil)) setBusy(true);
         break;
       case 'update': {
         const update = event.update || {};
@@ -487,7 +490,7 @@ export function createChat({ readOnly = () => false } = {}) {
       case 'turn_ended': {
         current = null;
         planBox = null;
-        setBusy(false);
+        if (!(event.seq && event.seq <= replayUntil)) setBusy(false);
         voiceOut.refreshInterview();
         const label = STOP_LABEL[event.stop_reason];
         if (label) note(label, event.stop_reason === 'error' ? 'error' : 'info');

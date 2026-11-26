@@ -256,7 +256,8 @@ def test_stop_envoie_session_cancel_a_l_agent(page: Page, agent_log: Path) -> No
     _say(page, "lent")
     stop = page.locator(".chat-stop")
     page.wait_for_function("() => document.querySelector('.chat-stop') && !document.querySelector('.chat-stop').hidden")
-    page.wait_for_selector(".chat-msg.is-agent")
+    # Le fil rejoue les tours précédents : « une réponse d'agent » y est déjà. On attend celle de CE tour.
+    page.wait_for_function("() => document.body.innerText.includes('Je réfléchis longuement')")
 
     stop.click()
 
@@ -300,6 +301,51 @@ def test_apres_rechargement_la_conversation_est_reprise_par_session_load(
         context.close()  # type: ignore[attr-defined]
     loads = [m for m in _received(agent_log) if m.get("method") == "session/load"]
     assert len(loads) == loads_before + 1 and loads[-1]["params"]["sessionId"] == "chat-sess-1"
+
+
+def test_le_rejeu_de_l_historique_n_allume_jamais_stop_ni_n_occupe_la_saisie(browser: Browser, chat_url: str) -> None:
+    """Rouvrir un fil qui a déjà des tours : l'historique rejoué ne fait pas clignoter « Stop ».
+
+    Le flux rejoue tout le journal après `hello`. Un `turn_started` rejoué allumait `aria-busy` et Stop, et un message
+    tapé à cet instant était ignoré en silence (la saisie se dit occupée) : le test du Stop échouait en CI sans que
+    le message ne soit jamais parti (#1386). Le flux est ici fourni par le test, pour que l'ordre soit exact.
+    """
+    history = [
+        {"seq": 0, "type": "hello", "state": {"running": True, "busy": False, "seq": 4}},
+        {"seq": 1, "type": "user", "text": "avant"},
+        {"seq": 2, "type": "turn_started"},
+        {"seq": 3, "type": "turn_ended", "stop_reason": "end_turn"},
+        {"seq": 4, "type": "turn_started"},
+    ]
+    body = "retry: 600000\n\n" + "".join(
+        f"id: {e['seq']}\nevent: chat\ndata: {json.dumps(e)}\n\n" for e in history
+    )
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    page.add_init_script(
+        """(() => {
+            window.__busy = [];
+            new MutationObserver((records) => records.filter((r) => r.target.classList.contains('chat')).forEach((r) => window.__busy.push(r.target.getAttribute('aria-busy'))))
+                .observe(document, { subtree: true, attributes: true, attributeFilter: ['aria-busy'] });
+        })()"""
+    )
+    page.route(
+        "**/api/workspace/chat/stream*",
+        lambda route: route.fulfill(status=200, headers={"Content-Type": "text/event-stream"}, body=body),
+    )
+    try:
+        page.goto(f"{chat_url}/workspace/index.html", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        page.evaluate("() => window.GrimoireWorkspace.setAtelier(true)")
+        page.locator("[data-dock-tab='orchestrateur']").click()
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('.chat-msg.is-user')].some((n) => n.innerText.includes('avant'))"
+        )
+        assert page.locator(".chat-stop").is_hidden()
+        assert page.locator(".chat").get_attribute("aria-busy") == "false"
+        assert "true" not in page.evaluate("() => window.__busy"), "un tour rejoué a allumé l'état occupé"
+    finally:
+        context.close()
 
 
 # ── Thème clair ─────────────────────────────────────────────────────────────
