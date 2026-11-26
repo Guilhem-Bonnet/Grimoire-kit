@@ -107,6 +107,11 @@ def _view(project: Path) -> str:
     return json.dumps(fleet.fleet_live_view(project, now=NOW), sort_keys=True, default=str)
 
 
+def _tail(view: str) -> list[dict[str, Any]]:
+    sessions = json.loads(view)["sessions"]
+    return [tool for session in sessions for tool in session["tail"]]
+
+
 def _many(count: int, *, start: int = 0) -> list[list[dict[str, Any]]]:
     return [_bash(i, f"echo {i} {LEAK_A}", f"sortie {i} {LEAK_B}") for i in range(start, start + count)]
 
@@ -198,6 +203,13 @@ def test_aucun_texte_sensible_n_est_rendu_en_clair(project: Path, journal: Path)
     for text in rendered:
         for leak in (LEAK_A, LEAK_B, LEAK_C):
             assert leak not in text
+    # Le fil porte un vrai résumé et un vrai extrait, caviardés : sans ``settle()`` au rendu ils seraient vides.
+    for index in (0, 3):
+        entry = next(
+            tool for tool in _tail(rendered[index]) if tool["tool"] == "Bash" and "echo" in str(tool["summary"])
+        )
+        assert "[redacted:github-token]" in entry["summary"]
+    assert any("[redacted:github-token]" in str(tool["excerpt"]) for tool in _tail(rendered[0]))
     assert '"kind": "error"' in rendered[2]
     assert '"kind": "question"' in rendered[2]
 
@@ -209,7 +221,7 @@ def test_un_appel_sorti_du_fil_ne_garde_pas_son_texte_brut(project: Path, journa
     assert all(tool.raw_summary is not None for tool in state.tools), "dans le fil : brut gardé jusqu'au rendu"
     _view(project)
     assert all(tool.raw_summary is None and tool.raw_excerpt is None for tool in state.tools)
-    evicted = fleet._Tool(id="x", at="", tool="Bash", raw_summary=f"echo {LEAK_A}")
+    evicted = fleet._Tool(id="x", at="", tool="Bash", raw_summary=fleet._Raw(f"echo {LEAK_A}"))
     evicted.leave_tail()
     assert evicted.raw_summary is None and not evicted.in_tail
 
@@ -334,3 +346,58 @@ def test_les_registres_gardes_sont_bornes(tmp_path: Path, monkeypatch: pytest.Mo
         (root / "_grimoire/standard/llm-provider-registry.yaml").write_text(REGISTRY, encoding="utf-8")
         fleet._registry_and_pricing(root)
     assert list(fleet._REGISTRIES) == [str(tmp_path / "b")]
+
+
+# ── Défense en profondeur : le brut ne se montre pas avant son rendu ────────
+
+
+def test_le_texte_brut_n_apparait_ni_dans_repr_ni_dans_asdict(journal: Path) -> None:
+    import dataclasses
+
+    journal.write_bytes(_lines(_bash(1, f"echo {LEAK_A}", f"sortie {LEAK_B}")))
+    state = fleet._state_for(journal)
+    tool = state.tools[0]
+    assert tool.raw_summary is not None and tool.raw_excerpt is not None, "le brut attend bien son rendu"
+    for shown in (repr(tool), str(dataclasses.asdict(tool)), repr(state), str(dataclasses.asdict(state))):
+        assert LEAK_A not in shown
+        assert LEAK_B not in shown
+
+
+# ── Caviarder PUIS tronquer, jamais l'inverse ───────────────────────────────
+
+
+@pytest.mark.parametrize("lazy", [True, False])
+def test_un_secret_a_cheval_sur_la_troncature_ne_laisse_aucun_fragment(
+    project: Path, journal: Path, monkeypatch: pytest.MonkeyPatch, lazy: bool
+) -> None:
+    if not lazy:
+        monkeypatch.setattr(fleet, "_LAZY_MAX_CHARS", -1)
+    marker = "[redacted:github-token]"
+    # Le secret commence 30 caractères avant le seuil : tronquer d'abord en laisserait un début lisible ;
+    # caviarder d'abord donne un texte plus court que le seuil, qui se termine par la marque entière.
+    command = "c" * (fleet.SUMMARY_CHARS - 31) + " " + LEAK_A
+    output = "o" * (fleet.EXCERPT_CHARS - 31) + " " + LEAK_B
+    journal.write_bytes(_lines(_bash(1, command, output)))
+
+    (entry,) = _tail(_view(project))
+
+    assert entry["summary"].endswith(marker) and entry["excerpt"].endswith(marker)
+    for shown in (entry["summary"], entry["excerpt"]):
+        assert "gh" + "p_" not in shown
+
+
+def test_la_description_d_un_sous_agent_est_caviardee_avant_la_troncature(project: Path, journal: Path) -> None:
+    journal.write_bytes(_lines([_call(1)]))
+    subdir = journal.parent / SESSION / "subagents"
+    subdir.mkdir(parents=True)
+    (subdir / "agent-abc.jsonl").write_bytes(_lines([_call(2)]))
+    description = "d" * (80 - 31) + " " + LEAK_C + " fin de description"
+    (subdir / "agent-abc.meta.json").write_text(json.dumps({"agentType": "Explore", "description": description}))
+
+    view = json.loads(_view(project))
+
+    (sub,) = [session for session in view["sessions"] if session["role"] == "subagent"]
+    shown = sub["agent"]["description"]
+    assert "gh" + "p_" not in shown
+    assert "[redacted:github-token]" in shown
+    assert LEAK_C not in json.dumps(view)
