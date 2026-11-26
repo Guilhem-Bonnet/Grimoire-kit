@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 from rich.console import Console
@@ -90,6 +90,69 @@ def _render(plan: QueuePlan) -> None:
         console.print(f"[dim]hors file : {task_id} — {reason}[/dim]")
     for famine in plan.famine:
         console.print(f"[yellow]attention {famine.attention.level} : {famine.task_id} — {famine.reason}[/yellow]")
+
+
+@queue_app.command("rules")
+def queue_rules(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    ledger_root: Annotated[Path, _LEDGER_ROOT_OPTION] = _DEFAULT_LEDGER,
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Les règles d'usage de `capacity.yaml`, la consommation du jour et l'état de chaque règle (lecture seule).
+
+    La consommation est un minimum (`quota.consumed`, écrit par le tick d'après les journaux de session). Sort en 1
+    si `capacity.yaml` est illisible ; une règle invalide est listée sous « ignorées », sans faire échouer la commande.
+    """
+    from datetime import UTC, datetime
+
+    from grimoire.missions.admission import load_capacity
+    from grimoire.missions.service import TaskService
+    from grimoire.missions.usage_rules import rules_report
+
+    service = TaskService(project_root.resolve(), ledger_root)
+    capacity = load_capacity(service.home_root)
+    report = rules_report(capacity.usage_rules, capacity.rule_issues, service.ledger.list_events() if service.has_ledger else [], datetime.now(UTC))
+    report["quota"] = {"tokens_per_day": capacity.tokens_per_day, "on_unknown": capacity.on_unknown}
+    report["capacity_errors"] = dict(capacity.errors)
+    if _as_json(ctx, json_output):
+        typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        _render_rules(report)
+    if capacity.errors:
+        raise typer.Exit(1)
+
+
+def _number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _bound(today: dict[str, Any], metric: str) -> str:
+    return "" if today[f"{metric}_complete"] else " (borne basse : une partie est inconnue)"
+
+
+def _render_rules(report: dict[str, Any]) -> None:
+    today = report["consumption_today"]
+    quota = report["quota"]
+    console.print(
+        f"[bold]Aujourd'hui ({today['day']} UTC)[/bold] : {today['tokens']} tokens{_bound(today, 'tokens')}, "
+        f"{today['usd']:.4f} USD{_bound(today, 'usd')}, {today['sessions']} session(s) — "
+        f"plafond {quota['tokens_per_day']} tokens/jour, consommation inconnue : {quota['on_unknown']}"
+    )
+    for section, reason in report["capacity_errors"].items():
+        console.print(f"[red]capacité illisible ({section}) : {reason}[/red]")
+    if not report["rules"]:
+        console.print("[dim]Aucune règle d'usage valide dans capacity.yaml (usage_rules).[/dim]")
+    else:
+        table = Table(title="Règles d'usage")
+        for column in ("règle", "portée", "mesure", "seuil", "action", "consommation", "état"):
+            table.add_column(column)
+        for r in report["rules"]:
+            scope = r["scope"] + (f" {r['scope_key']}" if r["scope_key"] else "")
+            table.add_row(r["id"], scope, r["metric"], _number(r["threshold"]), r["action"], _number(r["value"]), r["state"])
+        console.print(table)
+    for issue in report["issues"]:
+        console.print(f"[yellow]{issue}[/yellow]")
 
 
 @queue_app.command("release")

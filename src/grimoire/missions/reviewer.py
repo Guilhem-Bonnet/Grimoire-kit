@@ -105,6 +105,7 @@ from grimoire.missions.launcher import (
 from grimoire.missions.manual_review import MANUAL_KEY, claim_sessions, manual_reviews, manual_tasks
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
 from grimoire.missions.schemas import TaskState
+from grimoire.missions.session_cap import cap_refusal
 from grimoire.missions.task_worktree import find_task_worktree, tick_worktree_path
 from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT, Choice, clip_context, new_question_id
 
@@ -358,6 +359,12 @@ class ReviewStage:
                 task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "",
                 cause="unjudgeable_reviews",
             )
+        capped = cap_refusal(
+            self._service, "reviewer", self._policy.reviewer.sessions_per_day,
+            (REVIEW_LAUNCHED_EVENT, REVIEW_LAUNCH_FAILED_EVENT), entity_id=task.id, actor=REVIEWER_ACTOR, now=self._now,
+        )
+        if capped:
+            return ReviewOutcome(task.id, "capped", "skipped", capped)
         return self._launch(task, launch, second=second)
 
     # -- double relecture (``protected_gate: dual_review``) --------------------

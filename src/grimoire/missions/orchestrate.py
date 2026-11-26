@@ -185,6 +185,12 @@ def run_tick(
     *exec_* lance les processus externes du lanceur et du janitor (``claude``, ``gh``) ; défaut : le vrai binaire.
     Un *dispatcher* qui rend des :class:`~grimoire.missions.launcher.LaunchOutcome` les voit dans le rapport.
     """
+    if apply:  # une pause posée par une règle de portée « jour » ne survit pas au changement de jour
+        from datetime import UTC
+
+        from grimoire.missions.usage_rules import lift_day_pauses
+
+        lift_day_pauses(project_root, now or datetime.now(UTC))
     state = read_pause(home_root(project_root), control_home=control_home)
     if state.global_stop:
         return TickReport(
@@ -300,6 +306,7 @@ def _one_pass(
     attention = [*state.attention(), *provider_notes, *([heartbeat] if heartbeat else [])]
     policy, cleanup = _orchestrator_stage(service, mode, exec_, attention)
     plan = service.queue_plan(now=now, pause=state)
+    _usage_rules_stage(service, plan, mode, now, attention)
     dispatched: tuple[str, ...] = ()
     launches: tuple[LaunchOutcome, ...] = ()
     if dispatcher is None and mode == "apply" and policy is not None and policy.worker.enabled:
@@ -343,6 +350,9 @@ def _one_pass(
     for merge in merges:
         if merge.status in ("failed", "refused") or merge.action == "escalate":
             attention.append(f"merger : {merge.task_id} {merge.action} {merge.status} ({merge.detail})")
+    from grimoire.missions.session_cap import cap_attention
+
+    attention.extend(cap_attention(service, now))  # relecteur, merger : le plafond du jour a refusé un lancement
     for external in external_merges:
         if external.status == "failed":
             attention.append(f"fusion externe : {external.task_id} {external.status} ({external.detail})")
@@ -372,6 +382,28 @@ def _one_pass(
     )
 
 
+def _usage_rules_stage(service: TaskService, plan: QueuePlan, mode: str, now: datetime | None, attention: list[str]) -> None:
+    """Les règles d'usage franchies (``capacity.yaml``) : attention, ``hold``, pause ``drain`` ; jamais une session tuée.
+
+    Le plan a déjà différé les lancements qu'une règle ``hold`` ou ``pause`` retient ; ici seuls les effets s'écrivent
+    (événement, pause), en apply. Une règle invalide est dite, jamais fatale.
+    """
+    from datetime import UTC
+
+    from grimoire.missions.usage_rules import apply_effects
+
+    attention.extend(f"capacity.yaml : {issue}" for issue in plan.capacity.rule_issues)
+    if not plan.rules:
+        return
+    try:
+        apply_effects(
+            service, plan.rules, apply=mode == "apply", now=now or datetime.now(UTC), attention=attention,
+            task_ids=[tid for tid, _base, _eff in plan.order],
+        )
+    except Exception as exc:  # une règle en erreur ne casse pas le tick : les lancements qu'elle retient sont déjà différés
+        attention.append(f"règles d'usage : étape en erreur ({type(exc).__name__}: {exc})")
+
+
 def _planned_routes(
     service: TaskService, policy: OrchestratorPolicy | None, admitted: tuple[Admit, ...],
 ) -> tuple[tuple[str, SensitiveRoute], ...]:
@@ -395,8 +427,15 @@ def _usage_stage(service: TaskService, mode: str, attention: list[str]) -> tuple
     """
     if mode != "apply":
         return ()
+    from grimoire.missions.quota_usage import record_consumption
     from grimoire.missions.usage_fold import fold_pending
 
+    try:  # la consommation des sessions lancées, au ledger (``quota.consumed``) : ce que lit le plafond du jour
+        for consumed in record_consumption(service):
+            if consumed.status == "unknown":
+                attention.append(f"quota : consommation de la session {consumed.role} {consumed.session} inconnue ({consumed.detail})")
+    except Exception as exc:
+        attention.append(f"quota : consommation non enregistrée à ce tick ({type(exc).__name__}: {exc})")
     try:
         report = fold_pending(service)
     except Exception as exc:  # récolte, admission, lancements et relectures sont faits

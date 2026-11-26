@@ -33,6 +33,7 @@ from grimoire.missions.admission import (
 )
 from grimoire.missions.pause import read_pause
 from grimoire.missions.service import TaskService
+from grimoire.missions.usage_rules import rules_report
 
 __all__ = ["REASON_LABELS", "capacity_view"]
 
@@ -45,6 +46,7 @@ REASON_LABELS: dict[str, str] = {
     "quota": "quota du jour atteint",
     "pause": "pause",
     "provider": "fournisseur différé",
+    "usage_rule": "règle d'usage franchie",
     "unknown": "inconnue",
 }
 
@@ -138,6 +140,8 @@ def _quota(capacity: Capacity, view: LedgerView) -> dict[str, Any]:
     else:
         reste = max(plafond - used.tokens, 0)
         detail = f">= {used.tokens}/{plafond} tokens consommés — {reste} restants au mieux"
+        if used.status == "partial":
+            detail += f" ; {used.unknown_sessions} session(s) sans chiffre (consommation partiellement inconnue)"
     return {"mode": "fini", "consomme": used.tokens, "plafond": plafond, "statut": used.status, "detail": detail}
 
 
@@ -186,6 +190,7 @@ def capacity_view(
             "wip": _wip(capacity, view),
             "reservoirs": [_ci_reservoir(capacity, view), *_host_reservoirs(capacity, host), *_llm_reservoirs(capacity, view)],
             "quota": _quota(capacity, view),
+            "usage": rules_report(capacity.usage_rules, capacity.rule_issues, [], moment),
             "file": [],
             "exclues": [],
             "famine": [],
@@ -207,6 +212,7 @@ def capacity_view(
             *_llm_reservoirs(capacity, plan.view),
         ],
         "quota": _quota(capacity, plan.view),
+        "usage": rules_report(capacity.usage_rules, capacity.rule_issues, service.ledger.list_events(), moment),
         "file": _queue(plan, titles),
         "exclues": [{"task_id": t, "titre": titles.get(t, t), "raison": r} for t, r in plan.excluded],
         "famine": [f.task_id for f in plan.famine],

@@ -404,6 +404,7 @@ aucun démon) ; le routeur ne lit pas ce module, le quota relève de l'admission
 | Commande | Description |
 | --- | --- |
 | `grimoire queue plan [--json] [--no-routes]` | Ce que l'admission déciderait maintenant, à blanc : l'ordre de la file, les tâches admises, et pour chaque `Defer` sa raison ; sortie 1 si la capacité déclarée est illisible, 2 si une tâche est en famine |
+| `grimoire queue rules [--json]` | Les règles d'usage de `capacity.yaml`, la consommation du jour (borne basse) et l'état de chaque règle ; lecture seule, sortie 1 si `capacity.yaml` est illisible, une règle invalide est listée « ignorée » |
 | `grimoire queue release <tâche> [--pool ci] [--reason ...]` | Libère un créneau CI dont la fin des checks n'est pas observable (`capacity.released`) ; geste d'humain, l'origine humaine est exigée comme pour `task comment` |
 
 **File** : priorité, puis vieillissement (+1 cran toutes les 24 h passées à l'état `ready`,
@@ -451,6 +452,90 @@ alors jamais `Defer(quota)`, seul un refus du fournisseur le peut. Fini, le jour
 à la consommation connue, un minimum lu dans `quota.consumed` ; la décision porte la route du
 routeur, inchangée. Si des appels ont eu lieu aujourd'hui sans chiffre de tokens, la consommation
 est `unknown` : refusée en autonome (`GRIMOIRE_UNATTENDED=1`), affichée en interactif.
+
+**Consommation enregistrée** : à chaque tick appliqué, le kit lit le journal de chaque session qu'il a lancée
+(worker, relecteur, arbitre, session orchestrateur) et écrit un événement `quota.consumed` : `tokens` (le total de
+`grimoire task usage` : entrée, sortie, cache lu et écrit), `cost_usd` si tous les appels sont tarifés, `model`,
+`role`, `task_id`, `session`. Une session n'est comptée qu'une fois : la clé est son identifiant (le condensé SHA-256
+pour les rôles dont le ledger ne garde que le condensé), l'événement porte le *delta* depuis le dernier et le total
+cumulé, rejouer le tick n'écrit rien. C'est une **borne basse** (`status: lower_bound`) : le kit voit le journal de
+l'hôte, pas la facture. Journal introuvable, illisible, au-dessus de 50 Mo ou d'un hôte non lu : `status: unknown` avec
+la `reason`, jamais un chiffre inventé ; une session lancée depuis moins de 10 minutes n'est pas déclarée inconnue
+(son journal peut ne pas exister encore).
+
+**Consommation partiellement inconnue** (`quota.on_unknown`) : sous un plafond fini, quand une partie des sessions du
+jour n'a pas de chiffre, le défaut est `refuse` (sens fermé : `Defer(unknown)` en autonome), sauf si le connu seul
+atteint déjà le plafond (`Defer(quota)`). `count_known` ne compte que le connu : un réglage explicite du projet, à
+choisir en sachant que le plafond réel peut alors être dépassé.
+
+```yaml
+quota:
+  tokens_per_day: 2000000
+  on_unknown: refuse          # défaut ; ou count_known
+```
+
+**Plafonds de sessions par jour du relecteur et du merger** : `orchestrator.roles.reviewer.sessions_per_day` et
+`orchestrator.roles.merger.sessions_per_day` (`orchestration-policy.yaml`), même forme que celui du worker. **Pas de
+limite par défaut** : en poser une aurait changé le comportement des projets existants, et le worker (5), l'arbitre (5)
+et l'orchestrateur (12) en ont déjà une. Le relecteur compte ses lancements du jour (réussis ou non) ; le merger compte
+les **reprises du worker qu'il déclenche** (`task.merge_bounced` du jour, escalades exclues), seul cas où il lance une
+session. Au plafond, rien n'est lancé, aucune session en cours n'est touchée, la tâche ne change pas d'état ; le refus
+est écrit au ledger (`role.session_cap_reached`, une fois par rôle et par jour) et une ligne de la liste d'attention
+le dit jusqu'à minuit UTC.
+
+**Règles d'usage** (`usage_rules:` dans `capacity.yaml`, par projet, activables une à une) :
+
+```yaml
+usage_rules:
+  - {id: jour-gros, scope: day, metric: tokens, threshold: 2000000, action: warn}
+  - {id: tache-chere, scope: task, metric: usd, threshold: 5, action: hold}
+  - {id: trop-de-sessions, scope: project, metric: sessions, threshold: 200, action: pause, enabled: false}
+```
+
+`scope` : `task` (tous les lancements d'une tâche), `project` (depuis le début), `day` (aujourd'hui, UTC) ; la portée
+« session » est déjà celle des politiques `per_session`. `metric` : `tokens`, `usd` (coût connu), `sessions`.
+`action` : `warn`, `hold` ou `pause`. Les règles s'appliquent **à l'admission et au lancement seulement** : aucune
+session en cours n'est tuée.
+
+| Action | Effet |
+| --- | --- |
+| `warn` | une ligne dans la liste d'attention du tick ; rien n'est retenu |
+| `hold` | le lancement est différé (`Defer(usage_rule)`, avec la règle franchie en détail) ; l'événement `usage_rule.hold` est écrit une fois par règle, tâche et jour ; la ligne d'attention dit comment lever |
+| `pause` | pose la pause existante en mode `drain` (les sessions en cours finissent), l'acteur `usage-rule:<portée>:<id>` et la règle franchie comme motif ; une règle de portée `task` ne met en pause que cette tâche |
+
+`hold` s'appelle ainsi, et non « question à l'humain » : une tâche `ready` ne peut pas passer en attente humaine
+(le ledger l'interdit), le kit ne promet donc pas une question qui n'existe pas. Il retient le lancement et dit, dans
+la liste d'attention, quelle règle est franchie. **Pour lever** : un humain relève le seuil ou met `enabled: false` sur la
+règle dans `capacity.yaml` ; une règle de portée `day` se lève d'elle-même à minuit UTC. Aucun agent ne le fait.
+
+**Pause posée par une règle** : jamais écrasée si une pause existe déjà (humaine ou autre), la règle le dit seulement.
+Elle ne porte pas d'origine, donc seul un humain la lève (`grimoire orchestrate resume`) ; elle ne se lève **pas** quand
+la consommation repasse sous le seuil. Seule exception : une pause de portée `day` (acteur `usage-rule:day:<id>`) est
+levée par le tick au changement de jour UTC. Une pause humaine, ou posée par une règle de portée `project` ou `task`, ne
+se lève jamais d'elle-même.
+
+**Règle invalide** : signalée (`capacity.yaml : usage_rules[2] ignorée : …` dans la liste d'attention et sous
+« ignorées » dans `queue rules`) et ignorée ; les autres règles tiennent. Un `capacity.yaml` illisible reste fermé
+(aucune règle, admission refusée comme avant). La consommation d'une règle est une borne basse : franchie sur le
+connu, elle l'est pour de bon ; sous le seuil sur une consommation partiellement inconnue, elle le dit. Un coût
+inconnu n'est jamais compté zéro. L'action « modèle moins cher » viendra avec la mesure par modèle.
+
+```text
+$ grimoire queue rules
+Aujourd'hui (2026-11-26 UTC) : 0 tokens, 0.0000 USD, 0 session(s) — plafond 2000000 tokens/jour, consommation inconnue : refuse
+                                  Règles d'usage
+┏━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ règle       ┃ portée ┃ mesure ┃ seuil   ┃ action ┃ consommation ┃ état          ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ jour-gros   │ day    │ tokens │ 2000000 │ warn   │ 0            │ sous le seuil │
+│ tache-chere │ task   │ usd    │ 5       │ hold   │ 0            │ sous le seuil │
+└─────────────┴────────┴────────┴─────────┴────────┴──────────────┴───────────────┘
+usage_rules[3] (casse) ignorée : scope doit valoir task | project | day, pas 'nope'
+```
+
+**Qui peut changer quoi** : le plafond, les règles et le journal de consommation sont hors de portée des agents. Aucun
+outil MCP, aucune route ni commande de la console du cockpit n'écrit `capacity.yaml` ni `quota.consumed` (un test le
+prouve) ; la fiche Capacité du cockpit affiche la consommation du jour et les règles, en lecture seule.
 
 **Famine** : une tâche différée depuis plus de 24 h (`queue.famine_hours`) monte au niveau 2
 d'attention, sa raison est affichée.
