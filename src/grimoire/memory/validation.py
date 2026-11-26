@@ -123,13 +123,17 @@ DEFAULT_ALLOWED_EMITTERS: tuple[str, ...] = (
 # étiquettes, qui sont des constantes — était réputé sensible, et la ligne de
 # journal restait rouge (alertes #342, #345, #346) alors qu'elle ne portait déjà
 # plus rien du secret. Le contenu de la table n'a pas changé ; son nom, si.
-_REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
+_BOUNDED_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Ce motif ne détecte que l'ouverture : l'étendue du bloc se cherche en une
     # passe (:func:`_redact_pem_blocks`). `BEGIN…(.*?)…END` en regex rescannait
     # jusqu'à la fin du texte à chaque ouverture sans fermeture : quadratique.
     # En tête : un bloc caviardé raccourcit le texte que les motifs suivants
     # parcourent (un texte de blocs piégés n'est plus balayé qu'une fois).
-    ("private-key-block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    # Les deux groupes (type, « BLOCK ») servent à ne fermer le bloc que sur une
+    # fin du même type.
+    ("private-key-block", re.compile(r"-----BEGIN ([A-Z ]*)PRIVATE KEY( BLOCK)?-----")),
+    # Première série : les formes à frontières de mot, inchangées. Elles gardent la
+    # main sur tout ce qu'elles reconnaissaient déjà, avec le même découpage.
     ("aws-access-key-id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
     # Jetons fine-grained : `github_pat_` + 22 caractères au moins (82 en pratique).
@@ -150,11 +154,96 @@ _REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Affectation générique. La valeur doit être compacte (aucune espace), longue
     # (douze caractères au moins) et contenir un chiffre : c'est ce qui distingue
     # `password: Tr0ub4dor3xKm9Qz` de `password policy is documented in ADR-004`.  # gitleaks:allow
+    # Le chiffre exigé se cherche sur l'étendue réellement capturée, par
+    # :func:`_assignment_hits` (un passage amorti linéaire) : un lookahead non
+    # borné rescannait la suite compacte à chaque occurrence du nom (quadratique,
+    # 13 s sur 108 Ko de « password=password=… »), et un lookahead borné ratait la
+    # valeur dont le premier chiffre est loin.
     ("credential-assignment", re.compile(
         r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token|"
-        r"password|passwd|secret|token)\b\s*[:=]\s*[\"']?(?=[^\s\"']*\d)"
-        r"[A-Za-z0-9_\-+/=.~]{12,}[\"']?"
+        r"password|passwd|secret|token)\b\s*[:=]\s*[\"']?(?P<v>[A-Za-z0-9_\-+/=.~]{12,})[\"']?"
     )),
+)
+
+#: Seconde série : la valeur reconnue à sa FORME (préfixe, longueur, alphabet),
+#: pas au texte qui la touche. Les règles ci-dessus exigent une frontière de mot
+#: avant — et parfois après — la valeur : collée à une lettre, accentuée ou non,
+#: à un chiffre ou à un souligné, elle n'était pas caviardée du tout. Elles
+#: tournent APRÈS la première série, sur son résultat : la nouvelle détection ne
+#: peut qu'ajouter du caviardage, jamais en défaire ni en découper un autre.
+#: Même étiquette que la famille d'origine.
+#:
+#: Quatrième champ : les littéraux dont l'un au moins figure dans tout texte que
+#: la règle peut reconnaître (comparaison insensible à la casse si le cinquième
+#: champ le dit). Une règle dont aucun littéral n'est présent n'est pas lancée :
+#: l'écrasante majorité des textes n'en contient aucun, et ces règles, qui n'ont
+#: plus la frontière de mot pour écarter les positions, coûtaient le double.
+#:
+#: Deux cas. Un préfixe assez singulier pour ne rien attraper d'ordinaire
+#: (`ghp_` + 30 alphanumériques, `xoxb-`, `eyJ` + trois segments) perd toute
+#: borne. Un préfixe qui termine aussi un mot courant (`sk-` dans « risk- »,
+#: `AKIA`, `github_pat_` dans un nom de test) ne se reconnaît collé que si la
+#: composition est celle d'une vraie valeur — et `sk-` jamais derrière une lettre
+#: (couper « task-… » en plein mot est pire que de manquer une clé collée à une
+#: lettre). Un caviardage de cette série remplace la valeur entière ou rien : il
+#: ne tronque jamais le nom qui la précède (groupe ``v``).
+#:
+#: Aucun lookahead ou lookbehind n'y contient de quantificateur non borné : la
+#: valeur collée est cherchée à chaque occurrence du préfixe et l'entrée est
+#: hostile (`py/polynomial-redos`) ; un test le vérifie sur la forme des motifs.
+_SHAPE_RULES: tuple[tuple[str, re.Pattern[str], tuple[str, ...], bool], ...] = (
+    ("github-token", re.compile(r"gh[pousr]_[A-Za-z0-9]{30,}"), ("ghp_", "gho_", "ghu_", "ghs_", "ghr_"), False),
+    ("slack-token", re.compile(r"xox[abprs]-[A-Za-z0-9-]{12,}"), ("xox",), False),
+    # `github_pat_` collé à un mot (`test_github_pat_…` est un nom de test) : seule
+    # la forme réelle, 22 alphanumériques, un souligné, puis 20 au moins.
+    ("github-pat", re.compile(r"github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{20,}"), ("github_pat_",), False),
+    # `sk-` termine des mots ordinaires (« risk-management-… ») : collé, il faut la
+    # forme des clés réelles, `sk-ant-api03-…`, `sk-ant-admin01-…`, et aucune lettre
+    # devant.
+    ("anthropic-key", re.compile(r"(?<!\w)sk-ant-[A-Za-z0-9_-]{20,}"), ("sk-ant-",), False),
+    ("anthropic-key", re.compile(r"(?<![^\W\d_])sk-ant-[A-Za-z]{2,8}[0-9]{2}-[A-Za-z0-9_-]{20,}"), ("sk-ant-",), False),
+    # Clé OpenAI collée : une suite de 16 alphanumériques d'un seul tenant dans les
+    # 24 premiers caractères, et minuscule, majuscule et chiffre dans les 40
+    # premiers. Une clé aléatoire a tout cela ; un mot composé ou un identifiant
+    # de tâche à tirets (`task-GAO-kanban-agent-001`) n'a pas la suite.
+    ("openai-key", re.compile(r"(?<!\w)sk-(?!ant-)[A-Za-z0-9_-]{20,}"), ("sk-",), False),
+    ("openai-key", re.compile(
+        r"(?<![^\W\d_])sk-(?!ant-)(?=[A-Za-z0-9_-]{0,24}[A-Za-z0-9]{16})"
+        r"(?=[A-Za-z0-9_-]{0,40}[0-9])(?=[A-Za-z0-9_-]{0,40}[A-Z])(?=[A-Za-z0-9_-]{0,40}[a-z])"
+        r"[A-Za-z0-9_-]{20,}"), ("sk-",), False),
+    # L'en-tête est borné et possessif : sans borne, chaque « eyJ » d'un long texte
+    # rescannerait toute la suite (quadratique). Les segments suivants ne sont
+    # atteints qu'après un point, et un point borne la course de l'en-tête.
+    ("jwt", re.compile(r"eyJ[A-Za-z0-9_-]{10,300}+\.[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}"), ("eyJ",), False),
+    # Identifiant AWS : exactement 20 caractères. Voisin avant minuscule, accentué,
+    # souligné ou ponctuation : la valeur est reconnue ; voisin avant majuscule ou
+    # chiffre : un chiffre dans les 16. Jamais suivi d'une majuscule ou d'un chiffre
+    # (la suite serait plus longue que l'identifiant : couper laisserait un fragment).
+    ("aws-access-key-id", re.compile(r"(?<![0-9A-Z])(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])"), ("AKIA", "ASIA"), False),
+    ("aws-access-key-id", re.compile(r"(?:AKIA|ASIA)(?=[A-Z]{0,15}[0-9])[0-9A-Z]{16}(?![0-9A-Z])"), ("AKIA", "ASIA"), False),
+    # « Bearer » collé à un mot (« HTTPBearer … ») : 16 caractères au moins dont un
+    # chiffre. Seule la valeur est remplacée, pas le mot.
+    ("bearer-token", re.compile(
+        r"(?i)(?<=\w)Bearer:?\s+(?P<v>(?=[A-Za-z0-9._~+/=-]{0,60}\d)[A-Za-z0-9._~+/=-]{16,})"), ("bearer",), True),
+    # Le nom d'une affectation n'a pas de frontière avant lui : il termine le plus
+    # souvent un identifiant plus long (`db_password`, `access_token`,
+    # `GITHUB_TOKEN`), que `\b` laissait passer parce que le souligné est un
+    # caractère de mot. La frontière après le nom reste (`tokenizer`, `token_count`
+    # ne sont pas des affectations de valeur). Le nom peut être entre guillemets
+    # (JSON, YAML). Seule la valeur est remplacée, jusqu'à la fin de la suite
+    # compacte (aucun fragment ne reste), et ce qui n'est pas une valeur sensible
+    # (appel, identifiant de code, date, nombre) est écarté : :func:`_looks_sensitive`.
+    ("credential-assignment", re.compile(
+        r"(?i)(?:api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token|"
+        r"password|passwd|secret|token)\b[\"']?\s*[:=]\s*[\"']?(?P<v>[A-Za-z0-9_\-+/=.~]{12,})[\"']?"
+    ), ("key", "pass", "secret", "token"), True),
+)
+
+#: Table publique des règles, étiquette et motif : ce que lisent les tests et les
+#: audits. Les deux séries, dans l'ordre d'exécution.
+_REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    *_BOUNDED_RULES,
+    *((label, pattern) for label, pattern, _, _ in _SHAPE_RULES),
 )
 
 #: Textes qui se présentent comme un tour système ou une réécriture de consigne.
@@ -379,7 +468,7 @@ def redact_metadata(metadata: Any, *, _path: str = "metadata") -> tuple[Any, tup
     return metadata, ()
 
 
-_PEM_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+_PEM_END = re.compile(r"-----END ([A-Z ]*)PRIVATE KEY( BLOCK)?-----")
 
 
 def _redact_pem_blocks(text: str, begin: re.Pattern[str], label: str) -> tuple[str, int]:
@@ -388,19 +477,152 @@ def _redact_pem_blocks(text: str, begin: re.Pattern[str], label: str) -> tuple[s
     Une ouverture sans fermeture rend aussi toutes les suivantes sans
     fermeture : on s'arrête alors, et le reste du texte — une clé tronquée est
     encore une clé — est caviardé d'un bloc depuis la première ouverture.
+
+    Un bloc ne se ferme que sur une fin du **même type** que son ouverture : une
+    ligne de fin étrangère, glissée au milieu, ne doit pas le fermer et laisser
+    visible ce qui suit jusqu'à sa vraie fin. Chaque fin n'est examinée qu'une fois.
     """
     out: list[str] = []
     pos = count = 0
     while (start := begin.search(text, pos)) is not None:
-        end = _PEM_END.search(text, start.end())
         out.append(text[pos:start.start()])
         out.append(f"[redacted:{label}]")
         count += 1
+        end = _PEM_END.search(text, start.end())
+        while end is not None and end.groups() != start.groups():
+            end = _PEM_END.search(text, end.end())
         if end is None:
             return "".join(out), count
         pos = end.end()
     out.append(text[pos:])
     return "".join(out), count
+
+
+_DIGIT = re.compile(r"\d")
+#: Fin d'une suite compacte : une espace ou un guillemet.
+_RUN_END = re.compile(r"[\s\"']")
+_NOT_A_VALUE_ISO = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}(?::\d{2}(?::\d{2}(?:[.,]\d+)?)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?"
+)
+_NOT_A_VALUE_NUMBER = re.compile(r"[+-]?\d[\d_.,]*")
+# Un appel : un nom de code (avec séparateur `_` ou `.`, ou en camelCase) suivi d'une parenthèse. Une valeur
+# alphanumérique brute collée à une parenthèse n'est pas un appel : elle reste caviardée.
+_NOT_A_VALUE_CALL = re.compile(
+    r"(?:[A-Za-z_][A-Za-z0-9]{0,63}[_.][A-Za-z0-9_.]{0,200}|[a-z]{1,40}(?:[A-Z][a-z0-9]{1,40}){1,10})\("
+)
+_NOT_A_VALUE_WORD = re.compile(r"(?:true|false|none|null)", re.IGNORECASE)
+_NOT_A_VALUE_IDENT = re.compile(
+    r"(?:[a-z]{1,40}[0-9]{0,4}|[A-Z]{1,40}[0-9]{0,4})"
+    r"(?:[_.](?:[a-z]{1,40}[0-9]{0,4}|[A-Z]{1,40}[0-9]{0,4}|[0-9]{1,4})){1,12}"
+)
+
+
+class _RunScan:
+    """Positions du prochain chiffre et de la prochaine fin de suite, en temps amorti linéaire.
+
+    Les questions arrivent à des positions croissantes (les correspondances d'un
+    ``finditer``) : la réponse trouvée à ``p`` reste la bonne pour tout ``q`` entre
+    ``p`` et elle. Chaque caractère n'est donc parcouru qu'une fois, quel que
+    soit le nombre d'occurrences du nom dans une longue suite compacte.
+    ``scanned`` compte les caractères parcourus : les tests s'en servent pour
+    garantir le caractère linéaire sans mesurer de durée.
+    """
+
+    __slots__ = ("_cache", "scanned", "text")
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.scanned = 0
+        self._cache: dict[re.Pattern[str], tuple[int, int]] = {}
+
+    def next_at(self, rx: re.Pattern[str], start: int) -> int:
+        """Première position ``>= start`` où ``rx`` correspond, ``len(text)`` à défaut."""
+        known = self._cache.get(rx)
+        if known is not None and known[0] <= start <= known[1]:
+            return known[1]
+        found = rx.search(self.text, start)
+        end = found.start() if found is not None else len(self.text)
+        self.scanned += end - start + 1
+        self._cache[rx] = (start, end)
+        return end
+
+
+def _looks_sensitive(run: str) -> bool:
+    """Faux si la suite compacte est manifestement autre chose qu'une valeur sensible.
+
+    Un appel de fonction, un identifiant de code (``a.b_c_2026``), une date ou un
+    horodatage ISO, un booléen, un nombre seul. Ne sert qu'à la seconde série.
+    """
+    if len(run) > 512:
+        # Aucun appel, identifiant, date ni nombre n'est aussi long ; et les motifs ci-dessous sont bornés.
+        return True
+    if _NOT_A_VALUE_CALL.match(run):
+        return False
+    core = run.rstrip(",;)]}")
+    return not (
+        _NOT_A_VALUE_ISO.fullmatch(core)
+        or _NOT_A_VALUE_NUMBER.fullmatch(core)
+        or _NOT_A_VALUE_WORD.fullmatch(core)
+        or _NOT_A_VALUE_IDENT.fullmatch(core)
+    )
+
+
+def _assignment_hits(text: str, pattern: re.Pattern[str], *, shaped: bool) -> list[tuple[int, int]]:
+    """Étendues à caviarder pour les affectations, en un passage linéaire.
+
+    Le motif trouve la valeur ; « elle contient un chiffre » se décide ensuite sur
+    la suite compacte qui la porte (jusqu'à la première espace ou guillemet), par
+    :class:`_RunScan`. Même résultat que l'ancien lookahead non borné, sans son
+    coût quadratique. Première série : le nom, les guillemets et la valeur sont
+    remplacés. Seconde (``shaped``) : la valeur seule, jusqu'à la fin de la suite
+    compacte, et seulement si c'est plausiblement une valeur sensible.
+    """
+    scan = _RunScan(text)
+    hits: list[tuple[int, int]] = []
+    floor = 0
+    for found in pattern.finditer(text):
+        if found.start() < floor:
+            continue
+        value_start = found.start("v")
+        run_end = scan.next_at(_RUN_END, value_start)
+        if scan.next_at(_DIGIT, value_start) >= run_end:
+            continue
+        if not shaped:
+            hits.append(found.span())
+            floor = found.end()
+            continue
+        if not _looks_sensitive(text[value_start:run_end]):
+            continue
+        hits.append((value_start, run_end))
+        floor = run_end
+    return hits
+
+
+def _apply_rule(text: str, label: str, pattern: re.Pattern[str], *, shaped: bool) -> tuple[str, int]:
+    """Appliquer une règle ; renvoyer le texte caviardé et le nombre de remplacements."""
+    marker = f"[redacted:{label}]"
+    if label == "private-key-block":
+        return _redact_pem_blocks(text, pattern, label)
+    if label == "credential-assignment":
+        spans = _assignment_hits(text, pattern, shaped=shaped)
+        if not spans:
+            return text, 0
+        out: list[str] = []
+        pos = 0
+        for start, end in spans:
+            out.append(text[pos:start])
+            out.append(marker)
+            pos = end
+        out.append(text[pos:])
+        return "".join(out), len(spans)
+    if "v" in pattern.groupindex:
+        # Seule la valeur est remplacée : le mot qui la précède reste entier.
+        def keep_name(found: re.Match[str]) -> str:
+            whole = found.group(0)
+            return whole[: found.start("v") - found.start()] + marker + whole[found.end("v") - found.start():]
+
+        return pattern.subn(keep_name, text)
+    return pattern.subn(marker, text)
 
 
 def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
@@ -416,12 +638,23 @@ def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
     """
     hits: list[str] = []
     redacted, _ = normalize_for_storage(text)
-    for label, pattern in _REDACTION_RULES:
-        if label == "private-key-block":
-            redacted, count = _redact_pem_blocks(redacted, pattern, label)
+    for label, pattern in _BOUNDED_RULES:
+        redacted, count = _apply_rule(redacted, label, pattern, shaped=False)
+        if count and label not in hits:
+            hits.append(label)
+    lowered: str | None = None
+    for label, pattern, literals, fold in _SHAPE_RULES:
+        # Pré-filtre : sans l'un des littéraux obligatoires, la règle ne peut rien trouver.
+        if fold:
+            if lowered is None:
+                lowered = redacted.lower()
+            haystack = lowered
         else:
-            redacted, count = pattern.subn(f"[redacted:{label}]", redacted)
-        if count:
+            haystack = redacted
+        if not any(literal in haystack for literal in literals):
+            continue
+        redacted, count = _apply_rule(redacted, label, pattern, shaped=True)
+        if count and label not in hits:
             hits.append(label)
     return redacted, tuple(hits)
 
@@ -447,7 +680,18 @@ def redaction_audit(text: str) -> tuple[str, ...]:
     transite par aucun journal en clair.
     """
     normalized, _ = normalize_for_storage(text)
-    return tuple(label for label, pattern in _REDACTION_RULES if pattern.search(normalized))
+    fired: list[str] = []
+    rules = [(label, pattern, False) for label, pattern in _BOUNDED_RULES]
+    rules += [(label, pattern, True) for label, pattern, _, _ in _SHAPE_RULES]
+    for label, pattern, shaped in rules:
+        if label == "credential-assignment":
+            found = bool(_assignment_hits(normalized, pattern, shaped=shaped))
+        else:
+            found = pattern.search(normalized) is not None
+        if found:
+            fired.append(label)
+    # Une famille peut porter plusieurs règles (même étiquette) : une seule mention.
+    return tuple(dict.fromkeys(fired))
 
 def instruction_like(text: str) -> str:
     """L'étiquette du premier motif de consigne rencontré, ou une chaîne vide.
