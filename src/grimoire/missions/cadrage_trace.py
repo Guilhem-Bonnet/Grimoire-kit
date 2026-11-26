@@ -16,9 +16,10 @@ fusion hors merger). Les commits et fichiers sont relus dans git à partir de ce
 dit (``notes``), jamais deviné. Une tâche qui n'a ni fusion ni branche vivante n'a pas de fichiers.
 
 **La dérive** : la validation scelle l'**empreinte** du texte validé (:func:`~.requirement_gate.fingerprint`) et son
-titre, pas le texte entier. Une exigence dont aucune validation ne porte l'empreinte actuelle, alors qu'une validation
-antérieure existe, est « modifiée depuis la validation ». On sait *que* le texte a changé, et si la formulation (le
-titre) a changé ; pas *quel* critère : le texte validé n'est pas conservé. Rien n'est ajouté au chemin de validation.
+titre, et range à côté le texte validé lui-même, borné (:mod:`.requirement_text`, affichage seulement : l'empreinte reste
+la seule référence). Une exigence dont aucune validation ne porte l'empreinte actuelle, alors qu'une validation
+antérieure existe, est « modifiée depuis la validation », avec un diff court « validé → courant ». Une validation
+antérieure à cette conservation n'a pas de texte : la dérive est signalée sans détail, et la sortie le dit.
 
 **Limites écrites** : les preuves viennent du ledger et du registre de preuves, que la MOE écrit (étiquette
 :data:`~.moa_acceptance.PROOF_SOURCE`) ; un fichier est « touché » par une tâche, pas forcément « servi » au sens
@@ -38,6 +39,7 @@ from grimoire.core.cadrage_requirements import read_requirements
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions import moa_acceptance as moa
 from grimoire.missions import requirement_gate as rg
+from grimoire.missions import requirement_text as rt
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -189,6 +191,26 @@ class Drift:
     moa: str
     tasks: tuple[str, ...] = ()
     files: tuple[str, ...] = ()
+    #: Le texte validé que la validation a rangé dans son entrée (affichage seulement) et le texte d'aujourd'hui rendu
+    #: de la même façon ; ``validated_text`` est vide pour une validation antérieure à cette conservation.
+    validated_text: str = ""
+    current_text: str = ""
+
+    @property
+    def has_detail(self) -> bool:
+        return bool(self.validated_text)
+
+    @property
+    def diff(self) -> list[str]:
+        """Le diff court « validé → courant » ; vide sans texte conservé."""
+        return rt.diff_lines(self.validated_text, self.current_text) if self.has_detail else []
+
+    @property
+    def note(self) -> str:
+        """Pourquoi il n'y a pas (ou pas plus) de détail ; vide quand le diff dit tout."""
+        if not self.has_detail:
+            return rt.NO_TEXT_NOTE
+        return "" if self.diff else rt.SAME_TEXT_NOTE
 
     @property
     def title_changed(self) -> bool:
@@ -196,11 +218,9 @@ class Drift:
 
     @property
     def what(self) -> str:
-        return (
-            "formulation"
-            if self.title_changed
-            else "critères, priorité ou périmètre (le texte validé n'est pas conservé)"
-        )
+        if self.title_changed:
+            return "formulation"
+        return "critères, priorité ou périmètre" + ("" if self.has_detail else " (le texte validé n'est pas conservé)")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -213,6 +233,9 @@ class Drift:
             "validated_by": self.moa,
             "tasks": list(self.tasks),
             "files": list(self.files),
+            "detail": self.has_detail,
+            "diff": self.diff,
+            "note": self.note,
         }
 
 
@@ -515,6 +538,7 @@ def _drift(
     if not sealed or any(e.get("fingerprint") == view.fingerprint for e in sealed):
         return None
     last = sealed[-1]
+    kept = last.get("text")  # conservé à la validation pour l'affichage ; absent des validations plus anciennes
     return Drift(
         rg.safe_text(last.get("title") or ""),
         view.title,
@@ -522,6 +546,8 @@ def _drift(
         rg.safe_text(last.get("moa") or ""),
         tuple(t.id for t in trace.tasks),
         tuple(trace.files),
+        rg.safe_text(kept, newlines=True)[: rt.TEXT_MAX] if isinstance(kept, str) else "",
+        rg.safe_text(rt.validated_text(view.title, view.priority, view.criteria), newlines=True),
     )
 
 

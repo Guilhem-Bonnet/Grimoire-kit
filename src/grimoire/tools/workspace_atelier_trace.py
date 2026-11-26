@@ -101,7 +101,14 @@ def _row(item: Any, slug: str, *, lean: bool = False) -> dict[str, Any]:
         "gaps": [{"kind": g.kind, "label": g.label, "detail": g.detail} for g in item.gaps],
         "drift": None
         if drift is None
-        else {"what": drift.what, "validated_at": drift.validated_at, "validated_by": drift.moa},
+        else {
+            "what": drift.what,
+            "validated_at": drift.validated_at,
+            "validated_by": drift.moa,
+            "detail": drift.has_detail,
+            "diff": drift.diff,
+            "note": drift.note,
+        },
         # Ce que le bouton « Valider » donne à copier : le geste se fait au terminal, jamais ici.
         "command": approve_command(item.key, slug) if not item.validated else "",
         "revalidate": drift is not None,

@@ -13,6 +13,7 @@
 // (voir `src/grimoire/tools/workspace_atelier_trace.py`).
 
 import { badge, icon } from '../shell.js';
+import { diffRows, driftNote } from './atelier-logic.js';
 
 const TONE = { proposee: '', validee: 'acc', 'en-cours': 'acc', livree: 'ok', recette: 'ok', reprise: 'warn' };
 const TASK_STATUS = {
@@ -90,6 +91,13 @@ function detail(row, say) {
     box.append(el('p', 'at-muted', `Validée par ${row.validated_by || 'la MOA'}${day(row.validated_at) ? ` le ${day(row.validated_at)}` : ''}.`));
   } else if (row.drift) {
     box.append(el('p', 'at-live-gap', `Modifiée depuis la validation (${row.drift.what}) : validée par ${row.drift.validated_by || 'la MOA'}${day(row.drift.validated_at) ? ` le ${day(row.drift.validated_at)}` : ''}, à revalider.`));
+    const rows = diffRows(row.drift);
+    if (rows.length) { // le diff court « validé → courant » : ce qui a changé depuis la validation
+      const diff = el('pre', 'at-live-diff', null, { 'data-role': 'drift-diff', 'aria-label': 'Ce qui a changé depuis la validation' });
+      for (const line of rows) diff.append(el('span', `at-diff-${line.kind}`, `${line.text}\n`));
+      box.append(diff);
+    }
+    if (driftNote(row.drift)) box.append(el('p', 'at-muted', driftNote(row.drift), { 'data-role': 'drift-note' }));
   } else if (row.reason) {
     box.append(el('p', 'at-muted', row.reason));
   }

@@ -720,6 +720,9 @@ export const api = {
     post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/comments', { block_id: blockId, quote, start, texte }),
   atelierFil: (slug, id, action, texte) =>
     post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/comments/' + encodeURIComponent(id), { action, texte }),
+  // « Rattacher ici » : ancre un fil orphelin au passage cité (`quote` vide : le bloc entier) ; le serveur revérifie.
+  atelierRattacher: (slug, id, blockId, quote, start) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/comments/' + encodeURIComponent(id), { action: 'attach', block_id: blockId, quote, start }),
   // Document vivant (lot 4) : l'état réel de ce qui sert chaque exigence (lecture), puis « Valider et découper » :
   // l'aperçu (lecture), puis l'écriture confirmée (`digest` : l'empreinte de l'aperçu confirmé ; 409 si le plan a
   // changé ou si une exigence Must n'est pas validée). Aucune route ne valide une exigence : la MOA le fait au terminal.

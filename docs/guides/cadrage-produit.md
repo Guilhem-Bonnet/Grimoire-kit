@@ -151,8 +151,30 @@ fichier qu'aucune de ces tâches n'a touché est dit sans exigence.
 **Dérive.** La validation scelle l'empreinte du texte validé (formulation,
 priorité, critères, périmètre) et son titre. Si l'exigence a changé depuis,
 la trace la signale « modifiée depuis la validation », avec ses tâches et
-fichiers, et dit si c'est la formulation. Elle ne dit pas *quel critère* a
-changé : le texte validé n'est pas conservé, seulement son empreinte.
+fichiers, et dit si c'est la formulation.
+
+Pour montrer *quoi* a changé, la validation range aussi le texte validé lui-même
+(priorité, formulation, critères ; 2 000 caractères au plus) dans la même entrée
+du journal d'autorité. Il ne sert qu'à l'affichage : l'empreinte reste la seule
+référence de la validation, et ce rangement ne change pas qui peut valider.
+`grimoire cadrage trace` (et sa sortie `--json`, champs `detail`, `diff` et
+`note` de `drift`) montre alors un diff court « validé → courant » (12 lignes
+au plus, `-` pour le validé, `+` pour le courant), et l'Atelier l'affiche sur
+l'exigence concernée. Une exigence validée avant cette conservation reste
+signalée en dérive sans détail, avec la phrase « validée avant la conservation
+du texte validé : la dérive est signalée sans détail » ; il suffit de la
+revalider pour que le diff apparaisse à la prochaine modification.
+
+**Rattacher un commentaire orphelin (Atelier, en test).** Quand le texte change
+et que le passage cité ne se retrouve plus, le commentaire devient orphelin et
+reste lisible avec son extrait d'origine. Sélectionne un passage du document
+(ou clique dans un bloc), puis « Rattacher ici » sur le fil : il s'ancre à la
+sélection, ou au bloc entier sans sélection, dans la même phase. Le serveur
+revérifie le passage contre le texte réel du bloc ; le fil garde dans son
+historique l'ancienne ancre, la nouvelle et la date. C'est un geste de l'écran
+(`POST …/comments/<id>` avec `action: attach`, jeton de session, refusé s'il
+vient d'une dictée) : l'agent ne peut pas rattacher, et rien ne rattache un fil
+de soi-même.
 
 Limites : un fichier « touché » par une tâche n'est pas forcément « servi » au
 sens fonctionnel ; les preuves sont celles que la MOE déclare ; un commit ou une

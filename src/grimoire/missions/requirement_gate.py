@@ -45,6 +45,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.missions.requirement_text import validated_text
 from grimoire.missions.schemas import ORIGIN_HUMAN
 
 if TYPE_CHECKING:
@@ -418,6 +419,7 @@ def approve_requirement(
             "requirement": key,
             "fingerprint": fingerprint(key, requirement),
             "title": safe_text(requirement.title).strip(),
+            "text": safe_text(validated_text(requirement.title, requirement.priority, requirement.criteria), newlines=True),
             "moa": mode.moa,
             "actor": actor,
             "origin": ORIGIN_HUMAN,
