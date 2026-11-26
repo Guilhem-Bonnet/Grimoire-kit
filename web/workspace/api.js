@@ -476,7 +476,13 @@ export const api = {
   // mémoire (mode rapide), agents, propositions, dernier run du wizard,
   // dernier run de flow `project-upgrade`, nom du projet. `project` cible un
   // AUTRE projet que celui déjà résolu — même convention que `health()`.
-  sheet: (project) => get(WS + 'sheet', project ? { project } : undefined),
+  // `sections` (#1243) : ne demander que ces sous-vues (`['agents']`) ; omis, toute la fiche.
+  sheet: (project, sections) => {
+    const params = {};
+    if (project) params.project = project;
+    if (sections && sections.length) params.sections = sections.join(',');
+    return get(WS + 'sheet', Object.keys(params).length ? params : undefined);
+  },
   // Capacité (P71) : WIP, réservoirs d'admission, quota et file des tâches
   // prêtes avec la raison de chaque report — le même plan à blanc que
   // `grimoire queue plan`, côté serveur (workspace_capacity.py), lecture

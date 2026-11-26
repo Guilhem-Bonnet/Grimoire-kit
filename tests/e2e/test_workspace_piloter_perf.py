@@ -100,10 +100,17 @@ def test_fiche_piloter_un_seul_appel_sheet_et_interactive_en_rapport_a_la_machin
         assert not old_calls, (
             f"une des sept anciennes routes (+ `projects()`) est repartie au premier rendu — {old_calls}"
         )
-        assert len(sheet_calls) == 1, (
-            f"attendu exactement un appel à /api/workspace/sheet au premier rendu — {urls}"
+        # #1243 : la fiche se peint en deux temps. Trois appels `sheet` partent ensemble — les sous-vues rapides,
+        # puis les agents, puis les propositions, chacune par sa section — plus la capacité, que son panneau lit
+        # lui-même. Jamais une cascade : pas un appel de plus, pas un de la fiche entière.
+        sections = sorted(u.split("sections=")[1].split("&")[0] for u in sheet_calls if "sections=" in u)
+        assert sections == sorted(["agents", "proposals", "health%2Cmemory%2CsetupRun%2CupgradeRuns%2CflowRuns%2Cname"]), (
+            f"les trois sections de la fiche attendues, ni plus ni moins — {urls}"
         )
-        assert len(urls) == 1, f"un seul appel réseau attendu au premier rendu — {urls}"
+        assert len(sheet_calls) == 3, f"trois appels à /api/workspace/sheet attendus au premier rendu — {urls}"
+        capacity_calls = [u for u in urls if "/api/workspace/capacity" in u]
+        assert len(capacity_calls) == 1, f"un seul appel de capacité attendu — {urls}"
+        assert len(urls) == 4, f"quatre appels réseau exactement au premier rendu — {urls}"
         # La coquille « chargement… » (#541 point 3) doit être retirée une
         # fois le vrai rendu posé — jamais empilée dessous (root.append sans
         # avoir vidé root d'abord serait un résidu visible, pas seulement

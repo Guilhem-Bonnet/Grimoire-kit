@@ -271,8 +271,8 @@ def _proposals(project_root: Path, _query: _Query) -> Any:
     return workspace_api.proposals_view(project_root)
 
 
-def _sheet(project_root: Path, _query: _Query) -> Any:
-    return workspace_api.sheet_view(project_root)
+def _sheet(project_root: Path, query: _Query) -> Any:
+    return workspace_api.sheet_view(project_root, _one(query, "sections"))  # `?sections=a,b` (#1243)
 
 
 def _flow_runs(project_root: Path, query: _Query) -> Any:
