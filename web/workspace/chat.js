@@ -119,7 +119,10 @@ export function createChat({ readOnly = () => false } = {}) {
   const targetBar = mk('div', { class: 'chat-targetbar', 'data-role': 'chat-target-bar' },
     mk('label', { for: 'chat-target', class: 'chat-host-label', text: 'Parler au projet' }), targetSelect);
   targetBar.hidden = true;
-  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, targetBar, hostBar, status, log, voiceOut.interview, voiceOut.element, form);
+  // Aucun agent utilisable : le chat se replie sur le Kanban et le dit ici (jamais en silence).
+  const banner = mk('div', { class: 'chat-banner', role: 'status', 'data-role': 'chat-no-agent' });
+  banner.hidden = true;
+  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, targetBar, hostBar, banner, status, log, voiceOut.interview, voiceOut.element, form);
 
   let stream = null;
   let lastSeq = 0;
@@ -147,7 +150,8 @@ export function createChat({ readOnly = () => false } = {}) {
   // Ce que la mascotte permanente du cockpit sait de l'orchestrateur (aucune requête : des faits du fil déjà reçus).
   let waitingCount = 0;
   let failed = false;
-  function announce() { publish('orchestrator', { busy, waiting: waitingCount, error: failed }); }
+  let noAgent = false; // aucun agent d'hôte utilisable : le chat est en repli Kanban (« sans agent », pas une erreur)
+  function announce() { publish('orchestrator', { busy, waiting: waitingCount, error: failed, noAgent }); }
 
   function setBusy(value) {
     busy = value;
@@ -418,9 +422,20 @@ export function createChat({ readOnly = () => false } = {}) {
   }
 
   // ── L'hôte (ACP3) : réglage du projet, hôte détecté par défaut ───────────
+  // Vue « Tous les projets » sans projet cible choisi : les hôtes sont ceux d'un projet, il n'y en a pas encore, donc
+  // rien n'est lu (la lecture retomberait sur un projet implicite) et la saisie reste fermée par `lockForTarget`.
+  const needsTarget = () => host.scopeAll && !currentChatTarget();
+
   async function loadHosts() {
+    if (needsTarget()) return;
+    // La première lecture attend les sondes des hôtes installés (au plus quelques secondes, ensuite gardées) : le
+    // sélecteur est là tout de suite, « vérification… », et la saisie n'est fermée par RIEN tant que la réponse n'est pas
+    // là — seul un « aucun hôte utilisable » confirmé la ferme.
+    hostBar.hidden = false;
+    hostSelect.replaceChildren(mk('option', { value: '', text: 'Vérification des hôtes…' }));
     let state;
     try { state = await api.chatHosts(); } catch { hostBar.hidden = true; return; }
+    if (needsTarget()) return; // la cible a été retirée pendant la lecture : cette réponse n'est plus la bonne
     hostBar.hidden = false;
     hostSelect.replaceChildren();
     for (const host of state.hosts) {
@@ -433,6 +448,19 @@ export function createChat({ readOnly = () => false } = {}) {
       if (host.note) option.title = host.note;
       hostSelect.append(option);
     }
+    // Aucun agent utilisable : le chat se replie tout seul sur le Kanban (la saisie reste ouverte), mais le dit — un
+    // bandeau en tête du fil, le sélecteur sur « Kanban », la mascotte « sans agent ».
+    noAgent = Boolean(state.fallback);
+    banner.hidden = !noAgent;
+    banner.replaceChildren();
+    if (noAgent) {
+      banner.append(
+        mk('strong', { text: 'Aucun agent n’est disponible : le chat est en mode Kanban. ' }),
+        mk('span', { text: 'Ce mode dépose votre message en consigne sur une tâche vivante ; les sessions y répondent par leurs notes, en différé. ' }),
+        mk('span', { text: state.reason || '' }),
+      );
+    }
+    announce();
     if (state.mode === 'kanban') {
       setStatus(`Mode différé : ${state.reason || 'le chat écrit dans le kanban'}. Les réponses arrivent par les notes des sessions.`);
     }
@@ -649,7 +677,7 @@ export function createChat({ readOnly = () => false } = {}) {
   // ── La cible en vue globale ─────────────────────────────────────────────
   function lockForTarget(chosen) {
     input.disabled = !chosen;
-    if (!chosen) hostBar.hidden = true;
+    if (!chosen) { hostBar.hidden = true; banner.hidden = true; noAgent = false; announce(); } // l'état du projet précédent
     send.disabled = !chosen || busy || readOnly();
     if (!chosen) setStatus('Choisissez le projet à qui vous parlez : le chat n’a pas de projet par défaut dans cette vue.');
   }

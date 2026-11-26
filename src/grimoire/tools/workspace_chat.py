@@ -113,6 +113,10 @@ def chat_mode(root: Path | None = None) -> tuple[str, tuple[str, ...], str]:
     alias = chosen_alias(root) if root is not None else (os.environ.get(HOST_ENV, "").strip() or "claude")
     if alias == KANBAN:
         return "kanban", (), "repli choisi : le chat écrit dans le kanban"
+    if not alias:  # aucun choix explicite et aucun hôte utilisable : repli Kanban, DIT (bandeau), jamais un hôte mort
+        from grimoire.hosts.acp_hosts import no_host_reason
+
+        return "kanban", (), no_host_reason(root)  # type: ignore[arg-type]
     host_id = resolve_host(alias)
     if host_id is None:
         raise AcpError(f"hôte inconnu pour l'orchestrateur : {alias!r}")
@@ -324,8 +328,13 @@ class Conversation:
                 self.session_id = client.session_id
                 self.resumed = resumed
         except AcpError as exc:
-            self._emit({"type": "error", "message": str(exc)})
-            raise
+            # La cause ET le geste de réparation, dits dans le fil : un hôte qui ne démarre pas n'est jamais muet.
+            from grimoire.hosts.acp_hosts import start_failure_remedy
+
+            failure = AcpError(f"{exc}{start_failure_remedy(self.root)}")
+            failure.published = True  # type: ignore[attr-defined]  # déjà dans le fil : `_run_turn` ne le répète pas
+            self._emit({"type": "error", "message": str(failure)})
+            raise failure from exc
         finally:
             with self._cond:
                 self._starting = False
@@ -528,7 +537,8 @@ class Conversation:
                 elif event["type"] == "error":
                     self._emit({"type": "error", "message": event.get("message", "")})
         except AcpError as exc:
-            self._emit({"type": "error", "message": str(exc)})
+            if not getattr(exc, "published", False):
+                self._emit({"type": "error", "message": str(exc)})
             self._emit({"type": "turn_ended", "stop_reason": "error"})
             if self._client is not None and self._client.state == "closed":
                 self.close()
@@ -817,10 +827,13 @@ def chat_hosts(root: Path, _query: dict[str, list[str]]) -> dict[str, Any]:
     from grimoire.hosts.acp_hosts import chosen_alias, host_choices
 
     mode, _command, reason = chat_mode(root)
+    chosen = chosen_alias(root)
     return {
-        "chosen": chosen_alias(root),
+        "chosen": chosen,
         "mode": mode,
         "reason": reason,
+        # Aucun choix et aucun agent utilisable : le chat s'est replié sur le Kanban, le cockpit doit le dire.
+        "fallback": mode == "kanban" and not chosen and not os.environ.get(AGENT_COMMAND_ENV, "").strip(),
         "hosts": [c.to_dict() for c in host_choices(root)],
     }
 

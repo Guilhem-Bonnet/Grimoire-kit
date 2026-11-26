@@ -163,7 +163,16 @@ def _open_chat(
     for script in (FAKE_MIC, FAKE_SPEECH, CAPTURE_STREAM):
         page.add_init_script(script)
     _voice_routes(page, voice)
-    page.route("**/api/workspace/chat/send*", lambda route: _json(route, {"ok": True, "accepted": True}))
+    # Ce test parle à un faux fil : l'hôte du chat est un faux agent annoncé utilisable. Le poste de CI n'a aucun hôte
+    # réel, et sans lui le chat dit « aucun hôte utilisable » et ferme la saisie (comportement voulu, éprouvé ailleurs).
+    page.route(
+        "**/api/workspace/chat/hosts*",
+        lambda route: _json(route, {"chosen": "fake", "mode": "acp", "reason": "", "hosts": [{
+            "alias": "fake", "display_name": "Faux agent", "mode": "acp", "available": True, "reason": "",
+            "command": ["fake"], "preview": False, "note": "", "selected": True, "detected": True,
+        }]}),
+    )
+    page.route("**/api/workspace/chat/send*", lambda route: _json(route,{"ok": True, "accepted": True}))
     body = (
         "retry: 600000\n\n"
         + f"id: 0\nevent: chat\ndata: {json.dumps({'seq': 0, 'type': 'hello', 'state': {'running': True, 'busy': False, 'seq': 0}})}\n\n"
