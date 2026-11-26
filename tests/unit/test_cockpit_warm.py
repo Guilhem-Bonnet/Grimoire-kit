@@ -172,3 +172,70 @@ def test_priority_refusal_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(os, "setpriority", refuse, raising=False)
     cockpit_http._lower_priority()
+
+
+class _FakeServer:
+    """Un serveur dont ``serve_forever`` lève ce qu'on lui donne : l'arrêt du cockpit sans réseau."""
+
+    def __init__(self, raises: BaseException, log: list[str]) -> None:
+        self._raises = raises
+        self._log = log
+
+    def serve_forever(self) -> None:
+        self._log.append("serve")
+        raise self._raises
+
+    def server_close(self) -> None:
+        self._log.append("close")
+
+
+def _patch_serve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raises: BaseException, log: list[str]) -> list[Path | None]:
+    from grimoire.cli import cmd_cockpit
+
+    started: list[Path | None] = []
+    class _LoggedEvent(threading.Event):
+        def set(self) -> None:
+            log.append("warm-stop")
+            super().set()
+
+    stop = _LoggedEvent()
+
+    def fake_start(root: Path | None) -> threading.Event:
+        started.append(root)
+        return stop
+
+    monkeypatch.setattr(cmd_cockpit, "_select_cwd_project", lambda root=None: None)
+    monkeypatch.setattr(cmd_cockpit, "_serve_dir", lambda: tmp_path)
+    monkeypatch.setattr(cmd_cockpit, "_sync_site", lambda serve_dir: None)
+    monkeypatch.setattr(cmd_cockpit, "load_registry", lambda: [])
+    monkeypatch.setattr(cmd_cockpit, "_unregistered_cwd_notice", lambda projects: None)
+    monkeypatch.setattr(cmd_cockpit, "new_session_token", lambda: None)
+    monkeypatch.setattr(cmd_cockpit, "ThreadingHTTPServer", lambda addr, handler: _FakeServer(raises, log))
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", tmp_path)
+    monkeypatch.setattr(cmd_cockpit, "start_warm", fake_start)
+    return started
+
+
+@pytest.mark.parametrize("raises", [KeyboardInterrupt(), RuntimeError("boom")])
+def test_serve_starts_the_warm_and_cancels_it_on_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raises: BaseException
+) -> None:
+    from grimoire.cli import cmd_cockpit
+
+    log: list[str] = []
+    started = _patch_serve(monkeypatch, tmp_path, raises, log)
+    if isinstance(raises, KeyboardInterrupt):
+        cmd_cockpit.serve(port=0, open_browser=False, do_refresh=False, with_tests=False, project_root=None)
+    else:
+        with pytest.raises(RuntimeError):
+            cmd_cockpit.serve(port=0, open_browser=False, do_refresh=False, with_tests=False, project_root=None)
+    assert started == [tmp_path]  # une seule chauffe, pour le projet servi
+    assert log == ["serve", "warm-stop", "close"]  # annulée avant la fermeture, même sur erreur
+
+
+def test_priority_untouched_off_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[int, ...]] = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(os, "setpriority", lambda *a: calls.append(a), raising=False)
+    cockpit_http._lower_priority()
+    assert calls == []  # hors Linux, le nice porterait sur tout le processus : on n'y touche pas
