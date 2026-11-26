@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import {
   ACTIONS, MOTION, SHAPE_COUNT, SLOW_FRAME_MS, VOCAL_ACTIONS, WIRED_ACTIONS, adaptScale, bandEdges, bandsFromSpectrum,
-  captionFor, deliversOn, frameIntervalMs, isSettled, isWiredAction, isWritingCall, labelFor, levelFromSamples,
+  assistantState, assistantTarget, glowTargetAt, captionFor, deliversOn, frameIntervalMs, isSettled, isWiredAction, isWritingCall, labelFor, levelFromSamples,
   needsVia, penPose, pickAction, shouldRun, smoothBands, smoothValue, stepWeights,
 } from '../../web/workspace/mascotte_logic.js';
 
@@ -43,7 +43,7 @@ test('sans vocal (jamais recording ni playing), la mascotte vit sur les états d
 
 test('chaque action a un libellé visible lisible et une place dans le shader', () => {
   assert.deepEqual(VOCAL_ACTIONS, ['ecoute', 'parle']);
-  assert.deepEqual(WIRED_ACTIONS, ['repos', 'ecoute', 'reflechit', 'parle', 'ecrit', 'question', 'livre']);
+  assert.deepEqual(WIRED_ACTIONS, ['repos', 'ecoute', 'reflechit', 'parle', 'ecrit', 'propose', 'question', 'livre']);
   assert.equal(captionFor('repos'), 'au repos');
   assert.equal(captionFor('reflechit'), 'réfléchit');
   assert.equal(captionFor('question'), 'attend ta réponse');
@@ -56,9 +56,60 @@ test('chaque action a un libellé visible lisible et une place dans le shader', 
   for (const name of Object.keys(ACTIONS)) assert.ok(MOTION[name], `mouvement de ${name}`);
 });
 
-test('setAction n’accepte que les états branchés : ni propose, ni délègue, ni attend (aucun événement du fil)', () => {
+test('setAction n’accepte que les états branchés : ni délègue ni attend (aucun événement du fil)', () => {
   for (const name of WIRED_ACTIONS) assert.equal(isWiredAction(name), true);
-  for (const name of ['propose', 'delegue', 'attend', '', undefined, null]) assert.equal(isWiredAction(name), false);
+  for (const name of ['delegue', 'attend', '', undefined, null]) assert.equal(isWiredAction(name), false);
+});
+
+test('assistantState : repos, réfléchit, question, suggestions, erreur, indisponible', () => {
+  assert.deepEqual(assistantState({}), { action: 'repos', count: 0, tone: 'idle', caption: 'au repos' });
+  assert.equal(assistantState({ busy: true }).action, 'reflechit');
+  assert.equal(assistantState({ busy: true }).caption, 'réfléchit');
+  const ask = assistantState({ question: true });
+  assert.deepEqual([ask.action, ask.count, ask.caption], ['question', 1, 'attend ta réponse']);
+  const some = assistantState({ suggestions: 2 });
+  assert.deepEqual([some.action, some.count, some.caption], ['propose', 2, '2 suggestions en attente']);
+  assert.equal(assistantState({ suggestions: 1 }).caption, 'une suggestion en attente');
+  assert.equal(assistantState({ permission: true }).action, 'question');
+  const err = assistantState({ error: 'agent mort' });
+  assert.deepEqual([err.action, err.tone, err.count], ['repos', 'error', 0]);
+  assert.equal(assistantState({ unavailable: true }).tone, 'off');
+});
+
+test('assistantState : priorités (erreur > indisponible > question > suggestions > réfléchit)', () => {
+  assert.equal(assistantState({ error: 'x', question: true, suggestions: 3, busy: true }).tone, 'error');
+  assert.equal(assistantState({ unavailable: true, question: true }).tone, 'off');
+  assert.equal(assistantState({ unavailable: true, suggestions: 1 }).action, 'propose', 'des suggestions à relire restent visibles');
+  assert.equal(assistantState({ question: true, suggestions: 3, busy: true }).action, 'question');
+  const both = assistantState({ question: true, suggestions: 3 });
+  assert.equal(both.count, 4, 'le compteur additionne ce qui attend');
+  assert.equal(both.caption, '4 choses attendent ta réponse');
+  assert.equal(assistantState({ suggestions: 3, busy: true }).action, 'propose');
+  assert.equal(assistantState({ suggestions: -2, busy: false }).action, 'repos');
+  assert.equal(assistantState({ suggestions: 'abc' }).count, 0);
+});
+
+test('assistantTarget : le clic vise la question, la permission, la suggestion, sinon le panneau', () => {
+  assert.equal(assistantTarget({ question: true, suggestions: 2 }), 'question');
+  assert.equal(assistantTarget({ permission: true, suggestions: 2 }), 'permission');
+  assert.equal(assistantTarget({ suggestions: 1 }), 'suggestion');
+  assert.equal(assistantTarget({}), 'panel');
+  assert.equal(assistantTarget(), 'panel');
+});
+
+test('glowTargetAt : l’ampoule s’allume en deux temps, seulement pour « propose »', () => {
+  assert.equal(glowTargetAt('repos', 5), 0);
+  assert.equal(glowTargetAt('propose', 0.1), 0);
+  assert.equal(glowTargetAt('propose', 0.75), 0.85);
+  assert.equal(glowTargetAt('propose', 0.85), 0.12);
+  assert.equal(glowTargetAt('propose', 5), 1);
+});
+
+test('« propose » arrivée est figée : plus aucune image tant que la suggestion attend', () => {
+  const settled = { action: 'propose', speed: 0, vy: 0, sy: 1, audio: 0, peak: 0, wobble: 0.06, wobbleTarget: 0.06, swirl: 1, via: false };
+  assert.equal(isSettled({ ...settled, glow: 1, glowTarget: 1 }), true);
+  assert.equal(isSettled({ ...settled, glow: 0, glowTarget: 1 }), false, 'le filament n’est pas encore allumé');
+  assert.equal(shouldRun({ started: true, visible: true, docHidden: false, action: 'propose', settled: true, dirty: false }), false);
 });
 
 test('deliversOn : seule une fin normale vécue livre', () => {
