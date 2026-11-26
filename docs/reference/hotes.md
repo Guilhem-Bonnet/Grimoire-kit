@@ -22,7 +22,7 @@ projet (agents, standard, mémoire)
   ProjectSurface  ← description host-neutre, construite une fois
         │
         ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
-        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}, .vscode/mcp.json,
+        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks,instructions}, .vscode/mcp.json,
         │                            .github/workflows/copilot-setup-steps.yml
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
         ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, .agents/skills, GEMINI.md
@@ -154,6 +154,7 @@ détail de chaque cellule (raison, repli, captures) est dans `grimoire host stat
 | Mémoire | émis, non vérifié | émis, non vérifié | émis, non vérifié |
 | Outils MCP | émis, non vérifié | émis, non vérifié | dégradé |
 | Skills et agents | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Cadrage et Atelier | émis, non vérifié | émis, non vérifié | dégradé |
 | Dispatch et modèle des sous-agents | dégradé | dégradé | dégradé |
 | Orchestrateur autonome : worker | non pris en charge | non pris en charge | non pris en charge |
 | Orchestrateur autonome : relecteur | non pris en charge | non pris en charge | non pris en charge |
@@ -172,6 +173,29 @@ configuré » tant que rien n'est posé. Le format lu est celui des fixtures de 
 (`session.shutdown.modelMetrics`, `assistant.message.outputTokens`) : **non vérifié sur un vrai Copilot**,
 chaque chiffre le dit. Une session sans `session.shutdown` n'a ni entrée ni cache connus ; le coût en
 dollars est toujours inconnu (le format ne donne que des requêtes premium).
+
+## Cadrage, Atelier et rappel de tâche sous Copilot
+
+Ce que `grimoire up` / `grimoire host sync --host copilot` livrent à Copilot, comme à Claude Code :
+
+| Surface du kit | Où elle arrive sous Copilot |
+|---|---|
+| Skills (`grimoire-cadrage`, `grimoire-memory`, `grimoire-steward`, `grimoire-agent-dispatch`) | `.github/skills/<nom>/SKILL.md`, chargés à la demande |
+| Commandes `grimoire cadrage …` (`interview`, `recall`, `trace`, `export`, `plan`…) | le terminal de l'agent (outil `execute`) ; `approve` et `recette` restent des gestes de la MOA |
+| Outils MCP `atelier_suggest`, `atelier_comment`, `atelier_comments` (et les outils mémoire et tâches) | le serveur `grimoire` : `.vscode/mcp.json` (VS Code), `.mcp.json` (CLI), saisie manuelle pour l'agent cloud (voir ci-dessous) |
+| Rappel de tâche | hook `SessionStart` de `.github/hooks/` |
+| Où trouver tout cela | `.github/instructions/grimoire-kit.instructions.md`, fichier géré (court : des noms, pas des corps), dérivé de la surface, de l'application `grimoire cadrage` et du serveur MCP |
+
+`.github/copilot-instructions.md` reste la graine du projet : le kit ne la réécrit jamais, c'est pourquoi la
+liste ci-dessus vit dans un fichier d'instructions géré à part. Un agent dont le frontmatter `tools:` liste les
+outils intégrés n'a pas les outils MCP, chez Copilot comme chez Claude Code (frontière d'outils des personas).
+Tout ceci est **non vérifié sur une session Copilot réelle**.
+
+Reprise d'une session Copilot CLI : la référence de la CLI (docs.github.com, « Copilot CLI command reference »,
+lue le 2026-11-26) documente `/resume` et `--continue`, qui ouvrent le **sélecteur** de sessions. Elle ne montre
+pas de syntaxe pour reprendre une session par son identifiant ni de commande qui affiche ou exporte un journal ;
+le kit n'écrit donc aucune commande de reprise ni de journal pour Copilot (la carte de tâche montre
+l'identifiant seul).
 
 ## MCP sous Copilot
 
