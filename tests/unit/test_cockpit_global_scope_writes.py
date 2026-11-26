@@ -49,6 +49,30 @@ def test_a_global_scope_memory_write_must_name_its_project_in_the_body(cockpit: 
     assert not any(line.get("reason") == GLOBAL_SCOPE_REFUSAL for line in cockpit.journal_lines())
 
 
+def _scope_refusals(host: Host) -> int:
+    return sum(1 for line in host.journal_lines() if line.get("reason") == GLOBAL_SCOPE_REFUSAL)
+
+
+def test_blueprint_computations_are_exempt_but_blueprint_writes_are_not(cockpit: Host) -> None:  # noqa: F811
+    body = json.dumps({"nodes": []}).encode()
+    for suffix in ("validate", "simulate"):
+        cockpit.request("POST", f"/api/blueprints/x/{suffix}", body, GLOBAL)
+    assert _scope_refusals(cockpit) == 0
+    assert cockpit.request("POST", "/api/blueprints/x/compile", body, GLOBAL) == 400
+    assert cockpit.request("PUT", "/api/blueprints/x", body, GLOBAL) == 400
+    assert _scope_refusals(cockpit) == 2
+
+
+def test_portfolio_route_under_the_scope_header(cockpit: Host) -> None:  # noqa: F811
+    task = TaskService(cockpit.root).add("À commenter", ("critère",), owner="guilhem", actor="t").task.id
+    path = f"/api/workspace/portfolio/tasks/{task}/comment?project={cockpit.slug}"
+    named = json.dumps({"text": "bonjour", "kind": "comment", "project": cockpit.slug}).encode()
+    assert cockpit.request("POST", path, named, GLOBAL) == 200
+    contradicting = json.dumps({"text": "x", "kind": "comment", "project": "autre"}).encode()
+    assert cockpit.request("POST", path, contradicting, GLOBAL) == 400
+    assert _scope_refusals(cockpit) == 0
+
+
 def test_registry_maintenance_stays_open_from_a_global_scope_page(cockpit: Host) -> None:  # noqa: F811
     body = json.dumps({"slug": "inconnu", "confirm": False}).encode()
     cockpit.request("POST", "/api/projects/remove", body, GLOBAL)

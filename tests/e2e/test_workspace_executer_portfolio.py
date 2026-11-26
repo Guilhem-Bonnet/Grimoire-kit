@@ -126,6 +126,16 @@ def _add_task(root: Path, title: str, *, ready: bool) -> str:
 
 @pytest.fixture(scope="module")
 def served_portfolio(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, object]]:
+    yield from _serve_portfolio(tmp_path_factory)
+
+
+@pytest.fixture
+def own_portfolio(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, object]]:
+    """Un cockpit à part pour le test qui ANNULE une tâche : il ne partage ni ledger ni décomptes avec les autres."""
+    yield from _serve_portfolio(tmp_path_factory)
+
+
+def _serve_portfolio(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, object]]:
     """Le cockpit dédié du portefeuille : projets A (réclamée, vivante), B
     (libre, éteinte) et C (chemin absent au registre)."""
     from grimoire.missions.ledger import MissionLedger
@@ -236,6 +246,19 @@ def portfolio_page(browser: Browser, served_portfolio: dict[str, object]) -> Ite
     page = context.new_page()
     slugs = served_portfolio["slugs"]
     page.goto(f"{served_portfolio['url']}/workspace/index.html?project={slugs['a']}", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    try:
+        yield page
+    finally:
+        context.close()
+
+
+@pytest.fixture
+def own_page(browser: Browser, own_portfolio: dict[str, object]) -> Iterator[Page]:
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    slugs = own_portfolio["slugs"]
+    page.goto(f"{own_portfolio['url']}/workspace/index.html?project={slugs['a']}", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     try:
         yield page
@@ -360,7 +383,7 @@ def test_une_transition_gatee_depuis_le_portefeuille_ecrit_dans_le_ledger_du_bon
 
 
 def test_les_gestes_du_panneau_depuis_la_vue_globale_visent_le_projet_de_la_ligne(
-    portfolio_page: Page, served_portfolio: dict[str, object]
+    own_page: Page, own_portfolio: dict[str, object]
 ) -> None:
     """Priorité, consigne et annulation lancées depuis la ligne de B (portée « Tous les projets »).
 
@@ -369,10 +392,10 @@ def test_les_gestes_du_panneau_depuis_la_vue_globale_visent_le_projet_de_la_lign
     """
     from grimoire.missions.service import TaskService
 
-    page = portfolio_page
-    slugs = served_portfolio["slugs"]
-    roots = served_portfolio["roots"]
-    task_b = served_portfolio["task_b"]
+    page = own_page
+    slugs = own_portfolio["slugs"]
+    roots = own_portfolio["roots"]
+    task_b = own_portfolio["task_b"]
     posts: list[str] = []
     page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
     _open_portfolio(page)
@@ -402,4 +425,4 @@ def test_les_gestes_du_panneau_depuis_la_vue_globale_visent_le_projet_de_la_lign
     assert [d.text for d in task.directives] == ["consigne depuis la vue globale"]
     other = TaskService(roots["a"])
     assert other.ledger.get_task(task_b) is None
-    assert other.require(served_portfolio["task_a"]).status.value == "claimed"
+    assert other.require(own_portfolio["task_a"]).status.value == "claimed"

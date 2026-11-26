@@ -76,6 +76,15 @@ test('l’entretien du registre reste possible sans cible', async () => {
   assert.equal(writes().length, 1);
 });
 
+test('un calcul (valider, simuler un blueprint) part sans cible ; une écriture de blueprint non', async () => {
+  await api.blueprintValidate('bp', { nodes: [] });
+  await api.blueprintSimulate('bp', { nodes: [] });
+  assert.equal(writes().length, 2);
+  await assert.rejects(api.blueprintCompile('bp', { nodes: [] }), /Tous les projets/);
+  await assert.rejects(api.blueprintPut('bp', { nodes: [] }), /Tous les projets/);
+  assert.equal(writes().length, 2);
+});
+
 test('hors portée globale, la cible ambiante reste celle du projet ouvert', async () => {
   host.scopeAll = false;
   host.project = 'projet-ouvert';

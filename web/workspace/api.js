@@ -129,6 +129,9 @@ function liveMark(path, options) {
 // dépôt visé par une page : il reste ouvert.
 const REGISTRY_WRITES = '/api/projects/';
 const MEMORY_WRITES = '/api/memory';
+// Liste FERMÉE des calculs envoyés en POST : valider et simuler un blueprint n'écrivent sur aucun
+// projet (`postOpen`). Rien d'autre n'y entre — `/compile` écrit et reste soumis à la cible.
+const COMPUTE_ROUTES = /^\/api\/blueprints\/[^/]+\/(validate|simulate)$/;
 const SCOPE_HEADER = 'X-Grimoire-Scope';
 
 function writeIsUntargeted(path, options) {
@@ -136,6 +139,7 @@ function writeIsUntargeted(path, options) {
   if (!options.method || options.method === 'GET') return false;
   const [base, query = ''] = path.split('?');
   if (base.startsWith(REGISTRY_WRITES)) return false;
+  if (COMPUTE_ROUTES.test(base)) return false;
   if (new URLSearchParams(query).get('project')) return false;
   if (base === MEMORY_WRITES) {
     try { return !JSON.parse(options.body || '{}').project; } catch { return true; }

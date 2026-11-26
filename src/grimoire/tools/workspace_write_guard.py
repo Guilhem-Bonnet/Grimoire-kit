@@ -80,8 +80,15 @@ def declares_global_scope(headers: _Headers) -> bool:
     return (headers.get(SCOPE_HEADER) or "").strip().lower() == "all"
 
 
+#: Liste FERMÉE des CALCULS envoyés en POST : ``/api/blueprints/<id>/validate|simulate`` ne touchent aucun disque
+#: (voir ``cmd_cockpit``) et lisent leur projet par le repli des lectures. Rien d'autre n'y entre : ``/compile`` écrit.
+_COMPUTE_SUFFIXES = ("/validate", "/simulate")
+
+
 def untargeted_route(route: str) -> bool:
     """Vrai pour une route d'écriture qui exige un projet explicite dans l'URL."""
+    if route.startswith("/api/blueprints/") and route.endswith(_COMPUTE_SUFFIXES):
+        return False
     return not route.startswith(_UNTARGETED_OK)
 
 
