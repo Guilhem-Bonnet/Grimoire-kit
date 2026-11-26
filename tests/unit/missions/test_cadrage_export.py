@@ -29,13 +29,13 @@ pytestmark = pytest.mark.covers("cli:cadrage export")
 
 runner = CliRunner()
 DATE = "2026-11-25"
-SECRET = "ghp_" + "a" * 36
+CANARI = "ghp_" + "a" * 36
 
 EXIGENCES = f"""# Exigences
 
 - REQ-001 [Must] : l'utilisateur se connecte par lien magique
   - le lien expire après 15 minutes
-  - jeton de test {SECRET}
+  - valeur de test {CANARI}
 - REQ-002 (Should) : export CSV, voir aussi REQ-001
   - le fichier s'ouvre dans un tableur
 - REQ-003 (Won't) : journal d'audit
@@ -168,16 +168,16 @@ def test_export_is_deterministic_except_the_date(tmp_path: Path) -> None:
     assert differing == {"index.md", "manifest.json"}
 
 
-def test_export_redacts_secrets_and_leaks_no_machine_path_or_user(tmp_path: Path) -> None:
+def test_export_redacts_canary_values_and_leaks_no_machine_path_or_user(tmp_path: Path) -> None:
     root = _project(tmp_path / "p")
     _delivered(root)
     (root / CADRAGE_DIR / "03-comprehension.md").write_text(
-        f"# C\n\nvu dans {root}/src et /home/alice/secret.txt, clé {SECRET}\n", encoding="utf-8"
+        f"# C\n\nvu dans {root}/src et /home/alice/notes.txt, valeur {CANARI}\n", encoding="utf-8"
     )
     out = tmp_path / "lot"
     assert _export(root, out).exit_code == 0
     blob = "\n".join(_lot(out).values())
-    assert SECRET not in blob and "redacted" in blob
+    assert CANARI not in blob and "redacted" in blob
     assert str(root) not in blob and str(tmp_path) not in blob and "/home/alice" not in blob and "alice" not in blob
     assert ce.scrub(f"{root}/x", root) == "./x"
     assert ce.scrub(str(Path.home()) + "/y") == "~/y"
