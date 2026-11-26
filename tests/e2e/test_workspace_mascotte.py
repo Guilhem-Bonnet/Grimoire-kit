@@ -133,6 +133,9 @@ def _open(
         viewport={"width": viewport[0], "height": viewport[1]}, reduced_motion="reduce" if reduced else "no-preference"
     )
     page = context.new_page()
+    slow = float(os.environ.get("GRIMOIRE_E2E_CPU_THROTTLE", "1"))
+    if slow > 1:  # processeur du navigateur ralenti (CDP) : reproduit un WebGL logiciel lent, comme en CI
+        context.new_cdp_session(page).send("Emulation.setCPUThrottlingRate", {"rate": slow})
     requests: list[str] = []
     errors: list[str] = []
     page.on("request", lambda r: requests.append(f"{r.method} {r.url}"))
@@ -186,6 +189,28 @@ def _settle(page: Page, quiet_ms: int = 400) -> None:
         """(ms) => new Promise((resolve) => { const a = window.__draws; setTimeout(() => resolve(window.__draws === a), ms); })""",
         arg=quiet_ms,
         timeout=20_000,
+    )
+
+
+def _rendering_stopped(page: Page, min_frames: int = 8, quiet_ms: int = 1500, timeout: int = 90_000) -> None:
+    """Attend que l'entrée de la forme soit finie et le rendu arrêté, sans rien supposer de la cadence des images.
+
+    L'animation d'entrée dure un temps SIMULÉ fixe (les pas de temps sont plafonnés à 50 ms) : il faut environ 36 images
+    sur un processeur lent, plus de 100 sur un rapide. Attendre un NOMBRE d'images (l'ancienne attente, 60) échoue
+    donc quand le rendu est lent (WebGL logiciel en CI) : l'entrée finit avant, la boucle s'arrête et le compteur ne
+    l'atteint jamais. Ici on attend l'arrêt lui-même : au moins `min_frames` images (l'entrée a commencé) puis aucune
+    image pendant `quiet_ms` (une image retardée par la charge ne passe pas pour l'arrêt).
+    """
+    page.evaluate("() => { window.__quiet = null; }")
+    page.wait_for_function(
+        """({ min, quiet }) => {
+          const now = performance.now();
+          const s = window.__quiet || (window.__quiet = { count: -1, since: now });
+          if (window.__draws !== s.count) { s.count = window.__draws; s.since = now; return false; }
+          return s.count >= min && now - s.since >= quiet;
+        }""",
+        arg={"min": min_frames, "quiet": quiet_ms},
+        timeout=timeout,
     )
 
 
@@ -308,8 +333,7 @@ def test_a_pending_question_waits_for_the_human_and_rendering_stops_after_the_en
     )
     try:
         _wait_caption(page, "attend ta réponse")  # prime sur « réfléchit » (le tour est en cours)
-        page.wait_for_function("() => window.__draws >= 60", timeout=15_000)  # l'animation d'entrée a bien tourné
-        _settle(page, 1500)  # puis la boucle s'arrête (fenêtre large : l'hôte chargé peut retarder une image)
+        _rendering_stopped(page)
         before = _draws(page)
         assert before < 400, f"l'entrée ne doit pas durer : {before} images"
         page.wait_for_timeout(1500)
