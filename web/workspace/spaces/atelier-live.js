@@ -72,7 +72,9 @@ function commandBlock(row, say) {
 
 function detail(row, say) {
   const box = el('div', 'at-live-detail', null, { 'data-role': 'live-detail' });
-  if (row.tasks.length) {
+  if (row.detail === false) {
+    box.append(el('p', 'at-muted', 'Chargement du détail…', { role: 'status' })); // chantier long : détail à la demande
+  } else if (row.tasks.length) {
     const list = el('ul', 'at-live-tasks');
     for (const task of row.tasks) {
       const item = el('li');
@@ -96,20 +98,32 @@ function detail(row, say) {
 }
 
 /** Une ligne d'état par exigence ; `open` dit si son détail est ouvert, `toggle` retient son choix. */
-function liveLine(row, { open, toggle, say }) {
+function liveLine(row, { open, toggle, say, more }) {
   const node = el('div', 'at-live', null, { 'data-live': row.id, 'data-state': row.state, role: 'group', 'aria-label': `État de ${row.id} : ${row.label}` });
   const line = el('div', 'at-live-row');
   const fold = el('button', 'at-live-toggle', null, { type: 'button', 'aria-expanded': String(open), 'data-act': 'toggle-detail', 'aria-label': `Détail de ${row.id}` });
   fold.append(badge(row.label, TONE[row.state] || ''));
   if (row.drift) fold.append(badge('modifiée depuis la validation', 'warn'));
-  fold.append(el('span', 'at-muted', row.tasks.length ? plural(row.tasks.length, 'tâche', 'tâches') : 'aucune tâche'));
-  if (row.tasks.length) fold.append(el('span', 'at-muted', plural(row.files, 'fichier', 'fichiers')));
+  fold.append(el('span', 'at-muted', row.task_count ? plural(row.task_count, 'tâche', 'tâches') : 'aucune tâche'));
+  if (row.task_count) fold.append(el('span', 'at-muted', plural(row.files, 'fichier', 'fichiers')));
   for (const gap of row.gaps) fold.append(badge(gap.label, 'warn', gap.detail || gap.label));
   line.append(fold);
   let panel = null;
   const sync = (isOpen) => {
     fold.setAttribute('aria-expanded', String(isOpen));
-    if (isOpen && !panel) { panel = detail(row, say); node.append(panel); }
+    if (isOpen && !panel) {
+      panel = detail(row, say);
+      node.append(panel);
+      if (row.detail === false) {
+        more(row.id).then((full) => {
+          if (!full || !panel) return;
+          const fresh = detail(full, say);
+          fresh.hidden = panel.hidden;
+          panel.replaceWith(fresh);
+          panel = fresh;
+        });
+      }
+    }
     if (panel) panel.hidden = !isOpen;
   };
   fold.addEventListener('click', () => { const next = fold.getAttribute('aria-expanded') !== 'true'; toggle(next); sync(next); });
@@ -141,7 +155,15 @@ function previewPanel(data, { confirm, cancel }) {
   };
   group(plural(data.create.length, 'tâche sera créée', 'tâches seront créées'), data.create, (t) => {
     const li = el('li', null, null, { 'data-create': t.requirement });
-    li.append(el('code', null, t.requirement), ` ${t.title.replace(/^REQ-\d+\s—\s/, '')} `, el('span', 'at-muted', `${plural(t.criteria.length, 'critère repris', 'critères repris')}, ${t.verifiability}`));
+    li.append(el('code', null, t.requirement), ` ${t.title.replace(/^REQ-\d+\s—\s/, '')} `, el('span', 'at-muted', `priorité ${t.priority || 'non précisée'}, vérifiabilité ${t.verifiability}`));
+    // Ce qui sera écrit se lit avant de confirmer : le texte des critères, ouvert d'emblée quand ils sont peu nombreux.
+    const crit = el('details', 'at-split-crit', null, { 'data-role': 'criteria' });
+    if (t.criteria.length <= 3) crit.open = true;
+    crit.append(el('summary', 'at-muted', plural(t.criteria.length, 'critère repris', 'critères repris')));
+    const items = el('ul');
+    for (const text of t.criteria) items.append(el('li', null, text));
+    crit.append(items);
+    li.append(crit);
     if ((t.already_linked || []).length) {
       li.append(el('span', 'at-live-gap', ` Déjà liée à ${t.already_linked.join(', ')} (ajoutée à la main) : une tâche de plus sera créée.`));
     }
@@ -187,11 +209,20 @@ export function createLiveDoc(ctx, slug, { sheet, status }) {
   const slot = el('div', null, null, { 'data-role': 'decoupage-slot' });
   toolbar.append(split, summary, refreshButton);
 
+  /** Le détail complet d'une exigence, pour un chantier dont les lignes sont allégées. */
+  const more = async (req) => {
+    try {
+      const full = await ctx.api.atelierTrace(slug, req);
+      return ctx.signal.aborted ? null : full.requirements.find((r) => r.id === req) || null;
+    } catch {
+      return null;
+    }
+  };
   const rowOf = (req) => (state.trace ? state.trace.requirements.find((r) => r.id === req) : null);
   const line = (req) => {
     const row = rowOf(req);
     if (!row) return el('div', 'at-live', null, { 'data-live': req, hidden: '' }); // pas (encore) dans la trace
-    return liveLine(row, { open: state.open.has(req), toggle: (on) => { if (on) state.open.add(req); else state.open.delete(req); }, say });
+    return liveLine(row, { open: state.open.has(req), toggle: (on) => { if (on) state.open.add(req); else state.open.delete(req); }, say, more });
   };
 
   const paint = () => {

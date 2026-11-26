@@ -227,6 +227,10 @@ def test_split_preview_then_confirm_creates_once_and_replay_creates_nothing(
         panel = page.locator("[data-role='decoupage']")
         panel.wait_for(timeout=APPEAR_MS)
         assert panel.locator("[data-create]").count() == 3  # REQ-001, 002, 003 : une tâche par exigence avec critère
+        # Le texte des critères qui seront écrits se lit dans l'aperçu, sans geste.
+        shown = panel.locator("[data-create='REQ-001'] [data-role='criteria']")
+        assert "la transcription apparaît en moins de 2 secondes" in shown.inner_text()
+        assert shown.locator("li").first.is_visible()
         assert panel.locator("[data-skipped='REQ-004']").inner_text().count("sans critère") == 1
         assert panel.locator("[data-skipped='REQ-005']").inner_text().count("hors périmètre") == 1
         assert _plan_tasks(root) == before  # l'aperçu n'écrit rien

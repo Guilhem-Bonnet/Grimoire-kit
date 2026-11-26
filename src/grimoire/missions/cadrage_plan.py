@@ -52,14 +52,17 @@ if TYPE_CHECKING:
 __all__ = [
     "ANCHOR",
     "CHECK_COMMAND",
+    "LOCK_TIMEOUT_S",
     "PLANNED",
     "Ambiguity",
     "CadragePlan",
     "Proposal",
+    "apply_locked",
     "apply_plan",
     "build_plan",
     "covers_of",
     "is_anchor",
+    "plan_lock",
 ]
 
 #: ``extra.cadrage`` d'une tâche : ``plan`` (tirée d'une exigence) ou ``questions`` (l'ancre des questions).
@@ -511,3 +514,29 @@ def apply_plan(service: TaskService, plan: CadragePlan, actor: str) -> CadragePl
     _post_questions(service, plan, actor)
     plan.applied = True
     return plan
+
+
+#: Délai du verrou du découpage : au-delà, un autre processus écrit encore (503 côté cockpit).
+LOCK_TIMEOUT_S = 10.0
+
+
+def plan_lock(root: Path, chantier: str | None, *, timeout: float | None = None) -> contextlib.AbstractContextManager[None]:
+    """Verrou inter-processus du découpage d'un chantier (``.decoupage.lock`` dans son dossier de cadrage).
+
+    Il couvre la construction du plan **et** son écriture : deux processus (cockpit, ``grimoire serve``,
+    ``grimoire cadrage plan --yes``) qui découpent le même chantier se suivent, le second relit le ledger où le
+    premier a écrit et ne crée rien de plus. ``TimeoutError`` si le verrou n'est pas venu en *timeout* secondes."""
+    from grimoire.core.cadrage import cadrage_dir
+    from grimoire.core.fsio import locked
+
+    return locked(cadrage_dir(root, chantier) / "decoupage", timeout=LOCK_TIMEOUT_S if timeout is None else timeout)
+
+
+def apply_locked(root: Path, service: TaskService, plan: CadragePlan, actor: str) -> CadragePlan:
+    """Écrit *plan* sous :func:`plan_lock`, après l'avoir reconstruit : ce que la CLI confirme est rejoué sur l'état
+    du ledger au moment d'écrire, pas sur celui de l'aperçu."""
+    try:
+        with plan_lock(root, plan.chantier):
+            return apply_plan(service, build_plan(root, service, plan.chantier, plan.mission), actor)
+    except TimeoutError as exc:
+        raise GrimoireMissionError(f"un autre découpage de ce chantier est en cours : {exc}") from exc

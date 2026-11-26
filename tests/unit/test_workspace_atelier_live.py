@@ -247,10 +247,11 @@ def test_apply_creates_one_task_per_requirement_in_the_state_plan_gives_and_repl
     by_req = {(t.extra or {})["requirement"]: t for t in tasks}
     assert by_req[f"{slug}/REQ-001"].acceptance == ("la transcription apparaît en moins de 2 secondes",)
     assert by_req[f"{slug}/REQ-001"].priority == "high"
-    # Rejouer, avec la même empreinte ou une autre : rien de plus.
-    for again in (digest, "autre"):
-        code, body = _post(project, slug, {"confirm": True, "digest": again})
-        assert code == 200 and body["already"] is True and body["created"] == []
+    # Rejouer : l'ancienne empreinte (un autre onglet) est périmée, rien n'est créé ; l'aperçu à jour rend « déjà fait ».
+    code, body = _post(project, slug, {"confirm": True, "digest": digest})
+    assert code == 409 and body["reason"] == "apercu-perime"
+    code, body = _post(project, slug, {"confirm": True, "digest": _get(project, slug, "decoupage")["digest"]})
+    assert code == 200 and body["already"] is True and body["created"] == []
     assert len([t for t in _tasks(project) if (t.extra or {}).get("cadrage") == "plan"]) == 2
     assert _row(_get(project, slug, "trace"), "REQ-001")["tasks"][0]["id"] == by_req[f"{slug}/REQ-001"].id
 
@@ -280,7 +281,7 @@ def test_two_simultaneous_confirmations_create_each_task_once(project: Path, hum
         thread.start()
     for thread in threads:
         thread.join()
-    assert sorted(codes) == [200, 200]
+    assert sorted(codes) == [200, 409]  # le second voit un plan déjà écrit : son empreinte est périmée
     assert len([t for t in _tasks(project) if (t.extra or {}).get("cadrage") == "plan"]) == 2
 
 
@@ -308,7 +309,8 @@ def test_without_any_must_the_découpage_is_ready_and_a_questions_only_plan_is_i
     preview = _get(project, slug, "decoupage")
     assert preview["ready"] is True and preview["create"] == [] and preview["questions"]
     first = _post(project, slug, {"confirm": True, "digest": preview["digest"]})
-    second = _post(project, slug, {"confirm": True, "digest": preview["digest"]})
+    assert _post(project, slug, {"confirm": True, "digest": "forgé"})[0] == 409  # même sans tâche : toujours contrôlée
+    second = _post(project, slug, {"confirm": True, "digest": _get(project, slug, "decoupage")["digest"]})
     assert first[0] == second[0] == 200 and first[1]["created"] == [] == second[1]["created"]
     asked = [t for t in _tasks(project) if (t.extra or {}).get("cadrage") == "questions"]
     assert len(asked) == 1  # l'ancre des questions n'est pas dupliquée
@@ -384,6 +386,127 @@ def test_the_default_chantier_links_do_not_pick_other_chantiers_tasks(project: P
     TaskService(project).add("Ailleurs", ("ok",), requirement="autre/REQ-001")
     create = {c["requirement"]: c for c in _get(project, "principal", "decoupage")["create"]}
     assert create["REQ-001"]["already_linked"] == []
+
+
+def test_criteria_rewritten_after_the_preview_are_not_created_unseen(project: Path) -> None:
+    text = "# Exigences\n\n- REQ-002 (Should) : repli navigateur\n  - le repli marche hors ligne\n"
+    slug = _chantier(project, text)
+    preview = _get(project, slug, "decoupage")
+    assert preview["create"][0]["criteria"] == ["le repli marche hors ligne"]  # le texte est dans l'aperçu
+    path = project / "_grimoire" / "cadrage" / slug / "04-exigences.md"
+    path.write_text(text.replace("hors ligne", "sans revue"), encoding="utf-8")
+    code, body = _post(project, slug, {"confirm": True, "digest": preview["digest"]})
+    assert code == 409 and body["reason"] == "apercu-perime"
+    assert _tasks(project) == []
+    # La priorité ou les questions qui seraient posées comptent aussi dans l'empreinte.
+    path.write_text(text.replace("(Should)", "(Could)"), encoding="utf-8")
+    assert _get(project, slug, "decoupage")["digest"] != preview["digest"]
+
+
+def _worker(root: str, slug: str, digest: str, barrier: Any, queue: Any, cli: bool) -> None:
+    from grimoire.missions.cadrage_plan import apply_locked, build_plan
+
+    barrier.wait()
+    path = Path(root)
+    if cli:  # le chemin de `grimoire cadrage plan --yes`
+        service = TaskService(path)
+        plan = build_plan(path, service, slug, "")
+        queue.put(len(apply_locked(path, service, plan, "cli").proposals))
+    else:
+        queue.put(wa.post_http(path, f"{P}atelier/chantiers/{slug}/decoupage", {"confirm": True, "digest": digest})[0])
+
+
+def test_two_processes_split_the_same_chantier_without_duplicates(project: Path) -> None:
+    import multiprocessing
+
+    lines = ["# Exigences", ""] + [f"- REQ-{i:03d} (Should) : e{i}\n  - c{i}" for i in range(1, 21)]
+    slug = _chantier(project, "\n".join(lines) + "\n")
+    digest = _get(project, slug, "decoupage")["digest"]
+    ctx = multiprocessing.get_context("fork")
+    barrier, queue = ctx.Barrier(2), ctx.Queue()
+    procs = [
+        ctx.Process(target=_worker, args=(str(project), slug, digest, barrier, queue, cli)) for cli in (False, True)
+    ]
+    for proc in procs:
+        proc.start()
+    results = [queue.get(timeout=60) for _ in procs]
+    for proc in procs:
+        proc.join(30)
+    planned = [t for t in _tasks(project) if (t.extra or {}).get("cadrage") == "plan"]
+    assert len(planned) == 20 and len({(t.extra or {})["requirement"] for t in planned}) == 20, results
+
+
+def test_a_held_lock_answers_503_and_writes_nothing(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import cadrage_plan
+    from grimoire.missions.cadrage_plan import plan_lock
+
+    slug = _chantier(project)
+    digest = _get(project, slug, "decoupage")["digest"]
+    monkeypatch.setattr(cadrage_plan, "LOCK_TIMEOUT_S", 0.2)
+    with plan_lock(project, slug, timeout=5):
+        code, body = _post(project, slug, {"confirm": True, "digest": digest})
+    assert code == 503 and "verrouillé" in body["error"]
+    assert _tasks(project) == []
+
+
+def test_the_trace_is_kept_while_nothing_changes_and_rebuilt_when_it_does(
+    project: Path, human: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slug = _chantier(project)
+    calls: list[int] = []
+    real = cadrage_trace.build_trace
+    monkeypatch.setattr(cadrage_trace, "build_trace", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    _get(project, slug, "trace")
+    _get(project, slug, "trace")
+    assert len(calls) == 1  # rien n'a changé : une seule construction
+    _approve(project, slug, "REQ-001")  # une validation (journal) : reconstruite aussitôt
+    assert _row(_get(project, slug, "trace"), "REQ-001")["validated"] is True and len(calls) == 2
+    TaskService(project).add("Dictée", ("ok",), requirement=f"{slug}/REQ-001")  # le ledger bouge
+    assert _row(_get(project, slug, "trace"), "REQ-001")["task_count"] == 1 and len(calls) == 3
+    path = project / "_grimoire" / "cadrage" / slug / "04-exigences.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("2 secondes", "3 secondes"), encoding="utf-8")
+    assert _row(_get(project, slug, "trace"), "REQ-001")["revalidate"] is True and len(calls) == 4
+    monkeypatch.setattr(live, "CACHE_TTL_S", 0.0)  # au-delà du délai, relue même sans changement
+    _get(project, slug, "trace")
+    assert len(calls) == 5
+
+
+def test_long_chantiers_get_lean_rows_and_the_detail_on_demand(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "DETAIL_MAX", 2)
+    slug = _chantier(project, "# Exigences\n\n" + "".join(f"- REQ-{i:03d} (Should) : e{i}\n  - c{i}\n" for i in range(1, 5)))
+    TaskService(project).add("Une", ("ok",), requirement=f"{slug}/REQ-003")
+    view = _get(project, slug, "trace")
+    lean = _row(view, "REQ-003")
+    assert lean["detail"] is False and lean["tasks"] == [] and lean["task_count"] == 1
+    full = dict(wa.get(project, f"{P}atelier/chantiers/{slug}/trace", {"req": ["REQ-003"]}))
+    assert _row(full, "REQ-003")["detail"] is True and len(_row(full, "REQ-003")["tasks"]) == 1
+    assert _row(full, "REQ-004")["detail"] is False
+
+
+def test_requirement_ids_are_ascii_digits_only(project: Path) -> None:
+    text = "# Exigences\n\n- REQ-001 (Should) : vrai\n  - c\n- REQ-００２ (Should) : sosie\n  - c\n- REQ-٣ (Should) : arabe\n  - c\n"
+    slug = _chantier(project, text)
+    view = _get(project, slug, "trace")
+    assert [r["id"] for r in view["requirements"]] == ["REQ-001"]
+    from grimoire.core.cadrage_requirements import REQ_ID
+
+    assert REQ_ID.search("REQ-００２") is None and REQ_ID.search("REQ-٣") is None and REQ_ID.search("REQ-002")
+
+
+def test_no_other_method_or_path_validates_or_splits(project: Path) -> None:
+    slug = _chantier(project)
+    base = f"{P}atelier/chantiers/{slug}"
+    body = json.dumps({"origin": "human", "confirm": True, "digest": "x"}).encode()
+    for leaf in ("decoupage", "trace", "exigences/REQ-001", "exigences/REQ-001/valider", "valider", "approve"):
+        assert wa.put_http(project, f"{base}/{leaf}", body)[0] in (404, 400), leaf
+    for leaf in ("trace", "exigences/REQ-001/approve", "exigences", "validations", "REQ-001/valider"):
+        assert wa.post_http(project, f"{base}/{leaf}", {"confirm": True})[0] == 404, leaf
+    assert not AuthorityJournal().path.exists() and _tasks_or_none(project) == []
+
+
+def _tasks_or_none(root: Path) -> list[Any]:
+    service = TaskService(root)
+    return service.list_tasks() if service.has_ledger else []
 
 
 def test_the_trace_payload_is_json_serialisable(project: Path, human: None) -> None:

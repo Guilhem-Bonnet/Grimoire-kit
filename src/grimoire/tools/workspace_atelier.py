@@ -316,7 +316,7 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
 # ── Branchement des hôtes ───────────────────────────────────────────────────
 
 
-def get(root: Path, path: str, _query: dict[str, list[str]]) -> Any:
+def get(root: Path, path: str, query: dict[str, list[str]]) -> Any:
     if path == FEATURES:
         return features(root)
     _need_flag(root)
@@ -332,7 +332,7 @@ def get(root: Path, path: str, _query: dict[str, list[str]]) -> Any:
     if len(rest) == 3 and rest[0] == "chantiers" and rest[2] in ("trace", "decoupage"):
         from grimoire.tools import workspace_atelier_trace as live
 
-        return live.trace_view(root, rest[1]) if rest[2] == "trace" else live.decoupage_preview(root, rest[1])
+        return live.trace_view(root, rest[1], (query.get("req") or [""])[0]) if rest[2] == "trace" else live.decoupage_preview(root, rest[1])
     raise FileNotFoundError(f"route inconnue : {path}")
 
 

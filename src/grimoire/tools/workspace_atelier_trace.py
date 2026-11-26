@@ -22,7 +22,6 @@ reste conditionné à la validation (par la MOA) des exigences Must.
 from __future__ import annotations
 
 import hashlib
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -40,8 +39,6 @@ STATES = {
     "accepted": ("recette", "recette prononcée"),
     "rework": ("reprise", "reprise à faire"),
 }
-#: Deux découpages simultanés (deux onglets) ne doivent pas créer deux fois les mêmes tâches.
-_APPLY = threading.Lock()
 
 
 def approve_command(key: str, chantier: str) -> str:
@@ -75,7 +72,7 @@ def _moa(root: Path) -> dict[str, Any]:
     return {"declared": bool(mode.declared), "name": mode.moa, "problem": mode.problem or ""}
 
 
-def _row(item: Any, slug: str) -> dict[str, Any]:
+def _row(item: Any, slug: str, *, lean: bool = False) -> dict[str, Any]:
     state, label = STATES[item.stage]
     drift = item.drift
     return {
@@ -90,7 +87,11 @@ def _row(item: Any, slug: str) -> dict[str, Any]:
         "validated_by": item.validated_by,
         "validated_at": item.validated_at,
         "reason": item.reason,
-        "tasks": [{"id": t.id, "title": t.title, "status": t.status, "delivered": t.delivered} for t in item.tasks],
+        "task_count": len(item.tasks),
+        "detail": not lean,  # faux : le détail des tâches se demande par exigence (`?req=`)
+        "tasks": []
+        if lean
+        else [{"id": t.id, "title": t.title, "status": t.status, "delivered": t.delivered} for t in item.tasks],
         "files": len(item.files),
         "tests": len(item.tests),
         "gaps": [{"kind": g.kind, "label": g.label, "detail": g.detail} for g in item.gaps],
@@ -103,19 +104,78 @@ def _row(item: Any, slug: str) -> dict[str, Any]:
     }
 
 
-def trace_view(root: Path, slug: str) -> dict[str, Any]:
-    """La trace du chantier pour le document : une exigence par ligne, construite **une fois** (git compris)."""
+def _sig(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _text_hash(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _stamp(root: Path, chantier: str | None, service: Any) -> tuple[Any, ...]:
+    """Ce dont la trace dépend et qui bouge : le texte des fichiers d'exigences et du contexte projet (MOA), le
+    ledger (événements), le journal d'autorité et sa tête. Un changement de l'un d'eux change la clé : une
+    validation scellée au terminal apparaît dès la lecture suivante."""
+    from grimoire.core.cadrage import cadrage_dir
+    from grimoire.core.cadrage_requirements import REQUIREMENT_FILES
+    from grimoire.missions.mandate import AuthorityJournal
+
+    folder = cadrage_dir(root, chantier)
+    journal = AuthorityJournal()
+    return (
+        *(_text_hash(folder / name) for name in REQUIREMENT_FILES),
+        _text_hash(root / wa.CONTEXT_FILE),
+        _sig(service.ledger_root / "events.jsonl"),
+        _sig(journal.path),
+        _sig(journal.head_path),
+    )
+
+
+#: ``(racine, slug) -> (clé, date, trace)`` : en mémoire du processus seulement. La date borne ce que la clé ne voit
+#: pas (git, registre de preuves) ; elle ne sert jamais à garder un état d'autorité plus longtemps que la clé.
+_TRACES: dict[tuple[str, str], tuple[tuple[Any, ...], float, Any]] = {}
+CACHE_TTL_S = 10.0
+#: Au-delà, une ligne ne porte plus le détail de ses tâches (``?req=REQ-nnn`` le rend, à la demande).
+DETAIL_MAX = 150
+
+
+def _built(root: Path, slug: str) -> Any:
+    """La trace construite, relue seulement si la clé a changé (ou après :data:`CACHE_TTL_S`)."""
+    import time
+
     from grimoire.core.exceptions import GrimoireError
     from grimoire.missions.cadrage_trace import build_trace
 
-    wa._need_flag(root)
-    slug = wa._slug(slug)
     chantier, _mission = _target(root, slug)
+    service = _service(root)
+    key = _stamp(root, chantier, service)
+    held = _TRACES.get((str(root), slug))
+    if held is not None and held[0] == key and time.monotonic() - held[1] < CACHE_TTL_S:
+        return held[2]
     try:
-        built = build_trace(root, _service(root), chantier)
+        built = build_trace(root, service, chantier)
     except GrimoireError as exc:  # ledger ou journal abîmé : l'erreur du kit, dite telle quelle
         raise ValueError(str(exc)) from exc
-    rows = [_row(item, slug) for item in built.requirements]
+    _TRACES[(str(root), slug)] = (key, time.monotonic(), built)
+    return built
+
+
+def trace_view(root: Path, slug: str, req: str = "") -> dict[str, Any]:
+    """La trace du chantier pour le document : une exigence par ligne, construite **une fois** (git compris), puis
+    tenue tant que rien n'a changé. Au-delà de :data:`DETAIL_MAX` exigences, les lignes sont allégées ;
+    ``req="REQ-nnn"`` rend le détail complet de cette seule exigence."""
+    wa._need_flag(root)
+    slug = wa._slug(slug)
+    built = _built(root, slug)
+    lean = len(built.requirements) > DETAIL_MAX
+    rows = [_row(item, slug, lean=lean and item.key.rpartition("/")[2] != req) for item in built.requirements]
     musts = [r for r in rows if r["priority"] == "must"]
     return {
         "schema": SCHEMA,
@@ -164,7 +224,22 @@ def _unvalidated_musts(root: Path, plan: Any, slug: str) -> list[dict[str, str]]
 
 def _digest(plan: Any) -> str:
     """Empreinte de ce que l'aperçu promet de créer : la confirmation porte sur ces tâches-là."""
-    raw = "\n".join(f"{p.requirement}\t{p.title}" for p in plan.proposals)
+    import json
+
+    written = {
+        "mission": plan.mission,
+        "tasks": [
+            [p.requirement, p.title, list(p.acceptance), [c.cmd for c in p.checks], p.priority, p.verifiability,
+             p.criterion_origin]
+            for p in plan.proposals
+        ],
+        "questions": [
+            [q.ambiguity.key, q.status, q.ambiguity.blocking, q.ambiguity.text]
+            for q in plan.questions
+            if q.status in ("new", "unanswered")
+        ],
+    }
+    raw = json.dumps(written, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -269,7 +344,7 @@ def decoupage_apply(root: Path, slug: str, body: dict[str, Any]) -> dict[str, An
     plan d'aujourd'hui (le ledger ou le cadrage a bougé : le document recharge l'aperçu).
     """
     from grimoire.core.exceptions import GrimoireError
-    from grimoire.missions.cadrage_plan import apply_plan
+    from grimoire.missions.cadrage_plan import apply_plan, plan_lock
 
     wa._need_flag(root)
     slug = wa._slug(slug)
@@ -278,7 +353,10 @@ def decoupage_apply(root: Path, slug: str, body: dict[str, Any]) -> dict[str, An
     digest = body.get("digest")
     if not isinstance(digest, str) or not digest:
         raise ValueError("`digest` requis : l'empreinte de l'aperçu confirmé")
-    with _APPLY:
+    chantier, _mission = _target(root, slug)
+    # Inter-processus : le plan est construit ET écrit sous le même verrou (cockpit, `grimoire serve`, CLI) ;
+    # un verrou non obtenu en LOCK_TIMEOUT_S lève TimeoutError (503 par `post_http`).
+    with plan_lock(root, chantier):
         try:
             service, plan = _plan(root, slug)
             blocked = _unvalidated_musts(root, plan, slug)
@@ -289,7 +367,7 @@ def decoupage_apply(root: Path, slug: str, body: dict[str, Any]) -> dict[str, An
                 )
             if not plan.requirements.identified:
                 raise ValueError("aucune exigence identifiée dans le cadrage : rien à découper")
-            if plan.proposals and _digest(plan) != digest:
+            if _digest(plan) != digest:  # toujours : critères, priorités, questions, tout ce qui va être écrit
                 raise _conflict("le plan a changé depuis l'aperçu : relis-le avant de confirmer", "apercu-perime")
             already = not plan.proposals
             plan = apply_plan(service, plan, ACTOR)

@@ -51,13 +51,13 @@ __all__ = [
 ]
 
 #: L'identifiant d'une exigence : ``REQ-`` puis 1 à 4 chiffres (``REQ-1`` et ``REQ-001`` sont distincts).
-REQ_ID = re.compile(r"\bREQ-\d{1,4}\b")
+REQ_ID = re.compile(r"\bREQ-[0-9]{1,4}\b")
 #: Les fichiers lus, dans l'ordre : le dernier fait foi sur la formulation (le cahier des charges).
 REQUIREMENT_FILES: tuple[str, ...] = ("04-exigences.md", "05-cahier-des-charges.md")
 
 _ANCHOR = re.compile(
     r"^(?P<indent>\s*)(?P<heading>#{1,6}\s+)?(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s+)?"
-    r"[*_`]{0,2}(?P<id>REQ-\d{1,4})\b[*_`]{0,2}\s*(?:[:—–.)-]\s*)?(?P<rest>.*)$"
+    r"[*_`]{0,2}(?P<id>REQ-[0-9]{1,4})\b[*_`]{0,2}\s*(?:[:—–.)-]\s*)?(?P<rest>.*)$"
 )
 _SUB_ITEM = re.compile(r"^(?P<indent>\s*)(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(?P<text>.+)$")
 _MOSCOW = re.compile(r"\b(must|should|could|won'?t|wont)\b(?:\s+have)?", re.IGNORECASE)
@@ -204,7 +204,7 @@ def _column(headers: list[str], *needles: str) -> int:
 def _parse_table_row(
     col: _Collector, filename: str, line_no: int, cells: list[str], headers: list[str], section: str
 ) -> None:
-    id_index = next((i for i, c in enumerate(cells) if re.fullmatch(r"[*_`]{0,2}REQ-\d{1,4}[*_`]{0,2}", c.strip())), -1)
+    id_index = next((i for i, c in enumerate(cells) if re.fullmatch(r"[*_`]{0,2}REQ-[0-9]{1,4}[*_`]{0,2}", c.strip())), -1)
     if id_index < 0:
         return
     req_id = _clean(cells[id_index]).strip("`")
