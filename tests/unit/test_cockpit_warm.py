@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from grimoire.cli import cockpit_http
+from grimoire.cli import cockpit_http, cockpit_warm
 from grimoire.tools.workspace_pulse import TRACES_RELPATH
 from grimoire.traces import journal_cache
 from grimoire.traces.journal_cache import load_trace_journal
@@ -77,6 +77,7 @@ def no_sheet(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     seen: list[str] = []
     monkeypatch.setattr(workspace_api, "sheet_view", lambda root: seen.append("sheet"))
     monkeypatch.setattr(workspace_api, "tasks_view", lambda root: seen.append("tasks"))
+    monkeypatch.setattr(cockpit_warm, "warm_fleet", lambda root, stop=None: seen.append("fleet"))
     return seen
 
 
@@ -85,7 +86,7 @@ def test_warm_reads_the_journal_once_for_n_requests(project: Path, parsed: list[
     for thread in threading.enumerate():
         if thread.name == "cockpit-warm":
             thread.join(JOIN_S)
-    assert no_sheet == ["sheet", "tasks"]
+    assert no_sheet == ["sheet", "tasks", "fleet"]
     assert len(parsed) == LINES  # le parcours complet, une fois
     for _ in range(5):  # cinq requêtes ensuite : aucune ligne de plus
         assert len(load_trace_journal(project / TRACES_RELPATH)) == LINES
