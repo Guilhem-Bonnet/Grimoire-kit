@@ -67,7 +67,14 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.hosts.model_table import CLAUDE_CODE, TIERS, kit_model, load_model_table, resolve_model
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.liveness import probe_status
-from grimoire.missions.model_routing import REASON_PROVIDER_ROUTE, REASON_ROUTER, RoutingTrace, step_up, tier_for
+from grimoire.missions.model_routing import (
+    REASON_PROVIDER_ROUTE,
+    REASON_ROUTER,
+    RoutingTrace,
+    StepUp,
+    step_up,
+    tier_for,
+)
 from grimoire.missions.provider_failure import transient_api_error
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.sensitive_route import SensitiveRoute, sensitive_route_for
@@ -261,9 +268,6 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
     for event in service.ledger.list_events():
         if event.event_type == LAUNCHED_EVENT:
             found[event.entity_id] = dict(event.payload)
-        elif event.event_type == WORKER_RESUMED_EVENT and event.payload.get("routing") and event.entity_id in found:
-            # une montée en gamme (reprise après un refus de relecture) : les reprises suivantes partent de ce palier
-            found[event.entity_id].update(model=event.payload.get("model", ""), routing=event.payload["routing"])
     return found
 
 
@@ -783,6 +787,83 @@ def _sensitive_now(service: TaskService, task_id: str) -> str:
     return f"route sensible à la reprise : Claude Code au palier fort ({route.reason})" if route.strong else ""
 
 
+def launched_today(service: TaskService, now: datetime | None = None) -> int:
+    """Les lancements du jour (UTC) : réussis ou échoués, ils comptent tous au plafond ``sessions_per_day``."""
+    today = _day((now or datetime.now(UTC)).isoformat())
+    return sum(
+        1 for e in service.ledger.list_events()
+        if e.event_type in (LAUNCHED_EVENT, LAUNCH_FAILED_EVENT) and _day(e.created_at) == today
+    )
+
+
+def _step_up_allowed(service: TaskService, task_id: str, launch: Mapping[str, Any]) -> StepUp | None:
+    """La montée en gamme décidée pour la reprise de *launch*, ou ``None`` : relue sur la politique du moment.
+
+    Il faut que la politique n'ait aucun réglage de modèle (``default_routing``, ``model`` vide), que l'ancienne session
+    soit arrêtée de façon prouvée, que le disjoncteur soit fermé, que le plafond du jour et le mandat laissent partir
+    une session neuve, puis que le modèle *réel* du lancement soit un palier connu de la table (:func:`step_up`).
+    """
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+
+    policy = load_orchestrator_policy(service.home_root).policy
+    if policy is None or not policy.worker.default_routing:
+        return None
+    _short, started, halted = _session_marks(service, task_id)
+    if started < 0 or halted < started or read_breaker(service.home_root).open:
+        return None
+    if launched_today(service) >= policy.worker.sessions_per_day or mandate_precheck(service, WORKER_ACTOR):
+        return None
+    return step_up(policy.worker, launch, lambda tier: tier_model(service.home_root, tier))
+
+
+def _step_up_session(
+    service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
+    permission_mode: str = "", cause: str = "",
+) -> ExecResult | None:
+    """Reprise d'un refus de relecture sur le palier au-dessus : une session neuve, même worktree, ou ``None``.
+
+    ``claude --resume`` ne reçoit pas de modèle : la montée est une session neuve, avec la consigne du worker et
+    *message*. ``None`` rend la main à la reprise ordinaire de la conversation : une condition de
+    :func:`_step_up_allowed` manquante, un échec du lancement, une sortie sans identifiant de session, une identité
+    non résolue ou une inscription refusée (la session lancée est alors arrêtée). Jamais d'échec qui armerait le
+    disjoncteur : la reprise ordinaire en décide.
+    """
+    if (up := _step_up_allowed(service, task_id, launch)) is None:
+        return None
+    cwd = Path(str(launch.get("cwd") or "."))
+    spec = SessionSpec(
+        name=f"grimoire-{task_id}", prompt=f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}",
+        model=up.model, permission_mode=permission_mode, lean=bool(launch.get("lean")),
+    )
+    plan = ClaudeCodeWorkerHost(claude_bin).plan(spec)
+    result = exec_(list(plan.argv), cwd, plan.environ())
+    match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
+    if match is None:
+        return None
+    short = match.group(1)
+    session_id = resolve_background_session(exec_, cwd, short, claude_bin, name=f"grimoire-{task_id}", session_cwd=cwd)
+    refused, _code = attest_session(service, session_id, WORKER_ACTOR, task_id) if session_id else ("session non résolue", "")
+    if refused:
+        _halt(exec_, cwd, short, claude_bin)
+        return None
+    routing = up.trace.to_dict()
+    _seal_worker_for_dual_review(service, task_id, session_id, up.model, "")
+    current = service.require(task_id).claim
+    service.ledger.append_event(
+        LAUNCHED_EVENT, task_id, "task", WORKER_ACTOR,
+        {**launch, "model": up.model, "routing": routing, "session": short, "session_id": session_id, "relaunch": True,
+         "lease_epoch": current.lease_epoch if current is not None else launch.get("lease_epoch", 0)},
+    )
+    payload: dict[str, Any] = {
+        "session": short, "fresh": True, "name": f"grimoire-{task_id}", "session_id": session_id,
+        "model": up.model, "routing": routing,
+    }
+    if cause:
+        payload["cause"] = cause
+    service.ledger.append_event(WORKER_RESUMED_EVENT, task_id, "task", WORKER_ACTOR, payload)
+    return result
+
+
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
     permission_mode: str = "", cause: str = "", opencode: OpencodeWorkerHost | None = None,
@@ -795,7 +876,8 @@ def resume_worker(
     la reprise si les deux échouent. La session obtenue est notée (``task.worker_session_resumed``) : elle compte
     de nouveau dans le WIP et c'est elle que le prochain arrêt vise. *cause* nomme l'origine de la reprise
     (``provider_error`` pour le tick, #1158) ; elle est notée au ledger et plafonne les reprises automatiques.
-    *escalate* (un refus de relecture) : la reprise part un palier plus haut (:func:`~.model_routing.step_up`), notée.
+    *escalate* (un refus de relecture) : sous les défauts du kit, la reprise tente d'abord un palier plus haut
+    (:func:`_step_up_session`) ; toute condition non remplie ou tout échec rend la reprise ordinaire, sans montée.
     """
     fresh_only = ""
     if launch.get("host") == GEMINI_HOST:
@@ -819,22 +901,19 @@ def resume_worker(
     if fresh_only and (refused := _worktree_hooks(cwd)):
         return ExecResult(1, "", refused)  # le worktree d'un worker opencode n'a pas encore les hooks de Claude Code
     host = ClaudeCodeWorkerHost(claude_bin)
-    stepped = step_up(launch, lambda tier: tier_model(service.home_root, tier)) if escalate and not fresh_only else None
-    if stepped is not None:
-        launch = {**launch, "model": stepped.model, "routing": stepped.trace.to_dict()}
+    if escalate and not fresh_only and (stepped := _step_up_session(service, exec_, claude_bin, task_id, launch, message,
+                                                                    permission_mode=permission_mode, cause=cause)):
+        return stepped
     # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
     spec = SessionSpec(
         name=f"grimoire-{task_id}", prompt=message, model=str(launch.get("model") or ""), permission_mode=permission_mode,
         lean=bool(launch.get("lean")), settings=settings_path(str(launch["provider"])) if launch.get("provider") else None,
         resume=str(launch.get("session_id") or ""),
     )
-    fresh = stepped is not None
-    if stepped is not None:
-        # Un modèle ne change pas en cours de conversation (``--resume`` ne le reçoit pas) : session neuve, même worktree.
-        spec = replace(spec, resume="", prompt=f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}")
     resumed = host.plan(spec)
     result = ExecResult(1, "", fresh_only) if fresh_only else exec_(list(resumed.argv), cwd, resumed.environ())
-    if result.returncode != 0 and not fresh:
+    fresh = False
+    if result.returncode != 0:
         prompt = f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}"
         again = host.plan(replace(spec, resume="", prompt=prompt))
         retry = exec_(list(again.argv), cwd, again.environ())
@@ -846,8 +925,6 @@ def resume_worker(
     payload: dict[str, Any] = {"session": short, "fresh": fresh, "name": f"grimoire-{task_id}"}
     if cause:
         payload["cause"] = cause
-    if stepped is not None:
-        payload.update(model=stepped.model, routing=stepped.trace.to_dict())
     if fresh and match:
         session_id = resolve_background_session(exec_, cwd, short, claude_bin, name=f"grimoire-{task_id}", session_cwd=cwd)
         payload["session_id"] = session_id
@@ -914,11 +991,7 @@ class WorkerLauncher:
         return frozenset(busy)
 
     def _launched_today(self) -> int:
-        today = _day((self._now or datetime.now(UTC)).isoformat())
-        return sum(
-            1 for e in self._service.ledger.list_events()
-            if e.event_type in (LAUNCHED_EVENT, LAUNCH_FAILED_EVENT) and _day(e.created_at) == today
-        )
+        return launched_today(self._service, self._now)
 
     def _tier_for(self, task: MissionTask) -> str:
         """Le palier de cette tâche : ``cheap`` pour une V0 sous ``model_by_class``, sinon celui du rôle ; sans réglage

@@ -681,12 +681,26 @@ le modèle par défaut de l'hôte ; pour le retrouver, poser `model_by_class: fa
   `provider_route`, `host_default`, `host_model`) et un `detail` éventuel. `grimoire task show <id>` l'affiche
   (`routage : haiku (palier cheap, classe V0) — défaut du kit pour cette classe`) ; `--json` le porte dans
   `last_launch.routing`.
-- **Montée en gamme** : après un refus de relecture (`NOT-READY`), le worker repart un palier plus haut (`cheap` →
-  `mid` → `strong`), en session neuve sur le même worktree (`claude --resume` ne reçoit pas de modèle), avec les
-  constats du relecteur. Une marche par refus, plafonnée au palier fort ; jamais de montée quand `worker.model` impose
-  le modèle, quand la session passe par un fournisseur, ou quand le palier courant est inconnu. La montée est notée
-  dans `task.worker_session_resumed` et `task.session_launched` (`reason: step_up`), `task show` l'affiche
-  (`montée en gamme : …`) et les reprises suivantes partent de ce palier.
+- **Montée en gamme** : réservée aux projets sans réglage de modèle (ceux dont les défauts ci-dessus s'appliquent,
+  relus au moment de la reprise : un projet qui a posé `tier`, `model`, `provider` ou `model_by_class` ne monte
+  jamais). Après un refus de relecture (`NOT-READY`), le worker repart un palier au-dessus du modèle réellement
+  lancé (`haiku` → `sonnet` → `opus`), une marche par refus, plafonnée au palier fort ; un modèle que la table ne
+  connaît pas ne monte pas, et un modèle n'est jamais remplacé par un modèle de rang inférieur. `claude --resume` ne
+  reçoit pas de modèle : la montée est une session neuve sur le même worktree, avec la consigne du worker et les
+  constats du relecteur. Elle passe par les mêmes contrôles qu'un lancement (plafond `sessions_per_day`, mandat,
+  disjoncteur) et exige que l'ancienne session soit arrêtée de façon prouvée. Si une condition manque, ou si la session
+  neuve échoue (lancement refusé, aucun identifiant dans la sortie, identité non résolue, inscription refusée), la
+  conversation est reprise comme avant, sans montée et sans échec compté au disjoncteur. La session de montée est notée
+  dans `task.session_launched` (`relaunch: true`, `routing.reason: step_up`) et `task.worker_session_resumed` ;
+  `grimoire task show` l'affiche une fois, sur la ligne `routage :`.
+- **À savoir** :
+  - Sans réglage, une tâche dont un critère d'acceptation est ambigu (aucun verdict qu'un programme puisse rendre)
+    est classée V2 et part sur le modèle fort. Pour la faire descendre, reformuler le critère
+    (`grimoire task show` explique la classe) ; pour revenir au comportement d'avant pour tout le projet, poser
+    `model_by_class: false` et `sensitive_route: off`.
+  - Les règles d'usage (`usage_rules`) ne distinguent pas les modèles : une session `opus` compte comme une session
+    `haiku` dans le plafond `sessions_per_day` et dans les règles. Les défauts font partir davantage de tâches sur le
+    modèle fort sans que ces règles le voient.
 
 ### Réveil du tick sur événement
 

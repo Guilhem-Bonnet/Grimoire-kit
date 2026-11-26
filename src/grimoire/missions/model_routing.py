@@ -73,6 +73,7 @@ REASON_HOST_MODEL = "host_model"
 REASON_STEP_UP = "step_up"
 
 _CLASS_TIERS = {Verifiability.V0: "cheap", Verifiability.V1: "mid", Verifiability.V2: "strong"}
+_DETAIL_LIMIT = 300
 _LADDER = ("cheap", "mid", "strong")
 
 _REASON_TEXT = {
@@ -100,9 +101,10 @@ class RoutingTrace:
     detail: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        detail = _clean(self.detail, _DETAIL_LIMIT)
         return {
             "class": self.klass, "tier": self.tier, "model": self.model, "reason": self.reason,
-            **({"detail": self.detail} if self.detail else {}),
+            **({"detail": detail} if detail else {}),
         }
 
 
@@ -139,43 +141,45 @@ class StepUp:
     trace: RoutingTrace
 
 
-def _tier_of(launch: Mapping[str, Any], resolve: Callable[[str], str]) -> str:
-    """Le palier du lancement : celui que sa trace nomme, à défaut celui dont le modèle est le modèle noté."""
-    routing = launch.get("routing")
-    if isinstance(routing, dict) and routing.get("tier") in _LADDER:
-        return str(routing["tier"])
+def step_up(role: WorkerRole, launch: Mapping[str, Any], resolve: Callable[[str], str]) -> StepUp | None:
+    """La reprise après un refus de relecture, un palier au-dessus du modèle *réel* ; ``None`` quand rien ne monte.
+
+    *role* : le rôle worker de la politique du moment, sans réglage de modèle (``default_routing``, ``model`` vide) :
+    un projet qui a réglé ``tier``, ``model``, ``provider`` ou ``model_by_class`` ne monte jamais. *launch* : la
+    charge du dernier lancement ; *resolve* : palier → modèle de l'hôte. Le palier courant se lit sur
+    le modèle noté (``launch["model"]``), jamais sur la trace : un modèle que la table ne connaît pas, ou une session
+    passée par un fournisseur, ne monte pas. Le plus haut palier dont le modèle est le modèle courant fait foi ; la
+    reprise vise le premier palier au-dessus dont le modèle existe et diffère : jamais un modèle de rang inférieur ou
+    égal, jamais plus d'une marche.     """
     model = str(launch.get("model") or "")
-    return next((tier for tier in _LADDER if model and resolve(tier) == model), "")
+    if not role.default_routing or role.model or launch.get("provider") or not model:
+        return None
+    here = [i for i, tier in enumerate(_LADDER) if resolve(tier) == model]
+    if not here:
+        return None
+    current = max(here)
+    for index in range(current + 1, len(_LADDER)):
+        tier, candidate = _LADDER[index], resolve(_LADDER[index])
+        if candidate and candidate != model:
+            routing = launch.get("routing")
+            klass = str(routing.get("class") or "") if isinstance(routing, dict) else ""
+            return StepUp(candidate, tier, _LADDER[current], RoutingTrace(klass, tier, candidate, REASON_STEP_UP, f"{_LADDER[current]} → {tier}"))
+    return None
 
 
-def step_up(launch: Mapping[str, Any], resolve: Callable[[str], str]) -> StepUp | None:
-    """La reprise après un refus de relecture, un palier plus haut ; ``None`` quand rien ne monte.
-
-    *launch* : la charge du dernier lancement ; *resolve* : palier → modèle de l'hôte. Une marche par appel, au plus
-    jusqu'à ``strong``. Rien ne monte si le modèle est imposé par la politique, si la session passe par un fournisseur
-    (son modèle n'est pas celui de l'hôte), si le palier n'est pas connu, ou s'il est déjà fort.
-    """
-    routing = launch.get("routing")
-    if launch.get("provider") or (isinstance(routing, dict) and routing.get("reason") == REASON_POLICY_MODEL):
-        return None
-    current = _tier_of(launch, resolve)
-    if not current or current == _LADDER[-1]:
-        return None
-    tier = _LADDER[_LADDER.index(current) + 1]
-    model = resolve(tier)
-    if not model:
-        return None
-    klass = str(routing.get("class") or "") if isinstance(routing, dict) else ""
-    trace = RoutingTrace(klass, tier, model, REASON_STEP_UP, f"{current} → {tier}")
-    return StepUp(model, tier, current, trace)
+def _clean(text: object, limit: int) -> str:
+    """*text* sans caractère de contrôle, borné à *limit* caractères."""
+    flat = "".join(c if c.isprintable() else " " for c in str(text))
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
 def describe_routing(routing: Mapping[str, Any]) -> str:
     """La ligne que ``grimoire task show`` affiche : « sonnet (palier mid, classe V1) — défaut du kit… »."""
-    model = str(routing.get("model") or "") or "modèle par défaut de l'hôte"
+    model = _clean(routing.get("model") or "", 80) or "modèle par défaut de l'hôte"
     facts = ", ".join(
-        f"{label} {routing[key]}" for key, label in (("tier", "palier"), ("class", "classe")) if routing.get(key)
+        f"{label} {_clean(routing[key], 20)}" for key, label in (("tier", "palier"), ("class", "classe")) if routing.get(key)
     )
-    reason = _REASON_TEXT.get(str(routing.get("reason") or ""), str(routing.get("reason") or ""))
-    detail = f" ({routing['detail']})" if routing.get("detail") else ""
+    raw = str(routing.get("reason") or "")
+    reason = _REASON_TEXT.get(raw) or _clean(raw, 60)
+    detail = f" ({_clean(routing['detail'], _DETAIL_LIMIT)})" if routing.get("detail") else ""
     return f"{model}{f' ({facts})' if facts else ''} — {reason}{detail}"

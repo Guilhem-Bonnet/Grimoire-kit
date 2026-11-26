@@ -10,7 +10,15 @@ from test_launcher import _to_review, ready, ready_v0, tick, write_policy
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
-from grimoire.missions.launcher import LAUNCHED_EVENT, WORKER_RESUMED_EVENT, launched_sessions, resume_worker
+from grimoire.missions import launcher
+from grimoire.missions.breaker import trip
+from grimoire.missions.launcher import (
+    LAUNCHED_EVENT,
+    WORKER_RESUMED_EVENT,
+    ExecResult,
+    launched_sessions,
+    resume_worker,
+)
 from grimoire.missions.model_routing import (
     REASON_DEFAULT_CLASS,
     REASON_HOST_DEFAULT,
@@ -18,6 +26,7 @@ from grimoire.missions.model_routing import (
     REASON_POLICY_MODEL,
     REASON_POLICY_TIER,
     REASON_SENSITIVE_PATH,
+    RoutingTrace,
     class_tier,
     describe_routing,
     step_up,
@@ -30,6 +39,7 @@ from grimoire.missions.verifiability import Verifiability
 
 runner = CliRunner()
 _TABLE = {"cheap": "haiku", "mid": "sonnet", "strong": "opus"}
+_DEFAUTS = WorkerRole(default_routing=True)
 
 
 @pytest.fixture
@@ -160,77 +170,182 @@ def test_un_chemin_sensible_part_au_modele_fort_sans_reglage(projet: Path, servi
 # ── la montée en gamme ───────────────────────────────────────────────────────
 
 
-def _renvoi(projet: Path, host: FakeHost, tid: str, launch: dict) -> None:  # type: ignore[type-arg]
+def _bg_neuves(host: FakeHost) -> list[list[str]]:
+    return [a for a in host.of("claude", "--bg") if "--resume" not in a]
+
+
+def _worker_en_revue(projet: Path, host: FakeHost, service: TaskService, *, v0: bool = True) -> str:
+    """Une tâche lancée, rendue en revue et son worker arrêté (preuve d'arrêt au ledger)."""
+    tid = ready_v0(service, "mécanique") if v0 else ready(service, "à juger")
+    tick(projet, host)
+    _to_review(projet, tid)
+    tick(projet, host)
+    return tid
+
+
+def _renvoi(projet: Path, tid: str, host: object, *, escalate: bool = True) -> ExecResult:
+    launch = launched_sessions(TaskService(projet))[tid]
     TaskService(projet).ledger.transition_task(tid, TaskState.RUNNING, actor_id="reviewer")
-    assert resume_worker(
-        TaskService(projet), host, "claude", tid, launch, "corrige", permission_mode="acceptEdits", escalate=True
-    ).returncode == 0
+    return resume_worker(
+        TaskService(projet), host, "claude", tid, launch, "corrige", permission_mode="acceptEdits", escalate=escalate  # type: ignore[arg-type]
+    )
+
+
+def _modele_courant(projet: Path, tid: str) -> str:
+    return str(launched_sessions(TaskService(projet))[tid]["model"])
 
 
 def test_un_refus_de_relecture_remonte_d_une_marche_plafonnee_et_tracee(
     projet: Path, service: TaskService, host: FakeHost
 ) -> None:
-    tid = ready_v0(service, "mécanique")
-    tick(projet, host)
-    _to_review(projet, tid)
-    tick(projet, host)
-    _renvoi(projet, host, tid, launched_sessions(TaskService(projet))[tid])
-    argv = host.of("claude", "--bg")[-1]  # session neuve : `--resume` ne reçoit pas de modèle
-    assert "--resume" not in argv and argv[argv.index("--model") + 1] == "sonnet"
+    write_policy(projet, per_day=9)
+    tid = _worker_en_revue(projet, host, service)
+    assert _renvoi(projet, tid, host).returncode == 0
+    argv = _bg_neuves(host)[-1]  # session neuve : `--resume` ne reçoit pas de modèle
+    assert argv[argv.index("--model") + 1] == "sonnet"
     (resumed,) = [e for e in TaskService(projet).ledger.list_events(tid) if e.event_type == WORKER_RESUMED_EVENT]
     assert resumed.payload["routing"] == {
         "class": "V0", "tier": "mid", "model": "sonnet", "reason": "step_up", "detail": "cheap → mid",
     }
-    assert launched_sessions(TaskService(projet))[tid]["model"] == "sonnet"
+    assert _modele_courant(projet, tid) == "sonnet"
     shown = runner.invoke(app, ["task", "show", tid, "--project-root", str(projet)])
-    assert "montée en gamme : sonnet (palier mid, classe V0) — montée en gamme après un refus de relecture (cheap → mid)" in shown.output
-    # deuxième refus : le palier fort, puis plus rien ne monte
-    _to_review(projet, tid)
-    tick(projet, host)
-    _renvoi(projet, host, tid, launched_sessions(TaskService(projet))[tid])
-    assert launched_sessions(TaskService(projet))[tid]["model"] == "opus"
-    _to_review(projet, tid)
-    tick(projet, host)
-    _renvoi(projet, host, tid, launched_sessions(TaskService(projet))[tid])
-    assert launched_sessions(TaskService(projet))[tid]["model"] == "opus"
-    assert len([e for e in TaskService(projet).ledger.list_events(tid) if e.event_type == WORKER_RESUMED_EVENT and e.payload.get("routing")]) == 2
+    assert shown.output.count("montée en gamme après un refus de relecture") == 1, shown.output
+    assert "routage : sonnet (palier mid, classe V0) — montée en gamme après un refus de relecture (cheap → mid)" in shown.output
+    for attendu in ("opus", "opus"):  # deuxième refus : le palier fort, puis plus rien ne monte
+        _to_review(projet, tid)
+        tick(projet, host)
+        _renvoi(projet, tid, host)
+        assert _modele_courant(projet, tid) == attendu
+    assert len(_bg_neuves(host)) == 3  # le lancement d'origine, puis deux montées seulement
 
 
 def test_sans_escalade_la_reprise_garde_le_modele(projet: Path, service: TaskService, host: FakeHost) -> None:
-    tid = ready_v0(service, "mécanique")
-    tick(projet, host)
-    launch = launched_sessions(TaskService(projet))[tid]
-    _to_review(projet, tid)
-    tick(projet, host)
-    TaskService(projet).ledger.transition_task(tid, TaskState.RUNNING, actor_id="reviewer")
-    resume_worker(TaskService(projet), host, "claude", tid, launch, "reprends", permission_mode="acceptEdits")
+    tid = _worker_en_revue(projet, host, service)
+    _renvoi(projet, tid, host, escalate=False)
     argv = host.of("claude", "--bg", "--resume")[-1]
-    assert "--model" not in argv  # la conversation reprise garde son modèle
-    (resumed,) = [e for e in TaskService(projet).ledger.list_events(tid) if e.event_type == WORKER_RESUMED_EVENT]
-    assert "routing" not in resumed.payload
+    assert "--model" not in argv and len(_bg_neuves(host)) == 1
 
 
-def test_un_lancement_ancien_sans_trace_se_deduit_du_modele() -> None:
-    found = step_up({"model": "haiku", "provider": ""}, _TABLE.__getitem__)
+@pytest.mark.parametrize("extra", ["      tier: cheap\n", "      model: haiku\n", "      model_by_class: true\n      tier: cheap\n"])
+def test_d1_un_projet_qui_a_regle_son_modele_ne_monte_jamais(projet: Path, service: TaskService, host: FakeHost, extra: str) -> None:
+    write_policy(projet, extra=extra)
+    tid = _worker_en_revue(projet, host, service, v0=False)
+    _renvoi(projet, tid, host)
+    assert len(_bg_neuves(host)) == 1 and host.of("claude", "--bg", "--resume")
+    assert not [e for e in TaskService(projet).ledger.list_events(tid) if e.payload.get("routing", {}).get("reason") == "step_up"]
+
+
+def test_d1_la_politique_est_relue_a_la_reprise(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = _worker_en_revue(projet, host, service)
+    write_policy(projet, extra="      tier: cheap\n")  # réglée entre le lancement et le refus
+    _renvoi(projet, tid, host)
+    assert len(_bg_neuves(host)) == 1
+
+
+def test_d2_un_lancement_ancien_sous_modele_impose_ne_monte_pas(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      model: sonnet\n")
+    tid = _worker_en_revue(projet, host, service, v0=False)
+    _renvoi(projet, tid, host)
+    assert len(_bg_neuves(host)) == 1 and _modele_courant(projet, tid) == "sonnet"
+
+
+def test_d3_jamais_de_descente_le_palier_est_celui_du_modele_reel() -> None:
+    routed = {"model": "opus", "routing": {"class": "V2", "tier": "cheap", "model": "opus", "reason": "router"}}
+    assert step_up(_DEFAUTS, routed, _TABLE.__getitem__) is None
+    assert step_up(_DEFAUTS, {"model": "autre"}, _TABLE.__getitem__) is None
+    assert step_up(_DEFAUTS, {"model": ""}, _TABLE.__getitem__) is None
+    assert step_up(_DEFAUTS, {"model": "haiku", "provider": "deepseek"}, _TABLE.__getitem__) is None
+    found = step_up(_DEFAUTS, {"model": "haiku"}, _TABLE.__getitem__)
     assert found is not None and (found.model, found.previous_tier, found.trace.klass) == ("sonnet", "cheap", "")
 
 
-@pytest.mark.parametrize(
-    "launch",
-    [
-        {"model": "opus"},  # déjà fort
-        {"model": "haiku", "provider": "deepseek"},  # route de fournisseur
-        {"model": "autre"},  # palier inconnu
-        {"model": "haiku", "routing": {"tier": "cheap", "reason": REASON_POLICY_MODEL}},  # modèle imposé
-    ],
-)
-def test_rien_ne_monte_quand_le_palier_est_inconnu_impose_ou_deja_fort(launch: dict) -> None:  # type: ignore[type-arg]
-    assert step_up(launch, _TABLE.__getitem__) is None
+def test_d3_une_table_ou_deux_paliers_partagent_un_modele_monte_au_premier_different() -> None:
+    table = {"cheap": "sonnet", "mid": "sonnet", "strong": "opus"}
+    found = step_up(_DEFAUTS, {"model": "sonnet", "routing": {"class": "V1"}}, table.__getitem__)
+    assert found is not None and (found.model, found.tier, found.trace.klass) == ("opus", "strong", "V1")
+    assert step_up(_DEFAUTS, {"model": "haiku"}, {"cheap": "haiku", "mid": "", "strong": ""}.__getitem__) is None
 
 
-def test_rien_ne_monte_sans_modele_pour_le_palier_suivant() -> None:
-    assert step_up({"model": "haiku", "routing": {"tier": "cheap"}}, {"cheap": "haiku"}.get) is None  # type: ignore[arg-type,return-value]
+def test_d1_d2_step_up_lui_meme_refuse_un_projet_qui_a_regle_son_modele() -> None:
+    for role in (WorkerRole(), WorkerRole(tier="cheap"), WorkerRole(model="sonnet"), WorkerRole(default_routing=True, model="sonnet")):
+        assert step_up(role, {"model": "sonnet"}, _TABLE.__getitem__) is None
 
 
-def test_describe_routing_sans_modele_ni_detail() -> None:
+def test_d4_le_plafond_de_sessions_du_jour_borne_la_montee(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, per_day=1)
+    tid = _worker_en_revue(projet, host, service)
+    assert _renvoi(projet, tid, host).returncode == 0
+    assert len(_bg_neuves(host)) == 1 and host.of("claude", "--bg", "--resume")  # comme sur main : reprise sans montée
+
+
+def test_d4_le_mandat_et_le_disjoncteur_bornent_la_montee(
+    projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_policy(projet, per_day=9)
+    tid = _worker_en_revue(projet, host, service)
+    monkeypatch.setattr(launcher, "mandate_precheck", lambda *_a: "plafond de mandat")
+    _renvoi(projet, tid, host)
+    assert len(_bg_neuves(host)) == 1
+    monkeypatch.undo()
+    _to_review(projet, tid)
+    tick(projet, host)
+    trip(projet, "panne")
+    _renvoi(projet, tid, host)
+    assert len(_bg_neuves(host)) == 1
+
+
+def test_d5_une_montee_qui_echoue_se_rabat_sur_la_reprise_ordinaire(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, per_day=9)
+    tid = _worker_en_revue(projet, host, service)
+
+    def exec_(argv, cwd, env):  # type: ignore[no-untyped-def]
+        if "--bg" in argv and "--resume" not in argv:
+            return ExecResult(1, "", "claude : échec")
+        return host(argv, cwd, env)
+
+    result = _renvoi(projet, tid, exec_)
+    assert result.returncode == 0 and host.of("claude", "--bg", "--resume")
+    assert _modele_courant(projet, tid) == "haiku"
+
+
+def test_d7_une_session_neuve_sans_identifiant_est_un_echec_pas_une_session_non_attestee(
+    projet: Path, service: TaskService, host: FakeHost
+) -> None:
+    write_policy(projet, per_day=9)
+    tid = _worker_en_revue(projet, host, service)
+
+    def exec_(argv, cwd, env):  # type: ignore[no-untyped-def]
+        if "--bg" in argv and "--resume" not in argv:
+            return ExecResult(0, "rien d'utile\n")
+        return host(argv, cwd, env)
+
+    assert _renvoi(projet, tid, exec_).returncode == 0
+    assert host.of("claude", "--bg", "--resume") and _modele_courant(projet, tid) == "haiku"
+
+
+def test_une_session_de_montee_non_attestee_est_arretee_puis_reprise_ordinaire(
+    projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_policy(projet, per_day=9)
+    tid = _worker_en_revue(projet, host, service)
+    monkeypatch.setattr(launcher, "attest_session", lambda *_a: ("inscription refusée", "x"))
+    assert _renvoi(projet, tid, host).returncode == 0
+    assert host.of("claude", "stop") and host.of("claude", "--bg", "--resume")
+    assert _modele_courant(projet, tid) == "haiku"
+
+
+def test_d6_pas_de_session_neuve_tant_que_l_ancienne_n_est_pas_arretee(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, per_day=9)
+    tid = ready_v0(service, "mécanique")
+    tick(projet, host)
+    _to_review(projet, tid)  # le tick n'a pas encore arrêté la session
+    _renvoi(projet, tid, host)
+    assert len(_bg_neuves(host)) == 1 and host.of("claude", "--bg", "--resume")
+
+
+def test_le_detail_de_trace_est_borne_et_sans_caractere_de_controle() -> None:
+    hostile = RoutingTrace("V0", "cheap", "x", "step_up", "a\x1b[2J\n" + "b" * 5000).to_dict()
+    assert len(hostile["detail"]) <= 300 and "\x1b" not in hostile["detail"] and "\n" not in hostile["detail"]
+    line = describe_routing({"model": "m\x1b[2J", "reason": "r\n" * 500, "detail": "d" * 5000, "tier": "t\x00"})
+    assert len(line) < 600 and all(c.isprintable() for c in line)
     assert describe_routing({"reason": "inconnue"}) == "modèle par défaut de l'hôte — inconnue"
