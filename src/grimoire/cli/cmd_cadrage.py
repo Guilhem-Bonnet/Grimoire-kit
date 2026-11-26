@@ -509,6 +509,11 @@ def _print_trace(trace: CadrageTrace) -> None:
                 f"  [yellow]modifiée depuis la validation[/yellow] — {req.drift.what}"
                 + (f" : « {_safe(req.drift.validated_title)} » → « {_safe(req.drift.current_title)} »" if req.drift.title_changed else "")
             )
+            for row in req.drift.diff:
+                tone = "red" if row.startswith("-") else "green" if row.startswith("+") else "dim"
+                console.print(f"    [{tone}]{_safe(row)}[/{tone}]", highlight=False)
+            if req.drift.note:
+                console.print(f"    [dim]{_safe(req.drift.note)}[/dim]")
             if req.drift.tasks:
                 console.print(f"    tâches concernées : {_safe(', '.join(req.drift.tasks))}")
             if req.drift.files:

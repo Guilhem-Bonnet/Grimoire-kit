@@ -19,6 +19,7 @@ from grimoire.core.cadrage import CADRAGE_DIR
 from grimoire.core.standard_state import AGENT_MARKER_ENVS, HOST_SESSION_ENVS, SESSION_ENV
 from grimoire.missions import cadrage_trace as ct
 from grimoire.missions import requirement_gate as rg
+from grimoire.missions import requirement_text as rt
 from grimoire.missions.mandate import AuthorityJournal
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
@@ -227,7 +228,8 @@ def test_cadrage_trace_drift_criteria_then_title(tmp_path: Path) -> None:
     path = root / CADRAGE_DIR / "04-exigences.md"
     path.write_text(EXIGENCES.replace("15 minutes", "5 minutes"), encoding="utf-8")
     drift = _req(_trace(root), "REQ-001").drift
-    assert drift is not None and not drift.title_changed and "texte validé n'est pas conservé" in drift.what
+    assert drift is not None and not drift.title_changed and drift.what == "critères, priorité ou périmètre"
+    assert drift.diff == ["- critère : le lien expire après 15 minutes", "+ critère : le lien expire après 5 minutes"] and drift.note == ""
     assert drift.tasks == (tid,) and drift.files == ("src/login.py", "tests/test_login.py")
     assert drift.to_dict()["message"] == "modifiée depuis la validation"
     path.write_text(EXIGENCES.replace("lien magique", "lien par SMS"), encoding="utf-8")
@@ -239,6 +241,58 @@ def test_cadrage_trace_drift_criteria_then_title(tmp_path: Path) -> None:
     assert _req(_trace(root), "REQ-001").drift is None
     rg.approve_requirement(root, "REQ-002", actor="ada")
     assert _req(_trace(root), "REQ-002").drift is None
+
+
+def test_validation_keeps_the_validated_text_bounded_and_the_fingerprint_alone_decides(tmp_path: Path) -> None:
+    root = _project(tmp_path / "p")
+    entry = rg.approve_requirement(root, "REQ-001", actor="ada")
+    assert entry["text"] == "[must] l'utilisateur se connecte par lien magique\ncritère : le lien expire après 15 minutes"
+    requirement = rg.lookup(root, "REQ-001")
+    assert requirement is not None and entry["fingerprint"] == rg.fingerprint("REQ-001", requirement)
+    assert rg.validation_of(root, "REQ-001")[0] is not None
+    big = ["x" * 500 for _ in range(10)]
+    assert len(rt.validated_text("t", "must", big)) == rt.TEXT_MAX
+    assert rt.validated_text("t", "", ["b", "a"]) == "[?] t\ncritère : a\ncritère : b"  # ordre des critères indifférent, comme l'empreinte
+
+
+def test_diff_lines_is_short_and_empty_when_nothing_differs() -> None:
+    assert rt.diff_lines("a\nb", "a\nb") == []
+    many = rt.diff_lines("\n".join(f"old{i}" for i in range(20)), "")
+    assert len(many) == rt.DIFF_MAX_LINES + 1 and many[-1] == "… 8 lignes de plus"
+    assert rt.diff_lines("a\nb", "a")[-1] == "- b"
+    assert rt.diff_lines("a", "a\nb\nc") == ["+ b", "+ c"]
+
+
+def test_drift_without_kept_text_says_so_and_with_text_shows_the_diff(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    view: Any = SimpleNamespace(fingerprint="new", title="T2", priority="must", criteria=("c",), validated=False)
+    old = {"type": rg.VALIDATED_ENTRY, "project": "/p", "requirement": "REQ-001", "fingerprint": "old", "title": "T", "ts": "d", "moa": "ada"}
+    trace = ct.RequirementTrace("REQ-001", "T2", "must", ("c",), "proposed", "x", False)
+    same_title: Any = SimpleNamespace(fingerprint="new", title="T", priority="must", criteria=("c2",), validated=False)
+    legacy = ct._drift([old], "/p", "REQ-001", same_title, trace)
+    assert legacy is not None and not legacy.has_detail and legacy.diff == [] and legacy.note == rt.NO_TEXT_NOTE
+    assert legacy.to_dict()["detail"] is False and legacy.to_dict()["note"] == rt.NO_TEXT_NOTE
+    assert "le texte validé n'est pas conservé" in legacy.what
+    same = ct._drift([{**old, "text": "[must] T2\ncritère : c"}], "/p", "REQ-001", view, trace)
+    assert same is not None and same.has_detail and same.diff == [] and same.note == rt.SAME_TEXT_NOTE
+    changed = ct._drift([{**old, "text": "[must] T\ncritère : c‮"}], "/p", "REQ-001", view, trace)
+    assert changed is not None and changed.diff == ["- [must] T", "+ [must] T2"] and changed.note == ""
+    junk = ct._drift([{**old, "text": 12}], "/p", "REQ-001", view, trace)
+    assert junk is not None and not junk.has_detail
+
+
+def test_cadrage_trace_cli_shows_the_drift_diff(tmp_path: Path) -> None:
+    root = _project(tmp_path / "p")
+    rg.approve_requirement(root, "REQ-001", actor="ada")
+    (root / CADRAGE_DIR / "04-exigences.md").write_text(EXIGENCES.replace("15 minutes", "5 minutes"), encoding="utf-8")
+    done = _cli(root)
+    assert done.exit_code == 0, done.output
+    assert "- critère : le lien expire après 15 minutes" in done.output
+    assert "+ critère : le lien expire après 5 minutes" in done.output
+    data = json.loads(_cli(root, "--json").output)
+    drift = next(r for r in data["requirements"] if r["requirement"] == "REQ-001")["drift"]
+    assert drift["detail"] is True and drift["diff"][-1] == "+ critère : le lien expire après 5 minutes"
 
 
 def test_cadrage_trace_never_validated_is_not_drift(tmp_path: Path) -> None:
@@ -451,3 +505,17 @@ def test_cadrage_trace_cli_text_full_chain_with_proofs_notes_recette_and_drift_s
     drifted = _cli(root, "REQ-001").stdout
     assert "tâches concernées" in drifted and "fichiers concernés : src/login.py" in drifted
     assert "critères, priorité ou périmètre" in drifted
+
+
+def test_a_truncated_validated_text_says_so_and_the_diff_is_marked_untrusted() -> None:
+    from types import SimpleNamespace
+
+    long = "[must] T\n" + "\n".join(f"critère : {i:03d} " + "x" * 120 for i in range(30))
+    kept = rt.validated_text("T", "must", [f"{i:03d} " + "x" * 120 for i in range(30)])
+    assert len(kept) == rt.TEXT_MAX and long
+    view: Any = SimpleNamespace(fingerprint="new", title="T", priority="must", criteria=("c",), validated=False)
+    old = {"type": rg.VALIDATED_ENTRY, "project": "/p", "requirement": "REQ-001", "fingerprint": "old", "title": "T", "ts": "d", "moa": "ada", "text": kept}
+    trace = ct.RequirementTrace("REQ-001", "T", "must", ("c",), "proposed", "x", False)
+    drift = ct._drift([old], "/p", "REQ-001", view, trace)
+    assert drift is not None and drift.note == rt.TRUNCATED_NOTE and "au-delà de 2000" in drift.note
+    assert drift.to_dict()["untrusted_fields"] == ["diff", "validated_title", "current_title"]

@@ -11,12 +11,12 @@
 // Données : `POST atelier/chantiers/<slug>/comments[/<id>]` (voir `src/grimoire/tools/workspace_atelier_comments.py`).
 
 import { badge, icon } from '../shell.js';
+import { QUOTE_MAX, attachTarget, canAttach, historyLine, nearestStart } from './atelier-logic.js';
 
-const QUOTE_MAX = 300;
 const AUTHOR = { humain: 'Humain', agent: 'Agent' };
 const STATE_NOTE = {
   retrouve: 'Le bloc a changé depuis le commentaire : le passage cité y figure toujours, tel quel.',
-  orphelin: 'Le passage cité a changé ou disparu : le commentaire reste orphelin, il n’est jamais rattaché à un autre passage.',
+  orphelin: 'Le passage cité a changé ou disparu : le commentaire reste orphelin : rien ne le rattache de soi-même, seul « Rattacher ici » le fait, sur ton geste.',
 };
 
 function el(tag, className, text, attrs) {
@@ -83,11 +83,7 @@ function readSelection(host, block) {
   const before = document.createRange();
   before.selectNodeContents(host);
   before.setEnd(range.startContainer, range.startOffset);
-  const guess = before.toString().length;
-  let best = -1;
-  for (let at = block.text.indexOf(picked); at >= 0; at = block.text.indexOf(picked, at + 1)) {
-    if (best < 0 || Math.abs(at - guess) < Math.abs(best - guess)) best = at;
-  }
+  const best = nearestStart(block.text, picked, before.toString().length);
   // Mise en forme au milieu de la sélection (gras, puce…) : le texte brut du bloc ne la contient pas, on cite le bloc.
   return best < 0 ? whole : { quote: picked, start: best, whole: false };
 }
@@ -95,6 +91,9 @@ function readSelection(host, block) {
 export function createComments(ctx, slug, { doc, sheet, reload }) {
   const ranges = new Map();
   const supported = typeof CSS !== 'undefined' && CSS.highlights && typeof window.Highlight === 'function';
+  // « Rattacher ici » : la dernière sélection de l'humain dans un bloc et le dernier bloc touché (le clic sur le bouton ne les efface pas).
+  let lastPick = null;
+  let lastBlock = null;
 
   const phases = () => doc().phases;
   const all = () => phases().flatMap((p) => p.comments || []);
@@ -206,7 +205,32 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     inner.push(quote, first);
     for (const r of c.reponses || []) inner.push(message(r.auteur, r.date, r.texte));
     if (c.suggestion) inner.push(suggestionLink(c));
+    if ((c.historique || []).length) {
+      const trace = el('ul', 'at-cm-trace', null, { 'data-role': 'attach-history', 'aria-label': 'Rattachements de ce fil' });
+      for (const entry of c.historique) trace.append(el('li', 'at-muted', historyLine(entry, when)));
+      inner.push(trace);
+    }
     const actions = el('div', 'at-edit-bar');
+    if (canAttach(c)) {
+      const attach = el('button', 'at-btn', null, { type: 'button', 'data-act': 'attach', 'aria-label': 'Rattacher ce commentaire à la sélection du document ou au bloc courant' });
+      attach.append(icon('i-act-next'), 'Rattacher ici');
+      attach.addEventListener('click', () => {
+        const exists = (id) => phases().some((p) => p.blocks.some((b) => b.id === id));
+        const target = attachTarget(lastPick && exists(lastPick.blockId) ? lastPick : null, lastBlock && exists(lastBlock.id) ? lastBlock : null);
+        const error = box.querySelector('.at-error');
+        if (!target) {
+          error.textContent = 'Sélectionne un passage du document (ou clique dans un bloc), puis rattache le commentaire.';
+          error.hidden = false;
+          return;
+        }
+        run(box, () => ctx.api.atelierRattacher(slug, c.id, target.blockId, target.quote, target.start).then(() => {
+          lastPick = null;
+          return { focus: c.id };
+        }), target.whole ? 'Commentaire rattaché au bloc.' : 'Commentaire rattaché à la sélection.');
+      });
+      actions.append(attach);
+      inner.push(el('p', 'at-muted', 'Sélectionne un passage du document (ou clique dans un bloc), puis « Rattacher ici ».', { 'data-role': 'attach-hint' }));
+    }
     if (resolved) {
       const reopen = el('button', 'at-btn', null, { type: 'button', 'data-act': 'reopen' });
       reopen.append(icon('i-act-retry'), 'Rouvrir');
@@ -358,9 +382,20 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     for (const host of sheet.querySelectorAll('.at-blk.has-sel')) host.classList.remove('has-sel');
     if (!selection || selection.isCollapsed || !selection.anchorNode) return;
     const holder = selection.anchorNode.parentElement && selection.anchorNode.parentElement.closest('.at-blk');
-    if (holder && sheet.contains(holder)) holder.classList.add('has-sel');
+    if (holder && sheet.contains(holder)) {
+      holder.classList.add('has-sel');
+      const block = phases().flatMap((p) => p.blocks).find((b) => b.id === holder.getAttribute('data-block'));
+      const picked = block ? readSelection(holder, block) : null;
+      if (picked && !picked.whole) lastPick = { blockId: block.id, quote: picked.quote, start: picked.start };
+    }
   };
   document.addEventListener('selectionchange', onSelect);
+  const onTouch = (event) => {
+    const holder = event.target.closest && event.target.closest('.at-blk');
+    if (holder && sheet.contains(holder)) lastBlock = { id: holder.getAttribute('data-block') };
+  };
+  sheet.addEventListener('pointerdown', onTouch);
+  sheet.addEventListener('focusin', onTouch);
 
   // Un agent a pu commenter pendant que l'onglet était ailleurs : au retour on relit, sauf si l'humain écrit.
   const writing = () => sheet.querySelector('.is-editing, .at-cm-new, .at-cm-reply, .at-cm-confirm');

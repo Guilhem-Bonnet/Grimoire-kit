@@ -29,6 +29,7 @@ __all__ = [
     "ETATS",
     "FILENAME",
     "MAX_ENTRIES",
+    "MAX_HISTORY",
     "MAX_OPEN",
     "MAX_REPLIES",
     "QUOTE_MAX",
@@ -54,6 +55,8 @@ QUOTE_MAX = 300
 CONTEXT_MAX = 40
 #: Réponses par fil : un fil sert à se parler, pas à tenir un journal.
 MAX_REPLIES = 50
+#: Rattachements gardés dans l'historique d'un fil (les plus récents) : une trace, pas un journal.
+MAX_HISTORY = 20
 #: Fils ouverts par chantier : de quoi travailler, pas de quoi noyer le document.
 MAX_OPEN = 100
 #: Fils au total (résolus compris) : les résolus les plus anciens partent d'abord.
@@ -90,6 +93,8 @@ class Comment:
     #: L'extrait a bougé dans son bloc depuis le commentaire : la marque reste, elle ne s'efface pas.
     deplace: bool = False
     replies: list[dict[str, str]] = field(default_factory=list)
+    #: Les rattachements (« Rattacher ici ») : date, ancienne ancre, nouvelle ancre. Écrit par le serveur seul.
+    historique: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -117,6 +122,35 @@ class StoreError(ValueError):
     """Le magasin existe mais ne se lit pas (droits, périphérique, lien) : on n'écrase rien."""
 
 
+def _anchor_ok(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("block_id"), str)
+        and isinstance(value.get("quote"), str)
+        and isinstance(value.get("start"), int)
+        and not isinstance(value.get("start"), bool)
+    )
+
+
+def _history_ok(rows: Any) -> bool:
+    return isinstance(rows, list) and all(
+        isinstance(r, dict) and isinstance(r.get("date"), str) and _anchor_ok(r.get("avant")) and _anchor_ok(r.get("apres"))
+        for r in rows
+    )
+
+
+def _clamp_anchor(value: dict[str, Any]) -> dict[str, Any]:
+    return {"block_id": value["block_id"][:200], "quote": value["quote"][:QUOTE_MAX], "start": value["start"]}
+
+
+def _clamp_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Les ``MAX_HISTORY`` derniers rattachements, aux champs bornés (les seuls champs que le serveur écrit)."""
+    return [
+        {"date": r["date"][:64], "avant": _clamp_anchor(r["avant"]), "apres": _clamp_anchor(r["apres"])}
+        for r in rows[-MAX_HISTORY:]
+    ]
+
+
 def _valid(item: Comment, phases: set[str]) -> bool:
     texts = (
         item.id, item.phase, item.block_id, item.block_fingerprint, item.quote, item.before, item.after,
@@ -137,6 +171,7 @@ def _valid(item: Comment, phases: set[str]) -> bool:
         and isinstance(item.orphelin, bool)
         and isinstance(item.deplace, bool)
         and bool(item.quote.strip())
+        and _history_ok(item.historique)
         and isinstance(replies, list)
         and all(
             isinstance(r, dict) and all(isinstance(r.get(k), str) for k in _REPLY_KEYS) and r["auteur"] in AUTEURS
@@ -179,6 +214,7 @@ def read(chantier_dir: Path) -> tuple[list[Comment], int, bytes | None]:
         if not _valid(item, phases):
             ignored += 1
             continue
+        item.historique = _clamp_history(item.historique)  # borné aussi à la lecture : un fichier édité à la main ne gonfle rien
         out.append(item)
     return out, ignored, None
 

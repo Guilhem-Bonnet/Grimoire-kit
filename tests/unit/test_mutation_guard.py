@@ -468,6 +468,7 @@ def test_the_atelier_comment_routes_refuse_everything_but_the_page(
         (route, json.dumps({"action": "resolve"}).encode()),
         (route, json.dumps({"action": "delete"}).encode()),
         (route, json.dumps({"action": "reply", "texte": "x"}).encode()),
+        (route, json.dumps({"action": "attach", "block_id": "brainstorm.x"}).encode()),
         (route.rsplit("/", 1)[0], json.dumps({"block_id": "brainstorm.x", "texte": "x"}).encode()),
     ):
         url = f"{target}?project={host.slug}"
