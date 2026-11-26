@@ -183,6 +183,35 @@ titre) ; la même réponse redonnée n'est pas dupliquée. `grimoire cadrage che
 refuse un angle obligatoire resté ouvert, écarté sans raison, d'état inconnu, ou
 un `entretien.json` illisible, invalide ou en lien symbolique.
 
+## Ce qui est déjà au dossier : `grimoire cadrage recall`
+
+`grimoire cadrage recall "<texte>" [--chantier <nom>] [--limit N] [--json]` rend
+au plus N rappels classés pour une demande, une question d'entretien ou une
+exigence en cours de rédaction, de trois sources : la **mémoire du projet**
+(décisions, incidents, conventions, par la recherche hybride lexical + vectoriel),
+les **exigences des chantiers** avec leur état (proposée, validée, livrée, recette
+prononcée) et, quand la trace les connaît, leurs tâches et fichiers, et les
+**pistes écartées et questions ouvertes** des brainstorms. Les deux dernières
+sources sont lues par une recherche lexicale simple, sans index. `--chantier`
+désigne le chantier en cours : ses propres lignes ne sont pas rappelées.
+
+`grimoire cadrage interview` ajoute à sa sortie un champ `recalls` (3 au plus,
+vide sans bruit). Un rappel est une donnée : son texte est caviardé des secrets
+et borné, il informe et ne valide rien. Si le backend vectoriel est absent ou en
+panne, le lexical répond seul et `issues` le dit. Lecture seule.
+
+```text
+$ grimoire cadrage recall "connexion par lien magique"
+  exigence (proposée) : REQ-001 l'utilisateur se connecte par lien magique — auth:04-exigences.md
+  question ouverte (idee) : Faut-il garder une session de 30 jours après la connexion par lien magique ? — auth:02-brainstorm.md
+  piste écartée (idee) : Authentification par mot de passe écartée : le lien magique suffit — auth:02-brainstorm.md
+dégradé : mémoire indisponible : [GR001] No 'project-context.yaml' found in …
+```
+
+Ici le projet n'a pas de mémoire configurée : la dernière ligne le dit, les
+deux autres sources répondent. Une exigence tracée jusqu'au code ajoute une
+ligne `code : tâches … ; fichiers …`.
+
 ## Le gate, dans `standard verify`
 
 `cadrage check` (la commande) et le gate du standard (`grimoire standard
