@@ -1,0 +1,32 @@
+/* Pilotage de l'orchestrateur (pause, reprise, disjoncteur) — fiche Piloter et vue « Tous les projets ». */
+.pi-panel { display: flex; flex-direction: column; gap: var(--sp-2); }
+.pi-panel h3 { font-size: var(--t-m); font-weight: 500; margin: 0; color: var(--ink); display: flex; align-items: center; gap: var(--sp-2); }
+.pi-line { margin: 0; font-size: var(--t-s); color: var(--ink); overflow-wrap: anywhere; }
+.pi-line[data-state="pause"], .pi-line[data-state="arret"], .pi-line[data-state="disjoncteur"] { color: var(--warn); }
+.pi-meta { margin: 0; font-size: var(--t-min); color: var(--ink2); overflow-wrap: anywhere; }
+.pi-meta[data-foreign="true"] { color: var(--ink); }
+.pi-note { margin: 0; font-size: var(--t-s); color: var(--ink2); overflow-wrap: anywhere; }
+.pi-note[hidden] { display: none; }
+.pi-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.pi-facts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: var(--t-min); color: var(--ink3); }
+
+.pi-machine { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
+.pi-machine[data-state="pause"] { border-color: var(--warn); }
+.pi-rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); overflow: hidden; }
+.pi-row { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line); }
+.pi-row:first-child { border-top: 0; }
+.pi-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); font-size: var(--t-s); }
+.pi-row-name { font-weight: 600; color: var(--ink); }
+.pi-row-state { color: var(--ink2); overflow-wrap: anywhere; }
+.pi-row[data-state="pause"] .pi-row-state, .pi-row[data-state="arret"] .pi-row-state, .pi-row[data-state="disjoncteur"] .pi-row-state { color: var(--warn); }
+
+dialog.pi-dialog { width: min(480px, calc(100% - 32px)); }
+.pi-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+.pi-form h2, .pi-form p { margin: 0; }
+.pi-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--t-s); color: var(--ink2); }
+.pi-field input { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); color: var(--ink); }
+.pi-modes { display: flex; flex-direction: column; gap: 4px; font-size: var(--t-s); color: var(--ink); }
+.pi-mode { display: flex; align-items: center; gap: var(--sp-2); }
+.pi-error { color: var(--bad); }
+.pi-error[hidden] { display: none; }
+.pi-form .kn-confirm-project-actions { margin-top: 0; }
