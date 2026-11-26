@@ -257,6 +257,25 @@ def test_moa_acceptance_refused_for_unvalidated_requirement(tmp_path: Path) -> N
     assert _state(root) == "proposee"
 
 
+def test_moa_acceptance_refused_when_text_changed_during_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Texte vu = texte scellé : changé entre la présentation et le « oui », la recette n'écrit rien."""
+    root = _project(tmp_path)
+    _delivered(root)
+    shown = moa.requirement_view(root, "REQ-001", service=TaskService(root)).fingerprint
+
+    def confirm(*_: object) -> bool:
+        path = root / CADRAGE_DIR / "04-exigences.md"
+        path.write_text(EXIGENCES.replace("15 minutes", "15 jours"), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(rg, "_confirm_human_turn", confirm)
+    with pytest.raises(rg.RequirementRefusedError, match="a changé pendant la validation, relis-la") as refused:
+        moa.pronounce(root, "REQ-001", "conforme", actor="ada", expected_fingerprint=shown)
+    assert refused.value.code == "changed" and _recettes() == []
+
+
 def test_moa_acceptance_refused_when_text_changed_since_validation(tmp_path: Path) -> None:
     root = _project(tmp_path)
     _delivered(root)

@@ -176,6 +176,15 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/__init__.py", "src/grimoire/core/__init__.py", "src/grimoire/flows/__init__.py",
     "src/grimoire/evidence/__init__.py", "src/grimoire/hosts/__init__.py", "src/grimoire/bridges/__init__.py",
     "src/grimoire/tools/__init__.py",
+    # les gestes d'autorité : la recette de la MOA, et les routes du cockpit qui exigent la clé de contrôle (mandat,
+    # pilote automatique, fournisseurs, acceptation en lot) avec leur point de passage commun (clé, pas de dictée)
+    "src/grimoire/missions/moa_acceptance.py", "src/grimoire/tools/human_gesture.py",
+    "src/grimoire/tools/workspace_routes.py", "src/grimoire/tools/workspace_pilotage.py",
+    "src/grimoire/tools/workspace_providers_write.py", "src/grimoire/tools/workspace_accept_merged.py",
+    "src/grimoire/cli/cockpit_write_target.py", "src/grimoire/voice/dictation.py",
+    # … le jeton de session et ce qui le sert, l'exige ou le pose : la garde d'écriture, les serveurs du cockpit
+    "src/grimoire/tools/request_guard.py", "src/grimoire/tools/workspace_write_guard.py",
+    "src/grimoire/tools/page_security.py", "src/grimoire/tools/forge_http.py", "src/grimoire/cli/cmd_cockpit.py",
 )
 
 #: Les chemins réservés qu'une double relecture peut juger : le reste de

@@ -85,6 +85,7 @@ __all__ = [
     "record_ready",
     "record_transition",
     "refuse_agent_origin",
+    "refuse_changed_requirement",
     "requirement_of",
     "safe_text",
     "sealed_validations",
@@ -371,6 +372,24 @@ def attest_human_turn(gesture: HumanGesture = APPROVE_GESTURE) -> None:
         )
 
 
+def refuse_changed_requirement(
+    root: Path, key: str, expected: str, seen: Requirement | None = None
+) -> Requirement:
+    """Relit l'exigence *key* et la rend ; refuse (rien d'écrit) si son empreinte n'est plus celle que la MOA a vue.
+
+    ``expected`` est l'empreinte du texte affiché (``""`` : rien n'était affiché) ; ``seen`` est l'exigence lue avant
+    la confirmation : elle doit avoir la même empreinte que ``expected``.
+    """
+    fresh = lookup(root, key)
+    now = fingerprint(key, fresh) if fresh is not None else ""
+    before = fingerprint(key, seen) if seen is not None else expected
+    if fresh is None or now != expected or before != expected:
+        raise RequirementRefusedError(
+            "changed", f"exigence {key} refusée : l'exigence a changé pendant la validation, relis-la."
+        )
+    return fresh
+
+
 def approve_requirement(
     root: Path,
     key: str,
@@ -378,8 +397,12 @@ def approve_requirement(
     actor: str,
     journal: AuthorityJournal | None = None,
     now: datetime | None = None,
+    expected_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Scelle la validation de l'exigence *key* par la MOA déclarée ; rend l'entrée du journal.
+
+    ``expected_fingerprint`` : l'empreinte du texte que la MOA a eu sous les yeux (:func:`fingerprint`). Si elle est
+    donnée, le scellement relit l'exigence après la confirmation et refuse, sans rien écrire, si le texte diffère.
 
     L'origine n'est pas un paramètre : la fonction l'établit elle-même (:func:`_agent_signal`, puis
     :func:`_confirm_human_turn`), que l'appel vienne de la CLI ou de l'API Python. Un marqueur d'agent refuse
@@ -412,6 +435,8 @@ def approve_requirement(
     if not requirement.planned:
         raise RequirementRefusedError("out_of_scope", f"exigence {key} hors périmètre (ou Won't) : rien à valider.")
     attest_human_turn(APPROVE_GESTURE)
+    if expected_fingerprint is not None:  # texte vu = texte scellé : relu après la confirmation
+        requirement = refuse_changed_requirement(project, key, expected_fingerprint, requirement)
     return _journal(journal).append(
         {
             "type": VALIDATED_ENTRY,

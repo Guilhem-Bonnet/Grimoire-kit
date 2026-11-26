@@ -31,12 +31,12 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.missions.human_acceptance import accept_task, acceptance_roots
 from grimoire.missions.launcher import LAUNCHED_EVENT
-from grimoire.missions.mandate import verify_control_key
 from grimoire.missions.questions import OPEN, records_of, status_of
 from grimoire.missions.review_receipt import READY, read_receipt
 from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.task_worktree import MERGED_EVENT
+from grimoire.tools.human_gesture import require_human_key
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -174,8 +174,7 @@ def accept_merged(project_root: Path, body: dict[str, Any]) -> dict[str, Any]:
     Sans clé de contrôle valide : :class:`PermissionError` (403), rien n'est écrit.
     Chaque refus est attribué à sa tâche ; les autres continuent.
     """
-    if not verify_control_key(body.get("control_key")):
-        raise PermissionError("clé de contrôle absente ou invalide : accepter en lot est un geste d'humain")
+    require_human_key(project_root, body, "clé de contrôle absente ou invalide : accepter en lot est un geste d'humain")
     root = project_root.resolve()
     service = TaskService(root)
     accepted: list[str] = []

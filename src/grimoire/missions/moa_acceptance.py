@@ -551,10 +551,14 @@ def pronounce(
     service: TaskService | None = None,
     journal: AuthorityJournal | None = None,
     now: datetime | None = None,
+    expected_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Scelle le verdict de la MOA sur l'exigence *key*, puis ouvre la tâche de suite ; rend ce qui a été fait.
 
     L'origine n'est pas un paramètre : la fonction l'établit comme :func:`~.requirement_gate.approve_requirement`.
+    Le texte scellé est celui qui a été présenté : l'exigence est relue après la confirmation et le scellement est
+    refusé (rien d'écrit) si son empreinte diffère de celle présentée (``expected_fingerprint`` si donnée, sinon
+    celle de la présentation lue par cette fonction).
     """
     from grimoire.missions.mandate import AuthorityJournal
     from grimoire.missions.service import TaskService
@@ -579,6 +583,12 @@ def pronounce(
     view = requirement_view(project, key, service=service, journal=journal, proofs=False)
     _refuse_unready(view)
     rg.attest_human_turn(RECETTE_GESTURE)
+    shown = view.fingerprint if expected_fingerprint is None else expected_fingerprint
+    if shown != view.fingerprint:
+        raise rg.RequirementRefusedError(
+            "changed", f"recette de {key} refusée : l'exigence a changé pendant la validation, relis-la."
+        )
+    rg.refuse_changed_requirement(project, key, shown)
     head, _, _ = key.rpartition("/")
     entry = journal.append(
         {

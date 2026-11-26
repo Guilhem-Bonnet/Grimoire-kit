@@ -963,12 +963,11 @@ def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
         MandateRefusedError,
         MandateRequest,
         MandateStore,
-        verify_control_key,
     )
     from grimoire.missions.schemas import ORIGIN_HUMAN
+    from grimoire.tools.human_gesture import require_human_key
     refuse_foreign_body(project_root, body)
-    if not verify_control_key(body.get("control_key")):
-        raise PermissionError("clé de contrôle absente ou invalide : accorder un mandat est un geste d'humain")
+    require_human_key(project_root, body, "clé de contrôle absente ou invalide : accorder un mandat est un geste d'humain")
     try:
         request = MandateRequest.build(
             body.get("gestures") or (), body.get("task_types") or (), body.get("max_sessions_per_day") or 0,
@@ -996,11 +995,11 @@ def _autopilot_set(project_root: Path, body: dict[str, Any]) -> Any:
     mandat actif, auquel le pilote reste lié.
     """
     from grimoire.missions.autopilot import AutopilotStore
-    from grimoire.missions.mandate import JournalError, MandateRefusedError, verify_control_key
+    from grimoire.missions.mandate import JournalError, MandateRefusedError
     from grimoire.missions.schemas import ORIGIN_HUMAN
+    from grimoire.tools.human_gesture import require_human_key
     refuse_foreign_body(project_root, body)
-    if not verify_control_key(body.get("control_key")):
-        raise PermissionError("clé de contrôle absente ou invalide : le pilote automatique est un geste d'humain")
+    require_human_key(project_root, body, "clé de contrôle absente ou invalide : le pilote automatique est un geste d'humain")
     if not isinstance(body.get("on"), bool):
         raise ValueError("`on` (booléen) requis : true active, false coupe")
     try:

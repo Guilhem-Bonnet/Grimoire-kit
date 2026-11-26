@@ -173,6 +173,49 @@ def test_moa_requirement_python_api_refused_in_agent_subprocess(tmp_path: Path) 
         service.transition(task.id, TaskState.READY, "agent")
 
 
+def _edit_during_confirmation(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le texte de l'exigence change pendant que la MOA répond « oui » à l'écran."""
+
+    def confirm(*_: object) -> bool:
+        path = root / CADRAGE_DIR / "04-exigences.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("15 minutes", "15 jours"), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(rg, "_confirm_human_turn", confirm)
+
+
+def test_moa_requirement_cli_refuses_text_changed_between_display_and_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le texte scellé est celui qui a été affiché : changé pendant la confirmation, rien n'est écrit au journal."""
+    root = _project(tmp_path)
+    _edit_during_confirmation(root, monkeypatch)
+    result = runner.invoke(app, ["cadrage", "approve", "REQ-001", "--path", str(root)])
+    assert result.exit_code == 1
+    assert "a changé pendant la validation, relis-la" in " ".join(result.output.split())
+    assert AuthorityJournal().read() == []
+
+
+def test_moa_requirement_api_expected_fingerprint_refuses_changed_text_and_accepts_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _project(tmp_path)
+    key = "REQ-001"
+    seen = rg.fingerprint(key, rg.lookup(root, key))  # type: ignore[arg-type]
+    entry = rg.approve_requirement(root, key, actor="ada", expected_fingerprint=seen)  # cas nominal inchangé
+    assert entry["fingerprint"] == seen
+    other = _project(tmp_path / "autre")
+    _edit_during_confirmation(other, monkeypatch)
+    seen_other = rg.fingerprint(key, rg.lookup(other, key))  # type: ignore[arg-type]
+    before = AuthorityJournal().read()
+    with pytest.raises(rg.RequirementRefusedError) as refused:
+        rg.approve_requirement(other, key, actor="ada", expected_fingerprint=seen_other)
+    assert refused.value.code == "changed" and AuthorityJournal().read() == before
+    with pytest.raises(rg.RequirementRefusedError) as nothing_shown:  # rien d'affiché : tout texte existant diffère
+        rg.approve_requirement(root, key, actor="ada", expected_fingerprint="")
+    assert nothing_shown.value.code == "changed"
+
+
 def test_moa_requirement_validation_sealed_with_fingerprint(tmp_path: Path) -> None:
     root = _project(tmp_path)
     entry = _approve(root)
