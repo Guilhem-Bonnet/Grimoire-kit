@@ -283,9 +283,10 @@ export const api = {
   // l'URL vit ici, avec la même cible que toute lecture. Un message est un tour humain : le
   // cockpit le relaie à l'agent et n'écrit rien lui-même (ADR-007).
   chatStreamUrl: (resume) => withProject(WS + 'chat/stream' + (resume ? '?resume=1' : '')),
-  chatSend: (text, answerTo, { dictation = false, tokens = [] } = {}) =>
+  chatSend: (text, answerTo, { dictation = false, tokens = [], chantier = null } = {}) =>
     post(WS + 'chat/send', {
       text,
+      ...(chantier ? { chantier } : {}), // chantier ouvert dans l'Atelier (revalidé par le serveur)
       ...(answerTo ? { answer_to: answerTo } : {}),
       ...(dictation ? { dictation: true } : {}),
       ...(tokens.length ? { dictation_tokens: tokens } : {}),
@@ -633,6 +634,10 @@ export const api = {
   atelierDecouper: (slug, digest) =>
     post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/decoupage', { confirm: true, digest }),
   // Boîte à idées (I13) : garder sans trier ; « annuler » d'un écart est `undo: true`, un événement de plus.
+  // Assistant du cadrage (lot 5) : l'état de l'entretien (lecture), puis un geste de la liste fermée du serveur
+  // (`geste` : un identifiant, jamais le texte d'une consigne ; `text` seulement pour `repondre`, la réponse de l'humain).
+  atelierEntretien: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/entretien'),
+  atelierAssistant: (slug, body) => post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/assistant', body),
   ideas: () => get(WS + 'ideas'),
   ideaAdd: (text) => post(WS + 'ideas/add', { text }),
   ideaDrop: (id, undo = false) => post(WS + 'ideas/drop', { id, undo }),

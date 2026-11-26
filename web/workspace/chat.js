@@ -16,6 +16,7 @@
 
 import { api, host, projectName } from './api.js';
 import { renderMarkdown } from './markdown.js';
+import { getAtelierContext } from './atelier-context.js';
 import { createMascotteLink } from './mascotte_lazy.js';
 import { createVoiceInput } from './voice.js';
 import { createVoiceOutbox, liveTarget, withoutSpokenTag } from './voice_outbox.js';
@@ -454,6 +455,10 @@ export function createChat({ readOnly = () => false } = {}) {
       case 'user':
         current = null;
         addText('user', event.text);
+        if (event.chantier && event.chantier.titre) { // message envoyé depuis l'Atelier : le chantier visé
+          const boxes = log.querySelectorAll('.chat-msg.is-user');
+          boxes[boxes.length - 1]?.append(mk('div', { class: 'chat-chantier', 'data-chantier': event.chantier.slug, text: `Chantier : ${event.chantier.titre}` }));
+        }
         current = null;
         break;
       case 'turn_started':
@@ -549,7 +554,7 @@ export function createChat({ readOnly = () => false } = {}) {
     }
     setBusy(true);
     try {
-      await api.chatSend(text, null, { dictation, tokens });
+      await api.chatSend(text, null, { dictation, tokens, chantier: getAtelierContext() });
       voice.commitDictation();
     } catch (error) {
       setBusy(false);
