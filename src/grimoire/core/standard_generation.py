@@ -134,6 +134,11 @@ MEMORY_READS_IGNORE_BLOCK = (
     "# Memory read receipts — one line per memory read served to agents (no content)\n"
     f"{MEMORY_READS_IGNORE}\n"
 )
+LEXICAL_INDEX_IGNORE = "_grimoire/_memory/*_lexical.sqlite3*"
+LEXICAL_INDEX_IGNORE_BLOCK = (
+    "# Lexical memory index — local state the first task or memory command creates\n"
+    f"{LEXICAL_INDEX_IGNORE}\n"
+)
 GITIGNORE_SECTION = (
     f"{GITIGNORE_MARKER}\n"
     "# Session runs — ephemeral runtime data\n"
@@ -141,6 +146,7 @@ GITIGNORE_SECTION = (
     "# Memory archives — compressed old sessions\n"
     "_grimoire/_memory/archives/\n"
     + MEMORY_READS_IGNORE_BLOCK
+    + LEXICAL_INDEX_IGNORE_BLOCK
 )
 
 
@@ -161,10 +167,15 @@ def ensure_grimoire_gitignore(root: Path) -> Path | None:
     except OSError:
         return None
     if GITIGNORE_MARKER in existing:
-        if MEMORY_READS_IGNORE in existing:
+        # Section posée avant ces lignes (reçu de lecture, index lexical) : on n'ajoute que celles qui manquent.
+        missing = "".join(
+            block for line, block in (
+                (MEMORY_READS_IGNORE, MEMORY_READS_IGNORE_BLOCK), (LEXICAL_INDEX_IGNORE, LEXICAL_INDEX_IGNORE_BLOCK),
+            ) if line not in existing
+        )
+        if not missing:
             return None
-        # Section posée avant le reçu de lecture mémoire : on n'y ajoute que sa ligne.
-        content = existing.rstrip() + "\n" + MEMORY_READS_IGNORE_BLOCK
+        content = existing.rstrip() + "\n" + missing
     else:
         content = existing.rstrip() + "\n\n" + GITIGNORE_SECTION if existing.strip() else GITIGNORE_SECTION
     try:

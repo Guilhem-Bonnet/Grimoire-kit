@@ -57,13 +57,53 @@ class TestSuggestNeeds:
         assert "multi-agent-orchestration" in ids
         assert "hooks-skills-governance" in ids
 
-    def test_mcp_config_suggests_tool_mediation(self, tmp_path: Path) -> None:
-        (tmp_path / ".mcp.json").write_text("{}", encoding="utf-8")
+    def test_kit_written_hooks_and_skills_do_not_suggest_governance(self, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text(
+            '{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "grimoire-hook --host claude"}]}]}}',
+            encoding="utf-8",
+        )
+        (tmp_path / ".github" / "hooks").mkdir(parents=True)
+        (tmp_path / ".github" / "hooks" / "k.json").write_text('{"bash": "grimoire-hook"}', encoding="utf-8")
+        (tmp_path / ".github" / "skills" / "grimoire-evidence").mkdir(parents=True)
+        ids = [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+        assert "hooks-skills-governance" not in ids
+
+    def test_a_project_own_hook_or_skill_suggests_governance(self, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text(
+            '{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "./lint.sh"}]}]}}', encoding="utf-8"
+        )
+        assert "hooks-skills-governance" in [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+        (tmp_path / ".claude" / "settings.json").write_text("{oops", encoding="utf-8")
+        assert "hooks-skills-governance" in [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+        (tmp_path / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        (tmp_path / ".github" / "skills" / "mine").mkdir(parents=True)
+        assert "hooks-skills-governance" in [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+
+    def test_foreign_mcp_server_suggests_tool_mediation(self, tmp_path: Path) -> None:
+        (tmp_path / ".mcp.json").write_text(
+            '{"mcpServers": {"grimoire": {"command": "grimoire-mcp"}, "db": {"command": "dbmcp"}}}', encoding="utf-8"
+        )
         ids = [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
         assert "tool-mediation-security" in ids
 
+    def test_unparseable_mcp_config_still_suggests_tool_mediation(self, tmp_path: Path) -> None:
+        (tmp_path / ".mcp.json").write_text("{not json", encoding="utf-8")
+        ids = [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+        assert "tool-mediation-security" in ids
+
+    def test_kit_written_mcp_config_does_not_suggest_tool_mediation(self, tmp_path: Path) -> None:
+        # The `.mcp.json` `grimoire up` writes holds only the kit's own server.
+        (tmp_path / ".mcp.json").write_text('{"mcpServers": {"grimoire": {"command": "grimoire-mcp"}}}', encoding="utf-8")
+        (tmp_path / ".vscode").mkdir()
+        (tmp_path / ".vscode" / "mcp.json").write_text('{"servers": {"grimoire": {}}}', encoding="utf-8")
+        (tmp_path / "mcp.json").write_text("[]", encoding="utf-8")
+        ids = [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+        assert "tool-mediation-security" not in ids
+
     def test_unknown_ids_never_suggested(self, tmp_path: Path) -> None:
-        (tmp_path / ".mcp.json").write_text("{}", encoding="utf-8")
+        (tmp_path / ".mcp.json").write_text('{"mcpServers": {"db": {}}}', encoding="utf-8")
         tiny_catalog = {"needs": [{"id": "solo-prototyping"}]}
         ids = [s.need_id for s in suggest_needs(_scan(tmp_path), tiny_catalog)]
         assert ids == ["solo-prototyping"]  # mcp filtré (absent du catalogue)

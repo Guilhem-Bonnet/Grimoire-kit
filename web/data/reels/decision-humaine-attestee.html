@@ -21,7 +21,7 @@ pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; 
 <main>
 <h1>Décision humaine attestée</h1>
 <p>L&#x27;agent pose une question ; seule la réponse du canal humain rend la tâche.</p>
-<p class="meta">kit 3.104.0 · enregistrée le 2026-11-23T18:52:18Z · empreinte de sortie <code>1ed9923823318aab7921b508a88d6aa335cf9ab99c86dd71ca78ca08ec9a330f</code></p>
+<p class="meta">kit 3.122.0 · enregistrée le 2026-11-26T19:35:59Z · empreinte de sortie <code>a5fa2a83d2e651b66b7f87b597675085555cc28f15208ab9b9e92ee03ff8187d</code></p>
 <section class="frame"><p class="cmd">$ grimoire task add &quot;Choisir base&quot; -a &quot;le choix est tranche par un humain&quot; --ready<span class="rc ok">sortie 0</span></p><pre>Mission créée : MIS-travaux-courants-001 (aucune n&#x27;existait).
 OK GAO-choisir-base-001 — Choisir base (ready)
   vérifiabilité : V2 — critère sans verdict reconnu : &#x27;le choix est tranche par un humain&#x27;
@@ -29,10 +29,10 @@ OK GAO-choisir-base-001 — Choisir base (ready)
       fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier
 attendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `&lt;commande&gt;`
 retourne 0 »</pre></section>
-<section class="frame"><p class="cmd">$ grimoire task claim GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (ready → claimed) · V2 → aucun — omets le paramètre model,
-garde celui de la session</pre></section>
-<section class="frame"><p class="cmd">$ grimoire task ask GAO-choisir-base-001 &quot;Quelle base de données ?&quot; --option sqlite --option postgres<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → aucun — omets le paramètre model,
-garde celui de la session
+<section class="frame"><p class="cmd">$ grimoire task claim GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (ready → claimed) · V2 → modèle de sous-agent : aucun
+conseillé pour un sous-agent — omets le paramètre model, il garde celui de la session</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task ask GAO-choisir-base-001 &quot;Quelle base de données ?&quot; --option sqlite --option postgres<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → modèle de sous-agent : aucun
+conseillé pour un sous-agent — omets le paramètre model, il garde celui de la session
 ! question sans option recommandée. Avec `--recommended &lt;option&gt;` (l&#x27;une des options proposées) et
 `--why &quot;&lt;raison&gt;&quot;`, celui qui tranchera sait ce que tu conseilles.</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task show GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>GAO-choisir-base-001 — Choisir base
@@ -40,7 +40,8 @@ garde celui de la session
   accepte : le choix est tranche par un humain
   vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —
 ou la tâche n&#x27;a aucun critère : sa vérifiabilité reste à démontrer.
-  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)
+  modèle recommandé : aucun conseillé pour un sous-agent — omets le paramètre model, il garde celui
+de la session (palier : session)
     - le choix est tranche par un humain → non reconnu
       fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier
 attendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `&lt;commande&gt;`
@@ -49,14 +50,15 @@ retourne 0 »
   données : classe non déclarée (aucun fournisseur externe)
   porté par : cli</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task answer GAO-choisir-base-001 sqlite<span class="rc ok">sortie 0</span></p><pre>Cette note sera enregistrée au nom d&#x27;un humain. Est-ce bien toi qui la donnes ? [o/N] o
-OK GAO-choisir-base-001 — Choisir base (waiting → ready) · V2 → aucun — omets le paramètre model,
-garde celui de la session</pre></section>
+OK GAO-choisir-base-001 — Choisir base (waiting → ready) · V2 → modèle de sous-agent : aucun
+conseillé pour un sous-agent — omets le paramètre model, il garde celui de la session</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task show GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>GAO-choisir-base-001 — Choisir base
   état    : ready (board : ready)
   accepte : le choix est tranche par un humain
   vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —
 ou la tâche n&#x27;a aucun critère : sa vérifiabilité reste à démontrer.
-  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)
+  modèle recommandé : aucun conseillé pour un sous-agent — omets le paramètre model, il garde celui
+de la session (palier : session)
     - le choix est tranche par un humain → non reconnu
       fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier
 attendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `&lt;commande&gt;`

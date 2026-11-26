@@ -148,6 +148,20 @@ _FILE_MARKERS: list[tuple[str, list[tuple[str, float]]]] = [
     ]),
 ]
 
+# Source-file suffix → stack, for projects without any manifest (see ``scan``).
+_SOURCE_SUFFIX_STACKS: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript",
+    ".ts": "typescript", ".tsx": "typescript",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".rb": "ruby",
+    ".cs": "csharp",
+}
+# Exactly the detection threshold: enough to be reported, never more.
+_SOURCE_ONLY_CONFIDENCE = 0.3
+
 # Project type inference rules: stack combination → type
 _TYPE_RULES: list[tuple[frozenset[str], str]] = [
     (frozenset({"terraform"}), "infrastructure"),
@@ -185,8 +199,13 @@ class StackScanner:
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
 
-    def scan(self) -> ScanResult:
-        """Analyse the project directory and return detected stacks."""
+    def scan(self, *, from_sources: bool = True) -> ScanResult:
+        """Analyse the project directory and return detected stacks.
+
+        ``from_sources`` lets a project with no manifest at all be recognised
+        by its source files; the monorepo walk turns it off for subdirectories
+        so that a stray script does not make a folder a subproject.
+        """
         scores: dict[str, float] = {}
         evidence: dict[str, list[str]] = {}
 
@@ -195,6 +214,15 @@ class StackScanner:
                 if self._matches(pattern):
                     scores[stack_name] = scores.get(stack_name, 0.0) + weight
                     evidence.setdefault(stack_name, []).append(pattern)
+
+        if not scores and from_sources:
+            # No build/manifest file at all: a bare script folder (``app.py``
+            # and a README) still has a language. Source files are weaker
+            # evidence than a manifest, so they only speak when nothing else
+            # did, and they never override a marker-based detection.
+            for stack_name, patterns in self._source_stacks().items():
+                scores[stack_name] = _SOURCE_ONLY_CONFIDENCE
+                evidence[stack_name] = patterns
 
         # Build detections, capping confidence at 1.0
         detections: list[StackDetection] = []
@@ -251,12 +279,40 @@ class StackScanner:
         for child in children:
             if _is_excluded_dir(child.name):
                 continue
-            result = StackScanner(child).scan()
+            result = StackScanner(child).scan(from_sources=False)
             if result.stacks:
                 out.append(result)
                 continue  # a detected subproject is a leaf
             if depth < max_depth:
                 StackScanner._walk_subprojects(child, depth + 1, max_depth, out)
+
+    def _source_stacks(self) -> dict[str, list[str]]:
+        """Stacks implied by source files at the root or one directory down.
+
+        Maps a stack name to the ``*.ext`` globs that were found, in the order
+        of :data:`_SOURCE_SUFFIX_STACKS`.
+        """
+        found: dict[str, list[str]] = {}
+        directories = [self._root]
+        try:
+            directories.extend(
+                p for p in sorted(self._root.iterdir(), key=lambda p: p.name)
+                if p.is_dir() and not p.is_symlink() and not p.name.startswith(".") and not _is_excluded_dir(p.name)
+            )
+        except OSError:
+            return found
+        for directory in directories:
+            try:
+                names = [p.suffix for p in directory.iterdir() if p.is_file()]
+            except OSError:
+                continue
+            for suffix in sorted(set(names)):
+                stack_name = _SOURCE_SUFFIX_STACKS.get(suffix)
+                if stack_name is not None:
+                    globs = found.setdefault(stack_name, [])
+                    if f"*{suffix}" not in globs:
+                        globs.append(f"*{suffix}")
+        return found
 
     def _matches(self, pattern: str) -> bool:
         """Check if a marker pattern is present in the project root."""
