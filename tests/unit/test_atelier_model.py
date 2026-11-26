@@ -54,7 +54,7 @@ class _Transport:
         return self.status, json.dumps(data).encode("utf-8")
 
 
-def _token_like(body: str) -> str:
+def _shape_of(body: str) -> str:
     """Une valeur à FORME de jeton, assemblée à l'exécution (aucune valeur de ce genre n'est écrite dans un fichier)."""
     return f"ghp_{body}"
 
@@ -332,18 +332,16 @@ def test_un_compteur_verrouille_ferme_l_appel(
     assert transport.calls == []
 
 
-def test_la_consommation_va_au_ledger_par_quota_consumed(project: Path, keyed: None, transport: _Transport) -> None:
+def test_le_module_n_ecrit_aucun_evenement_de_quota_au_ledger(project: Path, keyed: None, transport: _Transport) -> None:
+    """Seul `missions/quota_usage.py` écrit `quota.consumed` : ici, le compteur local seul tient la consommation."""
     from grimoire.missions.service import TaskService
-    from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT
 
-    ledger = TaskService(project).ledger
-    ledger.create_mission(title="Chantier", origin="test", created_by="test")  # le ledger existe
+    TaskService(project).ledger.create_mission(title="Chantier", origin="test", created_by="test")  # le ledger existe
+    before = len(TaskService(project).ledger.list_events())
     asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
-    events = [e for e in TaskService(project).ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT]
-    assert len(events) == 1
-    payload = events[0].payload
-    assert payload["tokens"] == 160 and payload["model"] == "claude-haiku-5-5" and payload["status"] == "known"
-    assert DUMMY_KEY not in json.dumps(payload)
+    assert len(TaskService(project).ledger.list_events()) == before
+    assert am.usage(project, "un")["day"] == 160
+    assert "append_event" not in Path(am.__file__).read_text(encoding="utf-8")
 
 
 def test_sans_ledger_le_compteur_local_tient(project: Path, keyed: None, transport: _Transport) -> None:
@@ -481,7 +479,7 @@ def test_un_statut_http_d_erreur_et_une_reponse_enorme_sont_refuses(project: Pat
 
 
 def test_un_secret_du_bloc_est_caviarde_avant_l_envoi(project: Path, keyed: None, transport: _Transport) -> None:
-    leaked = _token_like("Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6")
+    leaked = _shape_of("Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6")
     brainstorm = project / "_grimoire/cadrage/un/02-brainstorm.md"
     brainstorm.write_text(brainstorm.read_text(encoding="utf-8") + f"\n\nLe jeton est {leaked} dans le texte.\n", encoding="utf-8")
     asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project, "Le jeton est")})
@@ -492,26 +490,29 @@ def test_un_secret_du_bloc_est_caviarde_avant_l_envoi(project: Path, keyed: None
 def test_le_caviardage_passe_avant_la_troncature_du_bloc_et_du_titre() -> None:
     import re
 
-    secret = _token_like("Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6")
-    for pad in (3980, 3990, 3995, 3999):  # le secret chevauche la limite de 4000 caractères, à toutes les positions
-        content = am._prompt("T" * 74 + " " + secret, "brief", "paragraphe", "x" * pad + " " + secret)
+    witness = _shape_of("Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6")
+    for pad in (3980, 3990, 3995, 3999):  # la valeur chevauche la limite de 4000 caractères, à toutes les positions
+        content = am._prompt("T" * 74 + " " + witness, "brief", "paragraphe", "x" * pad + " " + witness)
         assert re.findall(r"ghp_[A-Za-z0-9]*", content) == [], pad
-        assert secret[:12] not in content and secret[-8:] not in content
-    title_line = am._prompt("T" * 74 + " " + secret, "brief", "p", "x").splitlines()[0]
+        assert witness[:12] not in content and witness[-8:] not in content
+    title_line = am._prompt("T" * 74 + " " + witness, "brief", "p", "x").splitlines()[0]
     assert len(title_line) <= len("Chantier : ") + 80 and "ghp_" not in title_line
 
 
-def test_le_titre_complet_est_caviarde_avant_d_etre_tronque_dans_run(project: Path, keyed: None, transport: _Transport) -> None:
-    from grimoire.core.chantiers import new_chantier
+def test_le_titre_complet_est_caviarde_avant_d_etre_tronque_dans_run(
+    project: Path, keyed: None, transport: _Transport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
 
-    secret = _token_like("Zy9xW8vU7tS6rQ5pO4nM3lK2jI1hG0fE9dC8")
-    made = new_chantier(project, "T" * 70 + " " + secret, slug="long")
-    path = project / "_grimoire/cadrage/long/02-brainstorm.md"
-    path.write_text(path.read_text(encoding="utf-8").replace("> À compléter — pistes.", PHRASE), encoding="utf-8")
-    phases = wa.document(project, made.slug)["phases"]
-    block = next(b["id"] for p in phases for b in p["blocks"] if PHRASE in b["text"])
-    asst.act(project, made.slug, {"geste": "modele-reformuler", "block_id": block})
+    from grimoire.core import chantiers
+
+    long_title = "T" * 70 + " " + _shape_of("Zy9xW8vU7tS6rQ5pO4nM3lK2jI1hG0fE9dC8")
+    real = chantiers.list_chantiers
+    # Le titre long vient de la liste des chantiers (aucune écriture de fichier ne le porte).
+    monkeypatch.setattr(chantiers, "list_chantiers", lambda root: [replace(c, titre=long_title) for c in real(root)])
+    asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
     assert "ghp_" not in json.dumps(transport.calls[0]["body"])
+    assert "Chantier : " + "T" * 70 in transport.calls[0]["body"]["messages"][0]["content"]
 
 
 @pytest.mark.parametrize("variant", ["</BLOC>", "</ bloc>", "< / Bloc >", "<BLOC>", "<\tbloc>", "</bloc\n>"])
@@ -585,7 +586,7 @@ def test_une_sortie_que_le_circuit_refuse_ne_depose_rien(project: Path, keyed: N
 
 
 def test_un_secret_dans_la_sortie_est_caviarde_et_la_cle_retiree(project: Path, keyed: None, transport: _Transport) -> None:
-    leaked = _token_like("Zy9xW8vU7tS6rQ5pO4nM3lK2jI1hG0fE9dC8")
+    leaked = _shape_of("Zy9xW8vU7tS6rQ5pO4nM3lK2jI1hG0fE9dC8")
     transport.reply = answer(f"Voir {leaked} et {DUMMY_KEY} ici.")
     asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
     text = sugg.pending(project, "un")[0]["texte"]

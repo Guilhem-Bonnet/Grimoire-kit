@@ -15,8 +15,9 @@ Garanties :
   (:func:`grimoire.providers.secrets.env_for_provider`), jamais écrite dans un fichier du projet, jamais journalisée,
   jamais renvoyée à la page ; aucune clé = fonction indisponible, dite telle quelle.
 - **Budget** : plafond dur de jetons par jour et par chantier, réservé AVANT l'appel (estimation prudente), refus si le
-  compteur est illisible ; délai court, aucun nouvel essai ; la consommation réelle est enregistrée au ledger par
-  l'événement ``quota.consumed`` existant.
+  compteur est illisible ; délai court, aucun nouvel essai ; la consommation réelle est tenue dans le compteur local
+  du projet. Elle n'est PAS écrite au ledger : seul ``missions/quota_usage.py`` écrit ``quota.consumed`` (journaux de
+  sessions) et aucune de ses fonctions publiques ne convient à un appel du kit.
 - **Ce qui part** : le texte du bloc visé et un contexte minimal (titre, phase, type), passés par
   :func:`grimoire.memory.validation.redact_secrets`.
 - **Ce qui revient** : une PROPOSITION, déposée dans le circuit existant (suggestion que l'humain accepte ou refuse,
@@ -247,25 +248,6 @@ def _give_back(root: Path, slug: str, reserved: int, now: datetime | None) -> No
         _adjust(root, slug, -reserved, cfg=None, now=now)
 
 
-def _record_ledger(root: Path, slug: str, geste: str, model: str, tokens: int) -> None:
-    """Enregistre la consommation par l'événement ``quota.consumed`` existant (sans ledger, rien : le compteur local tient)."""
-    try:
-        from grimoire.missions.service import TaskService
-        from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT
-
-        service = TaskService(root)
-        if not service.has_ledger:
-            return
-        service.ledger.append_event(
-            QUOTA_CONSUMED_EVENT, f"atelier-{slug}", "atelier", "atelier-assistant",
-            {"session": f"atelier:{slug}:{geste}", "role": "atelier-assistant", "task_id": "", "model": model,
-             "status": "known", "reason": "", "tokens": tokens, "cost_usd": None, "cost_status": "unknown",
-             "ongoing": False},
-        )
-    except Exception:  # le ledger est un registre : son échec ne casse pas une proposition déjà reçue
-        return
-
-
 def usage(root: Path, slug: str, *, now: datetime | None = None) -> dict[str, Any]:
     """Ce qui est consommé aujourd'hui, pour l'affichage ; ``readable: false`` si le compteur est illisible."""
     try:
@@ -416,7 +398,6 @@ def run(
     text, tokens = _answer(raw, reserved)  # malformée : la requête a abouti, la réservation reste comptée
     with contextlib.suppress(ModelError):  # sinon l'estimation prudente reste comptée
         _adjust(root, slug, tokens - reserved, cfg=None, now=now)  # la consommation réelle remplace l'estimation
-    _record_ledger(root, slug, geste, model, tokens)
     proposal = " ".join(redact_secrets(text)[0].split()) if spec.kind == "commentaire" else redact_secrets(text)[0].strip()
     proposal = proposal[:MAX_OUTPUT_CHARS].replace(key, "")
     if not proposal:

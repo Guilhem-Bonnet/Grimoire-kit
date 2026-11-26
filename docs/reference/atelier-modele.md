@@ -66,8 +66,10 @@ jamais le document. Elle est traitée comme un texte non fiable (caviardée, bor
   « usage déclaré incohérent » (la réservation reste comptée, jamais le chiffre déclaré).
 - Le transport n'utilise aucun proxy d'environnement (`HTTPS_PROXY`, etc.) et ne suit aucune redirection : la clé ne part
   que vers `api.anthropic.com`, en HTTPS.
-- Le compteur vit dans `_grimoire-runtime-output/atelier/modele-usage.json` ; la consommation va aussi au ledger par
-  l'événement `quota.consumed`, quand le projet en a un.
+- Le compteur vit dans `_grimoire-runtime-output/atelier/modele-usage.json`. La consommation de ces appels n'est **pas**
+  écrite au ledger : seul `missions/quota_usage.py` écrit l'événement `quota.consumed`, d'après les journaux de sessions,
+  et n'a pas de point d'entrée pour un appel du kit. Le quota de la file ne la voit donc pas ; ce compteur local seul la
+  borne.
 
 ## Route
 
