@@ -3263,7 +3263,8 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   min-height: 0;
 }
 
-.chat-hostbar {
+.chat-hostbar,
+.chat-targetbar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3275,7 +3276,8 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   font-size: 12px;
 }
 
-.chat-host {
+.chat-host,
+.chat-target {
   flex: 1;
   min-width: 0;
   font: inherit;

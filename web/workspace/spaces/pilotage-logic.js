@@ -90,6 +90,51 @@ export function noteKeeper() {
   return { set(value) { text = value || ''; }, clear() { text = ''; }, get() { return text; } };
 }
 
+/** L'état du pilote automatique et du mandat d'un projet, en une ligne (`authority` : la lecture de la ligne). */
+export function authorityLine(authority) {
+  if (!authority || authority.error || !authority.autopilot || !authority.mandate) {
+    return 'Pilote automatique et mandat : lecture impossible, rien n’est deviné.';
+  }
+  const { autopilot, mandate } = authority;
+  const pilot = autopilot.active
+    ? `Pilote automatique : activé${clockText(autopilot.since) ? ` depuis ${clockText(autopilot.since)}` : ''}`
+    : 'Pilote automatique : coupé';
+  const until = mandate.until ? ` jusqu’au ${String(mandate.until).slice(0, 10)}` : '';
+  const why = MANDATE_WHY[mandate.reason] || mandate.reason;
+  const grant = mandate.active ? `Mandat : actif${until}` : `Mandat : inactif${why ? ` (${why})` : ''}`;
+  return `${pilot} · ${grant}`;
+}
+
+/** Les raisons qu'un mandat inactif peut donner, en clair (le code reste affiché s'il est inconnu). */
+const MANDATE_WHY = {
+  expired: 'expiré', revoked: 'révoqué', cap_exceeded: 'plafond du jour atteint', no_mandate: 'aucun mandat',
+  malformed: 'mandat illisible', escalation_policy_changed: 'politique d’escalade changée',
+};
+
+/**
+ * Le bouton du pilote d'une ligne : `{ on, label, disabled, why }`. `on` est l'état visé par le clic. Le mandat n'est
+ * jamais accordé ni révoqué d'ici : sans mandat actif on ne peut qu'éteindre (ou rien), et la raison est écrite.
+ */
+export function pilotToggle(authority, { readOnly = false } = {}) {
+  if (readOnly) return { on: false, label: '', disabled: true, why: 'Cockpit en lecture seule.' };
+  if (!authority || authority.error || !authority.autopilot || !authority.mandate) {
+    return { on: false, label: '', disabled: true, why: 'Pilote indisponible : état illisible.' };
+  }
+  if (authority.autopilot.active) return { on: false, label: 'Éteindre le pilote automatique', disabled: false, why: '' };
+  if (!authority.mandate.active) {
+    return { on: true, label: 'Allumer le pilote automatique', disabled: true, why: 'Aucun mandat actif : il s’accorde depuis le projet.' };
+  }
+  return { on: true, label: 'Allumer le pilote automatique', disabled: false, why: '' };
+}
+
+/** Ce que le dialogue du pilote dit avant de demander la clé : qui est visé, ce qui change, ce qui ne change pas. */
+export function pilotConfirmLines(on, name) {
+  return on
+    ? [`Le pilote automatique de « ${name} » tranchera les cas bloqués de ce projet, sauf la liste réservée à l’humain.`,
+      'Il reste lié au mandat actuel ; le mandat lui-même ne change pas.']
+    : [`Le pilote automatique de « ${name} » sera coupé : les cas bloqués attendront de nouveau votre réponse.`];
+}
+
 /** Ce que la pause de toute la machine arrête, en une phrase qui nomme les projets. */
 export function machineStops(rows) {
   const names = rows.map((r) => r.name || r.slug);

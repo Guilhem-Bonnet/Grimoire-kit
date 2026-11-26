@@ -71,11 +71,29 @@ class ApiError extends Error {
 }
 export { ApiError };
 
+// Le chat en portée « Tous les projets » : la seule cible ambiante tolérée est celle que la personne a CHOISIE dans
+// le sélecteur du chat (`setChatTarget`), et elle ne vaut que pour les routes `chat/…` — jamais pour une autre
+// écriture. Sans choix, aucune route de chat ne reçoit de projet et les écritures sont refusées plus bas.
+let chatTarget = null;
+
+/** Fixe (ou efface, `null`) le projet que le chat de la vue globale vise. Sans effet hors portée globale. */
+export function setChatTarget(slug) { chatTarget = slug || null; }
+export function currentChatTarget() { return chatTarget; }
+
+function withChatTarget(path) {
+  const [base, query = ''] = path.split('?');
+  if (!chatTarget || !base.startsWith(WS + 'chat/')) return path;
+  const params = new URLSearchParams(query);
+  if (!params.has('project')) params.set('project', chatTarget);
+  return `${base}?${params.toString()}`;
+}
+
 function withProject(path) {
   // Portée « Tous les projets » : le projet servi n'est la cible de rien. Une
   // requête qui veut un projet le nomme elle-même ; sinon elle part sans (une
   // lecture retombe sur le repli du serveur, une écriture est refusée plus bas).
-  if (!host.project || host.scopeAll) return path;
+  if (host.scopeAll) return withChatTarget(path);
+  if (!host.project) return path;
   // N'ajoute `project` que s'il est absent : un appel qui cible déjà un AUTRE
   // projet explicitement (`agents(project)`, `proposals(project)`, la Flotte
   // qui interroge chaque projet du registre l'un après l'autre) portait déjà
@@ -157,11 +175,17 @@ function untargetedError() {
 }
 
 async function request(path, options = {}) {
-  if (writeIsUntargeted(path, options)) throw untargetedError();
+  // La cible est jugée sur l'URL FINALE : celle du chat choisi dans le sélecteur y est déjà posée.
+  const target = withProject(liveMark(path, options));
+  // La voix n'a pas de cible : le chat de la vue globale est texte seul, aucun appel `voice/…` n'y part (lecture ou écriture).
+  if (host.scopeAll && host.kind === 'cockpit' && path.split('?')[0].startsWith(WS + 'voice/')) {
+    throw new ApiError('Voix indisponible dans la vue « Tous les projets » : ouvrez un projet.', 400, { noTarget: true });
+  }
+  if (writeIsUntargeted(target, options)) throw untargetedError();
   let response;
   try {
     const writing = options.method && options.method !== 'GET';
-    response = await fetch(withProject(liveMark(path, options)), {
+    response = await fetch(target, {
       ...options,
       // L'hôte sait ainsi que la page se déclare en portée globale et refuse
       // toute écriture sans projet explicite, même si ce client se trompait.
@@ -351,8 +375,10 @@ export const api = {
   // qu'elle saisit — la page ne la garde pas ; l'agent du chat n'a ni la route ni la clé. Lot 3 : le
   // corps nomme aussi le projet visé, pour que l'hôte vérifie l'URL et le corps ensemble.
   autopilot: () => get(WS + 'autonomy/autopilot'),
-  autopilotSet: (on, controlKey) =>
-    post(WS + 'autonomy/autopilot', { on, control_key: controlKey, ...projectBody() }),
+  // `project` : en vue globale, le projet NOMMÉ du geste (URL et corps) ; sans lui, le projet ouvert.
+  autopilotSet: (on, controlKey, project) =>
+    post(WS + 'autonomy/autopilot' + (project ? '?project=' + encodeURIComponent(project) : ''),
+      { on, control_key: controlKey, ...(project ? { project } : projectBody()) }),
   // Lot 3 : le mandat de n'importe quel projet enrôlé. Octroyer et couper le pilote
   // passent par la clé de contrôle ; révoquer reste permis derrière le jeton (retirer
   // une autorité n'en demande aucune).
@@ -658,8 +684,10 @@ export const api = {
   // Apply d'assignation (P47 lot 3) : lance LA session que le plan a montrée —
   // l'empreinte du plan voyage dans le corps, le serveur refuse si l'état a
   // changé depuis (ADR-008). `post` : garde d'écriture commune comprise.
-  taskLaunch: (id, empreinte) =>
-    post(WS + 'tasks/' + encodeURIComponent(id) + '/launch', { empreinte }),
+  // `project` : le projet de la ligne en vue globale (URL et corps) ; la route est celle du projet ouvert.
+  taskLaunch: (id, empreinte, project) =>
+    post(WS + 'tasks/' + encodeURIComponent(id) + '/launch' + (project ? '?project=' + encodeURIComponent(project) : ''),
+      { empreinte, ...(project ? { project } : {}) }),
   // « Nouvelle tâche » (P35) : `TaskService.add` du projet servi, comme
   // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
   taskAdd: ({ title, acceptance, description }) =>

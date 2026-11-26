@@ -2382,16 +2382,14 @@ function receiptBlock(ctx, taskId, payload, project) {
 //: Les verdicts du préflight sur les tons existants du cockpit (stateIcon).
 const PREFLIGHT_TONE = { ok: 'ok', warn: 'warn', bloquant: 'bad', inconnu: '' };
 const PREFLIGHT_WORD = { ok: 'ok', warn: 'attention', bloquant: 'bloquant', inconnu: 'inconnu' };
-// Le cockpit multi-projets regarde, l'atelier du projet lance (même frontière
-// que réclamer une tâche) ; un plan sans empreinte vient d'un serveur plus
-// ancien que cette page.
-const LAUNCH_REMOTE_REASON = "Lancement depuis l'atelier du projet seulement (grimoire serve) — copie la commande en attendant.";
+// Un plan sans empreinte vient d'un serveur plus ancien que cette page. Depuis la vue globale, le lancement vise le
+// projet de la ligne (cible nommée dans l'URL et le corps, bouton qui le nomme) : plus de verrou « atelier du projet ».
 const LAUNCH_STALE_REASON = 'Plan sans empreinte (serveur plus ancien que la page) : copie la commande en attendant.';
 // Les états que le préflight accepte en entrée de file : une tâche prête est
 // candidate à l'admission, une proposée reçoit un plan qui dit ce qui manque.
 const ASSIGNABLE_STATUS = new Set(['proposed', 'ready']);
 
-function assignPlanNode(ctx, plan, taskId, project, refresh) {
+function assignPlanNode(ctx, plan, taskId, project, refresh, projectLabel = '') {
   const panel = document.createElement('div');
   panel.className = 'ex-assign-panel';
   panel.append(text('h4', null, 'Assigner une session'));
@@ -2471,7 +2469,8 @@ function assignPlanNode(ctx, plan, taskId, project, refresh) {
   launch.type = 'button';
   launch.className = 'btn pri';
   launch.dataset.role = 'assign-launch';
-  launch.textContent = 'Lancer la session';
+  // Vue globale : le bouton dit dans quel projet la session se lance.
+launch.textContent = project ? `Lancer la session dans ${projectLabel || project}` : 'Lancer la session';
   const launchStatus = actionStatus('');
   const lockReason = text('p', 'lbl', '');
   lockReason.id = 'ex-assign-lock-reason';
@@ -2482,8 +2481,7 @@ function assignPlanNode(ctx, plan, taskId, project, refresh) {
     lockReason.textContent = why;
     launch.setAttribute('aria-describedby', 'ex-assign-lock-reason');
   };
-  if (project) lock(LAUNCH_REMOTE_REASON);
-  else if (plan.pret === false) lock(`Pas prêt : ${plan.raison || 'raison non communiquée'}`);
+  if (plan.pret === false) lock(`Pas prêt : ${plan.raison || 'raison non communiquée'}`);
   else if (!plan.empreinte) lock(LAUNCH_STALE_REASON);
   else {
     launch.addEventListener('click', async () => {
@@ -2491,7 +2489,7 @@ function assignPlanNode(ctx, plan, taskId, project, refresh) {
       setActionStatus(launchStatus, 'Lancement en cours…');
       let result;
       try {
-        result = await ctx.api.taskLaunch(taskId, plan.empreinte);
+        result = await ctx.api.taskLaunch(taskId, plan.empreinte, project);
       } catch (error) {
         setActionStatus(launchStatus, failureText(error));
         launch.disabled = false;
@@ -2554,7 +2552,7 @@ function assignPlanNode(ctx, plan, taskId, project, refresh) {
   return panel;
 }
 
-async function renderAssignPanel(ctx, holder, taskId, project) {
+async function renderAssignPanel(ctx, holder, taskId, project, projectLabel = '') {
   // Chargement : squelette court, remplacé par le plan ou par l'échec nommé.
   const wait = document.createElement('div');
   wait.className = 'skeleton';
@@ -2572,10 +2570,12 @@ async function renderAssignPanel(ctx, holder, taskId, project) {
   }
   // Le pouls a pu fermer le panneau ou changer de tâche pendant la lecture.
   if (ctx.signal.aborted || !(assignUi.open && assignUi.task === taskId)) return;
-  holder.replaceChildren(assignPlanNode(ctx, plan, taskId, project, () => renderAssignPanel(ctx, holder, taskId, project)));
+  holder.replaceChildren(assignPlanNode(
+    ctx, plan, taskId, project, () => renderAssignPanel(ctx, holder, taskId, project, projectLabel), projectLabel,
+  ));
 }
 
-function assignBlock(ctx, detail, project) {
+function assignBlock(ctx, detail, project, projectLabel = '') {
   if (!ASSIGNABLE_STATUS.has(detail.status)) return null;
   const block = document.createElement('section');
   block.className = 'ex-insp-block';
@@ -2589,7 +2589,7 @@ function assignBlock(ctx, detail, project) {
   open.append(icon('play'), text('span', null, 'Assigner une session…'));
   const paint = (opened) => {
     open.setAttribute('aria-expanded', String(opened));
-    if (opened) renderAssignPanel(ctx, holder, detail.id, project);
+    if (opened) renderAssignPanel(ctx, holder, detail.id, project, projectLabel);
     else holder.replaceChildren();
   };
   open.addEventListener('click', () => {
@@ -3012,7 +3012,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   if (task.work) ctx.inspector.append(workBlock(task));
 
   // ── Assigner une session (P47) : le plan de lancement, sans rien lancer ──
-  appendIf(ctx.inspector, assignBlock(ctx, detail, project));
+  appendIf(ctx.inspector, assignBlock(ctx, detail, project, target?.name));
 
   // ── Mémoire servie : le reçu de rappel, rejouable (P27) ─────────────────
   ctx.inspector.append(receiptBlock(ctx, taskId, receipts, project));

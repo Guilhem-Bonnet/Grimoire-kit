@@ -27,6 +27,7 @@ dialog.pi-dialog { width: min(480px, calc(100% - 32px)); }
 .pi-field input { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); color: var(--ink); }
 .pi-modes { display: flex; flex-direction: column; gap: 4px; font-size: var(--t-s); color: var(--ink); }
 .pi-mode { display: flex; align-items: center; gap: var(--sp-2); }
+.pi-pilot { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 4px; }
 .pi-error { color: var(--bad); }
 .pi-error[hidden] { display: none; }
 .pi-form .kn-confirm-project-actions { margin-top: 0; }

@@ -426,3 +426,47 @@ def test_les_gestes_du_panneau_depuis_la_vue_globale_visent_le_projet_de_la_lign
     other = TaskService(roots["a"])
     assert other.ledger.get_task(task_b) is None
     assert other.require(own_portfolio["task_a"]).status.value == "claimed"
+
+
+def test_lancer_une_session_depuis_la_vue_globale_nomme_le_projet_de_la_ligne(
+    portfolio_page: Page, served_portfolio: dict[str, object]
+) -> None:
+    """Le plan est lu pour B (lecture réelle, rendue prête par le test) ; le bouton nomme B et le lancement part vers B.
+
+    Le lancement lui-même est simulé (`route.fulfill`) : aucune session d'agent n'est démarrée par ce test. La
+    politique de la route (jeton de session + empreinte du plan) est celle du projet ouvert, inchangée.
+    """
+    page = portfolio_page
+    slugs = served_portfolio["slugs"]
+    launches: list[tuple[str, str]] = []
+
+    def plan(route) -> None:  # type: ignore[no-untyped-def]
+        response = route.fetch()
+        body = response.json()
+        body.update({"pret": True, "raison": "", "empreinte": "empreinte-de-test"})
+        route.fulfill(response=response, json=body)
+
+    def launch(route) -> None:  # type: ignore[no-untyped-def]
+        request = route.request
+        launches.append((request.url, request.post_data or ""))
+        route.fulfill(json={"task_id": "x", "lance": True, "session": "sess-b", "detail": "simulé"})
+
+    page.route("**/api/workspace/tasks/*/launch-plan*", plan)
+    page.route("**/api/workspace/tasks/*/launch?*", launch)
+    _open_portfolio(page)
+    page.locator(".ex-card").filter(has_text=TITLE_B).first.dispatch_event("click")
+    inspector = page.locator("#inspector-body")
+    inspector.get_by_text(served_portfolio["task_b"], exact=True).wait_for()
+    inspector.locator("[data-role='assign-open']").dispatch_event("click")
+    button = inspector.locator("[data-role='assign-launch']")
+    button.wait_for()
+    assert "projet-beta" in button.inner_text(), "le bouton nomme le projet où la session se lance"
+    assert button.is_enabled()
+    _capture(page, "08-portefeuille-lancer-session")
+    button.dispatch_event("click")
+    inspector.get_by_text("sess-b").first.wait_for()
+
+    assert len(launches) == 1
+    url, body = launches[0]
+    assert f"project={slugs['b']}" in url and json.loads(body)["project"] == slugs["b"]
+    assert json.loads(body)["empreinte"] == "empreinte-de-test"
