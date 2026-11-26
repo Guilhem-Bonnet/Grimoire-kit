@@ -404,6 +404,7 @@ aucun démon) ; le routeur ne lit pas ce module, le quota relève de l'admission
 | Commande | Description |
 | --- | --- |
 | `grimoire queue plan [--json] [--no-routes]` | Ce que l'admission déciderait maintenant, à blanc : l'ordre de la file, les tâches admises, et pour chaque `Defer` sa raison ; sortie 1 si la capacité déclarée est illisible, 2 si une tâche est en famine |
+| `grimoire queue rules [--json]` | Les règles d'usage de `capacity.yaml`, la consommation du jour (borne basse), le nombre de sessions suivies, inconnues et en attente de relecture, et l'état de chaque règle ; lecture seule, sortie 1 si `capacity.yaml` est illisible, une règle invalide est listée « ignorée » |
 | `grimoire queue release <tâche> [--pool ci] [--reason ...]` | Libère un créneau CI dont la fin des checks n'est pas observable (`capacity.released`) ; geste d'humain, l'origine humaine est exigée comme pour `task comment` |
 
 **File** : priorité, puis vieillissement (+1 cran toutes les 24 h passées à l'état `ready`,
@@ -451,6 +452,30 @@ alors jamais `Defer(quota)`, seul un refus du fournisseur le peut. Fini, le jour
 à la consommation connue, un minimum lu dans `quota.consumed` ; la décision porte la route du
 routeur, inchangée. Si des appels ont eu lieu aujourd'hui sans chiffre de tokens, la consommation
 est `unknown` : refusée en autonome (`GRIMOIRE_UNATTENDED=1`), affichée en interactif.
+
+**Consommation et règles d'usage (partie 1/2, modules et lectures)** : trois modules autonomes préparent un plafond
+utilisable et des règles par tâche, projet ou jour. Leur branchement à l'admission, au tick et à la pause vient avec la
+partie réservée (#1412) : **tant qu'elle n'est pas fusionnée, ne posez pas `usage_rules:` ni `quota.on_unknown` dans
+`capacity.yaml`** — l'admission rejette une clé qu'elle ne connaît pas (échec fermé, comme pour toute clé inconnue).
+
+- `missions/quota_usage.py` lit le journal de chaque session lancée (worker, relecteur, arbitre, session orchestrateur)
+  et écrit `quota.consumed` : jetons (le total de `grimoire task usage`), coût si tous les appels sont tarifés, modèle,
+  rôle, tâche, session. Idempotent (clé : identifiant de session, ou son condensé), en delta, borne basse ; un journal
+  introuvable, illisible, trop gros, d'un hôte non lu ou un lancement sans identité donne `status: unknown` et sa raison
+  stable, jamais un chiffre inventé. Le suivi est tournant : budget de lectures et de temps par pas, un journal immobile
+  ne consomme rien, la plus ancienne lecture passe d'abord ; le cache `_grimoire-output/control/quota-reads.json` ne
+  porte que taille, date et total (jamais un chemin, lu comme fichier ordinaire seulement). La part consommée avant minuit
+  UTC se compte pour la veille.
+- `missions/usage_rules.py` lit, mesure et applique les règles `usage_rules:` — `{id, scope: task|project|day, metric:
+  tokens|usd|sessions, threshold, action: warn|hold|pause, enabled}`, appliquées à l'admission seulement, jamais à une
+  session en cours : `warn` (une ligne d'attention), `hold` (lancement retenu, la ligne dit comment lever), `pause` (pause
+  `drain`, jamais écrasée si une pause existe, levée par le tick au changement de jour pour la portée `day` seulement).
+  Une règle invalide est signalée et ignorée ; seuil non fini, négatif ou nul compris. Un coût inconnu n'est jamais compté
+  zéro.
+- `missions/session_cap.py` : la garde commune du plafond de sessions par jour (compte du jour au ledger, refus écrit une
+  fois par rôle et par jour, ligne d'attention), prête pour le relecteur et le merger.
+- Aucun outil MCP, aucune route ni commande de la console du cockpit n'écrit `capacity.yaml` ni `quota.consumed` (un test
+  le prouve) ; la fiche Capacité du cockpit montre la consommation du jour et les règles, en lecture seule.
 
 **Famine** : une tâche différée depuis plus de 24 h (`queue.famine_hours`) monte au niveau 2
 d'attention, sa raison est affichée.
