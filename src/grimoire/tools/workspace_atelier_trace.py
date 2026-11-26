@@ -51,6 +51,10 @@ def _target(root: Path, slug: str) -> tuple[str | None, str]:
     """``(chantier pour le kit, mission)`` d'un chantier existant, le slug étant confiné comme un fichier de phase."""
     slug = wa._slug(slug)
     wa._phase_path(root, slug, PHASES[0].filename)  # chantier inconnu ou lien symbolique : 404
+    from grimoire.core.cadrage_requirements import REQUIREMENT_FILES
+
+    for name in REQUIREMENT_FILES:  # un fichier d'exigences en lien symbolique n'est lu par personne : 404, rien de lu
+        wa._phase_path(root, slug, name)
     if slug == "principal":
         return None, ""
     from grimoire.core.chantiers import read_chantier
@@ -112,25 +116,46 @@ def _sig(path: Path) -> tuple[int, int] | None:
     return stat.st_mtime_ns, stat.st_size
 
 
+#: Un fichier d'exigences ou de contexte dépasse rarement quelques dizaines de Ko ; au-delà, seul le début compte pour la clé.
+MAX_HASHED_BYTES = 2_000_000
+
+
 def _text_hash(path: Path) -> str:
+    """Empreinte d'un fichier ORDINAIRE (jamais un lien, une FIFO ni un périphérique), lu sur une taille bornée ;
+    ``""`` si le fichier est absent ou refusé."""
+    from grimoire.core.regular_file import open_regular
+
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
+        with open_regular(path) as handle:
+            return hashlib.sha256(handle.read(MAX_HASHED_BYTES)).hexdigest()
+    except (OSError, ValueError):
         return ""
 
 
-def _stamp(root: Path, chantier: str | None, service: Any) -> tuple[Any, ...]:
+def _phase_file(root: Path, slug: str, name: str) -> Path | None:
+    """Chemin d'un fichier de phase du chantier ``slug`` : retrouvé par la liste des chantiers connus (jamais bâti
+    depuis l'URL), sans lien symbolique, puis confiné au dossier de cadrage du projet. ``None`` sinon."""
+    from grimoire.core.cadrage import cadrage_dir
+
+    try:
+        path = wa._phase_path(root, slug, name)
+        base = cadrage_dir(root, None).resolve()
+        return path if path.resolve().is_relative_to(base) else None
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _stamp(root: Path, slug: str, service: Any) -> tuple[Any, ...]:
     """Ce dont la trace dépend et qui bouge : le texte des fichiers d'exigences et du contexte projet (MOA), le
     ledger (événements), le journal d'autorité et sa tête. Un changement de l'un d'eux change la clé : une
     validation scellée au terminal apparaît dès la lecture suivante."""
-    from grimoire.core.cadrage import cadrage_dir
     from grimoire.core.cadrage_requirements import REQUIREMENT_FILES
     from grimoire.missions.mandate import AuthorityJournal
 
-    folder = cadrage_dir(root, chantier)
     journal = AuthorityJournal()
+    phases = (_phase_file(root, slug, name) for name in REQUIREMENT_FILES)
     return (
-        *(_text_hash(folder / name) for name in REQUIREMENT_FILES),
+        *("" if path is None else _text_hash(path) for path in phases),
         _text_hash(root / wa.CONTEXT_FILE),
         _sig(service.ledger_root / "events.jsonl"),
         _sig(journal.path),
@@ -155,7 +180,7 @@ def _built(root: Path, slug: str) -> Any:
 
     chantier, _mission = _target(root, slug)
     service = _service(root)
-    key = _stamp(root, chantier, service)
+    key = _stamp(root, slug, service)
     held = _TRACES.get((str(root), slug))
     if held is not None and held[0] == key and time.monotonic() - held[1] < CACHE_TTL_S:
         return held[2]

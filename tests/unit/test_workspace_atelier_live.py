@@ -567,6 +567,31 @@ def test_apply_locked_refuses_a_changed_plan_and_cockpit_shares_the_digest(proje
     assert _tasks_or_none(project) == []
 
 
+def test_forged_slugs_and_linked_requirement_files_are_never_read(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for forged in ("../../etc", "..%2f..", "a/../b", "inconnu", ".hidden"):
+        for leaf in ("trace", "decoupage"):
+            with pytest.raises(FileNotFoundError):
+                _get(project, forged, leaf)
+    slug = _chantier(project)
+    outside = project.parent / "secret.md"
+    outside.write_text("- REQ-001 (Must) : volé\n  - c\n", encoding="utf-8")
+    phase = project / "_grimoire" / "cadrage" / slug / "04-exigences.md"
+    phase.unlink()  # le fichier de phase est remplacé par un lien symbolique sortant
+    phase.symlink_to(outside)
+    reads: list[str] = []
+    from grimoire.core import regular_file
+
+    real = regular_file.open_regular
+    monkeypatch.setattr(regular_file, "open_regular", lambda p: (reads.append(str(p)), real(p))[1])
+    for leaf in ("trace", "decoupage"):
+        with pytest.raises(FileNotFoundError):  # 404 net, pas d'exception brute
+            _get(project, slug, leaf)
+    assert wa.post_http(project, f"{P}atelier/chantiers/{slug}/decoupage", {"confirm": True, "digest": "x"})[0] == 404
+    assert not any(str(outside) in r for r in reads)
+    assert live._text_hash(phase) == ""  # même la clé de cache refuse le lien
+    assert live._phase_file(project, slug, "04-exigences.md") is None
+
+
 def test_the_trace_payload_is_json_serialisable(project: Path, human: None) -> None:
     slug = _chantier(project)
     _approve(project, slug, "REQ-001")
