@@ -56,6 +56,7 @@ __all__ = [
     "evaluate",
     "event_day",
     "lift_day_pauses",
+    "next_midnight",
     "parse_rules",
     "rule_dict",
 ]
@@ -214,9 +215,10 @@ def _records(events: Iterable[Any], now: datetime) -> list[_Record]:
             key = str(payload.get("session") or event.id)
             task = str(payload.get("task_id") or "")
             if payload.get("status") == "unknown":
-                if unknown_counts_today(payload, parse_instant(str(event.created_at)), now):
-                    day = today
-                out.append(_Record(day, task, key, "unknown", 0, None))
+                # Un inconnu qui ne pèse plus reste dans la mesure sous le genre « settled » : son événement est le
+                # dernier état de la session et doit défaire l'inconnu en cours qui le précède, quel que soit son jour.
+                weighs = unknown_counts_today(payload, parse_instant(str(event.created_at)), now)
+                out.append(_Record(today, task, key, "unknown" if weighs else "settled", 0, None))
                 continue
             day = event_day(payload, day)
             tokens = payload.get("tokens")
@@ -235,7 +237,7 @@ def _measure(rule: UsageRule, records: list[_Record]) -> tuple[float, bool]:
         return float(len({r.key for r in records if r.kind == "launch"})), True
     last: dict[str, str] = {}
     for r in records:  # chronologique : le dernier état d'une session fait foi (un inconnu récent défait un connu ancien)
-        if r.kind in ("consumed", "unknown"):
+        if r.kind in ("consumed", "unknown", "settled"):
             last[r.key] = r.kind
     unknown = {key for key, kind in last.items() if kind == "unknown"}
     consumed = [r for r in records if r.kind == "consumed"]
@@ -403,5 +405,6 @@ def lift_day_pauses(project_root: Path, now: datetime) -> bool:
 
 
 def next_midnight(now: datetime) -> str:
+    """Minuit UTC suivant *now* (ISO 8601) : la reprise d'un lancement retenu par une règle de portée jour."""
     moment = now.astimezone(UTC)
     return (moment.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat()

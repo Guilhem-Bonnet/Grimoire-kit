@@ -175,6 +175,16 @@ def test_metrics_by_scope_and_an_unknown_cost_is_never_zero(service: TaskService
     assert today["tokens"] == 1500 and today["usd"] == 0.5 and today["usd_complete"] is False and today["sessions"] == 2
 
 
+def test_a_settled_unknown_clears_the_ongoing_one_before_it_whatever_the_day(service: TaskService) -> None:
+    base = {"session": "z", "status": "unknown", "tokens": None, "task_id": ""}
+    service.ledger.append_event(QUOTA_CONSUMED_EVENT, "x", "task", "tick", {**base, "reason": "trop gros", "ongoing": True})
+    rules, _ = parse_rules([{"id": "d", "scope": "day", "metric": "tokens", "threshold": 9, "action": "warn"}])
+    later = datetime.now(UTC) + timedelta(days=3)
+    assert not evaluate(rules, service.ledger.list_events(), later)[0].complete  # en cours : pèse sans limite de durée
+    service.ledger.append_event(QUOTA_CONSUMED_EVENT, "x", "task", "tick", {**base, "reason": "immobile", "ongoing": False})
+    assert evaluate(rules, service.ledger.list_events(), later)[0].complete  # remplacé par son dernier état
+
+
 def test_the_day_scope_forgets_yesterday_and_an_unknown_session_makes_the_reading_partial(service: TaskService) -> None:
     _spent(service, 5000)
     service.ledger.append_event(
