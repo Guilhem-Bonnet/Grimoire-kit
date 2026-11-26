@@ -124,11 +124,14 @@ def warm_sheet(root: Path, stop: threading.Event | None = None) -> None:
     Le premier parcours complet du journal (97 Mo, ~3 s) se paie ici, en premier, plutôt qu'à la première
     requête : ``attention``, ``agents`` et ``propositions`` s'y disputent le même verrou
     (``journal_cache``), donc une requête qui arrive pendant le parcours attend celui-ci au lieu d'en lancer
-    un second. *stop* annule la suite entre deux étapes (le parcours en cours, lui, se termine).
+    un second. Vient ensuite la Flotte (``cockpit_warm.warm_fleet`` : projet courant, puis vue globale), pour que
+    sa première ouverture soit servie à chaud. *stop* annule la suite entre deux étapes (l'étape en cours, elle,
+    se termine) ; l'échec d'une étape n'empêche pas les suivantes.
     """
     cancelled = stop.is_set if stop is not None else (lambda: False)
     with contextlib.suppress(Exception):
         _lower_priority()
+        from grimoire.cli.cockpit_warm import warm_fleet
         from grimoire.tools import workspace_api
         from grimoire.tools.workspace_pulse import TRACES_RELPATH
         from grimoire.traces.journal_cache import load_trace_journal
@@ -137,10 +140,12 @@ def warm_sheet(root: Path, stop: threading.Event | None = None) -> None:
             lambda: load_trace_journal(root / TRACES_RELPATH),
             lambda: workspace_api.sheet_view(root),
             lambda: workspace_api.tasks_view(root),
+            lambda: warm_fleet(root, stop),
         ):
             if cancelled():
                 return
-            step()
+            with contextlib.suppress(Exception):
+                step()
 
 
 def start_warm(root: Path | None) -> threading.Event:
