@@ -41,7 +41,7 @@ from grimoire.cli.cockpit_http import (
     gzip_body,
     send_json,
     serve_asset,
-    warm_sheet,
+    start_warm,
 )
 from grimoire.cli.cockpit_memory import (
     ALLOWED_ACTIONS,
@@ -1319,15 +1319,15 @@ def serve(
     console.print(f"[bold green]Cockpit[/bold green] → [link]{url}[/link]  [dim](Ctrl-C pour arrêter)[/dim]")
     if open_browser:
         webbrowser.open(url)
-    if _OPENING_PATH is not None:
-        # P94 : la première lecture de la fiche paie imports et caches froids ;
-        # elle se fait ici, avant que la page ne la demande.
-        threading.Thread(target=warm_sheet, args=(_OPENING_PATH,), daemon=True).start()
+    # P94 : le premier parcours du journal des traces, les imports et les caches froids se paient ici,
+    # avant que la page ne les demande ; l'arrêt du serveur annule la suite de la chauffe.
+    warm_stop = start_warm(_OPENING_PATH)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         console.print("\n[dim]Cockpit arrêté.[/dim]")
     finally:
+        warm_stop.set()
         httpd.server_close()
 
 
