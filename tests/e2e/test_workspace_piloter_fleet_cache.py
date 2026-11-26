@@ -68,8 +68,12 @@ def test_le_changement_de_projet_n_interroge_que_le_projet_cible(
         page.wait_for_selector("button:has-text('Mettre à jour')")
         assert fleet == [], f"la fiche d'un projet a relu la flotte : {fleet}"
 
-        assert seen == [f"{served}/api/workspace/sheet?project={slug_b}"], (
-            f"changement de projet : {len(seen)} requête(s) /api/workspace/sheet, attendu 1 (pas 3) — {seen}"
+        # Depuis #1243 la fiche se charge par sections : les sous-vues rapides, puis les agents, puis les
+        # propositions — trois appels, tous pour CE projet, jamais un par projet de la flotte.
+        page.wait_for_load_state("networkidle")
+        assert len(seen) == 3 and all(f"project={slug_b}" in url for url in seen), (
+            f"changement de projet : {len(seen)} requête(s) /api/workspace/sheet, attendu 3 sections du seul "
+            f"projet {slug_b} (pas une par projet) — {seen}"
         )
     finally:
         context.close()

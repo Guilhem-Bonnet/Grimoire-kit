@@ -23,6 +23,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from grimoire.core import file_memo
 from grimoire.core.exceptions import GrimoireRegistryError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.providers.capabilities import CapabilityPairs, parse_capabilities
@@ -159,17 +160,24 @@ def _load_registry_mapping(root: Path) -> dict[str, Any]:
     path = root / REGISTRY_FILE
     if not path.is_file():
         return {}
+
+    def parse(raw: bytes) -> dict[str, Any]:
+        data = _yaml().load(raw.decode("utf-8"))
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            msg = f"{REGISTRY_FILE} doit être une table YAML."
+            raise ProviderRegistryError(msg)
+        return data
+
     try:
-        data = _yaml().load(path.read_text(encoding="utf-8"))
+        # Dans une lecture d'affichage du cockpit (``file_memo.view_scope``), le registre n'est lu et analysé
+        # qu'une fois par changement du fichier : la capacité le relisait 64 fois par appel (#1243). Hors de ce
+        # scope, relecture simple. Tous les appelants ne font que lire la table : rien ne la modifie.
+        return file_memo.view_derived(path, "provider-registry", parse)
     except (YAMLError, OSError, UnicodeDecodeError) as exc:
         msg = f"{REGISTRY_FILE} illisible : {type(exc).__name__}: {exc}"
         raise ProviderRegistryError(msg) from exc
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        msg = f"{REGISTRY_FILE} doit être une table YAML."
-        raise ProviderRegistryError(msg)
-    return data
 
 
 def _str_tuple(value: Any) -> tuple[str, ...]:

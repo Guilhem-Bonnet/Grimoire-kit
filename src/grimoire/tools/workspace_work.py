@@ -213,6 +213,42 @@ def read_transcript_work(path: Path) -> dict[str, Any]:
     return state.as_work()
 
 
+def _copilot_session_work(project_root: Path, session_id: str, empty: dict[str, Any]) -> dict[str, Any]:
+    """Le modèle réel d'une session Copilot, lu dans son journal si l'emplacement est configuré (non vérifié).
+
+    Pas d'effort ni de skills : le format lu dans les fixtures ne les porte pas (``None`` / vide, jamais inventés).
+    """
+    from grimoire.traces.copilot_usage import (
+        UNVERIFIED_NOTE,
+        copilot_logs_location,
+        locate_session_journal,
+        read_copilot_journal,
+    )
+
+    location = copilot_logs_location(project_root)
+    if not location.usable or location.path is None:
+        return empty
+    journal = locate_session_journal(location.path, session_id)
+    if journal is None:
+        return empty
+    try:
+        session = read_copilot_journal(journal, base=location.path)
+    except (OSError, ValueError):
+        return empty
+    if not session.recognized:
+        return empty
+    model = session.model or None
+    return {
+        "source": "copilot_journal",
+        "model": model,
+        "tier": model_tier(model) if model else None,
+        "effort": None,
+        "skills": [],
+        "verified": False,
+        "note": UNVERIFIED_NOTE,
+    }
+
+
 def session_work(project_root: Path, session_id: str, host: str, *, home: Path | None = None) -> dict[str, Any]:
     """Ce que le journal de session dit du travail en cours — honnête quand il ne dit rien.
 
@@ -224,6 +260,8 @@ def session_work(project_root: Path, session_id: str, host: str, *, home: Path |
     from grimoire.bridges.schemas import HostId
     from grimoire.missions.session_link import canonical_host
 
+    if canonical_host(host) == HostId.GITHUB_COPILOT.value:
+        return _copilot_session_work(project_root, session_id, empty)
     if canonical_host(host) != HostId.CLAUDE_CODE_CLI.value:
         return empty
     path = transcript_path(project_root, session_id, home=home)
