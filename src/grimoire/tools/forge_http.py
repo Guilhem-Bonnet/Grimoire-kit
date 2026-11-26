@@ -287,6 +287,12 @@ class _ForgeHandler(SecureHandlerMixin, BaseHTTPRequestHandler):
         # déclare `readOnly` et n'a pas de raison de réclamer une
         # tâche ou de créer un override dans un dépôt qu'il ne sert
         # pas. Le refus y est donc un 404, pas un oubli.
+        from grimoire.tools import workspace_atelier
+
+        if path.startswith(workspace_atelier.ATELIER):  # Atelier en test : 404 drapeau, 409 bloc changé
+            code, payload = workspace_atelier.post_http(self.api.project_root, path, body)
+            self._json(payload, code)
+            return
         result = workspace_post(self.api.project_root, path, body)
         if result is WORKSPACE_UNHANDLED:
             self._error("route inconnue", 404)

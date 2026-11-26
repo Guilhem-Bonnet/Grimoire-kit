@@ -15,6 +15,8 @@ Routes (préfixe ``/api/workspace/``) :
 - ``GET atelier/chantiers/<slug>`` : cinq phases en blocs typés
 - ``PUT atelier/chantiers/<slug>/blocs/<id>`` ``{"text", "expected"}`` : réécrit la seule plage du bloc ;
   ``expected`` est l'empreinte du fichier de phase lue avec ``GET`` ; un fichier changé depuis = 409.
+- ``GET|POST atelier/chantiers/<slug>/suggestions``, ``POST …/suggestions/<id>`` : lot 2, voir
+  :mod:`grimoire.tools.workspace_atelier_suggestions` (``POST`` rend ses refus par :func:`post_http`).
 """
 
 from __future__ import annotations
@@ -156,6 +158,10 @@ def _chantier_row(root: Path, chantier: Any) -> dict[str, Any]:
     row["phases"] = [r["state"] for r in cadrage_status(root, name)["phases"]]
     if chantier.error:
         row["chemin"] = (cadrage_dir(root, name).relative_to(root) / "chantier.yaml").as_posix()
+    else:
+        from grimoire.tools import workspace_atelier_suggestions as sugg
+
+        row["suggestions"] = sugg.pending_count(root, chantier.slug)  # en attente, bloc visé encore là
     return dict(row)
 
 
@@ -219,10 +225,13 @@ def document(root: Path, slug: str) -> dict[str, Any]:
         found = read_chantier(root)
     if found is None:
         raise FileNotFoundError(f"chantier inconnu : {slug!r}")
-    return {
-        "chantier": _chantier_row(root, found),
-        "phases": [_phase_view(root, None if found.default else found.slug, p) for p in PHASES],
-    }
+    from grimoire.tools import workspace_atelier_suggestions as sugg
+
+    phases = [_phase_view(root, None if found.default else found.slug, p) for p in PHASES]
+    waiting = sugg.pending(root, slug)
+    for phase in phases:
+        phase["suggestions"] = [s for s in waiting if s["phase"] == phase["id"]]
+    return {"chantier": _chantier_row(root, found), "phases": phases}
 
 
 # ── Édition d'un bloc ───────────────────────────────────────────────────────
@@ -312,6 +321,10 @@ def get(root: Path, path: str, _query: dict[str, list[str]]) -> Any:
         return list_view(root)
     if len(rest) == 2 and rest[0] == "chantiers":
         return document(root, rest[1])
+    if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "suggestions":
+        from grimoire.tools import workspace_atelier_suggestions as sugg
+
+        return sugg.listing(root, rest[1])
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
@@ -321,7 +334,30 @@ def post(root: Path, path: str, body: dict[str, Any]) -> Any:
     _need_flag(root)
     if path.rstrip("/") == f"{ATELIER}chantiers":
         return create(root, body)
+    rest = path[len(ATELIER) :].strip("/").split("/")
+    if len(rest) >= 3 and rest[0] == "chantiers" and rest[2] == "suggestions":
+        from grimoire.tools import workspace_atelier_suggestions as sugg
+
+        if len(rest) == 3:
+            return sugg.deposit(root, rest[1], body)
+        if len(rest) == 4:
+            return sugg.decide(root, rest[1], rest[3], body)
     raise FileNotFoundError(f"route inconnue : {path}")
+
+
+def post_http(root: Path, path: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """``POST`` complet sous ``atelier/`` : code HTTP et charge, refus du domaine traduits (dont le 409)."""
+    try:
+        result = post(root, path, body)
+        return 200, result if isinstance(result, dict) else {"ok": True, "result": result}
+    except ConflictError as exc:
+        return 409, {"ok": False, "conflict": True, "error": str(exc)}
+    except FileNotFoundError as exc:
+        return 404, {"ok": False, "error": f"introuvable : {exc}"}
+    except PermissionError as exc:
+        return 403, {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return 400, {"ok": False, "error": str(exc)}
 
 
 def put_http(

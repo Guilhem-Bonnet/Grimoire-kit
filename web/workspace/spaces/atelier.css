@@ -65,10 +65,25 @@
 .at-btn.ghost { border-color: transparent; background: none; color: var(--ink2); }
 .at-btn:focus-visible, .at-phase:focus-visible, .at-search:focus-visible, .at-input:focus-visible, :where(.at-page) .at-row:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .at-btn .ico { width: 15px; height: 15px; }
+/* Suggestions de l'agent (lot 2) : sous le bloc visé, bordure pointillée, avant / après lisibles. */
+.at-sugg { border: 1.5px dashed color-mix(in srgb, var(--acc) 45%, transparent); background: var(--acc-soft); border-radius: var(--r); padding: var(--sp-3) var(--sp-4); margin: var(--sp-1) calc(var(--sp-3) * -1) var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-2); }
+.at-sugg-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.at-sugg-who { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--t-s); color: var(--acc); font-weight: 600; }
+.at-ai { width: 20px; height: 20px; border-radius: 6px; background: var(--acc); color: var(--on-acc); display: grid; place-items: center; flex: none; }
+.at-ai .ico { width: 12px; height: 12px; }
+.at-diff { display: flex; gap: var(--sp-3); align-items: baseline; white-space: pre-wrap; overflow-wrap: anywhere; }
+.at-diff-tag { flex: none; width: 64px; font-size: var(--t-min); color: var(--ink3); text-transform: uppercase; letter-spacing: 0.04em; }
+.at-diff del { color: var(--ink2); text-decoration-color: var(--ink3); }
+.at-diff ins { text-decoration: none; background: color-mix(in srgb, var(--acc) 14%, transparent); border-radius: 3px; padding: 0 2px; }
+.at-sugg-why { margin: 0; color: var(--ink2); font-size: var(--t-s); }
+.at-sugg .at-form { background: var(--panel); }
+.at-pending { color: var(--acc); font-weight: 600; }
 @container canvas (max-width: 900px) {
   .at-body { padding: var(--sp-4); }
   .at-cols { display: none; }
   :where(.at-page) .at-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   :where(.at-page) .at-row > :first-child { grid-column: 1 / -1; }
   .at-sheet { padding: var(--sp-4); }
+  .at-sugg { margin-left: 0; margin-right: 0; }
+  .at-diff { flex-direction: column; gap: var(--sp-1); }
 }
