@@ -26,6 +26,7 @@ Les réglages des rôles (``wip``, plafonds, activation) et la cadence du minute
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import UTC, datetime
@@ -70,13 +71,26 @@ def _author(flag: Any) -> str:
     return f"{actor} (ligne de commande)" if actor else "auteur non noté"
 
 
+def _clean(value: object, limit: int = _REASON_MAX) -> str:
+    """Un texte sur une ligne, sans contrôle ni caractère invisible, borné : tout ce qu'un agent a pu écrire passe ici."""
+    from grimoire.missions.requirement_gate import safe_text
+
+    text = " ".join(safe_text(value).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def _flag_view(flag: Any) -> dict[str, Any]:
     foreign = (flag.actor or "") != COCKPIT_ACTOR
     rule = (flag.actor or "").startswith(_USAGE_RULE_PREFIX)
-    notice = f"Pause posée par {_author(flag)} levée."
+    author = _clean(_author(flag), 80)
+    notice = f"Pause posée par {author} levée."
     if rule:
         notice += " La règle peut la reposer si son seuil est encore dépassé."
-    return {**flag.to_dict(), "author": _author(flag), "foreign": foreign, "usage_rule": rule, "lift_notice": notice}
+    raw = flag.to_dict()
+    # L'identifiant de session de l'agent ne sort pas ; l'interface n'a besoin que de savoir qu'il y en a une.
+    raw["has_session"] = bool(raw.pop("session", ""))
+    raw["actor"], raw["reason"], raw["unreadable"] = _clean(raw["actor"], 80), _clean(raw["reason"]), _clean(raw["unreadable"])
+    return {**raw, "author": author, "foreign": foreign, "usage_rule": rule, "lift_notice": notice}
 
 
 def _breaker_view(root: Path) -> dict[str, Any]:
@@ -87,9 +101,10 @@ def _breaker_view(root: Path) -> dict[str, Any]:
     read = load_orchestrator_policy(root)
     threshold = read.policy.breaker_threshold if read.policy is not None else DEFAULT_BREAKER_THRESHOLD
     return {
-        "open": state.open, "failures": state.failures, "threshold": threshold, "reason": state.reason,
-        "source": state.source, "opened_at": state.opened_at, "transients": state.transients,
-        "history": [dict(h) for h in state.history[-5:]], "describe": state.describe(),
+        "open": state.open, "failures": state.failures, "threshold": threshold, "reason": _clean(state.reason),
+        "source": _clean(state.source, 40), "opened_at": state.opened_at, "transients": state.transients,
+        "history": [{str(k): _clean(v) for k, v in h.items()} for h in state.history[-5:]],
+        "describe": _clean(state.describe(), 400),
     }
 
 
@@ -256,14 +271,19 @@ def _journal_readable() -> bool:
 
 
 def _journal(project_root: Path, gesture: str, **fields: Any) -> bool:
-    """L'événement gouverné ``pilotage`` au journal d'autorité ; ``False`` si le journal refuse."""
+    """L'événement gouverné ``pilotage`` au journal d'autorité ; ``False`` si le journal refuse.
+
+    Un geste de machine (``scope: machine``) ne porte pas de projet : le projet qui l'a ancré est ``via_project``.
+    """
     from grimoire.missions.mandate import AuthorityJournal
     from grimoire.missions.pause import home_root
     from grimoire.missions.schemas import ORIGIN_HUMAN
 
+    anchor = str(home_root(project_root))
+    where = {"project": "", "via_project": anchor} if fields.get("scope") == "machine" else {"project": anchor}
     try:
         AuthorityJournal().append({
-            "type": "pilotage", "project": str(home_root(project_root)), "gesture": gesture, "by": ORIGIN_HUMAN,
+            "type": "pilotage", **where, "gesture": gesture, "by": ORIGIN_HUMAN,
             "via": "cockpit", "ts": datetime.now(UTC).isoformat(), **fields,
         })
     except Exception:  # un journal rompu ne doit pas empêcher d'ARRÊTER ; l'appelant le dit
@@ -271,24 +291,42 @@ def _journal(project_root: Path, gesture: str, **fields: Any) -> bool:
     return True
 
 
-def _need_readable_journal() -> None:
+def _need_readable_journal(command: str) -> None:
+    """Rendre l'autonomie exige un journal lisible. La ligne de commande ne passe pas par lui : elle reste possible."""
     if not _journal_readable():
         raise ValueError(
-            "journal d'autorité illisible : rendre l'autonomie est refusé tant qu'il n'est pas réparé "
-            "(`grimoire orchestrate resume` en ligne de commande reste possible)"
+            "journal d'autorité illisible : rendre l'autonomie est refusé ici tant qu'il n'est pas réparé ; "
+            f"`{command}` en ligne de commande ne dépend pas de ce journal et reste possible"
         )
 
 
 def _reason(body: dict[str, Any]) -> str:
-    return str(body.get("reason") or "").strip()[:_REASON_MAX]
+    return _clean(body.get("reason") or "")
+
+
+def _described(flag: Any) -> dict[str, Any]:
+    """Ce qu'une pause était, pour l'événement : auteur, origine, mode, motif, date (jamais l'identifiant de session)."""
+    view = _flag_view(flag)
+    return {
+        "author": view["author"], "actor": view["actor"], "origin": _clean(flag.origin, 20), "mode": flag.mode,
+        "reason": view["reason"], "since": flag.since, "had_session": view["has_session"],
+    }
+
+
+def _stops_at_least(existing: Any, mode: str) -> bool:
+    """Vrai si poser *mode* arrête au moins autant que *existing* : rien avant, une pause plus étroite, ou un durcissement."""
+    if existing is None or existing.tasks:
+        return True
+    return mode == "hold" and existing.mode != "hold"
 
 
 def _refuse_if_paused(existing: Any, body: dict[str, Any]) -> None:
     """Une pause en place n'est jamais écrasée sans ``replace: true`` : on dit qui l'a posée et pourquoi."""
     if existing is not None and body.get("replace") is not True:
-        why = f" ({existing.reason})" if existing.reason else ""
+        view = _flag_view(existing)
+        why = f" ({view['reason']})" if view["reason"] else ""
         raise ValueError(
-            f"une pause {existing.mode} est déjà en place, posée par {_author(existing)}{why} : "
+            f"une pause {existing.mode} est déjà en place, posée par {view['author']}{why} : "
             "« Reprendre » la lève ; la remplacer demande un geste explicite (replace)"
         )
 
@@ -319,7 +357,14 @@ def _pause_at(project_root: Path, body: dict[str, Any], scope: str) -> Any:
     if machine and body.get("confirm") is not True:
         raise ValueError("pause de toute la machine : `confirm: true` requis (l'interface nomme ce qui sera arrêté)")
     path = global_pause_path() if machine else project_pause_path(project_root)
-    _refuse_if_paused(read_flag(path, scope) if path is not None else None, body)
+    existing = read_flag(path, scope) if path is not None else None
+    _refuse_if_paused(existing, body)
+    if not _stops_at_least(existing, str(mode)) and not _journal_readable():
+        raise ValueError(
+            "journal d'autorité illisible : sans lui, seul un geste qui arrête au moins autant qu'avant passe "
+            "(poser une pause, durcir, ouvrir le disjoncteur) ; remplacer ou affaiblir une pause est refusé ici, "
+            "`grimoire orchestrate pause` / `resume` en ligne de commande ne dépendent pas de ce journal"
+        )
     reason = _reason(body)
     try:
         flag = write_pause(
@@ -328,8 +373,22 @@ def _pause_at(project_root: Path, body: dict[str, Any], scope: str) -> Any:
         )
     except PauseError as exc:
         raise ValueError(str(exc)) from exc
-    journaled = _journal(project_root, "pause", scope=scope, mode=flag.mode, reason=reason)
-    return _outcome(project_root, journaled, paused=flag.to_dict())
+    if flag.session and path is not None:
+        # `write_pause` garde la session du drapeau remplacé : un drapeau humain ne porte aucune session d'agent.
+        # Le drapeau ne quitte jamais l'état « en pause » pendant la réécriture (même fichier, écriture atomique).
+        from grimoire.core.fsio import atomic_write
+        from grimoire.missions.pause import SCHEMA
+
+        payload = {
+            "schema": SCHEMA, "mode": flag.mode, "tasks": list(flag.tasks), "since": flag.since, "actor": flag.actor,
+            "reason": flag.reason, "origin": flag.origin, "session": "",
+        }
+        atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    extra = {"replaced": _described(existing)} if existing is not None else {}
+    journaled = _journal(
+        project_root, "pause", scope="machine" if machine else "project", mode=flag.mode, reason=reason, **extra
+    )
+    return _outcome(project_root, journaled, paused=_flag_view(flag))
 
 
 def pause_project(project_root: Path, body: dict[str, Any]) -> Any:
@@ -347,7 +406,7 @@ def _resume_at(project_root: Path, body: dict[str, Any], scope: str) -> Any:
     from grimoire.missions.schemas import ORIGIN_HUMAN
 
     _gate(project_root, body, "reprendre")
-    _need_readable_journal()
+    _need_readable_journal("grimoire orchestrate resume" + (" --global" if scope == "global" else ""))
     try:
         lifted = clear_pause(home_root(project_root), scope=scope, origin=ORIGIN_HUMAN)
     except PauseError as exc:
@@ -356,7 +415,8 @@ def _resume_at(project_root: Path, body: dict[str, Any], scope: str) -> Any:
         return _outcome(project_root, True, lifted=None, notice="Aucune pause à lever.")
     view = _flag_view(lifted)
     journaled = _journal(
-        project_root, "resume", scope=scope, mode=lifted.mode, lifted_actor=lifted.actor, lifted_reason=lifted.reason,
+        project_root, "resume", scope="machine" if scope == "global" else "project", mode=lifted.mode,
+        lifted=_described(lifted),
     )
     return _outcome(project_root, journaled, lifted=view, notice=view["lift_notice"])
 
@@ -381,7 +441,7 @@ def breaker_reset(project_root: Path, body: dict[str, Any]) -> Any:
     before = read_breaker(home)
     if not before.open:
         raise ValueError("le disjoncteur est déjà fermé")
-    _need_readable_journal()
+    _need_readable_journal("grimoire orchestrate breaker reset")
     reset(home, actor=COCKPIT_ACTOR)
     journaled = _journal(project_root, "breaker_reset", was_reason=before.reason, was_source=before.source)
     return _outcome(project_root, journaled, closed=True, was=before.reason)

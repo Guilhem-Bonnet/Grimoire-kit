@@ -495,6 +495,105 @@ def test_l_evenement_gouverne_nomme_le_geste_et_l_humain(duo: tuple[int, Path, P
     assert entry["project"] == str(alpha)
 
 
+def _break_journal() -> None:
+    journal = AuthorityJournal().path
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("pas une ligne de journal\n", encoding="utf-8")
+
+
+def test_sans_journal_lisible_aucun_remplacement_n_affaiblit_un_arret(duo: tuple[int, Path, Path]) -> None:
+    port, alpha, _beta = duo
+    write_pause(alpha, mode=HOLD, actor="guilhem", reason="arret humain", origin="human")
+    write_pause(alpha, mode=HOLD, scope=SCOPE_GLOBAL, actor="guilhem", origin="human")
+    _break_journal()
+    before = (project_pause_path(alpha).read_bytes(), global_pause_path().read_bytes())  # type: ignore[union-attr]
+
+    for mode in (DRAIN, HOLD):  # affaiblir, et remplacer à l'identique : aucune trace possible, donc refusé
+        status, body = _post(port, PAUSE, "alpha", {"mode": mode, "replace": True})
+        assert status == 400 and "journal d'autorité illisible" in body["error"], body
+        status, body = _post(port, MACHINE_PAUSE, "beta", {"mode": mode, "confirm": True, "replace": True})
+        assert status == 400 and "journal d'autorité illisible" in body["error"], body
+
+    assert (project_pause_path(alpha).read_bytes(), global_pause_path().read_bytes()) == before  # type: ignore[union-attr]
+
+
+def test_sans_journal_lisible_poser_ou_durcir_ou_ouvrir_passent(duo: tuple[int, Path, Path]) -> None:
+    port, alpha, beta = duo
+    _break_journal()
+
+    status, body = _post(port, PAUSE, "alpha", {"mode": DRAIN})
+    assert status == 200 and body["journaled"] is False
+    status, body = _post(port, PAUSE, "alpha", {"mode": HOLD, "replace": True})
+    assert status == 200, "durcir (drain vers hold) arrête davantage"
+    assert read_flag(project_pause_path(alpha), "project").mode == HOLD  # type: ignore[union-attr]
+    assert _post(port, TRIP, "beta", {"reason": "r"})[0] == 200
+    assert read_breaker(beta).open is True
+
+
+def test_le_remplacement_trace_l_auteur_d_avant_et_n_herite_d_aucune_session(duo: tuple[int, Path, Path]) -> None:
+    port, alpha, _beta = duo
+    write_pause(alpha, mode=HOLD, actor="session-x", reason="motif de l'agent", origin="agent", session="S-secrete")
+
+    status, body = _post(port, PAUSE, "alpha", {"mode": DRAIN, "replace": True, "reason": "je reprends la main"})
+
+    assert status == 200, body
+    flag = read_flag(project_pause_path(alpha), "project")
+    assert flag is not None and (flag.origin, flag.actor, flag.session) == ("human", "cockpit", "")
+    [event] = [e for e in AuthorityJournal().read() if e.get("type") == "pilotage"]
+    replaced = event["replaced"]
+    assert (replaced["origin"], replaced["mode"], replaced["reason"]) == ("agent", HOLD, "motif de l'agent")
+    assert "session-x" in replaced["author"] and replaced["had_session"] is True
+    assert "S-secrete" not in json.dumps(event)
+
+    status, body = _post(port, RESUME, "alpha")
+    lifted = [e for e in AuthorityJournal().read() if e.get("type") == "pilotage"][-1]["lifted"]
+    assert status == 200 and (lifted["origin"], lifted["mode"], lifted["reason"]) == ("human", DRAIN, "je reprends la main")
+
+
+def test_les_refus_de_sortie_de_blocage_citent_la_bonne_commande_de_la_ligne_de_commande(
+    duo: tuple[int, Path, Path],
+) -> None:
+    port, alpha, _beta = duo
+    write_pause(alpha, mode=DRAIN, actor="guilhem")
+    write_pause(alpha, mode=DRAIN, scope=SCOPE_GLOBAL, actor="guilhem")
+    trip(alpha, "r")
+    _break_journal()
+
+    assert "`grimoire orchestrate resume`" in _post(port, RESUME, "alpha")[1]["error"]
+    assert "`grimoire orchestrate resume --global`" in _post(port, MACHINE_RESUME, "alpha")[1]["error"]
+    assert "`grimoire orchestrate breaker reset`" in _post(port, RESET, "alpha")[1]["error"]
+
+
+def test_le_motif_ecrit_par_un_agent_est_nettoye_borne_et_sa_session_ne_sort_pas(duo: tuple[int, Path, Path]) -> None:
+    port, alpha, _beta = duo
+    hostile = "<img src=x onerror=alert(1)>\n\x1b[31m rouge ‮​" + "A" * 5000
+    write_pause(alpha, mode=DRAIN, actor="agent\nzz", reason=hostile, origin="agent", session="SESSION-SECRETE")
+    trip(alpha, hostile)
+
+    state = _state(port, "alpha")
+    flag = state["pause"]["project"]
+
+    assert "\n" not in flag["reason"] and "\x1b" not in flag["reason"] and "‮" not in flag["reason"]
+    assert len(flag["reason"]) <= workspace_pilotage._REASON_MAX and flag["reason"].endswith("…")
+    assert flag["actor"] == "agent zz" and "session" not in flag and flag["has_session"] is True
+    assert len(state["breaker"]["reason"]) <= workspace_pilotage._REASON_MAX
+    assert "SESSION-SECRETE" not in json.dumps(state) and "\n" not in state["sentence"]
+    status, body = _post(port, PAUSE, "alpha", {"mode": HOLD})
+    assert status == 400 and "\x1b" not in body["error"] and len(body["error"]) < 600
+
+
+def test_un_geste_de_machine_se_journalise_en_portee_machine_avec_son_projet_d_ancrage(
+    duo: tuple[int, Path, Path],
+) -> None:
+    port, _alpha, beta = duo
+
+    _post(port, MACHINE_PAUSE, "beta", {"mode": DRAIN, "confirm": True})
+    _post(port, MACHINE_RESUME, "beta")
+
+    events = [e for e in AuthorityJournal().read() if e.get("type") == "pilotage"]
+    assert [(e["scope"], e["project"], e["via_project"]) for e in events] == [("machine", "", str(beta))] * 2
+
+
 # ── Ni agent ni console ───────────────────────────────────────────────────────
 
 _FORBIDDEN_WORDS = re.compile(r"pause|resume|breaker|pilotage|orchestrate|drain|hold", re.IGNORECASE)
