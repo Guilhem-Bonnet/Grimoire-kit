@@ -203,6 +203,31 @@ def check_guard_timeout(target: Path) -> list[EnvCheck]:
     )]
 
 
+def copilot_declared_off(target: Path) -> bool:
+    """Le projet déclare-t-il ses hôtes (``hosts.enabled``) **sans** ``copilot`` ?
+
+    Seule une déclaration explicite compte : sans ``hosts.enabled``, la détection par fichiers décide et un
+    fichier de hook Copilot isolé reste tenu pour un hook à entretenir. Déclaré hors liste, ``grimoire up`` ne
+    réécrit plus ``.github/hooks/`` (un fichier hérité d'une ancienne installation y reste tel quel) : lui
+    faire dire « lancez `grimoire up` » serait une consigne sans effet.
+    """
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.core.exceptions import GrimoireConfigError
+
+    try:
+        enabled = GrimoireConfig.from_yaml(target / "project-context.yaml").hosts.enabled
+    except GrimoireConfigError:
+        return False
+    return enabled is not None and "copilot" not in enabled
+
+
+#: Ce qui fait réellement quelque chose pour des fichiers Copilot hérités d'un hôte déclaré hors liste.
+COPILOT_LEFTOVER_REMEDY = (
+    "run `grimoire host sync --prune-disabled` to remove the leftover Copilot files, or add `copilot` to "
+    "`hosts.enabled` in project-context.yaml and run `grimoire up` to keep and update them"
+)
+
+
 def check_copilot_guard_timeout(target: Path) -> list[EnvCheck]:
     """La garde PreToolUse Copilot du kit, et ce que son délai garantit (#1280).
 
@@ -244,6 +269,20 @@ def check_copilot_guard_timeout(target: Path) -> list[EnvCheck]:
     if not guards:
         return []
     short = [f"{relpath}: {delay:g} s" for relpath, delay in guards if delay < GUARD_TIMEOUT]
+    if short and copilot_declared_off(target):
+        # Copilot est déclaré hors de `hosts.enabled` : ces fichiers ne sont plus entretenus par `up`, donc rien
+        # ici n'est une panne du kit. La garde Copilot est de toute façon consultative (aucun refus capturé,
+        # échec ouvert au dépassement du délai quel qu'il soit) : un délai court n'est pas une frontière de sécurité.
+        return [EnvCheck(
+            "hook_timeout_copilot",
+            passed=True,
+            level="info",
+            detail=(
+                f"Copilot is not in hosts.enabled; leftover guard timeout below {GUARD_TIMEOUT} s "
+                f"({'; '.join(short)}) is not maintained by `grimoire up`"
+            ),
+            remedy=COPILOT_LEFTOVER_REMEDY,
+        )]
     if short:
         return [EnvCheck(
             "hook_timeout_copilot",

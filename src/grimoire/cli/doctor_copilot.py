@@ -23,7 +23,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from grimoire.cli.doctor_hooks import _generated_hook_commands, _launches_grimoire_hook
+from grimoire.cli.doctor_hooks import (
+    COPILOT_LEFTOVER_REMEDY,
+    _generated_hook_commands,
+    _launches_grimoire_hook,
+    copilot_declared_off,
+)
 from grimoire.cli.env_checks import EnvCheck
 
 _LEGACY_OS_KEYS = ("windows", "linux", "osx")
@@ -77,6 +82,16 @@ def check_copilot_hook_format(target: Path) -> list[EnvCheck]:
     if not files:
         return []
     old = [f"{relpath} ({', '.join(problems)})" for relpath, data in files if (problems := _format_problems(data))]
+    if old and copilot_declared_off(target):
+        return [
+            EnvCheck(
+                "copilot_hook_format",
+                passed=True,
+                level="info",
+                detail="Copilot is not in hosts.enabled; leftover hook file(s) in an older format: " + "; ".join(old),
+                remedy=COPILOT_LEFTOVER_REMEDY,
+            )
+        ]
     if old:
         return [
             EnvCheck(
