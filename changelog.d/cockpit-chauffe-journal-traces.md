@@ -1,1 +1,0 @@
-- perf(cockpit): la chauffe au démarrage parcourt d'abord le journal des traces (à basse priorité, annulée à l'arrêt) : sur un poste réel (97 Mo), le journal est prêt à 2,6-2,9 s après le démarrage au lieu de 4,1 s, et les requêtes arrivées pendant le parcours l'attendent au lieu d'en lancer un second (Refs #1243)
