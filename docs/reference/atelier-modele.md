@@ -66,10 +66,22 @@ jamais le document. Elle est traitée comme un texte non fiable (caviardée, bor
   « usage déclaré incohérent » (la réservation reste comptée, jamais le chiffre déclaré).
 - Le transport n'utilise aucun proxy d'environnement (`HTTPS_PROXY`, etc.) et ne suit aucune redirection : la clé ne part
   que vers `api.anthropic.com`, en HTTPS.
-- Le compteur vit dans `_grimoire-runtime-output/atelier/modele-usage.json`. La consommation de ces appels n'est **pas**
-  écrite au ledger : seul `missions/quota_usage.py` écrit l'événement `quota.consumed`, d'après les journaux de sessions,
-  et n'a pas de point d'entrée pour un appel du kit. Le quota de la file ne la voit donc pas ; ce compteur local seul la
-  borne.
+- Le compteur vit dans `_grimoire-runtime-output/atelier/modele-usage.json` ; ses plafonds (jour, chantier) restent en
+  vigueur.
+- **Quota du kit et règles d'usage.** L'usage déclaré par chaque réponse valide est aussi inscrit au ledger
+  (`quota.consumed`, origine `atelier`, modèle, jetons d'entrée et de sortie, chantier) par le seul point d'entrée
+  `missions/quota_usage.py::record_kit_call`, que le client appelle après chaque réponse facturée. Il entre ainsi dans la
+  consommation du jour, les règles d'usage (`capacity.yaml`) et la fiche Capacité du cockpit. L'inscription est
+  idempotente (clé : l'identifiant de la réponse, `kit:atelier:<id>`), n'est jamais un second compte du compteur local, et
+  n'a lieu que si le projet a un ledger de missions ; un échec d'inscription ne fait pas échouer le geste (le compteur
+  local tient).
+- Avant tout appel, le client lit la même source que l'admission : une règle d'usage de portée `project` ou `day`
+  franchie dont l'action est `hold` ou `pause` **refuse le geste** (« règle d'usage … : geste du modèle refusé »), sans
+  appel ni réservation. `warn` ne retient rien ; une règle de portée `task` ne vise pas un geste d'Atelier. Un
+  `capacity.yaml` ou des règles illisibles refusent aussi (échec fermé). Pour lever : un humain relève le seuil ou met
+  `enabled: false` sur la règle ; la portée `day` se lève à minuit UTC.
+- Aucun outil MCP, aucune route ni commande n'inscrit une consommation ni n'en efface : le point d'entrée n'est appelé que
+  par le client, avec une origine d'une liste fermée et les jetons que la réponse déclare (un test le vérifie).
 
 ## Route
 

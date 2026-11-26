@@ -332,16 +332,57 @@ def test_un_compteur_verrouille_ferme_l_appel(
     assert transport.calls == []
 
 
-def test_le_module_n_ecrit_aucun_evenement_de_quota_au_ledger(project: Path, keyed: None, transport: _Transport) -> None:
-    """Seul `missions/quota_usage.py` écrit `quota.consumed` : ici, le compteur local seul tient la consommation."""
+def test_la_consommation_connue_entre_au_quota_du_kit_par_le_seul_point_d_entree(
+    project: Path, keyed: None, transport: _Transport
+) -> None:
+    """`missions/quota_usage.py` écrit `quota.consumed` : ce module ne fait qu'appeler `record_kit_call`."""
     from grimoire.missions.service import TaskService
+    from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT
 
     TaskService(project).ledger.create_mission(title="Chantier", origin="test", created_by="test")  # le ledger existe
-    before = len(TaskService(project).ledger.list_events())
+    transport.reply = {**answer("Une version plus claire du bloc."), "id": "msg_01ABC"}
     asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
-    assert len(TaskService(project).ledger.list_events()) == before
-    assert am.usage(project, "un")["day"] == 160
+    events = [e for e in TaskService(project).ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT]
+    assert len(events) == 1
+    payload = events[0].payload
+    assert (payload["session"], payload["role"], payload["tokens"], payload["chantier"]) == ("kit:atelier:msg_01ABC", "atelier", 160, "un")
+    assert (payload["input_tokens"], payload["output_tokens"]) == (120, 40) and payload["task_id"] == ""
+    assert am.usage(project, "un")["day"] == 160  # le compteur local reste en vigueur, à côté
     assert "append_event" not in Path(am.__file__).read_text(encoding="utf-8")
+
+
+def test_une_reponse_sans_identifiant_donne_un_identifiant_neuf_par_appel(project: Path, keyed: None, transport: _Transport) -> None:
+    from grimoire.missions.service import TaskService
+    from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT
+
+    TaskService(project).ledger.create_mission(title="Chantier", origin="test", created_by="test")
+    for _ in range(2):  # deux appels identiques en tout point ne se confondent pas
+        asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
+    events = [e for e in TaskService(project).ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT]
+    assert len({e.payload["session"] for e in events}) == 2 and am.usage(project, "un")["day"] == 320
+
+
+def test_une_regle_d_usage_qui_retient_refuse_le_geste_avant_tout_appel(project: Path, keyed: None, transport: _Transport) -> None:
+    from grimoire.missions.service import TaskService
+    from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT
+
+    service = TaskService(project)
+    service.ledger.create_mission(title="Chantier", origin="test", created_by="test")
+    service.ledger.append_event(
+        QUOTA_CONSUMED_EVENT, "x", "task", "tick", {"session": "s", "task_id": "", "tokens": 900, "status": "lower_bound"}
+    )
+    standard = project / "_grimoire" / "standard"
+    standard.mkdir(parents=True, exist_ok=True)
+    (standard / "capacity.yaml").write_text(
+        "version: 1\nusage_rules:\n  - {id: gros, scope: day, metric: tokens, threshold: 500, action: hold}\n", encoding="utf-8"
+    )
+    with pytest.raises(am.ModelError, match="règle d'usage gros"):
+        asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
+    assert transport.calls == [] and am.usage(project, "un")["day"] == 0
+    (standard / "capacity.yaml").write_text("version: 1\nusage_rules: [pas\n", encoding="utf-8")  # illisible : fermé
+    with pytest.raises(am.ModelError, match="illisible"):
+        asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
+    assert transport.calls == []
 
 
 def test_sans_ledger_le_compteur_local_tient(project: Path, keyed: None, transport: _Transport) -> None:

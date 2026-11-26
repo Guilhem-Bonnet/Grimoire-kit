@@ -568,6 +568,13 @@ usage_rules[3] (casse) ignorée : scope doit valoir task | project | day, pas 'n
 outil MCP, aucune route ni commande de la console du cockpit n'écrit `capacity.yaml` ni `quota.consumed` (un test le
 prouve) ; la fiche Capacité du cockpit affiche la consommation du jour et les règles, en lecture seule.
 
+**Appels de modèle du kit** : un appel que le kit facture lui-même (le modèle optionnel de l'Atelier,
+[atelier-modele.md](../atelier-modele.md)) inscrit sa consommation connue par `quota_usage.record_kit_call` (origine
+`atelier`, idempotent par identifiant de réponse) : elle entre dans la consommation du jour, les règles d'usage et la
+fiche Capacité, sans second compte. Avant l'appel, le client lit la même source que l'admission : une règle `hold` ou
+`pause` de portée `project` ou `day` franchie, ou un `capacity.yaml` illisible, refuse le geste. Le plafond local du
+client reste en vigueur en plus.
+
 **Famine** : une tâche différée depuis plus de 24 h (`queue.famine_hours`) monte au niveau 2
 d'attention, sa raison est affichée.
 

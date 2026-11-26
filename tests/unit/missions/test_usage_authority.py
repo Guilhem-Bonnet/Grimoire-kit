@@ -74,6 +74,20 @@ def test_only_the_tick_step_writes_consumption_and_nothing_writes_the_capacity_f
     assert risky == []
 
 
+def test_the_kit_entry_point_is_called_only_by_the_atelier_client_never_by_an_agent_surface() -> None:
+    """`record_kit_call` ne se branche ni sur un outil MCP, ni sur une route, ni sur une commande : le client l'appelle seul."""
+    callers = [
+        p.relative_to(SRC).as_posix() for p in _files("**/*.py")
+        if "record_kit_call" in p.read_text(encoding="utf-8") and p.name != "quota_usage.py"
+    ]
+    assert callers == ["tools/atelier_model.py"]
+    surfaces = _files("mcp/*.py", "cli/*.py", "tools/workspace_*.py")
+    assert [p.name for p in surfaces if "record_kit_call" in p.read_text(encoding="utf-8")] == []
+    from grimoire.missions.quota_usage import KIT_ORIGINS
+
+    assert KIT_ORIGINS == ("atelier",)  # une liste fermée, jamais une valeur venue d'un appelant
+
+
 @pytest.fixture
 def projet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(CONTROL_HOME_ENV, str(tmp_path / "control-home"))

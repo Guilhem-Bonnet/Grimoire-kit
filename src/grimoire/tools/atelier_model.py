@@ -16,8 +16,10 @@ Garanties :
   jamais renvoyée à la page ; aucune clé = fonction indisponible, dite telle quelle.
 - **Budget** : plafond dur de jetons par jour et par chantier, réservé AVANT l'appel (estimation prudente), refus si le
   compteur est illisible ; délai court, aucun nouvel essai ; la consommation réelle est tenue dans le compteur local
-  du projet. Elle n'est PAS écrite au ledger : seul ``missions/quota_usage.py`` écrit ``quota.consumed`` (journaux de
-  sessions) et aucune de ses fonctions publiques ne convient à un appel du kit.
+  du projet ; ce compteur et ses plafonds restent en vigueur. L'usage déclaré d'une réponse valide est AUSSI inscrit au
+  quota du kit par :func:`grimoire.missions.quota_usage.record_kit_call` (seul écrivain de la consommation : ce module
+  n'écrit aucun événement lui-même), et une règle d'usage ``hold`` ou ``pause`` franchie refuse le geste avant tout appel
+  (:func:`~grimoire.missions.quota_usage.kit_call_refusal`, lecture seule, échec fermé).
 - **Ce qui part** : le texte du bloc visé et un contexte minimal (titre, phase, type), passés par
   :func:`grimoire.memory.validation.redact_secrets`.
 - **Ce qui revient** : une PROPOSITION, déposée dans le circuit existant (suggestion que l'humain accepte ou refuse,
@@ -326,6 +328,29 @@ def _answer(raw: bytes, limit: int) -> tuple[str, int]:
     return text, counts[0] + counts[1]
 
 
+def _record_billed(root: Path, slug: str, model: str, raw: bytes) -> None:
+    """Inscrit au quota du kit l'usage déclaré d'une réponse 200 jugée valide ; sans effet si rien ne peut l'être.
+
+    L'identifiant de la réponse fait la clé (rejouer le même appel n'inscrit rien) ; sans identifiant, un identifiant
+    neuf : deux appels distincts ne se confondent jamais. Un échec d'inscription ne fait pas échouer le geste : le
+    compteur local tient.
+    """
+    import uuid
+
+    from grimoire.missions.quota_usage import record_kit_call
+
+    try:
+        data = json.loads(raw)
+        ident, used = data.get("id"), data["usage"]
+        call_id = ident if isinstance(ident, str) and ident else uuid.uuid4().hex
+        record_kit_call(
+            root, origin="atelier", call_id=call_id, model=model, input_tokens=used["input_tokens"],
+            output_tokens=used["output_tokens"], chantier=slug,
+        )
+    except Exception:
+        return
+
+
 def status(root: Path, slug: str) -> dict[str, Any]:
     """Ce que la page sait de l'option : jamais la clé, seulement si elle existe."""
     cfg = settings(root)
@@ -365,6 +390,10 @@ def run(
     key = api_key()
     if not key:
         raise ModelError(f"aucune clé : {KEY_VAR} dans l'environnement ou le magasin de clés du kit")
+    from grimoire.missions.quota_usage import kit_call_refusal
+
+    if refusal := kit_call_refusal(root):  # la même source que l'admission, en lecture : une règle d'usage retient le geste
+        raise ModelError(refusal)
     alias, model = resolve_model(cfg, geste, choice)
     block_id = assistant._known_block(root, slug, block_id)  # le bloc est l'un des blocs du document
     found = next(b for p in wa.document(root, slug)["phases"] for b in p["blocks"] if b["id"] == block_id)
@@ -396,6 +425,7 @@ def run(
         _give_back(root, slug, reserved, now)  # une réponse d'erreur ne consomme rien
         raise ModelError(f"le service a répondu {code} : appel sans effet")
     text, tokens = _answer(raw, reserved)  # malformée : la requête a abouti, la réservation reste comptée
+    _record_billed(root, slug, model, raw)  # la consommation connue entre dans le quota du kit (règles d'usage, fiche Capacité)
     with contextlib.suppress(ModelError):  # sinon l'estimation prudente reste comptée
         _adjust(root, slug, tokens - reserved, cfg=None, now=now)  # la consommation réelle remplace l'estimation
     proposal = " ".join(redact_secrets(text)[0].split()) if spec.kind == "commentaire" else redact_secrets(text)[0].strip()
