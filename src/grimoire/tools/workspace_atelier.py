@@ -10,7 +10,7 @@ permet de l'allumer.
 
 Routes (préfixe ``/api/workspace/``) :
 
-- ``GET features`` ; ``POST features`` ``{"atelier": bool}``
+- ``GET features`` ; ``POST features`` ``{"atelier": bool}`` ou ``{"mascotte": bool}`` (mascotte vocale du chat)
 - ``GET atelier/chantiers`` ; ``POST atelier/chantiers`` ``{"titre", "slug"?}``
 - ``GET atelier/chantiers/<slug>`` : cinq phases en blocs typés
 - ``PUT atelier/chantiers/<slug>/blocs/<id>`` ``{"text", "expected"}`` : réécrit la seule plage du bloc ;
@@ -35,6 +35,8 @@ FEATURES = f"{PREFIX}features"
 ATELIER = f"{PREFIX}atelier/"
 CONTEXT_FILE = "project-context.yaml"
 FLAG = ("cockpit", "test_features", "atelier")
+#: Mascotte vocale du chat (épique #1197, vocal #1343) : même mécanisme, rien de plus côté serveur.
+MASCOTTE_FLAG = ("cockpit", "test_features", "mascotte")
 _SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 #: Le texte d'un bloc : plafond large, un bloc est une page au plus.
 MAX_BLOCK_CHARS = 20_000
@@ -65,10 +67,10 @@ def _load(root: Path) -> Any:
         return None
 
 
-def enabled(root: Path) -> bool:
-    """Vrai seulement si ``cockpit.test_features.atelier`` vaut exactement ``true``."""
+def enabled(root: Path, flag: tuple[str, ...] = FLAG) -> bool:
+    """Vrai seulement si ``cockpit.test_features.atelier`` (ou le drapeau donné) vaut exactement ``true``."""
     node: Any = _load(root)
-    for key in FLAG:
+    for key in flag:
         if not hasattr(node, "get"):
             return False
         node = node.get(key)
@@ -76,10 +78,17 @@ def enabled(root: Path) -> bool:
 
 
 def features(root: Path) -> dict[str, Any]:
-    return {"atelier": enabled(root)}
+    return {"atelier": enabled(root), "mascotte": enabled(root, MASCOTTE_FLAG)}
 
 
-def set_atelier(root: Path, on: Any) -> dict[str, Any]:
+def set_mascotte(root: Path, on: Any) -> dict[str, Any]:
+    """Écrit ``cockpit.test_features.mascotte`` (même écriture que l'Atelier)."""
+    if not isinstance(on, bool):
+        raise ValueError("`mascotte` (booléen) requis : true active, false éteint")
+    return set_atelier(root, on, MASCOTTE_FLAG)
+
+
+def set_atelier(root: Path, on: Any, flag: tuple[str, ...] = FLAG) -> dict[str, Any]:
     """Écrit le drapeau dans ``project-context.yaml`` (commentaires et ordre conservés)."""
     import io
 
@@ -99,11 +108,11 @@ def set_atelier(root: Path, on: Any) -> dict[str, Any]:
         if not hasattr(data, "get"):
             raise ValueError(f"{CONTEXT_FILE} illisible : un dictionnaire est attendu")
         node = data
-        for key in FLAG[:-1]:
+        for key in flag[:-1]:
             if not hasattr(node.get(key), "get"):
                 node[key] = {}
             node = node[key]
-        node[FLAG[-1]] = on
+        node[flag[-1]] = on
         out = io.StringIO()
         yaml.dump(data, out)
         atomic_write(path, out.getvalue().encode("utf-8"))
@@ -332,6 +341,8 @@ def get(root: Path, path: str, _query: dict[str, list[str]]) -> Any:
 
 def post(root: Path, path: str, body: dict[str, Any]) -> Any:
     if path == FEATURES:
+        if "mascotte" in body and "atelier" not in body:
+            return set_mascotte(root, body.get("mascotte"))
         return set_atelier(root, body.get("atelier"))
     _need_flag(root)
     if path.rstrip("/") == f"{ATELIER}chantiers":

@@ -103,7 +103,7 @@ function speakText(text, lang) {
   return { done: new Promise((resolve) => { utterance.onend = resolve; utterance.onerror = resolve; synth.speak(utterance); }), stop: () => synth.cancel() };
 }
 
-export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, onOption = () => {} }) {
+export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, onOption = () => {}, onPlay = () => {}, onStop = () => {} }) {
   const element = document.createElement('section');
   element.className = 'chat-voice-out';
   element.setAttribute('aria-label', 'Messages parlés de l’orchestrateur');
@@ -131,6 +131,7 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
     const current = playing;
     playing = null;
     current.stop();
+    try { onStop(); } catch { /* un observateur n'interrompt jamais la lecture */ }
     const row = rows.get(current.id);
     if (row) { row.button.textContent = 'Lire'; row.button.setAttribute('aria-pressed', 'false'); }
   }
@@ -259,6 +260,7 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
       paint(result.message);
       const player = result.audio ? playWav(result.audio) : speakText(result.text);
       playing = { id, stop: player.stop };
+      try { onPlay(player.audio || null); } catch { /* un observateur n'interrompt jamais la lecture */ }
       row.button.textContent = 'Arrêter';
       row.button.setAttribute('aria-pressed', 'true');
       setStatus('');

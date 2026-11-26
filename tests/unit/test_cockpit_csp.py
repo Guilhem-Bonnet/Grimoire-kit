@@ -264,7 +264,8 @@ def test_chaque_feuille_de_la_coque_est_liee_par_la_page() -> None:
     }
     on_disk = {p.relative_to(WORKSPACE).as_posix() for p in _workspace_files(".css")}
     # source.css est chargée à la demande par l'espace Source (`<link>` posé par JS : permis par `style-src 'self'`).
-    assert on_disk - {"spaces/source.css"} == linked
+    # mascotte.css, de même, n'est demandée que par la mascotte vocale allumée (`mascotte_dock.js`) : éteinte, rien ne la charge.
+    assert on_disk - {"spaces/source.css", "mascotte.css"} == linked
 
 
 _REGEX_AFTER_WORD = {"return", "typeof", "case", "do", "else", "in", "of", "void", "delete", "throw", "new"}

@@ -94,7 +94,7 @@ export const MIC_CONSTRAINTS = {
  * refusé rend le texte à la saisie avec sa mention. La dictée tombe si le texte est entièrement réécrit.
  * Rien de ceci n'approuve quoi que ce soit : une permission se confirme par un clic (lot V5).
  */
-export function createVoiceInput({ api, input, slot, note, setStatus, readOnly = () => false }) {
+export function createVoiceInput({ api, input, slot, note, setStatus, readOnly = () => false, onMic = {} }) {
   let config = null;
   let recording = null;
   let dictated = [];
@@ -109,6 +109,7 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
 
   function release(session) {
     // Le micro se referme ici, quoi qu'il arrive.
+    try { if (onMic.close) onMic.close(); } catch { /* un observateur n'empêche jamais de couper le micro */ }
     try { session.node.disconnect(); } catch { /* déjà détaché */ }
     try { session.source.disconnect(); } catch { /* déjà détaché */ }
     for (const track of session.stream.getTracks()) track.stop();
@@ -145,6 +146,8 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
       button.textContent = `Arrêter (${left} s)`;
     }, 250);
     recording = session;
+    // Un observateur (la mascotte) peut lire des niveaux sur CE flux, déjà ouvert ; il n'en ouvre jamais un autre.
+    try { if (onMic.open) onMic.open({ context, source }); } catch { /* sans effet sur la dictée */ }
     button.textContent = `Arrêter (${Math.ceil(config.max_seconds)} s)`;
     button.setAttribute('aria-pressed', 'true');
     setStatus('Enregistrement en cours — le micro est ouvert.');
