@@ -116,7 +116,8 @@ export function createAssistant(ctx, slug, hooks) {
     if (v.question) {
       const q = el('div', 'at-asst-q', null, { 'data-role': 'assistant-question' });
       const tags = el('div', 'at-asst-tags');
-      if (where) tags.append(badge(where, 'acc'));
+      const asked = v.question;
+      if (asked.angle) tags.append(badge(`${asked.title}, ${PHASE_NAMES[asked.phase] || asked.phase}`, 'acc'));
       q.append(tags, el('p', null, v.question.text));
       body.append(q, answerForm(v));
     } else {
@@ -131,7 +132,9 @@ export function createAssistant(ctx, slug, hooks) {
   }, { iconName: 'i-act-pause' });
 
   const answerForm = (v) => {
-    const shown = v.current ? v.current.angle : ''; // l'angle que la barre affiche : celui que le geste vise
+    // L'angle que l'agent a NOMMÉ pour sa question (validé par le serveur) : celui que les deux gestes visent.
+    const shown = v.question && v.question.angle ? v.question.angle : '';
+    const label = shown ? ` : ${v.question.title}` : '';
     const area = el('textarea', 'at-asst-area', null, { rows: '2', 'aria-label': 'Ta réponse', placeholder: 'Ta réponse — Entrée envoie, Maj+Entrée saute une ligne', maxlength: '4000' });
     area.value = draft;
     area.addEventListener('input', () => { draft = area.value; });
@@ -146,13 +149,16 @@ export function createAssistant(ctx, slug, hooks) {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(); }
     });
     const row = el('div', 'at-asst-row');
-    row.append(
-      button('Répondre', 'answer', send, { primary: true, iconName: 'i-act-send' }),
-      button('Je ne sais pas', 'unknown', () => call({ geste: 'ne-sais-pas', angle: shown },'Noté comme hypothèse : la question suivante arrive.')),
-      button('Sans objet', 'skip', () => call({ geste: 'sans-objet', angle: shown },'Angle écarté : la question suivante arrive.')),
-    );
+    const unknown = button(`Je ne sais pas${label}`, 'unknown', () => call({ geste: 'ne-sais-pas', angle: shown }, 'Noté comme hypothèse : la question suivante arrive.'));
+    const skip = button(`Sans objet${label}`, 'skip', () => call({ geste: 'sans-objet', angle: shown }, 'Angle écarté : la question suivante arrive.'));
+    row.append(button('Répondre', 'answer', send, { primary: true, iconName: 'i-act-send' }), unknown, skip);
     const form = el('div', 'at-asst-form');
     form.append(area, row);
+    if (!shown) { // sans angle nommé, ces deux gestes ne sauraient pas ce qu'ils touchent : fermés, et on le dit
+      unknown.disabled = true;
+      skip.disabled = true;
+      form.append(el('p', 'at-muted', 'L’assistant n’a pas dit à quel angle se rattache sa question : « Je ne sais pas » et « Sans objet » sont indisponibles. Tu peux toujours répondre.', { 'data-role': 'assistant-noangle' }));
+    }
     return form;
   };
 

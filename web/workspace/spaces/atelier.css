@@ -152,6 +152,8 @@
 .at-asst-body { display: flex; flex-direction: column; gap: var(--sp-2); }
 .at-asst-body p { margin: 0; }
 .at-asst-body > .at-btn { align-self: flex-start; }
+.at-asst .at-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.at-asst .at-btn:disabled:hover { background: var(--panel); }
 .at-asst-q p { font-size: var(--t-m); font-weight: 500; }
 .at-asst-tags { display: flex; gap: var(--sp-1); margin-bottom: var(--sp-1); }
 .at-asst-row { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }

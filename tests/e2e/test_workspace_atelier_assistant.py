@@ -226,6 +226,18 @@ def test_parcours_de_l_assistant(
         assert _state(root, slug)["angles"]["hors-perimetre"]["state"] == "ecarte"  # type: ignore[index]
         assert "sur l'angle hors-perimetre" in _prompts(agent_log)[-1]
 
+        # 5 bis. Une question sans angle nommé : on peut répondre, mais les deux gestes qui visent un angle sont fermés.
+        page.locator(".at-asst-area").fill("sans marqueur")
+        page.locator("[data-act='answer']").click()
+        page.locator("[data-role='assistant-noangle']").wait_for(timeout=APPEAR_MS)
+        assert page.locator("[data-act='unknown']").is_disabled() and page.locator("[data-act='skip']").is_disabled()
+        assert "Sans objet" in page.locator("[data-act='skip']").inner_text()
+        _capture(page, "04b-sans-angle-1440x900")
+        page.locator(".at-asst-area").fill("Les risques sont faibles.")
+        page.locator("[data-act='answer']").click()
+        page.locator("[data-role='assistant-noangle']").wait_for(state="detached", timeout=APPEAR_MS)
+        assert "Sans objet : " in page.locator("[data-act='skip']").inner_text()  # le libellé rappelle l'angle visé
+
         # 6. « Challenger ce bloc » : une suggestion sous le bloc, par l'outil existant.
         block = page.locator(".at-blk", has_text="Le bouton maintenu").first
         block.hover()

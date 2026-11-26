@@ -3346,6 +3346,10 @@
    "version": "3.10.2",
    "path": "framework/memory/mem0-bridge.py"
   },
+  "c5b5c85298214ccde0902179d1988c5a88d167623f356af16f2a0bc83264064f": {
+   "version": "3.115.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
+  },
   "c5ebf6a14079a1e68dc8c075dd724f579031e554139119c82c8230c0db7556f9": {
    "version": "3.4.2",
    "path": "framework/copilot/instructions/grimoire-project.instructions.md"

@@ -85,7 +85,10 @@ Un message qui porte « [Contexte de l'Atelier] » (chantier, phase) vient de la
 barre de l'assistant : l'humain est devant le document de ce chantier.
 
 - Une question à la fois, courte, la dernière phrase du message, terminée par
-  « ? » ; angles dans l'ordre de `interview --json --chantier <slug>`.
+  « ? » ; angles dans l'ordre de `interview --json --chantier <slug>`. Ajouter
+  en toute dernière ligne `angle: <id>` (l'angle de la question, encore
+  ouvert) : le cockpit la lit et la retire ; sans elle, « Je ne sais pas » et
+  « Sans objet » restent fermés à l'humain.
 - Reformuler la réponse en une phrase, puis la consigner telle que l'humain l'a
   donnée (`interview answer --chantier <slug>`), jamais de ta propre initiative.
 - Proposer par `atelier_suggest`, commenter par `atelier_comment` ; lire les

@@ -594,16 +594,19 @@ class Conversation:
         try:
             from grimoire.tools import workspace_atelier_assistant as assistant
 
-            question = assistant.question_of(reply)
+            question, marked = assistant.split_reply(reply)
             if not question:
                 return
             if str(atelier.get("geste", "")).startswith("challenger-"):
                 return  # un challenge répond par suggestion ou commentaire, pas par une question d'entretien
             view = assistant.entretien_view(self.root, atelier["slug"])
-            current = view.get("current") or {}
+            # L'angle est celui que l'agent a NOMMÉ (dernière ligne `angle: <id>`), accepté s'il est encore ouvert ;
+            # sinon la question s'affiche sans angle et les gestes qui en dépendent restent fermés.
+            opened = {a["id"]: a for a in view["angles"] if a["state"] == "ouvert"}
+            named = opened.get(marked, {})
             self._questions[atelier["slug"]] = {
-                "text": question, "angle": str(current.get("angle", "")), "title": str(current.get("title", "")),
-                "phase": str(current.get("phase", "")),
+                "text": question, "angle": str(named.get("id", "")), "title": str(named.get("title", "")),
+                "phase": str(named.get("phase", "")),
             }
         except Exception:  # la barre est un confort : un état illisible ne casse jamais le tour
             return

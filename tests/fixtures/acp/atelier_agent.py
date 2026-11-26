@@ -49,7 +49,8 @@ def next_question(root: Path, slug: str) -> str:
     if not pending:
         return "Le cadrage de cette phase est complet."
     angle = next(a for a in ANGLES if a.id == pending[0])
-    return angle.seeds[0]
+    # Le marqueur de forme fermée que le skill demande : l'angle de la question, en toute dernière ligne.
+    return f"{angle.seeds[0]}\nangle: {angle.id}"
 
 
 def act(text: str, rest: str) -> str:
@@ -68,6 +69,8 @@ def act(text: str, rest: str) -> str:
         return "J'ai déposé une suggestion sous ce bloc."
     if "Applique le skill grimoire-cadrage" in text or "Reprends l'entretien" in text:
         return "Voici ma première question.\n\n" + next_question(root, name)
+    if rest.strip() == "sans marqueur":  # l'agent pose une question sans nommer d'angle : la barre ferme les gestes qui en dépendent
+        return "Une question sans angle nommé, sur quoi porte-t-elle ?"
     plan = interview.interview_plan(root, name)
     named = re.search(r"sur l'angle (\S+?)[ ,.]", text)  # les gestes « Je ne sais pas » et « Sans objet » nomment l'angle affiché
     angle = named.group(1) if named else (plan["open_required"][0] if plan["open_required"] else "utilisateurs")
