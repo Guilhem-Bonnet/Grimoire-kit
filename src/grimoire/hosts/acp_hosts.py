@@ -99,16 +99,16 @@ def acp_availability(profile: HostProfile) -> tuple[bool, str]:
     return True, ""
 
 
-#: Ce qu'il faut lancer pour installer l'hôte (clé : l'exécutable que le chat cherche). Indicatif : les noms de paquets
-#: sont ceux publiés par chaque éditeur, à vérifier dans sa documentation si la commande échoue.
+#: Ce qu'il faut lancer pour installer l'hôte (clé : l'exécutable que le chat cherche dans le PATH). Une commande n'entre
+#: ici que si le paquet npm existe au registre public ET que son champ ``bin`` déclare cet exécutable (`npm view <paquet>
+#: bin`, lu le 2026-11-26) ; sinon l'hôte n'a pas de commande et le cockpit dit « voir sa documentation », sans inventer.
+#: Cursor (``agent``) et Kimi (``kimi``) ne sont pas des paquets npm vérifiables ici : ils n'ont pas de commande.
 INSTALL_HINTS: dict[str, str] = {
     "claude-agent-acp": "npm install -g @agentclientprotocol/claude-agent-acp",
     "copilot": "npm install -g @github/copilot",
     "codex": "npm install -g @openai/codex",
-    "agent": "curl https://cursor.com/install -fsS | bash",
     "gemini": "npm install -g @google/gemini-cli",
     "opencode": "npm install -g opencode-ai",
-    "kimi": "uv tool install --python 3.13 kimi-cli",
 }
 
 #: Délai de la sonde ``initialize`` : un hôte qui ne répond pas dans ce temps n'est pas utilisable pour un chat.
@@ -192,7 +192,9 @@ def acp_usable(
 
 def _with_hint(profile: HostProfile, reason: str) -> str:
     hint = install_hint(profile)
-    return f"{reason} ; installer ou réparer : `{hint}`" if hint else reason
+    if hint:
+        return f"{reason} ; installer ou réparer : `{hint}`"
+    return f"{reason} ; installez l'adaptateur ACP de {profile.display_name} (voir sa documentation)"
 
 
 def usable_map(
@@ -277,7 +279,11 @@ def start_failure_remedy(root: Path) -> str:
         return " Choisissez un hôte dans le sélecteur « Hôte »."
     profile = profile_for(host_id)
     hint = install_hint(profile)
-    fix = f"installez ou réparez-le : `{hint}`" if hint else f"vérifiez `{' '.join(profile.acp_command)}`"
+    fix = (
+        f"installez ou réparez-le : `{hint}`"
+        if hint
+        else f"installez ou réparez l'adaptateur ACP de {profile.display_name} (voir sa documentation)"
+    )
     return f" L'hôte « {profile.display_name} » ne démarre pas : {fix}, ou choisissez un autre hôte dans le sélecteur « Hôte »."
 
 

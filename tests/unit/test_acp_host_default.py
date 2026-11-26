@@ -119,6 +119,32 @@ def test_sans_aucun_choix_explicite_le_defaut_n_est_pas_un_hote_mort(project: Pa
     assert workspace_chat.chat_mode(project)[0] == "unavailable"
 
 
+# ── Les commandes d'installation : seulement celles dont le paquet est vérifié ─
+
+
+def test_les_commandes_d_installation_sont_celles_dont_le_paquet_et_l_executable_ont_ete_verifies() -> None:
+    """Figé : `npm view <paquet> bin` (2026-11-26) déclare bien l'exécutable que le kit cherche dans le PATH."""
+    assert acp_hosts.INSTALL_HINTS == {
+        "claude-agent-acp": "npm install -g @agentclientprotocol/claude-agent-acp",
+        "copilot": "npm install -g @github/copilot",
+        "codex": "npm install -g @openai/codex",
+        "gemini": "npm install -g @google/gemini-cli",
+        "opencode": "npm install -g opencode-ai",
+    }
+
+
+def test_un_hote_sans_commande_verifiee_dit_voir_sa_documentation_sans_rien_inventer(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cursor = profile_for(HostId.CURSOR)
+    assert acp_hosts.install_hint(cursor) == ""
+    _installed(monkeypatch, "agent")
+    usable, reason = acp_hosts.acp_usable(cursor, project, probe=Probe("agent"))
+    assert not usable and "voir sa documentation" in reason and "curl" not in reason and "npm" not in reason
+    monkeypatch.setenv(acp_hosts.HOST_ENV, "cursor")
+    assert "voir sa documentation" in acp_hosts.start_failure_remedy(project)
+
+
 # ── La sonde et son cache ───────────────────────────────────────────────────
 
 
