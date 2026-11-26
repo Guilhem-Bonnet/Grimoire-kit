@@ -393,7 +393,7 @@ function workLiveRow(task) {
     line.append(effort);
   }
   const usage = (task.work && task.work.usage) || null;
-  if (usage && usage.usage_source === 'claude-code-transcript') {
+  if (hasFoldedTokens(usage)) {
     const tokens = text('span', null, tokensText(usage.total_tokens || 0));
     tokens.dataset.role = 'work-tokens';
     tokens.title = `${usage.input_tokens} in / ${usage.output_tokens} out, cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit — repliés des traces (grimoire task fold-usage)`;
@@ -410,6 +410,12 @@ function workLiveRow(task) {
 }
 
 // P75 : tokens compacts pour une carte — « 48,2 k tokens » au-delà du millier.
+// Un usage replié d'un journal d'hôte (Claude Code, Copilot : « non vérifié », chiffres parfois inconnus = null).
+function hasFoldedTokens(usage) {
+  return !!usage && ['claude-code-transcript', 'copilot-session', 'mixed'].includes(usage.usage_source)
+    && usage.total_tokens != null;
+}
+
 function tokensText(total) {
   if (total < 1000) return `${total} tokens`;
   const k = total / 1000;
@@ -437,7 +443,7 @@ function workTotalRow(work) {
   line.dataset.role = 'work-total';
   line.dataset.usageSource = usage.usage_source || 'none';
   const parts = [];
-  if (usage.usage_source === 'claude-code-transcript') {
+  if (hasFoldedTokens(usage)) {
     if (usage.calls) parts.push(`${usage.calls} appel${usage.calls > 1 ? 's' : ''}`);
     parts.push(`total ${tokensText(usage.total_tokens || 0)}`);
     if (work.cost_cad != null) parts.push(`${usage.cost_status === 'lower_bound' ? 'au moins ' : '≈ '}${cadText(work.cost_cad)}`);
@@ -2120,9 +2126,10 @@ function workBlock(task) {
   const usage = work.usage || {};
   const usageLine = text('div', 'lbl', '');
   usageLine.dataset.role = 'work-usage';
-  if (usage.usage_source === 'claude-code-transcript') {
+  if (hasFoldedTokens(usage)) {
     usageLine.textContent = `tokens : ${usage.total_tokens} (${usage.input_tokens} in / ${usage.output_tokens} out, `
-      + `cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit, ${usage.calls} appel(s))`;
+      + `cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit, ${usage.calls} appel(s))`
+      + (usage.verified === false ? ' — non vérifié sur un vrai Copilot' : '');
     block.append(usageLine);
     const costLine = text('div', 'lbl', '');
     costLine.dataset.role = 'work-cost';

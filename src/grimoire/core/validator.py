@@ -133,7 +133,7 @@ _KNOWN_AGENTS_KEYS = frozenset({
 })
 
 _KNOWN_HOSTS_KEYS = frozenset({
-    "enabled", "preserve",
+    "enabled", "preserve", "copilot_session_logs",
 })
 
 _VALID_EXECUTION_NEED_IDS = frozenset({

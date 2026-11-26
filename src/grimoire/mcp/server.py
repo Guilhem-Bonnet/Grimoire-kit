@@ -1219,6 +1219,7 @@ def grimoire_host_status(project_path: str = ".") -> str:
         project_path: Path to project root (default: current directory).
     """
     from grimoire.hosts.capabilities import gaps_for, profile_for
+    from grimoire.hosts.capability_matrix import build_capability_matrix, session_logs_status
     from grimoire.hosts.collect import build_surface
     from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
 
@@ -1247,6 +1248,9 @@ def grimoire_host_status(project_path: str = ".") -> str:
             "conflict_causes": pending.conflicts,
             "degradations": [d.to_dict() for d in plan.degradations],
             "capability_gaps": [g.surface for g in gaps_for(profile)],
+            # Système par système et surface par surface, dérivé du code (jamais promu) ; lecture seule.
+            "capability_matrix": build_capability_matrix(host_id, degradations=plan.degradations).to_dict(),
+            "session_logs": session_logs_status(target, host_id),
         })
     return json.dumps({"surface": surface.to_dict(), "hosts": hosts}, indent=2, ensure_ascii=False)
 
