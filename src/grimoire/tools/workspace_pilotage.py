@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-__all__ = ["COCKPIT_ACTOR", "GET_ROUTES", "POST_ROUTES", "clear_cache", "pilotage_state"]
+__all__ = ["COCKPIT_ACTOR", "GET_ROUTES", "POST_ROUTES", "authority_view", "clear_cache", "pilotage_state"]
 
 PREFIX = "/api/workspace/"
 #: Ce que le cockpit inscrit comme ``actor`` du drapeau qu'il pose : ce qui distingue sa pause de celle d'autrui.
@@ -220,6 +220,61 @@ def pilotage_state(
     return view
 
 
+class _ReadOnceJournal:
+    """Le journal d'autorité lu UNE fois (chaîne et tête vérifiées) puis partagé entre les lignes de la vue globale.
+
+    Seul ``read`` est mis en cache — y compris un échec, relancé tel quel à chaque ligne : le journal est partagé par
+    tous les projets de la machine, le relire par ligne coûterait N lectures complètes à chaque rafraîchissement.
+    Les marqueurs de révocation restent lus au fichier (``__getattr__``). Lecture seule : aucune ligne n'est écrite.
+    """
+
+    def __init__(self) -> None:
+        from grimoire.missions.mandate import AuthorityJournal
+
+        self._real = AuthorityJournal()
+        self._entries: list[dict[str, Any]] | None = None
+        self._error: Exception | None = None
+        self.reads = 0
+
+    def read(self) -> list[dict[str, Any]]:
+        if self._entries is None and self._error is None:
+            self.reads += 1
+            try:
+                self._entries = self._real.read()
+            except Exception as exc:
+                self._error = exc
+        if self._error is not None:
+            raise self._error
+        return list(self._entries or [])
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+
+def authority_view(root: Path, journal: Any = None) -> dict[str, Any]:
+    """Le pilote automatique et le mandat d'un projet, pour une ligne de la vue globale. Lecture seule.
+
+    Rien de ce que le mandat porte (gestes, types, plafond) ne sort : l'interface a besoin de savoir s'il est actif,
+    jusqu'à quand, et pourquoi il ne l'est pas. Un journal illisible se dit (``error``), jamais un « coupé » inventé.
+    """
+    from grimoire.missions.autopilot import AutopilotStore
+
+    try:
+        store = AutopilotStore(root, journal)
+        mandate = store.mandates.state()
+        pilot = store.state()
+    except Exception as exc:
+        return {"error": _clean(f"{type(exc).__name__}: {exc}", 120), "autopilot": None, "mandate": None}
+    return {
+        "error": "",
+        "autopilot": {"active": pilot.active, "since": pilot.since, "reason": _clean(pilot.reason, 120)},
+        "mandate": {
+            "active": mandate.active, "until": mandate.mandate.until if mandate.mandate else "",
+            "reason": _clean(mandate.reason, 80),
+        },
+    }
+
+
 def portfolio_view(*, control_home: Path | None = None) -> dict[str, Any]:
     """Une ligne par projet du registre (sans le ledger) et la pause de la machine."""
     from grimoire.missions.pause import SCOPE_GLOBAL, global_pause_path, read_flag
@@ -228,12 +283,16 @@ def portfolio_view(*, control_home: Path | None = None) -> dict[str, Any]:
     path = global_pause_path(control_home)
     machine = read_flag(path, SCOPE_GLOBAL) if path is not None else None
     rows: list[dict[str, Any]] = []
+    journal = _ReadOnceJournal()  # une seule lecture du journal d'autorité pour toutes les lignes
     for entry in load_registry():
         root = Path(str(entry.get("path", "")))
         if not root.is_dir():
             continue
         row = pilotage_state(root, control_home=control_home, roles=False)
-        rows.append({"slug": str(entry.get("slug", "")), "name": str(entry.get("name") or entry.get("slug", "")), **row})
+        rows.append({
+            "slug": str(entry.get("slug", "")), "name": str(entry.get("name") or entry.get("slug", "")), **row,
+            "authority": authority_view(root, journal),
+        })
     return {"machine": _flag_view(machine) if machine is not None else None, "projects": rows}
 
 

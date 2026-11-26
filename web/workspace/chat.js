@@ -14,7 +14,7 @@
 // clavier — Entrée envoie, Maj+Entrée saute une ligne — et les boutons de permission
 // reçoivent le focus quand la demande apparaît.
 
-import { api, host, projectName } from './api.js';
+import { api, currentChatTarget, host, projectName, setChatTarget } from './api.js';
 import { renderMarkdown } from './markdown.js';
 import { getAtelierContext } from './atelier-context.js';
 import { createMascotteLink } from './mascotte_lazy.js';
@@ -105,7 +105,13 @@ export function createChat({ readOnly = () => false } = {}) {
   const hostSelect = mk('select', { class: 'chat-host', id: 'chat-host', 'aria-label': 'Hôte de l’orchestrateur' });
   const hostBar = mk('div', { class: 'chat-hostbar' },
     mk('label', { for: 'chat-host', class: 'chat-host-label', text: 'Hôte' }), hostSelect);
-  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, voiceOut.interview, voiceOut.element, form);
+  // Vue « Tous les projets » : le chat n'a pas de projet par défaut. Le sélecteur est OBLIGATOIRE : tant qu'aucun projet
+  // n'est choisi, rien n'est connecté ni envoyé ; le choix est la seule cible des routes de chat (`setChatTarget`).
+  const targetSelect = mk('select', { class: 'chat-target', id: 'chat-target', 'aria-label': 'Projet à qui vous parlez' });
+  const targetBar = mk('div', { class: 'chat-targetbar', 'data-role': 'chat-target-bar' },
+    mk('label', { for: 'chat-target', class: 'chat-host-label', text: 'Parler au projet' }), targetSelect);
+  targetBar.hidden = true;
+  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, targetBar, hostBar, status, log, voiceOut.interview, voiceOut.element, form);
 
   let stream = null;
   let lastSeq = 0;
@@ -373,13 +379,14 @@ export function createChat({ readOnly = () => false } = {}) {
     // Lot 3 : le geste vise le projet de la portée (le corps le nomme aussi).
     // Le nom du projet s'affiche AVANT le champ de la clé de contrôle.
     const targetLine = mk('div', { class: 'chat-gesture-target' });
-    if (host.project) {
-      projectName(host.project).then((name) => { targetLine.textContent = `Cible : ${name}.`; });
+    const aimed = host.scopeAll ? currentChatTarget() : host.project;
+    if (aimed) {
+      projectName(aimed).then((name) => { targetLine.textContent = `Cible : ${name}.`; });
     }
     button.addEventListener('click', async () => {
       button.disabled = true;
       try {
-        await api.autopilotSet(event.on, keyField.value);
+        await api.autopilotSet(event.on, keyField.value, host.scopeAll ? aimed : undefined);
         keyField.value = '';
         result.textContent = event.on ? 'Pilote activé.' : 'Pilote coupé.';
       } catch (error) {
@@ -549,6 +556,7 @@ export function createChat({ readOnly = () => false } = {}) {
   async function submit() {
     const text = input.value.trim();
     if (!text || busy || readOnly()) return;
+    if (host.scopeAll && !currentChatTarget()) { note('Choisissez d’abord le projet à qui vous parlez.', 'error'); return; }
     const answering = target;
     const dictation = voice.dictationPending(text); // consommée après un envoi réussi seulement
     const tokens = voice.dictationTokens(text); // jetons de transcription : le serveur reconnaît la dictée sans se fier au seul marqueur
@@ -588,10 +596,62 @@ export function createChat({ readOnly = () => false } = {}) {
     try { await api.chatCancel(); } catch (error) { note(`Arrêt non transmis : ${error.message}`, 'error'); } finally { stop.disabled = false; }
   });
 
+  // ── La cible en vue globale ─────────────────────────────────────────────
+  function lockForTarget(chosen) {
+    input.disabled = !chosen;
+    if (!chosen) hostBar.hidden = true;
+    send.disabled = !chosen || busy || readOnly();
+    if (!chosen) setStatus('Choisissez le projet à qui vous parlez : le chat n’a pas de projet par défaut dans cette vue.');
+  }
+
+  /** Change de projet cible : le fil et le flux du précédent sont fermés, ceux du nouveau s'ouvrent. */
+  function pickTarget(slug) {
+    if (stream) stream.close();
+    stream = null;
+    setChatTarget(slug);
+    log.replaceChildren();
+    lastSeq = 0;
+    replayUntil = 0;
+    current = null;
+    tools.clear();
+    permissions.clear();
+    questions.clear();
+    gestures.clear();
+    target = null;
+    setBusy(false);
+    lockForTarget(slug);
+    if (!slug) return;
+    projectName(slug).then((name) => setStatus(`Connexion à l’orchestrateur de « ${name} »…`));
+    loadHosts();
+    connect();
+  }
+
+  async function loadTargets() {
+    targetBar.hidden = false;
+    let projects = [];
+    try { projects = (await api.projects()).projects || []; } catch { /* registre illisible : aucune cible, rien n'est deviné */ }
+    const chosen = currentChatTarget();
+    targetSelect.replaceChildren(mk('option', { value: '', text: 'Choisir un projet…' }));
+    for (const entry of projects) {
+      const option = mk('option', { value: entry.slug, text: entry.name || entry.slug });
+      option.selected = entry.slug === chosen;
+      targetSelect.append(option);
+    }
+    if (chosen && !projects.some((p) => p.slug === chosen)) setChatTarget(null);
+  }
+
+  targetSelect.addEventListener('change', () => pickTarget(targetSelect.value));
+
   return {
     element,
     /** À l'affichage de l'onglet : ouvre le flux la première fois, remet le focus dans la saisie. */
     open() {
+      if (!opened && host.scopeAll && !readOnly()) {
+        opened = true;
+        loadTargets().then(() => pickTarget(currentChatTarget()));
+        scrollDown();
+        return;
+      }
       if (!opened) {
         opened = true;
         if (readOnly()) {

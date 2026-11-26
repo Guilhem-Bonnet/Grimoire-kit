@@ -10,7 +10,8 @@
 import { api } from '../api.js';
 import { icon } from '../shell.js';
 import {
-  appliedPause, availableGestures, confirmLines, gestureNotice, machineStops, noteKeeper, pauseMeta,
+  appliedPause, authorityLine, availableGestures, confirmLines, gestureNotice, machineStops, noteKeeper, pauseMeta,
+  pilotConfirmLines, pilotToggle,
 } from './pilotage-logic.js';
 
 function el(tag, className, textContent) {
@@ -294,7 +295,43 @@ function projectRow(ctx, row, anchor, onChange) {
     bar.append(b);
   }
   li.append(bar);
+  li.append(pilotBlock(ctx, row, onChange));
   return li;
+}
+
+// Le pilote automatique d'un projet NOMMÉ, depuis la vue globale : un interrupteur par ligne qui passe par la route
+// d'écriture du projet visé (`?project=<slug>` et corps), derrière la clé de contrôle — rien de nouveau côté autorité.
+// Le mandat n'est que lu : il ne s'accorde ni ne se révoque d'ici.
+function pilotBlock(ctx, row, onChange) {
+  const box = el('div', 'pi-pilot');
+  box.dataset.pilot = row.slug;
+  const line = el('p', 'pi-meta', authorityLine(row.authority));
+  line.dataset.role = 'authority-line';
+  box.append(line);
+  const toggle = pilotToggle(row.authority, { readOnly: ctx.host.readOnly });
+  if (!toggle.label) return box;
+  const b = button({ id: 'pilot', label: toggle.label, icon: 'bolt', quiet: true }, async () => {
+    b.disabled = true;
+    try {
+      const answer = await runGesture(
+        {
+          title: `${toggle.label} — ${row.name}`, lines: pilotConfirmLines(toggle.on, row.name),
+          confirmLabel: toggle.on ? 'Allumer' : 'Éteindre',
+        },
+        (a) => api.autopilotSet(toggle.on, a.key, row.slug),
+      );
+      if (answer) onChange(answer);
+    } catch (failure) {
+      box.append(el('p', 'pi-note', `Pilote : ${failure && failure.message ? failure.message : 'geste refusé'}`));
+    } finally {
+      b.disabled = toggle.disabled;
+    }
+  });
+  b.disabled = toggle.disabled;
+  if (toggle.why) b.title = toggle.why;
+  box.append(b);
+  if (toggle.why) box.append(el('p', 'pi-meta', toggle.why));
+  return box;
 }
 
 function machineRow(ctx, view, anchor, onChange) {
