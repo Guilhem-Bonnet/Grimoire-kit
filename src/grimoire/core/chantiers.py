@@ -140,7 +140,7 @@ def read_chantier(root: Path, slug: str | None = None) -> Chantier:
     progress = _progress(root, None if default else slug)
     path = directory / CHANTIER_FILE
     if not path.is_file():
-        if not default and not _has_phase_file(directory, name):
+        if not default and not _listed_without_yaml(root, name):
             raise GrimoireValidationError(f"chantier inconnu : {name!r}")
         # Défaut, ou chantier nommé créé par ``cadrage init -c`` : pas de chantier.yaml, l'état se déduit des phases.
         report = status(root, None if default else name)
@@ -171,17 +171,25 @@ def has_only_named_chantiers(root: Path) -> bool:
     return any(_is_named_chantier(child) for child in base.iterdir())
 
 
-def _has_phase_file(directory: Path, name: str) -> bool:
-    """Vrai si *directory*, au nom de slug valide, porte au moins un fichier de phase (``cadrage init -c``)."""
-    if name == DEFAULT_CHANTIER or not _SLUG_RE.match(name) or len(name) > MAX_SLUG:
+def _has_phase_file(directory: Path) -> bool:
+    """Vrai si *directory*, sous-dossier réel de ``_grimoire/cadrage/`` au slug valide et qui n'est pas un lien
+    symbolique, porte au moins un fichier de phase (``cadrage init -c``)."""
+    name = directory.name
+    if name == DEFAULT_CHANTIER or not _SLUG_RE.match(name) or len(name) > MAX_SLUG or directory.is_symlink():
         return False
     return directory.is_dir() and any((directory / p.filename).is_file() for p in PHASES)
+
+
+def _listed_without_yaml(root: Path, name: str) -> bool:
+    """Le nom vient de la liste réelle des sous-dossiers, jamais de l'entrée : un slug hostile ne forme aucun chemin."""
+    base = root / CADRAGE_DIR
+    return base.is_dir() and any(child.name == name and _has_phase_file(child) for child in base.iterdir())
 
 
 def _is_named_chantier(directory: Path) -> bool:
     """Un chantier nommé existe par son ``chantier.yaml`` (``new``) ou, à défaut, par un fichier de phase
     (``init -c``, versions publiées jusqu'à 3.122.0) : la lecture ne l'écrit pas."""
-    return directory.is_dir() and ((directory / CHANTIER_FILE).is_file() or _has_phase_file(directory, directory.name))
+    return directory.is_dir() and ((directory / CHANTIER_FILE).is_file() or _has_phase_file(directory))
 
 
 def _mtime(directory: Path) -> float:

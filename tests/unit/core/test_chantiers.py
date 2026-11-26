@@ -324,6 +324,21 @@ def test_init_chantier_without_chantier_yaml_is_listed_without_writing(tmp_path:
     assert (directory / "chantier.yaml").is_file()
 
 
+def test_read_chantier_refuses_hostile_slugs_and_symlinked_dirs(tmp_path: Path) -> None:
+    from grimoire.core.chantiers import read_chantier
+
+    project = tmp_path / "proj"
+    outside = tmp_path / "dehors"
+    scaffold(outside, project_name="x", chantier="piege")
+    scaffold(project, project_name="x", chantier="vrai")
+    (project / CADRAGE_DIR / "lien").symlink_to(outside / CADRAGE_DIR / "piege", target_is_directory=True)
+    for hostile in ("..", "../../dehors", str(outside), "lien", "Pas Valide", "absent"):
+        with pytest.raises((GrimoireValidationError, ValueError)):
+            read_chantier(project, hostile)
+    assert [c.slug for c in list_chantiers(project)] == ["vrai"]
+    assert read_chantier(project, "vrai").slug == "vrai"
+
+
 def test_has_only_named_chantiers_sees_init_chantier(tmp_path: Path) -> None:
     from grimoire.core.chantiers import has_only_named_chantiers
 
