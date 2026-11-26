@@ -399,8 +399,11 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     } catch (cause) {
       if (ctx.signal.aborted) return;
       if (cause.code === 409) {
-        // Le bloc a changé depuis le dépôt (ou la suggestion est déjà tranchée) : rien n'est écrit, on recharge.
-        await reload('Le bloc a changé depuis la suggestion : elle est périmée, rien n’a été écrit.');
+        // Deux causes de 409, dites séparément : déjà tranchée (autre onglet, autre geste) ou bloc changé.
+        const done = cause.payload && cause.payload.reason === 'deja-tranchee';
+        await reload(done
+          ? 'Cette suggestion a déjà été tranchée ailleurs : le document a été rechargé, rien n’a été écrit de plus.'
+          : 'Le bloc a changé depuis la suggestion : elle est périmée, rien n’a été écrit.');
         return;
       }
       throw cause;

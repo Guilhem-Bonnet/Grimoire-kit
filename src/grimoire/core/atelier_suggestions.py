@@ -18,20 +18,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.cadrage import PHASES
 from grimoire.core.fsio import atomic_write, locked
 
 __all__ = [
     "AUTHOR_MAX",
     "ETATS",
     "FILENAME",
+    "MAX_ENTRIES",
     "MAX_PENDING",
     "MOTIF_MAX",
     "POSTURES",
+    "StoreError",
     "Suggestion",
     "load",
     "locked_store",
     "new_suggestion",
+    "read",
     "save",
+    "set_aside",
     "store_path",
 ]
 
@@ -42,6 +47,8 @@ MOTIF_MAX = 300
 AUTHOR_MAX = 60
 #: Suggestions en attente par chantier : de quoi travailler, pas de quoi noyer le document.
 MAX_PENDING = 100
+#: Entrées au total (tranchées et périmées comprises) : les plus anciennes non valides partent d'abord.
+MAX_ENTRIES = 300
 
 
 @dataclass(slots=True)
@@ -61,6 +68,10 @@ class Suggestion:
     etat: str = "proposee"
     decide_le: str = ""
     decide_motif: str = ""
+    #: Combien de blocs de la phase avaient ce même texte au dépôt, et l'empreinte de leurs voisins : de quoi ne
+    #: pas confondre le bloc visé avec un homonyme quand les rangs se décalent (voir ``workspace_atelier_suggestions``).
+    homonymes: int = 1
+    voisins: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -79,22 +90,67 @@ def new_suggestion(**fields: Any) -> Suggestion:
     return Suggestion(id=f"sug-{secrets.token_hex(4)}", date=now(), **fields)
 
 
-def load(chantier_dir: Path) -> list[Suggestion]:
-    """Les suggestions du chantier, dans l'ordre de dépôt. Absent ou illisible : aucune (jamais d'erreur)."""
+class StoreError(ValueError):
+    """Le magasin existe mais ne se lit pas (droits, périphérique) : on n'écrase rien."""
+
+
+def read(chantier_dir: Path) -> tuple[list[Suggestion], int, bytes | None]:
+    """``(suggestions valides, lignes ignorées, octets d'un magasin abîmé)``.
+
+    Une ligne à la phase ou à l'état inconnus, ou aux champs mal typés, est ignorée (et comptée) : elle ne
+    casse ni le document ni la décision. Un fichier qui n'est pas un magasin (JSON tronqué, mauvaise forme) rend
+    ses octets en troisième valeur : l'appelant qui réécrit doit les mettre de côté (:func:`set_aside`).
+    """
+    path = store_path(chantier_dir)
     try:
-        data = json.loads(store_path(chantier_dir).read_text(encoding="utf-8"))
-        rows = data["suggestions"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return [], 0, None
+    except OSError as exc:
+        raise StoreError(f"magasin des suggestions illisible : {exc}") from exc
+    try:
+        rows = json.loads(raw.decode("utf-8"))["suggestions"]
+    except (ValueError, KeyError, TypeError):
+        return [], 0, raw
+    if not isinstance(rows, list):
+        return [], 0, raw
     known = set(Suggestion.__dataclass_fields__)
+    phases = {p.id for p in PHASES}
     out: list[Suggestion] = []
-    for row in rows if isinstance(rows, list) else []:
-        if isinstance(row, dict) and all(isinstance(row.get(k), str) for k in ("id", "block_id", "texte")):
-            try:
-                out.append(Suggestion(**{k: v for k, v in row.items() if k in known}))
-            except TypeError:  # champ requis absent : ligne ignorée, le reste reste lisible
-                continue
-    return out
+    ignored = 0
+    for row in rows:
+        try:
+            item = Suggestion(**{k: v for k, v in row.items() if k in known})
+        except (TypeError, AttributeError):  # pas un objet, ou champ requis absent
+            ignored += 1
+            continue
+        strings = (v for k, v in item.to_dict().items() if k != "homonymes")
+        if (
+            item.phase not in phases
+            or item.etat not in ETATS
+            or not isinstance(item.homonymes, int)
+            or not all(isinstance(v, str) for v in strings)
+        ):
+            ignored += 1
+            continue
+        out.append(item)
+    return out, ignored, None
+
+
+def load(chantier_dir: Path) -> list[Suggestion]:
+    """Les suggestions valides du chantier, dans l'ordre de dépôt. Absent ou abîmé : aucune."""
+    try:
+        return read(chantier_dir)[0]
+    except StoreError:
+        return []
+
+
+def set_aside(chantier_dir: Path, raw: bytes) -> str:
+    """Garde les octets d'un magasin abîmé sous un nom daté (atomique) ; rend ce nom."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    name = f"{FILENAME}.abime-{stamp}"
+    atomic_write(chantier_dir / name, raw)
+    return name
 
 
 def save(chantier_dir: Path, items: list[Suggestion]) -> None:

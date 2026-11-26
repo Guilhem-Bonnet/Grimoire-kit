@@ -291,6 +291,8 @@ class _ForgeHandler(SecureHandlerMixin, BaseHTTPRequestHandler):
 
         if path.startswith(workspace_atelier.ATELIER):  # Atelier en test : 404 drapeau, 409 bloc changé
             code, payload = workspace_atelier.post_http(self.api.project_root, path, body)
+            if code == 200:  # même trace gouvernée que toute écriture de la vue de travail
+                self._governed_event("workspace.post", route=path[len(WORKSPACE_PREFIX):])
             self._json(payload, code)
             return
         result = workspace_post(self.api.project_root, path, body)
@@ -317,6 +319,8 @@ class _ForgeHandler(SecureHandlerMixin, BaseHTTPRequestHandler):
 
                 length = int(self.headers.get("Content-Length", 0) or 0)
                 code, payload = workspace_atelier.put_http(self.api.project_root, path, self.rfile.read(length))
+                if code == 200:
+                    self._governed_event("workspace.put", route=path[len(WORKSPACE_PREFIX):])
                 self._json(payload, code)
             else:
                 self._error("route inconnue", 404)

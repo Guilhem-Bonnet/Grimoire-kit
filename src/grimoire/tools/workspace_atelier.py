@@ -41,7 +41,9 @@ MAX_BLOCK_CHARS = 20_000
 
 
 class ConflictError(Exception):
-    """Le fichier de phase a changé depuis la lecture (409)."""
+    """Le fichier de phase a changé depuis la lecture (409). ``reason`` précise la cause quand on la connaît."""
+
+    reason = ""
 
 
 def handles(path: str) -> bool:
@@ -351,11 +353,16 @@ def post_http(root: Path, path: str, body: dict[str, Any]) -> tuple[int, dict[st
         result = post(root, path, body)
         return 200, result if isinstance(result, dict) else {"ok": True, "result": result}
     except ConflictError as exc:
-        return 409, {"ok": False, "conflict": True, "error": str(exc)}
+        return 409, {"ok": False, "conflict": True, "reason": exc.reason, "error": str(exc)}
     except FileNotFoundError as exc:
         return 404, {"ok": False, "error": f"introuvable : {exc}"}
     except PermissionError as exc:
         return 403, {"ok": False, "error": str(exc)}
+    except TimeoutError:  # le verrou du magasin ou du fichier n'est pas venu : réessayer
+        return 503, {
+            "ok": False,
+            "error": "le fichier est verrouillé par une autre écriture : réessaie dans un instant",
+        }
     except ValueError as exc:
         return 400, {"ok": False, "error": str(exc)}
 
@@ -381,5 +388,10 @@ def put_http(
         return 404, {"ok": False, "error": f"introuvable : {exc}"}
     except PermissionError as exc:
         return 403, {"ok": False, "error": str(exc)}
+    except TimeoutError:
+        return 503, {
+            "ok": False,
+            "error": "le fichier est verrouillé par une autre écriture : réessaie dans un instant",
+        }
     except ValueError as exc:  # JSONDecodeError en est un
         return 400, {"ok": False, "error": str(exc)}

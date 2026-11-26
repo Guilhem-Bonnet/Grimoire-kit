@@ -49,7 +49,7 @@ def atelier_suggest(
 
     try:
         done = suggest(project_path, chantier, block_id, text, reason, posture)
-    except (ValueError, ConflictError, PermissionError, FileNotFoundError) as exc:
+    except (ValueError, ConflictError, PermissionError, FileNotFoundError, TimeoutError) as exc:
         return _error(str(exc))
     return json.dumps(done, indent=2, ensure_ascii=False)
 

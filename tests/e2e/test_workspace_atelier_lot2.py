@@ -203,3 +203,20 @@ def test_captures(browser: Browser, project_on: tuple[str, Path], size: tuple[in
         card.wait_for(timeout=APPEAR_MS)
         card.evaluate("element => element.scrollIntoView({block: 'center'})")
         page.screenshot(path=str(folder / f"atelier-suggestion-{size[0]}x{size[1]}.png"))
+
+
+def test_already_decided_elsewhere_is_not_called_stale(browser: Browser, project_on: tuple[str, Path]) -> None:
+    """Acceptée dans un autre onglet : le 409 le dit (« déjà tranchée »), il ne parle pas de bloc périmé."""
+    url, root = project_on
+    slug = _chantier(root, "Suggestion déjà tranchée")
+    made = _suggest(root, slug, "- Bouton maintenu pour parler, déjà.\n- Repli sur le navigateur.")
+    for page in _open(browser, url, f"#atelier?chantier={slug}"):
+        card = page.locator(f"[data-sugg='{made['id']}']")
+        card.wait_for(timeout=APPEAR_MS)
+        workspace_atelier_suggestions.decide(root, slug, made["id"], {"decision": "accept"})  # « l'autre onglet »
+        with page.expect_response(lambda r: "/suggestions/" in r.url and r.request.method == "POST") as seen:
+            card.get_by_role("button", name="Accepter").click()
+        assert seen.value.status == 409
+        status = page.locator("[data-role='atelier-status']", has_text="déjà été tranchée")
+        status.wait_for(timeout=APPEAR_MS)
+        assert "périmée" not in status.inner_text()

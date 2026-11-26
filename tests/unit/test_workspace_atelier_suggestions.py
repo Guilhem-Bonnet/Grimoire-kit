@@ -63,9 +63,9 @@ def test_flag_off_every_suggestion_route_is_404(tmp_path: Path) -> None:
 
 def test_deposit_never_writes_the_phase_file(project: Path) -> None:
     before = _file(project)
-    made = _deposit(project, posture="sceptique", auteur="claude")
+    made = _deposit(project, posture="sceptique", auteur="claude")  # l'auteur envoyé est ignoré
     assert _file(project) == before
-    assert made["etat"] == "proposee" and made["posture"] == "sceptique" and made["auteur"] == "claude"
+    assert made["etat"] == "proposee" and made["posture"] == "sceptique" and made["auteur"] == "agent"
     assert made["avant"] == "- Une piste" and made["texte"] == "- Une piste, précisée" and made["date"]
     saved = json.loads((project / "_grimoire/cadrage/un" / store.FILENAME).read_text(encoding="utf-8"))
     assert [s["id"] for s in saved["suggestions"]] == [made["id"]]
@@ -187,7 +187,8 @@ def test_principal_chantier_takes_suggestions(project: Path) -> None:
     block = next(b for b in workspace_get(project, f"{P}atelier/chantiers/principal", {})["phases"][0]["blocks"] if b["editable"])
     code, out = wa.post_http(project, f"{P}atelier/chantiers/principal/suggestions", {"block_id": block["id"], "texte": "Autre"})
     assert code == 200 and (project / "_grimoire/cadrage" / store.FILENAME).is_file()
-    assert workspace_get(project, f"{P}atelier/chantiers", {})["chantiers"][-1]["suggestions"] >= 0
+    rows = {r["slug"]: r for r in workspace_get(project, f"{P}atelier/chantiers", {})["chantiers"]}
+    assert rows["principal"]["suggestions"] == 1 and rows["un"]["suggestions"] == 0
     assert workspace_get(project, f"{P}atelier/chantiers/principal", {})["phases"][0]["suggestions"][0]["id"] == out["suggestion"]["id"]
 
 
@@ -199,8 +200,8 @@ def test_store_load_tolerates_damage(tmp_path: Path) -> None:
     assert store.load(tmp_path) == []
     good = {"id": "a", "phase": "brief", "block_id": "brief.x", "block_fingerprint": "f", "avant": "", "texte": "t",
             "motif": "", "posture": "explorer", "auteur": "agent", "date": "d", "extra": 1}
-    (tmp_path / store.FILENAME).write_text(json.dumps({"suggestions": [good, {"id": "b"}, 3, {**good, "id": "c", "date": None, "avant": None}]}))
-    assert [s.id for s in store.load(tmp_path)] == ["a", "c"]
+    (tmp_path / store.FILENAME).write_text(json.dumps({"suggestions": [good, {"id": "b"}, 3, {**good, "id": "c", "date": None}]}))
+    assert [s.id for s in store.load(tmp_path)] == ["a"]  # champ mal typé, absent, pas un objet : ignorés
     incomplete = {k: v for k, v in good.items() if k != "phase"}
     (tmp_path / store.FILENAME).write_text(json.dumps({"suggestions": [incomplete]}))
     assert store.load(tmp_path) == []
