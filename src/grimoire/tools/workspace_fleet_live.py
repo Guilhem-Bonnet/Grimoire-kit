@@ -265,6 +265,27 @@ class _Call:
     counters: tuple[int, int, int, int]
 
 
+class _Raw:
+    """Un texte pas encore caviardé, qui ne se montre ni par ``repr`` ni par une sérialisation générique.
+
+    ``dataclasses.asdict`` copie (``deepcopy``) ce qu'il ne connaît pas : la copie est vide.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def __repr__(self) -> str:
+        return "<brut>"
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> _Raw:
+        return _Raw(type(self.value)())
+
+    def __copy__(self) -> _Raw:
+        return _Raw(type(self.value)())
+
+
 @dataclass(slots=True)
 class _Tool:
     id: str
@@ -276,16 +297,16 @@ class _Tool:
     #: Faux dès que l'appel sort des :data:`TAIL_CALLS` derniers : son texte n'est plus jamais rendu.
     in_tail: bool = True
     #: Texte brut en attente de caviardage : il n'est jamais rendu tel quel, seulement par :meth:`settle`.
-    raw_summary: str | None = None
-    raw_excerpt: str | None = None
+    raw_summary: _Raw | None = field(default=None, repr=False)
+    raw_excerpt: _Raw | None = field(default=None, repr=False)
 
     def settle(self) -> None:
         """Caviarde, tronque et garde le texte rendu ; le brut est oublié (un seul caviardage par texte)."""
         if self.raw_summary is not None:
-            self.summary = _clip(_clean(self.raw_summary), SUMMARY_CHARS)
+            self.summary = _clip(_clean(self.raw_summary.value), SUMMARY_CHARS)
             self.raw_summary = None
         if self.raw_excerpt is not None:
-            self.excerpt = _clip(_clean(self.raw_excerpt), EXCERPT_CHARS)
+            self.excerpt = _clip(_clean(self.raw_excerpt.value), EXCERPT_CHARS)
             self.raw_excerpt = None
 
     def leave_tail(self) -> None:
@@ -321,7 +342,8 @@ class _FileState:
     refused: bool = False
     offset: int = 0
     #: Les derniers octets consommés (avant ``offset``) : le même fichier les porte encore à la reprise.
-    guard: bytes = b""
+    #: Du texte de journal, donc tenu dans un :class:`_Raw` (ni ``repr`` ni ``asdict`` ne le montrent).
+    _guard: _Raw = field(default_factory=lambda: _Raw(b""), repr=False)
     session_id: str = ""
     entrypoint: str = ""
     cwd: str = ""
@@ -343,6 +365,14 @@ class _FileState:
     open_tools: dict[str, _Tool] = field(default_factory=dict)
     seen_tools: dict[str, None] = field(default_factory=dict)
     pr: dict[str, Any] | None = None
+
+    @property
+    def guard(self) -> bytes:
+        return bytes(self._guard.value)
+
+    @guard.setter
+    def guard(self, value: bytes) -> None:
+        self._guard = _Raw(value)
 
 
 @dataclass(slots=True)
@@ -634,7 +664,7 @@ def _defer_summary(tool: _Tool, text: str) -> None:
     if len(text) > _LAZY_MAX_CHARS:
         tool.summary = _clip(_clean(text), SUMMARY_CHARS)
     else:
-        tool.raw_summary = text
+        tool.raw_summary = _Raw(text)
 
 
 def _remember_tool(state: _FileState, tool_id: str) -> None:
@@ -670,7 +700,7 @@ def _fold_user(state: _FileState, line: dict[str, Any]) -> None:
             tool.excerpt = _clip(_clean(text), EXCERPT_CHARS)
             tool.raw_excerpt = None
         else:
-            tool.raw_excerpt = text
+            tool.raw_excerpt = _Raw(text)
         if failed:
             _note_marker(state, tool.at or stamp, "error", tool.excerpt or tool.tool)
 
@@ -813,7 +843,8 @@ def _meta_for(path: Path) -> _MetaState:
     if not isinstance(data, dict):
         return meta
     meta.agent_type = _text(data.get("agentType"))
-    meta.description = _text(data.get("description"))
+    # Caviardée avant la troncature du rendu (``_clip`` à l'assemblage) : jamais un fragment de secret.
+    meta.description = _clean(_text(data.get("description")))
     meta.model = _text(data.get("model"))
     meta.picked = _text(data.get("pickedEffortModel"))
     depth = data.get("spawnDepth")
