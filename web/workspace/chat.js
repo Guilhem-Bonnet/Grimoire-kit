@@ -428,6 +428,11 @@ export function createChat({ readOnly = () => false } = {}) {
 
   async function loadHosts() {
     if (needsTarget()) return;
+    // La première lecture attend les sondes des hôtes installés (au plus quelques secondes, ensuite gardées) : le
+    // sélecteur est là tout de suite, « vérification… », et la saisie n'est fermée par RIEN tant que la réponse n'est pas
+    // là — seul un « aucun hôte utilisable » confirmé la ferme.
+    hostBar.hidden = false;
+    hostSelect.replaceChildren(mk('option', { value: '', text: 'Vérification des hôtes…' }));
     let state;
     try { state = await api.chatHosts(); } catch { hostBar.hidden = true; return; }
     if (needsTarget()) return; // la cible a été retirée pendant la lecture : cette réponse n'est plus la bonne
