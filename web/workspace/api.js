@@ -617,6 +617,13 @@ export const api = {
   // depuis le dépôt répond 409 (suggestion périmée, rien n'est écrit).
   atelierDecision: (slug, id, decision, motif) =>
     post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/suggestions/' + encodeURIComponent(id), { decision, motif }),
+  // Commentaires ancrés (lot 3) : l'humain commente un passage (`quote` : le texte cité, `start` : sa position dans le
+  // bloc, que le serveur vérifie), puis répond, résout, rouvre ou supprime (`action`). L'auteur est « humain » : aucun
+  // champ ne le dit. Les fils d'un chantier arrivent avec le document (`phase.comments`), chacun avec son ancre du jour.
+  atelierCommenter: (slug, blockId, quote, start, texte) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/comments', { block_id: blockId, quote, start, texte }),
+  atelierFil: (slug, id, action, texte) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/comments/' + encodeURIComponent(id), { action, texte }),
   // Document vivant (lot 4) : l'état réel de ce qui sert chaque exigence (lecture), puis « Valider et découper » :
   // l'aperçu (lecture), puis l'écriture confirmée (`digest` : l'empreinte de l'aperçu confirmé ; 409 si le plan a
   // changé ou si une exigence Must n'est pas validée). Aucune route ne valide une exigence : la MOA le fait au terminal.

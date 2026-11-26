@@ -218,7 +218,8 @@ def test_mcp_tool_only_deposits_and_cannot_accept_its_own_suggestion(project: Pa
 
     names = {t.name for t in mcp._tool_manager.list_tools()}
     assert "atelier_suggest" in names
-    assert not [n for n in names if n.startswith("atelier") and n != "atelier_suggest"]
+    # Lot 3 : l'agent commente et lit les fils ; il ne tranche toujours rien (voir test_workspace_atelier_comments).
+    assert {n for n in names if n.startswith("atelier")} == {"atelier_suggest", "atelier_comment", "atelier_comments"}
     # Aucun paramètre de décision, aucune fonction de décision exposée par le module de l'outil.
     params = set(inspect.signature(atelier_tools.atelier_suggest).parameters)
     assert not params & {"decision", "accept", "reject", "suggestion_id", "id", "state", "etat"}

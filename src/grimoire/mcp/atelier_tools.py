@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-__all__ = ["atelier_suggest", "register"]
+__all__ = ["atelier_comment", "atelier_comments", "atelier_suggest", "register"]
 
 
 def _error(message: str) -> Any:
@@ -54,6 +54,73 @@ def atelier_suggest(
     return json.dumps(done, indent=2, ensure_ascii=False)
 
 
+def atelier_comment(
+    chantier: str,
+    text: str,
+    block_id: str = "",
+    quote: str = "",
+    start: int | None = None,
+    reply_to: str = "",
+    suggestion: str = "",
+    project_path: str = ".",
+) -> Any:
+    """Comment on a passage of a chantier's spec document, or reply in an open thread; the human reads it on screen.
+
+    Nothing is written to the document. The comment is anchored to the passage you quote and shows beside it in the
+    cockpit (Atelier tab, which must be enabled); you are always the author "agent". You can neither resolve, reopen
+    nor delete a thread: the human does. Read the open threads first with `atelier_comments` and answer in them.
+
+    Args:
+        chantier: Slug of the chantier (the default one is `principal`).
+        text: What you say (2000 characters at most).
+        block_id: Id of the block you comment on (`<phase>.<fingerprint>`, as served with the document); required
+            unless you reply.
+        quote: The exact passage of that block you refer to (300 characters at most); omit it to comment the block
+            as a whole. If the passage occurs more than once in the block, also give `start`.
+        start: Offset of `quote` in the block text, when it is ambiguous.
+        reply_to: Id of an open thread (`com-…`) to answer in instead of opening a new one.
+        suggestion: Id of a suggestion you just filed with `atelier_suggest` (`sug-…`) that this comment goes with.
+        project_path: Path to project root (default: current directory).
+    """
+    from grimoire.tools.workspace_atelier import ConflictError
+    from grimoire.tools.workspace_atelier_comments import agent_comment
+
+    try:
+        done = agent_comment(project_path, chantier, text, block_id, quote, start, reply_to, suggestion)
+    except (ValueError, ConflictError, PermissionError, FileNotFoundError, TimeoutError) as exc:
+        return _error(str(exc))
+    return json.dumps(done, indent=2, ensure_ascii=False)
+
+
+def atelier_comments(chantier: str, project_path: str = ".") -> Any:
+    """List the open comment threads of a chantier's spec document, with the quoted passage, to answer them.
+
+    Each thread gives its id, author, text and replies, the passage it quotes (`quote`), where that passage lives
+    today (`anchor.state`: `ancre`, `retrouve`, or `orphelin` when the passage was changed or deleted; never guessed)
+    and the current text of its block (`block_text`). Answer with `atelier_comment` and `reply_to`.
+
+    Args:
+        chantier: Slug of the chantier (the default one is `principal`).
+        project_path: Path to project root (default: current directory).
+    """
+    from grimoire.tools.workspace_atelier import ConflictError
+    from grimoire.tools.workspace_atelier_comments import agent_threads
+
+    try:
+        done = agent_threads(project_path, chantier)
+    except (ValueError, ConflictError, PermissionError, FileNotFoundError, TimeoutError) as exc:
+        return _error(str(exc))
+    return json.dumps(done, indent=2, ensure_ascii=False)
+
+
 def register(tool: Callable[[Any], Callable[[Any], Any]], writes: Callable[..., Any]) -> None:
-    """Enregistre ``atelier_suggest`` (écriture dans le magasin du chantier seulement, non destructive)."""
+    """Enregistre ``atelier_suggest`` et ``atelier_comment`` (écriture dans le magasin du chantier seulement, non
+    destructive) et ``atelier_comments`` (lecture). Aucun outil ne résout, ne rouvre ni ne supprime un fil."""
+    from mcp.types import ToolAnnotations
+
     tool(writes(destructive=False, idempotent=True))(atelier_suggest)
+    tool(writes(destructive=False, idempotent=True))(atelier_comment)
+    reads = ToolAnnotations.model_validate(
+        {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+    )
+    tool(reads)(atelier_comments)

@@ -17,6 +17,8 @@ Routes (préfixe ``/api/workspace/``) :
   ``expected`` est l'empreinte du fichier de phase lue avec ``GET`` ; un fichier changé depuis = 409.
 - ``GET|POST atelier/chantiers/<slug>/suggestions``, ``POST …/suggestions/<id>`` : lot 2, voir
   :mod:`grimoire.tools.workspace_atelier_suggestions` (``POST`` rend ses refus par :func:`post_http`).
+- ``GET|POST atelier/chantiers/<slug>/comments``, ``POST …/comments/<id>`` : lot 3, les commentaires ancrés, voir
+  :mod:`grimoire.tools.workspace_atelier_comments` (l'auteur est toujours « humain » ici ; l'agent passe par l'outil MCP).
 - ``GET atelier/chantiers/<slug>/trace``, ``GET|POST …/decoupage`` : lot 4, le document vivant, voir
   :mod:`grimoire.tools.workspace_atelier_trace`. Aucune route ne valide une exigence : c'est un geste de la MOA, au terminal.
 """
@@ -172,9 +174,11 @@ def _chantier_row(root: Path, chantier: Any) -> dict[str, Any]:
     if chantier.error:
         row["chemin"] = (cadrage_dir(root, name).relative_to(root) / "chantier.yaml").as_posix()
     else:
+        from grimoire.tools import workspace_atelier_comments as comments
         from grimoire.tools import workspace_atelier_suggestions as sugg
 
         row["suggestions"] = sugg.pending_count(root, chantier.slug)  # en attente, bloc visé encore là
+        row["commentaires"] = comments.open_count(root, chantier.slug)  # fils ouverts (lot 3)
     return dict(row)
 
 
@@ -244,6 +248,9 @@ def document(root: Path, slug: str) -> dict[str, Any]:
     waiting = sugg.pending(root, slug)
     for phase in phases:
         phase["suggestions"] = [s for s in waiting if s["phase"] == phase["id"]]
+    from grimoire.tools import workspace_atelier_comments as comments
+
+    comments.attach(root, slug, phases)  # lot 3 : les fils de chaque phase, avec leur ancre d'aujourd'hui
     return {"chantier": _chantier_row(root, found), "phases": phases}
 
 
@@ -319,6 +326,9 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
         updated = atelier_blocs.replace_block(current, block, text)
         if updated != current:
             atomic_write(path, updated.encode("utf-8"))
+    from grimoire.tools import workspace_atelier_comments as comments
+
+    comments.resync_after_edit(root, slug)  # lot 3 : les fils retrouvés suivent leur passage (sans effet sur l'écriture)
     return {"ok": True, "phase": _phase_view(root, None if slug == "principal" else slug, phase)}
 
 
@@ -338,6 +348,10 @@ def get(root: Path, path: str, query: dict[str, list[str]]) -> Any:
         from grimoire.tools import workspace_atelier_suggestions as sugg
 
         return sugg.listing(root, rest[1])
+    if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "comments":
+        from grimoire.tools import workspace_atelier_comments as comments
+
+        return comments.listing(root, rest[1])
     if len(rest) == 3 and rest[0] == "chantiers" and rest[2] in ("trace", "decoupage"):
         from grimoire.tools import workspace_atelier_trace as live
 
@@ -361,6 +375,11 @@ def post(root: Path, path: str, body: dict[str, Any]) -> Any:
             return sugg.deposit(root, rest[1], body)
         if len(rest) == 4:
             return sugg.decide(root, rest[1], rest[3], body)
+    if len(rest) in (3, 4) and rest[0] == "chantiers" and rest[2] == "comments":
+        from grimoire.tools import workspace_atelier_comments as comments
+
+        # Lot 3 : l'auteur est celui du canal (cette route = l'humain), jamais un champ du corps.
+        return comments.create(root, rest[1], body, "humain") if len(rest) == 3 else comments.act(root, rest[1], rest[3], body)
     if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "decoupage":
         from grimoire.tools import workspace_atelier_trace as live
 

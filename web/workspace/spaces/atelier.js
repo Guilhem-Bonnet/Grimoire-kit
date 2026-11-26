@@ -7,13 +7,15 @@
 // Lot 2 : un bloc qui porte une suggestion de l'agent l'affiche dessous (avant / après, motif, posture) avec
 // « Accepter » et « Refuser » ; l'agent ne modifie jamais un bloc, l'humain tranche ici. Compteur en bibliothèque.
 // Lot 4 : sous chaque exigence, sa ligne d'état réel et « Valider et découper » (voir `atelier-live.js`).
-// Hors de ces lots : l'assistant flottant, les commentaires, la recette depuis le document, la voix.
+// Lot 3 : des commentaires ancrés à un passage, entre l'humain et l'agent (voir `atelier-comments.js`).
+// Hors de ces lots : l'assistant flottant, les diagrammes, la recette depuis le document, la voix.
 // Données : `GET atelier/chantiers`, `POST atelier/chantiers`, `GET atelier/chantiers/<slug>`,
 // `PUT atelier/chantiers/<slug>/blocs/<id>`, `POST atelier/chantiers/<slug>/suggestions/<id>` (voir `src/grimoire/tools/workspace_atelier.py`).
 
 import { renderMarkdown } from '../markdown.js';
 import { badge, icon } from '../shell.js';
 import { createLiveDoc } from './atelier-live.js';
+import { createComments } from './atelier-comments.js';
 
 
 /** Ordre des groupes de la bibliothèque ; `archive` vit dans une ligne repliable. */
@@ -92,6 +94,12 @@ function chantierRow(ctx, row) {
     const waiting = badge(`${n} suggestion${n > 1 ? 's' : ''}`, 'acc', `${n} suggestion${n > 1 ? 's' : ''} en attente de ta décision`);
     waiting.setAttribute('data-role', 'sugg-count');
     name.append(waiting);
+  }
+  if (row.commentaires > 0) { // lot 3 : fils ouverts sur le document de ce chantier
+    const n = row.commentaires;
+    const talk = badge(`${n} commentaire${n > 1 ? 's' : ''}`, 'acc', `${n} fil${n > 1 ? 's' : ''} de commentaires ouvert${n > 1 ? 's' : ''}`);
+    talk.setAttribute('data-role', 'comment-count');
+    name.append(talk);
   }
   const { segs, done } = segments(row);
   const progress = el('span', 'at-cell');
@@ -359,12 +367,17 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const sheet = el('article', 'at-sheet', null, { 'aria-label': 'Document du chantier' });
   const nav = el('nav', 'at-phases', null, { 'aria-label': 'Étapes du cadrage' });
   const status = el('p', 'at-muted at-status', '', { role: 'status', 'aria-live': 'polite', 'data-role': 'atelier-status' });
-  const liveDoc = createLiveDoc(ctx, slug, { sheet, status });
+  // Lot 3 : les commentaires ancrés. `reqBlock` dit quel bloc porte chaque exigence, pour compter ses fils ouverts.
+  const reqBlock = new Map();
+  const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message) });
+  const liveDoc = createLiveDoc(ctx, slug, { sheet, status, comments: (req) => cm.openOn(reqBlock.get(req)) });
   let focusId = phaseFocus || state.doc.phases[0].id;
   const pendingNote = el('span', 'at-pending', null, { 'data-role': 'doc-sugg-count' });
+  const commentNote = el('span', 'at-pending', null, { 'data-role': 'doc-comment-count' });
   const countNote = () => {
     const waiting = state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0);
     pendingNote.textContent = waiting ? ` ${waiting} suggestion${waiting > 1 ? 's' : ''} en attente.` : '';
+    commentNote.textContent = cm.summary();
   };
 
   const phaseNav = () => {
@@ -416,6 +429,24 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     await reload(decision === 'accept' ? 'Suggestion acceptée : le bloc est réécrit.' : 'Suggestion refusée : le document n’a pas changé.');
   };
 
+  /** Après une réécriture de bloc : les fils de la phase suivent leur passage (ancres recalculées par le serveur). */
+  const syncComments = async (phaseId, written) => {
+    try {
+      const fresh = await ctx.api.atelierChantier(slug);
+      if (ctx.signal.aborted) return;
+      const mine = state.doc.phases.find((p) => p.id === phaseId);
+      const next = fresh.phases.find((p) => p.id === phaseId);
+      if (!mine || !next) return;
+      mine.comments = next.comments;
+      countNote();
+      drawSection(mine);
+      const again = mine.blocks.find((b) => b.text === written);
+      sheet.querySelector(`[data-block="${CSS.escape(again ? again.id : '')}"]`)?.focus();
+    } catch {
+      // Le prochain chargement du document remettra les fils à jour.
+    }
+  };
+
   const editBlock = (host, phase, block) => {
     const area = el('textarea', null, null, { 'aria-label': `Modifier le bloc : ${blockTitle(block)}`, spellcheck: 'true' });
     area.value = block.text;
@@ -449,6 +480,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         // La vue d'un bloc réécrit n'embarque pas les suggestions : celles des autres blocs restent, celles du
         // bloc modifié sont périmées (le serveur le dira de même au prochain chargement).
         result.phase.suggestions = (phase.suggestions || []).filter((x) => x.block_id !== block.id);
+        result.phase.comments = phase.comments || []; // provisoire : le serveur recalcule les ancres, relues ci-dessous
         state.doc.phases = state.doc.phases.map((p) => (p.id === phase.id ? result.phase : p));
         countNote();
         phaseNav();
@@ -457,6 +489,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         liveDoc.refresh(); // une exigence réécrite peut être « modifiée depuis la validation »
         const written = result.phase.blocks.find((b) => b.text === area.value.trimEnd());
         sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`)?.focus();
+        if ((phase.comments || []).length) syncComments(phase.id, area.value.trimEnd());
       } catch (cause) {
         if (ctx.signal.aborted) return;
         if (cause.code === 409) {
@@ -484,9 +517,13 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       tabindex: '0', 'data-block': block.id, 'data-kind': block.kind,
       'aria-label': `Modifier le bloc : ${blockTitle(block)}`,
     });
-    host.append(renderBlock(block));
+    host.append(renderBlock(block), cm.addButton(phase, block, host, blockTitle(block)));
     const edit = () => { if (!host.classList.contains('is-editing')) editBlock(host, phase, block); };
-    host.addEventListener('click', edit);
+    // Sélectionner un passage (pour le commenter) ne doit pas ouvrir l'édition du bloc : seul un clic sans sélection le fait.
+    host.addEventListener('click', () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !host.contains(selection.anchorNode)) edit();
+    });
     host.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && event.target === host) { event.preventDefault(); edit(); }
     });
@@ -501,6 +538,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       section.append(el('p', 'at-muted', phase.readable === false ? 'Ce fichier n’est pas de l’UTF-8 : modifie-le hors du cockpit.' : 'Cette phase n’a pas de fichier.'));
     }
     let intro = true;
+    const drawn = new Set();
     for (const block of phase.blocks) {
       if (block.kind === 'entete' || block.kind === 'titre') continue;
       if (intro && block.kind === 'paragraphe' && !block.section) {
@@ -509,11 +547,25 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         continue;
       }
       intro = false;
-      section.append(blockNode(phase, block));
-      if (block.kind === 'exigence' && block.req) section.append(liveDoc.line(block.req)); // état réel, sous l'exigence
+      if (block.editable) {
+        // Le bloc et ses fils côte à côte (marge) ou l'un sous l'autre (étroit) : la mise en page décide.
+        const row = el('div', 'at-cmrow');
+        row.append(blockNode(phase, block), cm.margin(block));
+        section.append(row);
+        drawn.add(block.id);
+      } else {
+        section.append(blockNode(phase, block));
+      }
+      if (block.kind === 'exigence' && block.req) {
+        reqBlock.set(block.req, block.id);
+        section.append(liveDoc.line(block.req)); // état réel, sous l'exigence
+      }
       for (const sug of (phase.suggestions || []).filter((x) => x.block_id === block.id)) section.append(suggestionNode(sug, decide));
     }
+    const lost = cm.orphans(phase, drawn); // les fils dont le passage a disparu : en fin de phase, avec leur extrait
+    if (lost) section.append(lost);
     if (old) old.replaceWith(section); else sheet.append(section);
+    cm.paint();
   };
 
   const drawAll = () => {
@@ -533,7 +585,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     opened ? `Ouvert le ${opened}.` : 'Chantier historique du projet.',
     chantier.modifie ? `Modifié le ${formatDate(chantier.modifie, { withTime: true })}.` : '',
   ].filter(Boolean).join(' '));
-  meta.append(pendingNote);
+  meta.append(pendingNote, commentNote);
   const head = el('div', 'at-head');
   const left = el('div');
   left.append(back, title, meta);
