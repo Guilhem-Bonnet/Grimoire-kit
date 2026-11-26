@@ -240,7 +240,7 @@ def test_a_changed_block_gives_its_quote_back(browser: Browser, project_on: tupl
         page.locator(".at-blk", has_text="enfoncé").wait_for(timeout=APPEAR_MS)
         thread = _thread(page, str(made["id"]))
         thread.wait_for(timeout=APPEAR_MS)
-        assert thread.get_attribute("data-anchor") == "retrouve" and "Passage retrouvé" in thread.inner_text()
+        assert thread.get_attribute("data-anchor") == "retrouve" and "Passage modifié depuis le commentaire" in thread.inner_text()
         assert page.locator(".at-cmrow", has_text="enfoncé").locator(f"[data-com='{made['id']}']").count() == 1
 
 

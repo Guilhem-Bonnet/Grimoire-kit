@@ -1,24 +1,25 @@
 """Ancres des commentaires de l'Atelier de spec (lot 3 de l'épique #1197) : retrouver un passage après modification.
 
-Un commentaire porte le bloc visé (identifiant et empreinte), l'extrait cité, sa position dans le bloc et le contexte
-de chaque côté. Le document change sous le commentaire (l'humain réécrit, l'agent propose, une suggestion est
-acceptée) ; :func:`locate` dit où le commentaire vit **aujourd'hui**, sans rien écrire.
+Un commentaire porte le bloc visé (identifiant, empreinte, **rang dans la phase et empreinte de ses deux voisins**),
+l'extrait cité, sa position dans le bloc et le contexte de chaque côté. Le document change sous le commentaire ;
+:func:`locate` dit où le commentaire vit **aujourd'hui**, sans rien écrire.
 
-Règle de réancrage, dans cet ordre, la première qui conclut gagne :
+Principe : **un fil ne quitte jamais son bloc d'origine.** Un autre bloc qui porte le même texte ou la même empreinte
+n'est pas ce bloc ; au moindre doute, le fil est orphelin. Règle, la première qui conclut gagne :
 
-1. **Le bloc visé n'a pas changé** (un seul bloc de la phase a son empreinte, et il n'y avait pas d'homonyme à
-   l'ancrage) : le commentaire reste attaché à ce bloc, que les blocs voisins aient changé ou non. État ``ancre``.
-2. **Le bloc a des homonymes** (même texte ailleurs dans la phase) : seul celui dont les voisins immédiats sont ceux
-   de l'ancrage convient, et il doit être unique ; sinon on ne sait pas lequel c'était : orphelin.
-3. **Le bloc visé a changé** : l'extrait est cherché mot pour mot dans les blocs modifiables de la phase. Il est
-   retrouvé (``retrouve``) quand **une seule** occurrence a le même contexte avant ET après (au bord du bloc, le
-   contexte vide veut dire « au bord »), ou, à défaut de contexte commun, quand l'extrait (24 caractères au moins) n'a
-   qu'une seule occurrence dans toute la phase.
-4. **Sinon** (extrait disparu ou occurrences en concurrence) : ``orphelin``. Jamais de rapprochement par
-   approximation : pas de distance d'édition, pas de « le plus ressemblant ».
+0. **Un orphelin le reste.** Un fil marqué orphelin au magasin (:attr:`Comment.orphelin`) ne se réancre plus de lui-même.
+1. **Le bloc visé n'a pas changé** : un bloc de la phase a son empreinte *et* c'est bien sa place (même rang, ou au moins
+   un voisin identique : un bloc inséré ou supprimé avant lui ne le détache pas). Il doit être le seul dans ce cas, ou
+   le seul au même rang. Les blocs voisins peuvent changer sans que le fil bouge. Un bloc de même texte mais d'une
+   autre place (rang et voisins différents) ne compte pas.
+2. **Le bloc visé a été modifié sur place** : c'est le bloc compris entre les deux mêmes voisins (empreintes des deux
+   identiques, et un seul bloc dans ce cas). L'extrait n'y est cherché que **dans ce bloc**, mot pour mot : retrouvé
+   (``retrouve``) s'il y figure une seule fois, ou, s'il y figure plusieurs fois, si une seule occurrence a exactement le
+   même contexte avant et après ; sinon orphelin.
+3. **Sinon** : ``orphelin``. Pas de recherche dans les autres blocs, pas de distance d'édition, pas d'unicité « dans la
+   phase ».
 
-Un orphelin garde son extrait d'origine et reste visible : ``near`` nomme le bloc encore présent qui a l'empreinte
-d'origine quand l'orphelin vient d'un doute entre homonymes ; ``""`` sinon (le document l'affiche en fin de phase).
+Un fil « retrouvé » (:attr:`Comment.deplace`) le reste : la marque est écrite au magasin et ne s'efface pas.
 """
 
 from __future__ import annotations
@@ -30,9 +31,6 @@ from typing import Any, Protocol
 from grimoire.core.atelier_comments import CONTEXT_MAX
 from grimoire.tools import atelier_blocs
 
-#: Extrait minimal pour qu'une occurrence unique suffise à le retrouver quand son contexte a changé.
-UNIQUE_MIN = 24
-
 
 class Anchored(Protocol):
     """Ce que :func:`locate` lit d'un commentaire."""
@@ -42,13 +40,16 @@ class Anchored(Protocol):
     start: int
     before: str
     after: str
-    homonymes: int
-    voisins: str
+    rank: int
+    prev: str
+    next: str
+    orphelin: bool
+    deplace: bool
 
 
 @dataclass(frozen=True, slots=True)
 class Anchor:
-    """Où vit le commentaire : ``ancre`` (bloc inchangé), ``retrouve`` (extrait retrouvé) ou ``orphelin``."""
+    """Où vit le commentaire : ``ancre`` (bloc inchangé), ``retrouve`` (bloc modifié, extrait retrouvé) ou ``orphelin``."""
 
     state: str
     block_id: str = ""
@@ -65,12 +66,11 @@ def context(text: str, start: int, end: int) -> tuple[str, str]:
     return text[max(0, start - CONTEXT_MAX) : start], text[end : end + CONTEXT_MAX]
 
 
-def around(blocks: Sequence[atelier_blocs.Block], index: int) -> tuple[int, str]:
-    """Ce qui distingue un bloc de ses homonymes : leur nombre et l'empreinte des voisins immédiats."""
-    same = sum(1 for b in blocks if b.text == blocks[index].text)
-    before = blocks[index - 1].text if index > 0 else ""
-    after = blocks[index + 1].text if index + 1 < len(blocks) else ""
-    return same, atelier_blocs.fingerprint(before + "\0" + after)
+def around(blocks: Sequence[atelier_blocs.Block], index: int) -> tuple[int, str, str]:
+    """L'identité d'un bloc dans sa phase : son rang et l'empreinte de chacun de ses voisins (``""`` au bord)."""
+    before = atelier_blocs.fingerprint(blocks[index - 1].text) if index > 0 else ""
+    after = atelier_blocs.fingerprint(blocks[index + 1].text) if index + 1 < len(blocks) else ""
+    return index, before, after
 
 
 def occurrences(text: str, needle: str) -> list[int]:
@@ -82,30 +82,42 @@ def occurrences(text: str, needle: str) -> list[int]:
     return found
 
 
-def _same_context(text: str, at: int, item: Anchored) -> bool:
-    """Le contexte d'une occurrence est celui de l'ancrage, sans tolérance (le bord compte comme un contexte)."""
-    end = at + len(item.quote)
-    before, after = context(text, at, end)
-    return before == item.before and after == item.after
+def _fp(block: atelier_blocs.Block) -> str:
+    return atelier_blocs.fingerprint(block.text)
+
+
+def _in_place(blocks: Sequence[atelier_blocs.Block], index: int, item: Anchored) -> bool:
+    """Le bloc ``index`` est à la place du bloc visé : même rang, ou au moins un voisin (non vide) identique."""
+    _rank, before, after = around(blocks, index)
+    return index == item.rank or (bool(before) and before == item.prev) or (bool(after) and after == item.next)
 
 
 def locate(blocks: Sequence[atelier_blocs.Block], item: Anchored) -> Anchor:
     """Où le commentaire ``item`` vit dans ``blocks`` (les blocs de sa phase, tels qu'aujourd'hui). N'écrit rien."""
-    same = [i for i, b in enumerate(blocks) if atelier_blocs.fingerprint(b.text) == item.block_fingerprint]
-    if same:
-        kept = same
-        if len(same) > 1 or item.homonymes > 1:
-            kept = [i for i in same if around(blocks, i)[1] == item.voisins]
-            if len(kept) != 1:
-                return Anchor("orphelin", near=blocks[same[0]].id)
-        block = blocks[kept[0]]
+    if item.orphelin:
+        return Anchor("orphelin")
+    held = "retrouve" if item.deplace else "ancre"
+    same = [i for i, b in enumerate(blocks) if _fp(b) == item.block_fingerprint]
+    placed = [i for i in same if _in_place(blocks, i, item)]
+    if len(placed) > 1:
+        placed = [i for i in placed if i == item.rank]
+        if len(placed) != 1:
+            return Anchor("orphelin", near=blocks[same[0]].id)  # le doute entre des blocs identiques
+    if len(placed) == 1:
+        block = blocks[placed[0]]
         if block.text[item.start : item.start + len(item.quote)] == item.quote:
-            return Anchor("ancre", block.id, item.start, item.start + len(item.quote))
+            return Anchor(held, block.id, item.start, item.start + len(item.quote))
         return Anchor("orphelin", near=block.id)  # position qui ne dit plus l'extrait : on ne devine pas
-    seen = [(b, at) for b in blocks if b.editable for at in occurrences(b.text, item.quote)]
-    exact = [(b, at) for b, at in seen if _same_context(b.text, at, item)]
-    pick = exact or (seen if len(item.quote) >= UNIQUE_MIN else [])
-    if len(pick) == 1:
-        block, at = pick[0]
-        return Anchor("retrouve", block.id, at, at + len(item.quote))
+    slot = [
+        i for i, b in enumerate(blocks)
+        if b.editable and _fp(b) != item.block_fingerprint and around(blocks, i)[1:] == (item.prev, item.next)
+    ]
+    if len(slot) != 1:
+        return Anchor("orphelin")
+    block = blocks[slot[0]]
+    found = occurrences(block.text, item.quote)
+    if len(found) > 1:
+        found = [at for at in found if context(block.text, at, at + len(item.quote)) == (item.before, item.after)]
+    if len(found) == 1:
+        return Anchor("retrouve", block.id, found[0], found[0] + len(item.quote))
     return Anchor("orphelin")

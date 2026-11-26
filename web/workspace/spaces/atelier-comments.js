@@ -15,8 +15,8 @@ import { badge, icon } from '../shell.js';
 const QUOTE_MAX = 300;
 const AUTHOR = { humain: 'Humain', agent: 'Agent' };
 const STATE_NOTE = {
-  retrouve: 'Le bloc a changé : le passage a été retrouvé tel quel.',
-  orphelin: 'Le passage cité a changé ou disparu : le commentaire n’est rattaché à aucun autre passage.',
+  retrouve: 'Le bloc a changé depuis le commentaire : le passage cité y figure toujours, tel quel.',
+  orphelin: 'Le passage cité a changé ou disparu : le commentaire reste orphelin, il n’est jamais rattaché à un autre passage.',
 };
 
 function el(tag, className, text, attrs) {
@@ -38,8 +38,8 @@ const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
 /** Les nœuds de texte d'un bloc rendu, hors boutons (le bouton « Commenter » n'est pas du texte du bloc). */
 function textNodes(host) {
   const out = [];
-  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) => (node.parentElement && node.parentElement.closest('.at-cm-add') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  const walker = document.createTreeWalker(host, window.NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => (node.parentElement && node.parentElement.closest('.at-cm-add') ? window.NodeFilter.FILTER_REJECT : window.NodeFilter.FILTER_ACCEPT),
   });
   while (walker.nextNode()) out.push(walker.currentNode);
   return out;
@@ -94,7 +94,7 @@ function readSelection(host, block) {
 
 export function createComments(ctx, slug, { doc, sheet, reload }) {
   const ranges = new Map();
-  const supported = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
+  const supported = typeof CSS !== 'undefined' && CSS.highlights && typeof window.Highlight === 'function';
 
   const phases = () => doc().phases;
   const all = () => phases().flatMap((p) => p.comments || []);
@@ -199,7 +199,7 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     const flags = el('div', 'at-cm-flags');
     if (resolved) flags.append(badge('Résolu', 'ok'));
     if (orphan) flags.append(badge('Orphelin', 'warn', STATE_NOTE.orphelin));
-    if (c.anchor.state === 'retrouve') flags.append(badge('Passage retrouvé', '', STATE_NOTE.retrouve));
+    if (c.anchor.state === 'retrouve') flags.append(badge('Passage modifié depuis le commentaire', 'warn', STATE_NOTE.retrouve));
     const first = message(c.auteur, c.date, c.texte);
     const inner = [];
     if (orphan) inner.push(el('p', 'at-muted', 'Passage d’origine, modifié ou supprimé :'));
@@ -255,7 +255,7 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
       box.append(body);
     }
     // Survol ou focus : le passage cité s'accentue dans le texte.
-    const lit = () => { if (supported && ranges.has(c.id)) CSS.highlights.set('at-cm-on', new Highlight(ranges.get(c.id))); };
+    const lit = () => { if (supported && ranges.has(c.id)) CSS.highlights.set('at-cm-on', new window.Highlight(ranges.get(c.id))); };
     const dim = () => { if (supported) CSS.highlights.delete('at-cm-on'); };
     box.addEventListener('pointerenter', lit);
     box.addEventListener('pointerleave', dim);
@@ -346,7 +346,7 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
       host.classList.add('has-cm');
     }
     if (supported) {
-      if (marks.length) CSS.highlights.set('at-cm', new Highlight(...marks)); else CSS.highlights.delete('at-cm');
+      if (marks.length) CSS.highlights.set('at-cm', new window.Highlight(...marks)); else CSS.highlights.delete('at-cm');
       CSS.highlights.delete('at-cm-on');
     }
     sheet.classList.toggle('has-cm', all().length > 0);

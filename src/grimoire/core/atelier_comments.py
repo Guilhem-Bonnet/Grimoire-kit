@@ -80,10 +80,15 @@ class Comment:
     resolu_le: str = ""
     #: Identifiant d'une suggestion (lot 2) que ce commentaire accompagne ; vide sinon.
     suggestion: str = ""
-    #: Combien de blocs de la phase avaient ce même texte à l'ancrage, et l'empreinte de leurs voisins : de quoi ne
-    #: pas confondre le bloc visé avec un homonyme (voir ``atelier_anchor``).
-    homonymes: int = 1
-    voisins: str = ""
+    #: Identité du bloc visé : son rang dans la phase et l'empreinte de ses deux voisins, suivis à chaque réécriture
+    #: faite par le cockpit (voir ``atelier_anchor``). Un autre bloc qui porte le même texte n'est jamais ce bloc.
+    rank: int = 0
+    prev: str = ""
+    next: str = ""
+    #: Un fil devenu orphelin le reste (écrit au magasin) : il ne se réancre plus de lui-même.
+    orphelin: bool = False
+    #: L'extrait a bougé dans son bloc depuis le commentaire : la marque reste, elle ne s'efface pas.
+    deplace: bool = False
     replies: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -115,7 +120,7 @@ class StoreError(ValueError):
 def _valid(item: Comment, phases: set[str]) -> bool:
     texts = (
         item.id, item.phase, item.block_id, item.block_fingerprint, item.quote, item.before, item.after,
-        item.auteur, item.date, item.texte, item.etat, item.resolu_le, item.suggestion, item.voisins,
+        item.auteur, item.date, item.texte, item.etat, item.resolu_le, item.suggestion, item.prev, item.next,
     )
     replies = item.replies
     return (
@@ -126,7 +131,11 @@ def _valid(item: Comment, phases: set[str]) -> bool:
         and isinstance(item.start, int)
         and not isinstance(item.start, bool)
         and item.start >= 0
-        and isinstance(item.homonymes, int)
+        and isinstance(item.rank, int)
+        and not isinstance(item.rank, bool)
+        and item.rank >= 0
+        and isinstance(item.orphelin, bool)
+        and isinstance(item.deplace, bool)
         and bool(item.quote.strip())
         and isinstance(replies, list)
         and all(
