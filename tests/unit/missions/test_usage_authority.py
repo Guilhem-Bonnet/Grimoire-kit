@@ -197,3 +197,25 @@ def test_the_orchestrate_cli_applies_the_same_rule_for_pause_and_resume(
     resumed = runner.invoke(app, ["orchestrate", "resume", "--project-root", str(projet)])
     assert resumed.exit_code == 1
     assert _flag(projet) == before  # ni remplacée par l'option --actor, ni levée
+
+
+def test_a_partial_lift_keeps_the_owner_origin_actor_and_reason_of_the_flag(projet: Path) -> None:
+    write_pause(
+        projet, mode=DRAIN, tasks=("A", "B"), actor="cli", reason="deux tâches", origin=ORIGIN_AGENT, session="s-agent-1"
+    )
+    clear_pause(projet, tasks=("A",), origin=ORIGIN_AGENT, session="s-agent-1")
+    flag = _flag(projet)
+    assert flag.tasks == ("B",) and (flag.origin, flag.session, flag.actor, flag.reason) == (
+        ORIGIN_AGENT, "s-agent-1", "cli", "deux tâches"
+    )
+    clear_pause(projet, origin=ORIGIN_AGENT, session="s-agent-1")  # la session lève encore le reste de SA pause
+    assert read_pause(projet).flags == ()
+
+
+def test_a_partial_lift_does_not_strip_a_rule_pause_of_its_origin(projet: Path) -> None:
+    write_pause(projet, mode=DRAIN, tasks=("A", "B"), actor="usage-rule:task:t", reason="règle", origin=PAUSE_ORIGIN)
+    clear_pause(projet, tasks=("A",), origin=ORIGIN_HUMAN)
+    flag = _flag(projet)
+    assert flag.tasks == ("B",) and flag.origin == PAUSE_ORIGIN and flag.actor == "usage-rule:task:t" and flag.reason == "règle"
+    with pytest.raises(PauseError):
+        clear_pause(projet, origin=ORIGIN_AGENT, session="s-agent-1")

@@ -407,7 +407,7 @@ def clear_pause(
         if left:
             payload = {
                 "schema": SCHEMA, "mode": existing.mode, "tasks": list(left), "since": existing.since,
-                "actor": existing.actor, "reason": existing.reason,
+                "actor": existing.actor, "reason": existing.reason, "origin": existing.origin, "session": existing.session,
             }
             atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
             return existing

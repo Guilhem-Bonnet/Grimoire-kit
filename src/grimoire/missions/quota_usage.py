@@ -39,19 +39,24 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.fsio import atomic_write
+from grimoire.core.regular_file import open_regular
 from grimoire.missions.lease import parse_instant
 from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT, SESSION_EVENTS
 
 if TYPE_CHECKING:
+    from grimoire.missions.admission import QueuePlan
     from grimoire.missions.service import TaskService
 
 __all__ = [
+    "DEFERRAL_EVENT",
+    "GIVE_UP_AFTER",
     "GRACE",
     "MAX_BYTES",
     "MAX_SESSIONS",
@@ -59,8 +64,12 @@ __all__ = [
     "OVERSIZE_REASON",
     "PENDING_REASON",
     "SESSION_EVENTS",
+    "SETTLED_REASON",
+    "SETTLE_AFTER",
     "STATE_RELPATH",
+    "TIME_BUDGET_S",
     "ConsumedOutcome",
+    "note_deferral",
     "record_consumption",
     "tracking",
 ]
@@ -73,7 +82,20 @@ MAX_BYTES = 50 * 1024 * 1024
 _ANCIENT = timedelta(days=30)
 #: Le cache des dernières lectures (taille, date, instant) : jamais une source de chiffre.
 STATE_RELPATH = Path("_grimoire-output") / "control" / "quota-reads.json"
-PENDING_REASON = "relecture en attente : le journal a changé et le budget de lecture du pas était épuisé"
+#: Au plus ce temps cumulé de lecture de journaux par pas : au-delà, le reste est reporté au tick suivant (la première
+#: lecture d'un pas a toujours lieu, pour que le suivi avance) et la consommation du jour est dite partielle.
+TIME_BUDGET_S = 20.0
+#: Le cache est ignoré au-delà de cette taille.
+STATE_MAX_BYTES = 4 * 1024 * 1024
+#: Un journal trop gros, immobile (taille et date) depuis cette durée, cesse de peser : sa consommation reste inconnue
+#: pour son jour, mais n'empêche plus l'admission des jours suivants.
+SETTLE_AFTER = timedelta(hours=48)
+#: Une session dont le journal reste introuvable n'est plus cherchée à chaque tick après cette durée.
+GIVE_UP_AFTER = timedelta(hours=24)
+MISSING_PREFIX = "journal de session introuvable"
+SETTLED_REASON = "journal trop gros et immobile : la consommation au-delà du dernier total connu n'est pas mesurée"
+DEFERRAL_EVENT = "quota.deferral_noted"
+PENDING_REASON ="relecture en attente : le journal a changé et le budget de lecture du pas était épuisé"
 OVERSIZE_REASON = "journal au-dessus du plafond de lecture : la consommation au-delà du dernier total connu n'est plus suivie"
 NO_ID_REASON = "lancement sans identifiant ni condensé de session : consommation non attribuable"
 _SAFE_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
@@ -134,6 +156,8 @@ class _Seen:
     cost: float = 0.0
     status: str = ""
     reason: str = ""
+    #: Inconnu « en cours » : la session peut encore consommer (journal à relire ou trop gros).
+    ongoing: bool = False
 
 
 def _seen(events: list[Any]) -> dict[str, _Seen]:
@@ -147,6 +171,7 @@ def _seen(events: list[Any]) -> dict[str, _Seen]:
         mine = seen.setdefault(key, _Seen())
         if event.payload.get("status") == "unknown":
             mine.status, mine.reason = "unknown", str(event.payload.get("reason") or "")
+            mine.ongoing = bool(event.payload.get("ongoing"))
             continue
         total = event.payload.get("session_total_tokens")
         if isinstance(total, int) and not isinstance(total, bool):
@@ -154,7 +179,7 @@ def _seen(events: list[Any]) -> dict[str, _Seen]:
             cost = event.payload.get("session_cost_usd")
             if isinstance(cost, (int, float)) and not isinstance(cost, bool):
                 mine.cost = max(mine.cost, float(cost))
-            mine.status, mine.reason = "known", ""
+            mine.status, mine.reason, mine.ongoing = "known", "", False
     return seen
 
 
@@ -233,11 +258,35 @@ def _measure(path: Path, root: Path, day_start: datetime) -> dict[str, Any]:
 
 
 def _load_state(root: Path) -> dict[str, dict[str, Any]]:
+    """Le cache, lu comme fichier ordinaire seulement (ni lien, ni tube, ni périphérique), de taille bornée.
+
+    Tout autre cas — absent, illisible, trop gros, mal formé — vaut « pas de cache » : tout est relu.
+    """
     try:
-        raw = json.loads((root / STATE_RELPATH).read_text(encoding="utf-8"))
+        with open_regular(root / STATE_RELPATH) as handle:
+            blob = handle.read(STATE_MAX_BYTES + 1)
+        raw = json.loads(blob) if len(blob) <= STATE_MAX_BYTES else None
     except (OSError, ValueError):
         return {}
-    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, dict)} if isinstance(raw, dict) else {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, dict):  # seuls taille, date et total comptent : jamais un chemin
+            out[key] = {k: value[k] for k in ("size", "mtime_ns", "read_at", "total") if k in value}
+    return out
+
+
+def _confined(path: Path | None, home: Path | None) -> Path | None:
+    """*path* s'il reste sous le dossier des journaux de l'hôte (liens résolus), sinon ``None``."""
+    from grimoire.tools.workspace_work import claude_projects_dir
+
+    if path is None:
+        return None
+    try:
+        return path if path.resolve().is_relative_to(claude_projects_dir(home).resolve()) else None
+    except OSError:
+        return None
 
 
 def _save_state(root: Path, state: dict[str, dict[str, Any]]) -> None:
@@ -249,7 +298,7 @@ def _save_state(root: Path, state: dict[str, dict[str, Any]]) -> None:
 
 def record_consumption(
     service: TaskService, *, home: Path | None = None, now: datetime | None = None,
-    max_sessions: int = MAX_SESSIONS, max_bytes: int = MAX_BYTES,
+    max_sessions: int = MAX_SESSIONS, max_bytes: int = MAX_BYTES, time_budget: float = TIME_BUDGET_S,
 ) -> list[ConsumedOutcome]:
     """Écrit ``quota.consumed`` pour chaque session lancée dont le journal a grandi (idempotent, borné, tournant)."""
     ledger = service.ledger
@@ -261,16 +310,17 @@ def record_consumption(
     state = _load_state(root)
     before_state = json.dumps(state, sort_keys=True)
     outcomes: list[ConsumedOutcome] = []
+    kept: set[str] = set()
     pending: list[tuple[str, str, _Session, Path, tuple[int, int]]] = []
 
     def unknown(session: _Session, reason: str, label: str = "unknown", *, ongoing: bool = False) -> None:
         """Un seul événement par changement d'état réel : le même état ne s'écrit pas deux fois.
 
-        *ongoing* : la session peut encore consommer (journal à relire ou trop gros) ; l'inconnu pèse alors sur le
-        jour courant tant qu'il est récent, même écrit la veille.
+        *ongoing* : la session peut encore consommer (journal à relire ou trop gros) ; l'inconnu pèse alors, sans limite
+        de durée, jusqu'à ce que le journal soit relu ou reste immobile (un événement ``ongoing: false`` l'acte).
         """
         mine = seen.get(session.key, _Seen())
-        if mine.status == "unknown" and mine.reason == reason:
+        if mine.status == "unknown" and mine.reason == reason and mine.ongoing == ongoing:
             outcomes.append(ConsumedOutcome(session.key[:12], session.role, session.task_id, label if label != "unknown" else "unchanged", reason))
             return
         ledger.append_event(
@@ -279,7 +329,7 @@ def record_consumption(
              "status": "unknown", "reason": reason, "tokens": None, "cost_usd": None, "cost_status": "unknown",
              "ongoing": ongoing},
         )
-        seen[session.key] = _Seen(mine.total, mine.cost, "unknown", reason)
+        seen[session.key] = _Seen(mine.total, mine.cost, "unknown", reason, ongoing)
         outcomes.append(ConsumedOutcome(session.key[:12], session.role, session.task_id, label, reason))
 
     for key, session in sessions.items():
@@ -290,16 +340,24 @@ def record_consumption(
             unknown(session, NO_ID_REASON)
             continue
         if mine.status == "known" and entry and launched is not None and moment - launched > _ANCIENT:
-            continue  # connue, immobile, vieille de plus de 30 jours : plus même examinée
-        cached = Path(str(entry["path"])) if isinstance(entry.get("path"), str) else None
-        path = cached if cached is not None and cached.is_file() else _locate(session, home)
+            continue  # connue, immobile, vieille de plus de 30 jours : plus même examinée (et élaguée du cache)
+        kept.add(key)
+        age = None if launched is None else moment - launched
+        if mine.status == "unknown" and mine.reason.startswith(MISSING_PREFIX) and age is not None and age > GIVE_UP_AFTER:
+            outcomes.append(ConsumedOutcome(key[:12], session.role, session.task_id, "unchanged", "journal introuvable, plus cherché"))
+            continue  # restée inconnue pour son jour, mais plus recherchée à chaque tick
+        # Le chemin n'est JAMAIS lu du cache : toujours recalculé, et confiné au dossier des journaux de l'hôte.
+        path = _confined(_locate(session, home), home)
         if path is None:
-            young = launched is not None and moment - launched < GRACE
+            if mine.status == "unknown" and mine.ongoing:  # le journal a disparu : plus rien ne peut grossir
+                unknown(session, SETTLED_REASON)
+                continue
+            young = age is not None and age < GRACE
             if young or mine.status == "known":
                 outcomes.append(ConsumedOutcome(key[:12], session.role, session.task_id, "unchanged", "journal absent"))
                 continue
             host = f" ({session.provider})" if session.provider else ""
-            unknown(session, f"journal de session introuvable ou d'un hôte non lu{host}")
+            unknown(session, f"{MISSING_PREFIX} ou d'un hôte non lu{host}")
             continue
         try:
             info = path.stat()
@@ -307,19 +365,26 @@ def record_consumption(
             unknown(session, f"journal illisible ({type(exc).__name__})")
             continue
         stamp = (info.st_size, info.st_mtime_ns)
-        if entry.get("size") == stamp[0] and entry.get("mtime_ns") == stamp[1] and entry.get("path") == str(path):
-            outcomes.append(ConsumedOutcome(key[:12], session.role, session.task_id, "unchanged"))
+        # Le cache ne dispense de lire que si son stamp est celui du fichier réel ET le total qu'il a vu est celui du
+        # ledger, pour une session que le ledger dit connue (ou trop grosse) : un cache faux donne une relecture.
+        trusted = mine.status == "known" or (mine.status == "unknown" and mine.reason in (OVERSIZE_REASON, SETTLED_REASON))
+        if trusted and entry.get("size") == stamp[0] and entry.get("mtime_ns") == stamp[1] and entry.get("total") == mine.total:
+            if mine.ongoing and moment - datetime.fromtimestamp(info.st_mtime, UTC) >= SETTLE_AFTER:
+                unknown(session, SETTLED_REASON)  # immobile depuis la fenêtre : cesse de peser, un seul événement
+            else:
+                outcomes.append(ConsumedOutcome(key[:12], session.role, session.task_id, "unchanged"))
             continue  # rien n'a changé depuis la dernière lecture : aucun budget
         if stamp[0] > max_bytes:
-            unknown(session, OVERSIZE_REASON, ongoing=True)
-            state[key] = {"path": str(path), "size": stamp[0], "mtime_ns": stamp[1], "read_at": moment.isoformat()}
+            unknown(session, OVERSIZE_REASON, ongoing=True)  # la décision suit l'état du fichier, pas des réécritures
+            state[key] = {"size": stamp[0], "mtime_ns": stamp[1], "read_at": moment.isoformat(), "total": mine.total}
             continue
         pending.append((str(entry.get("read_at") or ""), key, session, path, stamp))
 
     pending.sort(key=lambda item: item[0])  # la dernière lecture la plus ancienne d'abord (« jamais » en tête)
     day_start = moment.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    deadline = time.monotonic() + time_budget
     for index, (_read_at, key, session, path, stamp) in enumerate(pending):
-        if index >= max_sessions:
+        if index >= max_sessions or (index > 0 and time.monotonic() > deadline):
             unknown(session, PENDING_REASON, "skipped", ongoing=True)
             continue
         mine = seen.get(key, _Seen())
@@ -328,17 +393,42 @@ def record_consumption(
         except OSError as exc:
             unknown(session, f"journal illisible ({type(exc).__name__})")
             continue
-        state[key] = {"path": str(path), "size": stamp[0], "mtime_ns": stamp[1], "read_at": moment.isoformat()}
         total = int(measure["total"])
+        state[key] = {"size": stamp[0], "mtime_ns": stamp[1], "read_at": moment.isoformat(), "total": max(total, mine.total)}
         if total <= mine.total and mine.status != "unknown":
             outcomes.append(ConsumedOutcome(key[:12], session.role, session.task_id, "unchanged"))
             continue
         _record(service, session, measure, mine, total, day_start)
         outcomes.append(ConsumedOutcome(key[:12], session.role, session.task_id, "recorded", f"+{max(total - mine.total, 0)} tokens"))
         seen[key] = _Seen(max(total, mine.total), measure["cost"], "known", "")
+    state = {key: value for key, value in state.items() if key in kept}  # les sessions sorties du suivi quittent le cache
     if json.dumps(state, sort_keys=True) != before_state:
         _save_state(root, state)
     return outcomes
+
+
+def note_deferral(service: TaskService, plan: QueuePlan, *, apply: bool, attention: list[str]) -> None:
+    """Dit, une fois par jour et par cause, que la consommation inconnue ou partielle diffère les lancements autonomes."""
+    cause = ""
+    for deferred in plan.deferred:
+        if deferred.reason == "unknown" and deferred.detail.startswith("consommation du jour"):
+            cause = "partial" if "partiellement" in deferred.detail else "unknown"
+            break
+    if not cause:
+        return
+    day = plan.now.astimezone(UTC).date().isoformat()
+    for event in service.ledger.list_events():
+        if event.event_type == DEFERRAL_EVENT and event.payload.get("day") == day and event.payload.get("cause") == cause:
+            return
+    waiting = max(plan.view.tokens.unknown_sessions, 1)
+    what = "partiellement inconnue" if cause == "partial" else "inconnue"
+    attention.append(
+        f"quota : lancements différés, consommation {what}, {waiting} session(s) à relire. Pour en sortir : les prochains "
+        "ticks relisent les journaux ; sinon un humain règle `quota.on_unknown: count_known` dans capacity.yaml "
+        "(le connu seul compte), ou relève le plafond."
+    )
+    if apply:
+        service.ledger.append_event(DEFERRAL_EVENT, "project", "task", _ACTOR, {"day": day, "cause": cause})
 
 
 def _record(service: TaskService, session: _Session, measure: dict[str, Any], mine: _Seen, total: int, day_start: datetime) -> None:

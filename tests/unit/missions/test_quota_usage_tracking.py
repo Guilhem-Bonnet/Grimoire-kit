@@ -18,7 +18,9 @@ from grimoire.missions.quota_usage import (
     NO_ID_REASON,
     OVERSIZE_REASON,
     PENDING_REASON,
+    SETTLED_REASON,
     STATE_RELPATH,
+    note_deferral,
     record_consumption,
     tracking,
 )
@@ -223,10 +225,177 @@ def test_an_ongoing_unknown_weighs_on_the_next_day_but_an_old_plain_one_does_not
     capacity = load_capacity(service.home_root)
     tomorrow = datetime.now(UTC) + timedelta(hours=30)
     assert derive_view(service.ledger, capacity, now=tomorrow).tokens.status == "unknown"
-    assert derive_view(service.ledger, capacity, now=datetime.now(UTC) + timedelta(days=4)).tokens.status == "lower_bound"
+    assert derive_view(service.ledger, capacity, now=datetime.now(UTC) + timedelta(days=4)).tokens.status == "unknown"  # sans limite de durée
     _launch(service, _task(service), _sid(2))
     record_consumption(service, now=_later() + timedelta(hours=1))  # sans journal : inconnu simple, écrit aujourd'hui
-    assert derive_view(service.ledger, capacity, now=tomorrow).tokens.unknown_sessions == 1
+    assert derive_view(service.ledger, capacity, now=datetime.now(UTC)).tokens.unknown_sessions == 2
+    for later in (tomorrow, datetime.now(UTC) + timedelta(days=4)):  # l'inconnu simple ne pèse que le jour où il est écrit
+        assert derive_view(service.ledger, capacity, now=later).tokens.unknown_sessions == 1
+
+
+def test_a_big_journal_that_keeps_growing_stays_partial_and_stops_weighing_only_once_still(service: TaskService, tmp_path: Path) -> None:
+    _launch(service, _task(service), _sid(1))
+    _journal(tmp_path, _sid(1), 15, pad=100_000)
+    capacity = load_capacity(service.home_root)
+    record_consumption(service, now=_later(), max_bytes=MIB)
+    later = datetime.now(UTC) + timedelta(hours=49)
+    _journal(tmp_path, _sid(1), 40, pad=100_000)  # grossit encore à 49 h
+    record_consumption(service, now=later, max_bytes=MIB)
+    assert derive_view(service.ledger, capacity, now=later).tokens.status == "unknown"
+    assert len([e for e in _events(service) if e["status"] == "unknown"]) == 1  # aucun événement de plus
+    still = datetime.now(UTC) + timedelta(hours=100)  # immobile depuis la fenêtre
+    for _ in range(3):
+        record_consumption(service, now=still, max_bytes=MIB)
+    settled = [e for e in _events(service) if e["status"] == "unknown"]
+    assert [bool(e["ongoing"]) for e in settled] == [True, False] and settled[-1]["reason"] == SETTLED_REASON
+    assert derive_view(service.ledger, capacity, now=still + timedelta(days=2)).tokens.status == "lower_bound"
+
+
+def test_a_cache_entry_never_redirects_the_journal(service: TaskService, projet: Path, tmp_path: Path) -> None:
+    _launch(service, _task(service), _sid(1))
+    real = _journal(tmp_path, _sid(1), 2)
+    record_consumption(service, now=_later())
+    decoy = tmp_path / "decoy.jsonl"
+    decoy.write_bytes(real.read_bytes())
+    cache = projet / STATE_RELPATH
+    state = json.loads(cache.read_text(encoding="utf-8"))
+    info = decoy.stat()
+    state[_sid(1)].update(path=str(decoy), size=info.st_size, mtime_ns=info.st_mtime_ns)
+    cache.write_text(json.dumps(state), encoding="utf-8")
+    _journal(tmp_path, _sid(1), 200)
+    for _ in range(3):
+        record_consumption(service, now=_later())
+    assert _use(service).tokens == 300_000
+    assert "path" not in json.loads(cache.read_text(encoding="utf-8"))[_sid(1)]
+
+
+def test_a_journal_outside_the_host_folder_is_not_read(service: TaskService, tmp_path: Path) -> None:
+    _launch(service, _task(service), _sid(1))
+    outside = tmp_path / "ailleurs.jsonl"
+    outside.write_text(_line(0) + "\n", encoding="utf-8")
+    link = tmp_path / "claude" / "projects" / "wt" / f"{_sid(1)}.jsonl"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside)
+    record_consumption(service, now=_later())
+    assert [e["status"] for e in _events(service)] == ["unknown"]  # introuvable : jamais lu hors du dossier de l'hôte
+
+
+def test_a_forged_cache_cannot_make_an_unmeasured_session_look_read(service: TaskService, projet: Path, tmp_path: Path) -> None:
+    _launch(service, _task(service), _sid(1))
+    path = _journal(tmp_path, _sid(1), 3)
+    info = path.stat()
+    cache = projet / STATE_RELPATH
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({_sid(1): {"size": info.st_size, "mtime_ns": info.st_mtime_ns, "read_at": "x", "total": 0}}), encoding="utf-8")
+    record_consumption(service, now=_later())
+    assert _use(service).tokens == 4500
+
+
+def test_an_unsafe_cache_file_is_ignored_and_never_blocks_the_tick(service: TaskService, projet: Path, tmp_path: Path) -> None:
+    import os
+    import signal
+
+    _launch(service, _task(service), _sid(1))
+    _journal(tmp_path, _sid(1), 2)
+    cache = projet / STATE_RELPATH
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(cache)  # un tube : l'ouvrir en lecture bloquerait
+    signal.alarm(10)
+    try:
+        record_consumption(service, now=_later())
+    finally:
+        signal.alarm(0)
+    assert _use(service).tokens == 3000
+    cache.unlink()
+    victim = tmp_path / "victime.json"
+    victim.write_text("{}", encoding="utf-8")
+    cache.symlink_to(victim)  # un lien n'est pas suivi
+    _journal(tmp_path, _sid(1), 4)
+    record_consumption(service, now=_later())
+    assert victim.read_text(encoding="utf-8") == "{}" and _use(service).tokens == 6000
+    cache.unlink()
+    cache.write_text(" " * (4 * MIB + 10), encoding="utf-8")  # trop gros : ignoré
+    assert load_state_ignored(projet)
+
+
+def load_state_ignored(projet: Path) -> bool:
+    from grimoire.missions.quota_usage import _load_state
+
+    return _load_state(projet) == {}
+
+
+def test_the_time_budget_defers_the_rest_and_says_partial(service: TaskService, tmp_path: Path) -> None:
+    for n in range(3):
+        _launch(service, _task(service, f"t{n}"), _sid(n))
+        _journal(tmp_path, _sid(n), 1)
+    out = record_consumption(service, now=_later(), time_budget=-1.0)  # la première lecture a toujours lieu
+    assert sorted(o.status for o in out) == ["recorded", "skipped", "skipped"]
+    assert _use(service).status == "partial" and _use(service).unknown_sessions == 2
+    record_consumption(service, now=_later(), time_budget=-1.0)
+    record_consumption(service, now=_later(), time_budget=-1.0)
+    assert _use(service).status == "lower_bound" and _use(service).tokens == 4500
+
+
+def test_sessions_out_of_the_tracking_leave_the_cache(service: TaskService, projet: Path, tmp_path: Path) -> None:
+    _launch(service, _task(service), _sid(1))
+    _journal(tmp_path, _sid(1), 1)
+    record_consumption(service, now=_later())
+    assert _sid(1) in json.loads((projet / STATE_RELPATH).read_text(encoding="utf-8"))
+    record_consumption(service, now=datetime.now(UTC) + timedelta(days=40))
+    assert json.loads((projet / STATE_RELPATH).read_text(encoding="utf-8")) == {}
+
+
+def test_a_journal_never_found_is_no_longer_searched_after_a_while(
+    service: TaskService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import grimoire.missions.quota_usage as quota
+
+    _launch(service, _task(service), _sid(1))
+    record_consumption(service, now=datetime.now(UTC) + timedelta(hours=25))
+    assert [e["status"] for e in _events(service)] == ["unknown"]
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("journal recherché alors qu'il y a renoncé")
+
+    monkeypatch.setattr(quota, "_locate", boom)
+    out = record_consumption(service, now=datetime.now(UTC) + timedelta(hours=26))
+    assert [o.status for o in out] == ["unchanged"] and tracking(service.ledger.list_events())["unknown"] == 1
+
+
+def test_a_deferral_caused_by_unknown_consumption_is_said_once_a_day_with_the_way_out(service: TaskService, projet: Path) -> None:
+    tid = _task(service)
+    service.ledger.append_event("task.session_launched", tid, "task", "worker", {"session": "ab", "model": "sonnet"})
+    record_consumption(service, now=_later())  # lancement sans identité : inconnu
+    (projet / STANDARD / "capacity.yaml").write_text("version: 1\nquota:\n  tokens_per_day: 1000\n", encoding="utf-8")
+    plan = service.queue_plan(autonomous=True)
+    assert [d.reason for d in plan.deferred] == ["unknown"]
+    lines: list[str] = []
+    note_deferral(service, plan, apply=False, attention=lines)
+    note_deferral(service, plan, apply=False, attention=lines)
+    assert len(lines) == 2 and "count_known" in lines[0] and "à relire" in lines[0]  # en plan : rien n'est écrit
+    lines.clear()
+    note_deferral(service, plan, apply=True, attention=lines)
+    note_deferral(service, plan, apply=True, attention=lines)
+    assert len(lines) == 1 and "inconnue" in lines[0]
+    ok = service.queue_plan(autonomous=False)
+    note_deferral(service, ok, apply=True, attention=lines)
+    assert len(lines) == 1
+
+
+def test_the_tick_reports_the_deferral_because_of_unknown_consumption(
+    service: TaskService, projet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.missions.orchestrate import run_tick
+    from grimoire.missions.pause import CONTROL_HOME_ENV
+
+    monkeypatch.setenv(CONTROL_HOME_ENV, str(projet.parent / "control-home"))
+    monkeypatch.setenv("GRIMOIRE_UNATTENDED", "1")
+    tid = _task(service)
+    service.ledger.append_event("task.session_launched", tid, "task", "worker", {"session": "ab", "model": "sonnet"})
+    (projet / STANDARD / "capacity.yaml").write_text("version: 1\nquota:\n  tokens_per_day: 1000\n", encoding="utf-8")
+    report = run_tick(projet)
+    assert any("lancements différés" in line for line in report.attention)
+    assert not any("lancements différés" in line for line in run_tick(projet).attention)  # une fois par jour
 
 
 def test_pending_reasons_are_stable_strings() -> None:

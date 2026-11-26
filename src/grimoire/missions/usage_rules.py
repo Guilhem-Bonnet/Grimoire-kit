@@ -45,7 +45,6 @@ __all__ = [
     "ACTIONS",
     "HOLD_EVENT",
     "METRICS",
-    "ONGOING_WINDOW",
     "PAUSE_ORIGIN",
     "QUOTA_CONSUMED_EVENT",
     "SCOPES",
@@ -194,17 +193,15 @@ def _num(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-#: Un « inconnu en cours » (journal à relire, trop gros) compte pour le jour courant tant qu'il date de moins de cela.
-ONGOING_WINDOW = timedelta(hours=48)
-
-
 def unknown_counts_today(payload: Mapping[str, Any], stamp: datetime | None, now: datetime) -> bool:
-    """Un ``quota.consumed`` inconnu pèse sur *now* : écrit aujourd'hui, ou « en cours » et récent."""
+    """Un ``quota.consumed`` inconnu pèse sur *now* : écrit aujourd'hui, ou « en cours » (journal à relire ou trop gros).
+
+    Un inconnu en cours pèse sans limite de durée : il cesse quand le tick écrit l'événement qui le remplace (journal
+    relu, ou immobile depuis la fenêtre, ou disparu), jamais parce que le temps a passé.
+    """
     if stamp is None:
         return False
-    if stamp.astimezone(UTC).date() == now.astimezone(UTC).date():
-        return True
-    return bool(payload.get("ongoing")) and now - stamp <= ONGOING_WINDOW
+    return stamp.astimezone(UTC).date() == now.astimezone(UTC).date() or bool(payload.get("ongoing"))
 
 
 def _records(events: Iterable[Any], now: datetime) -> list[_Record]:

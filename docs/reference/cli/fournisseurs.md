@@ -473,6 +473,17 @@ n'est affamée. Une session dont le journal a changé sans pouvoir être relue �
 `grimoire queue rules` et la fiche Capacité disent combien de sessions sont suivies, inconnues, en attente de
 relecture. La consommation est écrite **avant** le plan d'admission du tick.
 
+Le cache ne porte que taille, date, instant de lecture et total vu : **jamais le chemin** d'un journal, recalculé à
+chaque pas et confiné au dossier des journaux de l'hôte ; un cache faux ne fait donc au pire que relire. Il est lu comme
+fichier ordinaire seulement (ni lien, ni tube, ni périphérique, taille bornée), sinon ignoré, et élagué des sessions
+sorties du suivi. L'étape de lecture a aussi un budget de **temps** (20 s cumulées par pas, la première lecture ayant
+toujours lieu) ; le reste est reporté au tick suivant, la consommation étant dite `partial`. Un journal trop gros ou à
+relire pèse **tant que son fichier change** (sans limite de durée) ; il cesse de peser quand il reste immobile 48 h
+(un événement `ongoing: false` l'acte, la consommation au-delà du dernier total restant non mesurée), qu'il a disparu ou
+qu'il est relu. Une session dont le journal reste introuvable (hôte non lu) n'est plus cherchée après 24 h, mais reste
+comptée inconnue pour son jour. Quand une consommation inconnue ou partielle diffère les lancements autonomes sous
+`on_unknown: refuse`, la liste d'attention le dit une fois par jour et par cause, avec le geste pour en sortir.
+
 **Jour d'un delta** : un delta est daté de son écriture, mais les appels dont l'horodatage précède minuit UTC se
 comptent pour la veille (`day` dans l'événement). Limite restante : un appel sans horodatage lisible compte pour le
 jour de la mesure, et une veille mesurée plusieurs jours plus tard est datée de la veille entière ; le coût d'un delta

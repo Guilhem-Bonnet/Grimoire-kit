@@ -313,6 +313,12 @@ def _one_pass(
     _consumption_stage(service, mode, attention)
     plan = service.queue_plan(now=now, pause=state)
     _usage_rules_stage(service, plan, mode, now, attention)
+    try:
+        from grimoire.missions.quota_usage import note_deferral
+
+        note_deferral(service, plan, apply=mode == "apply", attention=attention)
+    except Exception as exc:  # un message manquant ne casse pas le tick
+        attention.append(f"quota : message de report non écrit ({type(exc).__name__}: {exc})")
     dispatched: tuple[str, ...] = ()
     launches: tuple[LaunchOutcome, ...] = ()
     if dispatcher is None and mode == "apply" and policy is not None and policy.worker.enabled:
