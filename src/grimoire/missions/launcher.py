@@ -67,6 +67,7 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.hosts.model_table import CLAUDE_CODE, TIERS, kit_model, load_model_table, resolve_model
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.liveness import probe_status
+from grimoire.missions.model_routing import REASON_PROVIDER_ROUTE, REASON_ROUTER, RoutingTrace, step_up, tier_for
 from grimoire.missions.provider_failure import transient_api_error
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.sensitive_route import SensitiveRoute, sensitive_route_for
@@ -260,6 +261,9 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
     for event in service.ledger.list_events():
         if event.event_type == LAUNCHED_EVENT:
             found[event.entity_id] = dict(event.payload)
+        elif event.event_type == WORKER_RESUMED_EVENT and event.payload.get("routing") and event.entity_id in found:
+            # une montée en gamme (reprise après un refus de relecture) : les reprises suivantes partent de ce palier
+            found[event.entity_id].update(model=event.payload.get("model", ""), routing=event.payload["routing"])
     return found
 
 
@@ -782,7 +786,7 @@ def _sensitive_now(service: TaskService, task_id: str) -> str:
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
     permission_mode: str = "", cause: str = "", opencode: OpencodeWorkerHost | None = None,
-    gemini: GeminiWorkerHost | None = None,
+    gemini: GeminiWorkerHost | None = None, escalate: bool = False,
 ) -> ExecResult:
     """Rend la tâche à son worker : reprend la session arrêtée par ``claude --bg --resume``, à défaut en lance une neuve.
 
@@ -791,6 +795,7 @@ def resume_worker(
     la reprise si les deux échouent. La session obtenue est notée (``task.worker_session_resumed``) : elle compte
     de nouveau dans le WIP et c'est elle que le prochain arrêt vise. *cause* nomme l'origine de la reprise
     (``provider_error`` pour le tick, #1158) ; elle est notée au ledger et plafonne les reprises automatiques.
+    *escalate* (un refus de relecture) : la reprise part un palier plus haut (:func:`~.model_routing.step_up`), notée.
     """
     fresh_only = ""
     if launch.get("host") == GEMINI_HOST:
@@ -814,16 +819,22 @@ def resume_worker(
     if fresh_only and (refused := _worktree_hooks(cwd)):
         return ExecResult(1, "", refused)  # le worktree d'un worker opencode n'a pas encore les hooks de Claude Code
     host = ClaudeCodeWorkerHost(claude_bin)
+    stepped = step_up(launch, lambda tier: tier_model(service.home_root, tier)) if escalate and not fresh_only else None
+    if stepped is not None:
+        launch = {**launch, "model": stepped.model, "routing": stepped.trace.to_dict()}
     # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
     spec = SessionSpec(
         name=f"grimoire-{task_id}", prompt=message, model=str(launch.get("model") or ""), permission_mode=permission_mode,
         lean=bool(launch.get("lean")), settings=settings_path(str(launch["provider"])) if launch.get("provider") else None,
         resume=str(launch.get("session_id") or ""),
     )
+    fresh = stepped is not None
+    if stepped is not None:
+        # Un modèle ne change pas en cours de conversation (``--resume`` ne le reçoit pas) : session neuve, même worktree.
+        spec = replace(spec, resume="", prompt=f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}")
     resumed = host.plan(spec)
     result = ExecResult(1, "", fresh_only) if fresh_only else exec_(list(resumed.argv), cwd, resumed.environ())
-    fresh = False
-    if result.returncode != 0:
+    if result.returncode != 0 and not fresh:
         prompt = f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}"
         again = host.plan(replace(spec, resume="", prompt=prompt))
         retry = exec_(list(again.argv), cwd, again.environ())
@@ -835,6 +846,8 @@ def resume_worker(
     payload: dict[str, Any] = {"session": short, "fresh": fresh, "name": f"grimoire-{task_id}"}
     if cause:
         payload["cause"] = cause
+    if stepped is not None:
+        payload.update(model=stepped.model, routing=stepped.trace.to_dict())
     if fresh and match:
         session_id = resolve_background_session(exec_, cwd, short, claude_bin, name=f"grimoire-{task_id}", session_cwd=cwd)
         payload["session_id"] = session_id
@@ -908,9 +921,15 @@ class WorkerLauncher:
         )
 
     def _tier_for(self, task: MissionTask) -> str:
-        """Le palier de cette tâche : ``cheap`` pour une V0 sous ``model_by_class``, sinon celui du rôle."""
-        role = self._policy.worker
-        return "cheap" if role.model_by_class and classify(task) is Verifiability.V0 else role.tier
+        """Le palier de cette tâche : ``cheap`` pour une V0 sous ``model_by_class``, sinon celui du rôle ; sans réglage
+        de modèle, celui de sa classe (:func:`~.model_routing.tier_for`)."""
+        return tier_for(self._policy.worker, classify(task))[0]
+
+    def routing_trace(self, task: MissionTask, model: str, *, sensitive: bool = False, reason: str = "") -> dict[str, Any]:
+        """Le bloc ``routing`` du lancement de *task* sur *model* quand l'hôte, pas ``claude --model``, le choisit."""
+        klass = classify(task)
+        tier, why = tier_for(self._policy.worker, klass, sensitive=sensitive)
+        return RoutingTrace(klass.value, tier, model, reason or why).to_dict()
 
     def routing_for(self, task: MissionTask) -> SensitiveRoute:
         """La décision ``sensitive_route`` pour *task* : ce que le lancement fera, lisible sans rien lancer."""
@@ -920,7 +939,7 @@ class WorkerLauncher:
         role = self._policy.worker
         if role.model:
             return role.model
-        if role.model_by_class and tier == "cheap":
+        if (role.model_by_class or role.default_routing) and tier == "cheap":
             # Un verdict mécanique juge seul : la route du routeur ne remonte pas ce palier.
             return tier_model(self._service.home_root, "cheap")
         route = admit.route
@@ -1009,7 +1028,8 @@ class WorkerLauncher:
             from grimoire.missions.worker_lifecycle import launch_opencode
 
             return launch_opencode(self, task, wt)
-        tier = "strong" if sensitive.strong else self._tier_for(task)
+        klass = classify(task)
+        tier, why_tier = tier_for(self._policy.worker, klass, sensitive=sensitive.strong)
         # Une tâche qui vise un chemin sensible ne prend pas la route du fournisseur bon marché : elle part sur
         # l'hôte, au palier fort, plutôt que de voir sa PR rejetée puis réécrite (``sensitive_route``).
         provider_id = "" if sensitive.strong else self._policy.worker.provider
@@ -1053,6 +1073,10 @@ class WorkerLauncher:
             # Un refus de plafond révoque déjà le mandat ; un rôle en conflit ou un journal en erreur est une panne.
             return self._abandon(tid, session, wt.path, refused, count=code != CAP_EXCEEDED)
         _seal_worker_for_dual_review(service, tid, session_id, model, route.provider if route is not None else "", self._policy)
+        reason = REASON_PROVIDER_ROUTE if route is not None else why_tier
+        if route is None and not self._policy.worker.model and not sensitive.strong and model != tier_model(service.home_root, tier):
+            reason = REASON_ROUTER
+        trace = RoutingTrace(klass.value, tier, model, reason, sensitive.reason if sensitive.strong else "")
         version = self._host_version()
         if version:
             # P86 : la session est nommée au claim avec la version de l'hôte ; sans elle le frein n'est jamais prouvé.
@@ -1067,6 +1091,7 @@ class WorkerLauncher:
                 "provider_refused": denial,
                 "lean": self._policy.worker.lean,
                 "permission_mode": self._policy.worker.permission_mode,
+                "routing": trace.to_dict(),
                 "cwd": str(wt.path), "branch": wt.branch,
                 "lease_epoch": current.lease_epoch if current is not None else 0,
                 **({"sensitive_route": sensitive.to_dict()} if sensitive.strong else {}),

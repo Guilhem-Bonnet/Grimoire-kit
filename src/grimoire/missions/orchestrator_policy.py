@@ -19,9 +19,11 @@ janitor :
           model: ""               # alias ou nom complet ; vide : la route du routeur, sinon le palier
           provider: ""            # fournisseur du registre avec anthropic_base_url : route ses tâches V0/V1
           lean: false             # session allégée : outils de fichiers et Bash seuls, sans MCP ni skills
-          model_by_class: false   # une tâche V0 part au palier cheap, le reste au palier du rôle
+          model_by_class: false   # une tâche V0 part au palier cheap, le reste au palier du rôle. Absent, sans model,
+                                  # tier ni provider : V0 cheap, V1 mid, V2 strong (missions/model_routing.py)
           sensitive_route: off    # strong : une tâche qui cite un chemin sensible part sur l'hôte au palier fort
-                                  # (opus), sans route de fournisseur (missions/sensitive_route.py) ; off : inchangé
+                                  # (opus), sans route de fournisseur (missions/sensitive_route.py) ; off : inchangé.
+                                  # Absent, sous les mêmes conditions que model_by_class : strong
           sensitive_paths: []     # motifs sensibles en plus des chemins réservés du merger et de la double relecture
           tier: ""                # cheap | mid | strong (repli quand ni model ni route ne donnent de modèle)
           wip: 1                  # sessions de worker en même temps
@@ -105,7 +107,7 @@ from grimoire.missions.dual_review import (
     PROTECTED_GATES,
     SECOND_REVIEWER_TIERS,
 )
-from grimoire.missions.sensitive_route import SENSITIVE_ROUTE_OFF, SENSITIVE_ROUTES
+from grimoire.missions.sensitive_route import SENSITIVE_ROUTE_OFF, SENSITIVE_ROUTE_STRONG, SENSITIVE_ROUTES
 from grimoire.missions.worker_host import CLAUDE_CODE_HOST, GEMINI_HOST, OPENCODE_HOST, PROJECT_HOSTS, WORKER_HOSTS
 
 if TYPE_CHECKING:
@@ -177,6 +179,9 @@ class WorkerRole:
     sensitive_route: str = SENSITIVE_ROUTE_OFF
     sensitive_paths: tuple[str, ...] = ()
     host: str = CLAUDE_CODE_HOST
+    #: Aucun réglage de modèle dans la politique (ni ``model``, ``tier``, ``provider`` ni ``model_by_class``) : le
+    #: palier suit la classe de vérifiabilité (:mod:`~grimoire.missions.model_routing`).
+    default_routing: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -184,7 +189,7 @@ class WorkerRole:
             "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode,
             "provider": self.provider, "lean": self.lean, "model_by_class": self.model_by_class,
             "sensitive_route": self.sensitive_route, "sensitive_paths": list(self.sensitive_paths),
-            "host": self.host,
+            "host": self.host, "default_routing": self.default_routing,
         }
 
 
@@ -418,7 +423,12 @@ def _parse_worker(raw: Any, project_host: str = CLAUDE_CODE_HOST) -> WorkerRole:
         raise _InvalidPolicyError(
             "orchestrator.roles.worker.lean n'a pas d'équivalent sur host: gemini (options propres à Claude Code)"
         )
-    route = _text(data.get("sensitive_route", SENSITIVE_ROUTE_OFF), "orchestrator.roles.worker.sensitive_route")
+    # Rien de réglé côté modèle : les défauts du kit s'appliquent ; un seul réglage explicite les écarte tous.
+    by_default = host == CLAUDE_CODE_HOST and not (model or tier or provider or "model_by_class" in data)
+    route = _text(
+        data.get("sensitive_route", SENSITIVE_ROUTE_STRONG if by_default else SENSITIVE_ROUTE_OFF),
+        "orchestrator.roles.worker.sensitive_route",
+    )
     if route not in SENSITIVE_ROUTES:
         raise _InvalidPolicyError(
             f"orchestrator.roles.worker.sensitive_route : {route!r} inconnu (admis : {', '.join(SENSITIVE_ROUTES)})"
@@ -441,6 +451,7 @@ def _parse_worker(raw: Any, project_host: str = CLAUDE_CODE_HOST) -> WorkerRole:
         sensitive_route=route,
         sensitive_paths=tuple(g.strip() for g in raw_paths),
         host=host,
+        default_routing=by_default,
     )
 
 

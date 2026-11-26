@@ -278,7 +278,8 @@ def task_show(
     from grimoire.missions.board import board_status_of
     from grimoire.missions.dispatch_advice import dispatch_advice, model_hint
     from grimoire.missions.gates import GatesFileError, declared_transitions
-    from grimoire.missions.launcher import LAUNCHED_EVENT, WORKER_DEFERRED_EVENT
+    from grimoire.missions.launcher import LAUNCHED_EVENT, WORKER_DEFERRED_EVENT, WORKER_RESUMED_EVENT
+    from grimoire.missions.model_routing import describe_routing
     from grimoire.providers.data_policy import declared_data_class
 
     service = _service(project_root, ledger_root)
@@ -299,6 +300,12 @@ def task_show(
     # l'outil `Agent` — #662) ; `model_tier` reste toujours
     # renseigné. Le JSON garde les deux champs bruts, le texte passe par
     # `model_hint` pour ne jamais afficher `None` littéralement.
+    # La dernière montée en gamme (reprise après un refus de relecture) postérieure à ce lancement.
+    last_step_up = None
+    if last_launch is not None and last_launch.event_type == LAUNCHED_EVENT:
+        for event in service.ledger.list_events(task_id):
+            if event.event_type == WORKER_RESUMED_EVENT and event.created_at >= last_launch.created_at:
+                last_step_up = event.payload.get("routing") or last_step_up
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
     usage = _usage_of(task, project_root.resolve())
@@ -356,7 +363,13 @@ def task_show(
             out.print(f"  différée : {escape(str(last_launch.payload.get('reason', '')))}")
         elif last_launch.payload.get("provider_refused"):
             out.print(f"  repli sur l'hôte : {escape(str(last_launch.payload['provider_refused']))}")
+        routing = last_launch.payload.get("routing")
         routed = last_launch.payload.get("sensitive_route")
+        sensitive = isinstance(routed, dict) and bool(routed.get("route"))
+        if isinstance(routing, dict) and not sensitive:
+            out.print(f"  routage : {escape(describe_routing(routing))}")
+        if last_step_up is not None:
+            out.print(f"  montée en gamme : {escape(describe_routing(last_step_up))}")
         if isinstance(routed, dict) and routed.get("route"):
             out.print(
                 f"  routage fort : {escape(str(last_launch.payload.get('model') or ''))} — "

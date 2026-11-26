@@ -639,7 +639,7 @@ orchestrator:
     worker:
       provider: deepseek
       model_by_class: true
-      sensitive_route: strong   # off (défaut) : inchangé ; toute autre valeur rend la politique invalide
+      sensitive_route: strong   # défaut `strong` sans réglage de modèle (voir plus bas), sinon `off` ; toute autre valeur rend la politique invalide
       sensitive_paths: []       # motifs ajoutés aux chemins réservés ci-dessous
 ```
 
@@ -661,6 +661,32 @@ orchestrator:
   le détail du lancement.
 - **Avant de lancer** : `grimoire orchestrate tick` (le plan, sans `--apply`) affiche `Routage prévu : <id> — fort
   | habituel : <raison>` pour chaque tâche admise, et la clé `routes` en `--json`.
+
+### Modèle du worker : défauts, trace et montée en gamme
+
+Sans réglage de modèle dans `orchestrator.roles.worker` (ni `model`, `tier`, `provider` ni `model_by_class`, hôte
+Claude Code), le palier du worker suit la classe de la tâche : V0 `cheap` (`haiku`), V1 `mid` (`sonnet`), V2 `strong`
+(`opus`). Une tâche qui cite un chemin sensible part au palier fort, `sensitive_route` valant alors `strong` par
+défaut. Un seul réglage explicite écarte ces défauts : le routage du projet reste celui qu'il a écrit. `sensitive_route`
+posé explicitement (`off` compris) prime toujours. Avant ce changement, un projet sans réglage lançait ses workers sur
+le modèle par défaut de l'hôte ; pour le retrouver, poser `model_by_class: false`.
+
+| Clé absente | Défaut | Pour le garder comme avant |
+|---|---|---|
+| `model_by_class`, `tier`, `model`, `provider` (aucune des quatre) | V0 `cheap`, V1 `mid`, V2 `strong` | `model_by_class: false` |
+| `sensitive_route` (sous la même condition) | `strong` | `sensitive_route: off` |
+
+- **Trace** : chaque lancement note, dans `task.session_launched`, un bloc `routing` : `class`, `tier`, `model`,
+  `reason` (`default_class`, `policy_class`, `policy_tier`, `policy_model`, `sensitive_path`, `router`,
+  `provider_route`, `host_default`, `host_model`) et un `detail` éventuel. `grimoire task show <id>` l'affiche
+  (`routage : haiku (palier cheap, classe V0) — défaut du kit pour cette classe`) ; `--json` le porte dans
+  `last_launch.routing`.
+- **Montée en gamme** : après un refus de relecture (`NOT-READY`), le worker repart un palier plus haut (`cheap` →
+  `mid` → `strong`), en session neuve sur le même worktree (`claude --resume` ne reçoit pas de modèle), avec les
+  constats du relecteur. Une marche par refus, plafonnée au palier fort ; jamais de montée quand `worker.model` impose
+  le modèle, quand la session passe par un fournisseur, ou quand le palier courant est inconnu. La montée est notée
+  dans `task.worker_session_resumed` et `task.session_launched` (`reason: step_up`), `task show` l'affiche
+  (`montée en gamme : …`) et les reprises suivantes partent de ce palier.
 
 ### Réveil du tick sur événement
 

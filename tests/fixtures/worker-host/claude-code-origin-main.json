@@ -393,6 +393,8 @@
           "--bg",
           "--name",
           "grimoire-<T>",
+          "--model",
+          "opus",
           "--permission-mode",
           "acceptEdits",
           "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
