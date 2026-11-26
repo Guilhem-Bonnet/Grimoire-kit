@@ -216,6 +216,15 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
     },
     /** Vrai si le vocal est disponible (config lue) : le mode conversation n'existe que là. */
     available: () => Boolean(config && config.available && config.mode === 'voice') && !readOnly(),
+    /** Le serveur a répondu sur le vocal (disponible ou non) : on peut dire pourquoi il ne l'est pas. */
+    known: () => Boolean(config) && !readOnly(),
+    /** Pourquoi le vocal n'est pas utilisable, en clair (`''` s'il l'est). */
+    unavailableReason() {
+      if (!config) return 'le serveur n’a pas répondu sur le vocal';
+      if (!config.available) return config.reason || 'le vocal est indisponible';
+      if (config.mode !== 'voice') return 'le mode vocal est en mode texte (interaction.mode: voice dans project-context.yaml pour le passer en voix)';
+      return '';
+    },
     isRecording: () => Boolean(recording),
     /** Ouvre / ferme le micro comme le bouton « Dicter » (à la fermeture : transcription, puis `onText`). */
     start,

@@ -14,9 +14,9 @@
     "grimoire task review GAO-livrer-fichi-001 --verdict READY --reviewer fixture",
     "grimoire task close GAO-livrer-fichi-001"
   ],
-  "kit_version": "3.104.0",
-  "recorded_at": "2026-11-23T18:52:12Z",
-  "output_sha256": "cf1cdcc5baa846ec90967e8cabb6593f45f547a49914e0cb42702faf7489b803",
+  "kit_version": "3.122.0",
+  "recorded_at": "2026-11-26T19:35:55Z",
+  "output_sha256": "18c9f169c5c84581bf428c041fea1cbaba3e792d61bd6472a69376c86d1e8ca2",
   "frames": [
     {
       "kind": "run",
@@ -28,13 +28,13 @@
       "kind": "run",
       "command": "grimoire task claim GAO-livrer-fichi-001",
       "exit_code": 0,
-      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (ready → claimed) · V1 → sonnet"
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (ready → claimed) · V1 → modèle de sous-agent : sonnet"
     },
     {
       "kind": "run",
       "command": "grimoire task move GAO-livrer-fichi-001 --to running",
       "exit_code": 0,
-      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (claimed → running) · V1 → sonnet"
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (claimed → running) · V1 → modèle de sous-agent : sonnet"
     },
     {
       "kind": "write",
@@ -46,7 +46,7 @@
       "kind": "run",
       "command": "grimoire task move GAO-livrer-fichi-001 --to needs_verification",
       "exit_code": 0,
-      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (running → needs_verification) · V1 → sonnet"
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (running → needs_verification) · V1 → modèle de sous-agent\n: sonnet"
     },
     {
       "kind": "run",
@@ -70,7 +70,7 @@
       "kind": "run",
       "command": "grimoire task close GAO-livrer-fichi-001",
       "exit_code": 0,
-      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (needs_verification → closed) · V1 → sonnet"
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (needs_verification → closed) · V1 → modèle de sous-agent :\nsonnet"
     }
   ]
 }

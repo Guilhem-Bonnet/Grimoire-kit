@@ -786,18 +786,20 @@ def doctor(
     _record("python", passed=True, detail=f"Python {sys.version.split()[0]}")
 
     # 9. Summary
-    ok_count = sum(1 for r in results if r["passed"])
-    fail_count = sum(1 for r in results if not r["passed"])
+    from grimoire.cli.doctor_summary import conclusion, tally
+
+    ok_count, fail_count, warn_count = tally(results)
 
     if fmt == "json":
-        data: dict[str, Any] = {"project": str(target), "checks": results, "passed": ok_count, "failed": fail_count}
+        data: dict[str, Any] = {"project": str(target), "checks": results, "passed": ok_count, "failed": fail_count,
+                                "warnings": warn_count}
         if fixed:
             data["fixed"] = fixed
         typer.echo(json.dumps(data, indent=2))
     else:
         if fixed:
             console.print(f"\n[green]Fixed {len(fixed)} issue(s):[/green] {', '.join(fixed)}")
-        console.print(f"\n[bold]{ok_count}/{ok_count + fail_count} checks passed[/bold]")
+        console.print(f"\n[bold]{conclusion(ok_count, fail_count, warn_count)}[/bold]")
         if cfg:
             from grimoire.core.project_capabilities import discover_footer_line, unexploited_hints
 

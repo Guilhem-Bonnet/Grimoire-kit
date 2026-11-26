@@ -9,7 +9,9 @@
 export function createMascotteLink({ api, place }) {
   let dock = null;
   let loading = null;
-  let armed = false; // la lecture du drapeau est en cours : on garde les événements du fil pour les rejouer
+  // Avant la première lecture du drapeau (la veille du fil de la mascotte permanente branche le flux avant l'ouverture
+  // du chat) comme pendant elle : on garde les événements du fil, bornés, pour les rejouer au montage.
+  let armed = true;
   const facts = { busy: false, waiting: 0 };
 
   // Les événements du fil qui arrivent pendant le chargement du dock (flux ouvert en même temps) sont rejoués dans

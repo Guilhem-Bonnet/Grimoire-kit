@@ -6,6 +6,7 @@
 // pas dans le document : l'agent consigne la réponse que l'humain vient de donner, propose par suggestion, commente.
 // L'état vient de `GET atelier/chantiers/<slug>/entretien` (état de l'entretien et faits du chat), relu régulièrement.
 
+import { publish } from '../mascotte_bus.js';
 import { badge, icon } from '../shell.js';
 
 const PHASE_NAMES = { brief: 'Brief', brainstorm: 'Brainstorm', comprehension: 'Compréhension', exigences: 'Exigences', 'cahier-des-charges': 'Cahier des charges' };
@@ -71,7 +72,7 @@ export function createAssistant(ctx, slug, hooks) {
     if (!mascotte) return;
     const v = view;
     const turn = (v && v.turn) || {};
-    mascotte.update({
+    const facts = {
       error: v ? v.error : '',
       unavailable: Boolean(v && v.agent && !v.agent.available),
       question: Boolean(v && v.question && !turn.mine),
@@ -79,7 +80,10 @@ export function createAssistant(ctx, slug, hooks) {
       suggestions: hooks.suggestions ? hooks.suggestions() : 0,
       busy: Boolean(turn.mine),
       text: v && v.question ? v.question.text : '',
-    });
+    };
+    mascotte.update(facts);
+    // La mascotte permanente du cockpit s'efface ici (celle de l'Atelier la remplace) et sait où mener un clic ailleurs.
+    publish('assistant', { ...facts, slug });
   };
 
   /** Le clic sur la mascotte : le panneau passe au premier plan sur ce qui attend. */
@@ -112,6 +116,7 @@ export function createAssistant(ctx, slug, hooks) {
     if (ctx.signal.aborted) return;
     mascotte = createAtelierMascotte(ctx, { activate, fill, say: hooks.say });
     bar.prepend(mascotte.element);
+    ctx.signal.addEventListener('abort', () => publish('assistant', null));
     syncMascotte();
   }).catch(() => { /* sans mascotte, la barre reste telle quelle */ });
 

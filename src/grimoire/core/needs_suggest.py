@@ -39,6 +39,90 @@ def _has_any(root: Path, patterns: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(found)
 
 
+#: The MCP server the kit writes into host configs itself (``hosts/collect.py``).
+_KIT_MCP_SERVER = "grimoire"
+
+
+def _foreign_mcp_configs(root: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
+    """MCP config files that declare a server other than the kit's own.
+
+    ``grimoire up`` writes ``.mcp.json`` with its own ``grimoire`` server; that
+    file alone says nothing about the project's tool surface, so it must not
+    trigger the tool-mediation suggestion. A file that cannot be parsed is kept
+    (it is not provably the kit's).
+    """
+    import json
+
+    found: list[str] = []
+    for rel in paths:
+        path = root / rel
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            found.append(rel)
+            continue
+        servers: dict[str, Any] = {}
+        if isinstance(data, dict):
+            for key in ("mcpServers", "servers"):
+                section = data.get(key)
+                if isinstance(section, dict):
+                    servers.update(section)
+        if any(name != _KIT_MCP_SERVER for name in servers):
+            found.append(rel)
+    return tuple(found)
+
+
+def _hook_commands(node: Any) -> list[str]:
+    """Every ``command`` string found anywhere under a parsed hooks section."""
+    if isinstance(node, dict):
+        found = [v for k, v in node.items() if k == "command" and isinstance(v, str)]
+        for value in node.values():
+            found.extend(_hook_commands(value))
+        return found
+    if isinstance(node, list):
+        return [c for item in node for c in _hook_commands(item)]
+    return []
+
+
+def _foreign_hook_surfaces(root: Path) -> tuple[str, ...]:
+    """Hook and skill surfaces that are not the kit's own.
+
+    ``grimoire up`` writes its hooks into ``.claude/settings.json`` and
+    ``.github/hooks/``, and ships ``grimoire-*`` skills; finding them says
+    nothing about the project's own control surfaces. Only a hook that does not
+    call the kit, or a skill the kit did not ship, counts. An unparseable
+    settings file is kept (not provably the kit's).
+    """
+    import json
+
+    found: list[str] = []
+    settings = root / ".claude" / "settings.json"
+    if settings.is_file():
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8"))
+            commands = _hook_commands(data.get("hooks") if isinstance(data, dict) else None)
+            foreign = any("grimoire" not in c for c in commands)
+        except (OSError, ValueError):
+            foreign = True
+        if foreign:
+            found.append(".claude/settings.json")
+    for hook in sorted((root / ".github" / "hooks").glob("*")):
+        try:
+            foreign_hook = "grimoire" not in hook.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            foreign_hook = True
+        if foreign_hook:
+            found.append(hook.relative_to(root).as_posix())
+            break
+    for skill in sorted((root / ".github" / "skills").glob("*")):
+        if not skill.name.startswith("grimoire"):
+            found.append(skill.relative_to(root).as_posix())
+            break
+    return tuple(found)
+
+
 def _docs_corpus(root: Path) -> tuple[str, ...]:
     docs = root / "docs"
     if docs.is_dir() and any(docs.rglob("*.md")):
@@ -80,9 +164,7 @@ def suggest_needs(
             )
         )
 
-    hook_surfaces = _has_any(
-        root, (".github/hooks/*", ".claude/settings.json", ".github/skills/*")
-    )
+    hook_surfaces = _foreign_hook_surfaces(root)
     if hook_surfaces:
         raw.append(
             NeedSuggestion(
@@ -92,7 +174,7 @@ def suggest_needs(
             )
         )
 
-    mcp = _has_any(root, (".mcp.json", "mcp.json", ".vscode/mcp.json"))
+    mcp = _foreign_mcp_configs(root, (".mcp.json", "mcp.json", ".vscode/mcp.json"))
     if mcp:
         raw.append(
             NeedSuggestion(

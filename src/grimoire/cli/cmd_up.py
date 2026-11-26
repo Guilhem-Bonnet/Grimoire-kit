@@ -658,6 +658,7 @@ def _step_init(
     interactive: bool,
     dry_run: bool,
     no_cockpit: bool = False,
+    no_standard: bool = False,
 ) -> bool:
     """Run (or skip) express init. Returns True when a config is available after the step."""
     from grimoire.cli.cmd_init import run_init
@@ -681,7 +682,7 @@ def _step_init(
         ctx.obj["output"] = "text"
         run_init(
             ctx, target, name=name, archetype=",".join(archetypes), backend=backend,
-            force=False, dry_run=False, no_cockpit=no_cockpit,
+            force=False, dry_run=False, no_cockpit=no_cockpit, standard_follows=not no_standard,
         )
     except typer.Abort:
         state.steps.append(StepResult("init", "failed", "init cancelled by user"))
@@ -1332,7 +1333,7 @@ def run_up_pipeline(
         ctx, state, target,
         name=name, archetypes=archetypes, backend=backend,
         interactive=interactive, dry_run=dry_run,
-        no_cockpit=no_cockpit,
+        no_cockpit=no_cockpit, no_standard=no_standard,
     )
     blocked = not has_config
     # #888 — the interactive wizard deduced the standard needs from « who works on this

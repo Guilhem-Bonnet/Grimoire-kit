@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import {
   ACTIONS, MOTION, SHAPE_COUNT, SLOW_FRAME_MS, VOCAL_ACTIONS, WIRED_ACTIONS, adaptScale, bandEdges, bandsFromSpectrum,
-  assistantState, assistantTarget, glowTargetAt, captionFor, deliversOn, frameIntervalMs, isSettled, isWiredAction, isWritingCall, labelFor, levelFromSamples,
+  anchorDestination, assistantState, assistantTarget, glowTargetAt, mergeFacts, captionFor, deliversOn, frameIntervalMs, isSettled, isWiredAction, isWritingCall, labelFor, levelFromSamples,
   needsVia, penPose, pickAction, shouldRun, smoothBands, smoothValue, stepWeights,
 } from '../../web/workspace/mascotte_logic.js';
 
@@ -87,6 +87,39 @@ test('assistantState : priorités (erreur > indisponible > question > suggestion
   assert.equal(assistantState({ suggestions: 3, busy: true }).action, 'propose');
   assert.equal(assistantState({ suggestions: -2, busy: false }).action, 'repos');
   assert.equal(assistantState({ suggestions: 'abc' }).count, 0);
+});
+
+test('assistantState : les questions et permissions du chat (waiting) comptent et priment sur la réflexion', () => {
+  const s = assistantState({ waiting: 2, busy: true });
+  assert.deepEqual([s.action, s.count, s.caption], ['question', 2, '2 choses attendent ta réponse']);
+  assert.equal(assistantState({ waiting: 1 }).caption, 'attend ta réponse');
+  assert.equal(assistantState({ waiting: 1, suggestions: 2 }).count, 3);
+  assert.equal(assistantState({ waiting: 1, error: 'x' }).tone, 'error', 'l’erreur prime');
+  assert.equal(assistantState({ waiting: -3 }).action, 'repos');
+  assert.equal(assistantState({ waiting: 'x' }).action, 'repos');
+});
+
+test('mergeFacts : les faits de l’orchestrateur et de l’assistant de l’Atelier, une erreur de l’orchestrateur prime', () => {
+  assert.deepEqual(mergeFacts(), { error: '', question: false, permission: false, suggestions: 0, busy: false, waiting: 0 });
+  const merged = mergeFacts({
+    orchestrator: { busy: true, waiting: 1, error: false },
+    assistant: { question: true, suggestions: 2, busy: false, error: '' },
+  });
+  assert.deepEqual(merged, { error: '', question: true, permission: false, suggestions: 2, busy: true, waiting: 1 });
+  assert.equal(mergeFacts({ orchestrator: { error: true }, assistant: { error: 'entretien' } }).error, 'orchestrateur');
+  assert.equal(mergeFacts({ assistant: { error: 'entretien' } }).error, 'entretien');
+  assert.equal(assistantState(mergeFacts({ orchestrator: { busy: true } })).caption, 'réfléchit');
+  assert.equal(assistantState(mergeFacts({ orchestrator: { error: true } })).caption, 'erreur de l’assistant');
+});
+
+test('anchorDestination : l’Atelier quand c’est son assistant qui attend (et que le chat n’attend rien), sinon le chat', () => {
+  assert.equal(anchorDestination(), 'chat');
+  assert.equal(anchorDestination({ orchestrator: { waiting: 1 } }), 'chat');
+  assert.equal(anchorDestination({ assistant: { question: true, slug: 'x' } }), 'atelier');
+  assert.equal(anchorDestination({ assistant: { suggestions: 2, slug: 'x' } }), 'atelier');
+  assert.equal(anchorDestination({ assistant: { suggestions: 2 } }), 'chat', 'sans chantier à ouvrir');
+  assert.equal(anchorDestination({ orchestrator: { waiting: 1 }, assistant: { question: true, slug: 'x' } }), 'chat');
+  assert.equal(anchorDestination({ orchestrator: { busy: true }, assistant: { busy: true, slug: 'x' } }), 'chat');
 });
 
 test('assistantTarget : le clic vise la question, la permission, la suggestion, sinon le panneau', () => {

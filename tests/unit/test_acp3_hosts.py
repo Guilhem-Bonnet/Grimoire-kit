@@ -12,6 +12,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
+from grimoire.acp import AcpError
 from grimoire.cli.doctor_acp import check_acp_hosts
 from grimoire.hosts import acp_hosts
 from grimoire.hosts.capabilities import HostId, all_profiles, profile_for
@@ -169,6 +170,8 @@ def test_doctor_reports_each_installed_host_whose_acp_answers_initialize_without
     log = tmp_path / "methods.log"
     _fake_bin(fake_path, "gemini", _AGENT.format(python=sys.executable, log=str(log)))
     _fake_bin(fake_path, "opencode", f"#!{sys.executable}\nimport sys\nsys.exit(3)\n")  # installé mais muet
+    (tmp_path / "GEMINI.md").write_text("# g\n", encoding="utf-8")  # le projet utilise ces deux hôtes
+    (tmp_path / ".opencode").mkdir()
     checks = {c.name: c for c in check_acp_hosts(tmp_path)}
     assert set(checks) == {"acp_host-gemini-cli", "acp_host-opencode"}  # les hôtes absents ne sont pas rapportés
     assert checks["acp_host-gemini-cli"].level == "ok"
@@ -185,8 +188,28 @@ def test_doctor_reports_nothing_when_no_host_is_installed(fake_path: Path, tmp_p
 @pytest.mark.skipif(sys.platform == "win32", reason="faux hôtes en scripts à shebang : non exécutables sous Windows")
 def test_doctor_marks_a_preview_host(fake_path: Path, tmp_path: Path) -> None:
     _fake_bin(fake_path, "copilot", f"#!{sys.executable}\nimport sys\nsys.exit(1)\n")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "copilot-instructions.md").write_text("# c\n", encoding="utf-8")
     (check,) = check_acp_hosts(tmp_path)
     assert "preview" in check.detail
+
+
+def test_doctor_neither_probes_nor_warns_for_a_host_the_project_does_not_use(
+    fake_path: Path, tmp_path: Path
+) -> None:
+    _fake_bin(fake_path, "copilot", f"#!{sys.executable}\nimport sys\nsys.exit(1)\n")  # installé, pas dans le projet
+    (tmp_path / ".claude").mkdir()  # le seul hôte du projet : Claude Code
+    probed: list[tuple[str, ...]] = []
+
+    def spy(command: tuple[str, ...], cwd: Path) -> None:
+        probed.append(command)
+        raise AcpError("Broken pipe : Copilot CLI was not found")
+
+    checks = check_acp_hosts(tmp_path, probe=spy)
+    assert not [c for c in checks if c.level == "warn"]
+    assert not any("Broken pipe" in c.detail for c in checks)
+    assert [c.level for c in checks] == ["info"] and "GitHub Copilot" in checks[0].detail
+    assert not any(command and command[0] == "copilot" for command in probed)
 
 
 # ── Repli kanban (Copilot dans VS Code) ─────────────────────────────────────

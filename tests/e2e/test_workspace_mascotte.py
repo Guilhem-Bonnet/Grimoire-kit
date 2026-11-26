@@ -230,9 +230,9 @@ def test_flag_off_nothing_visible_and_module_never_requested(browser: Browser, p
         page.wait_for_timeout(800)
         assert page.locator(CANVAS).count() == 0
         assert page.locator(FIGURE).is_hidden()
-        assert not [r for r in requests if "mascotte" in r and "mascotte_lazy.js" not in r], (
-            "drapeau éteint : seule la porte (mascotte_lazy.js) peut être demandée"
-        )
+        assert not [
+            r for r in requests if "mascotte" in r and "mascotte_lazy.js" not in r and "mascotte_bus.js" not in r
+        ], "drapeau éteint : seule la porte (mascotte_lazy.js) peut être demandée"
         assert not errors
     finally:
         context.close()
