@@ -146,7 +146,22 @@
 .at-cm-orphans h3 { margin: 0; font-size: var(--t-m); font-weight: 600; }
 .at-cm-orphans p { margin: 0; }
 /* Lot 5 : la barre de l'assistant (sticky, toujours au même endroit) et « Challenger ce bloc ». */
-.at-asst { position: sticky; bottom: var(--sp-3); z-index: 2; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); background: var(--overlay, var(--card)); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); }
+.at-asst-main { display: flex; flex-direction: column; gap: var(--sp-2); flex: 1; min-width: 0; }
+/* La mascotte de l'assistant (fonction en test) : le même slime d'encre que celui du chat, posé à côté de la barre. */
+.at-mascotte { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); flex: none; width: 120px; }
+.at-mascotte-btn { position: relative; display: block; padding: 0; border: 1px solid var(--line); border-radius: var(--r); background: none; cursor: pointer; }
+.at-mascotte-btn:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.at-mascotte-stage, .at-mascotte-canvas { display: block; width: 120px; height: 80px; border-radius: var(--r); background: radial-gradient(ellipse at 50% 46%, var(--mascotte-night-1) 0%, var(--mascotte-night-2) 55%, var(--mascotte-night-3) 100%); }
+.at-mascotte-dot { display: block; width: 14px; height: 14px; margin: 33px 53px; border-radius: 50%; background: var(--mascotte-night-1); box-shadow: 0 0 0 2px var(--line); }
+.at-mascotte[data-tone="wait"] .at-mascotte-btn { border-color: var(--acc); }
+.at-mascotte[data-tone="error"] .at-mascotte-btn { border-color: var(--bad); }
+.at-mascotte[data-tone="off"] .at-mascotte-btn { opacity: 0.7; }
+.at-mascotte-count { position: absolute; top: -6px; right: -6px; min-width: 20px; padding: 0 var(--sp-1); box-sizing: border-box; border-radius: 10px; background: var(--acc); color: var(--on-acc); font-size: var(--t-s); font-weight: 600; line-height: 20px; text-align: center; }
+.at-mascotte-caption { font-size: var(--t-s); text-align: center; }
+.at-mascotte[data-tone="error"] .at-mascotte-caption { color: var(--bad); }
+.at-mascotte-speak { font-size: var(--t-s); }
+.at-mascotte [hidden] { display: none; }
+.at-asst { position: sticky; bottom: var(--sp-3); z-index: 2; display: flex; flex-direction: row; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); background: var(--overlay, var(--card)); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); }
 .at-asst-head { display: flex; align-items: center; gap: var(--sp-2); }
 .at-asst-head .at-muted { margin-left: auto; }
 .at-asst-body { display: flex; flex-direction: column; gap: var(--sp-2); }

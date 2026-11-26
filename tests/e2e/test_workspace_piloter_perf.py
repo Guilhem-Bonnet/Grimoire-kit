@@ -110,7 +110,11 @@ def test_fiche_piloter_un_seul_appel_sheet_et_interactive_en_rapport_a_la_machin
         assert len(sheet_calls) == 3, f"trois appels à /api/workspace/sheet attendus au premier rendu — {urls}"
         capacity_calls = [u for u in urls if "/api/workspace/capacity" in u]
         assert len(capacity_calls) == 1, f"un seul appel de capacité attendu — {urls}"
-        assert len(urls) == 4, f"quatre appels réseau exactement au premier rendu — {urls}"
+        # Le bloc « Pilotage » lit son état lui-même (une route de fichiers, sans le ledger), sans bloquer le rendu :
+        # `renderSheet` le monte sans l'attendre, comme la capacité.
+        pilotage_calls = [u for u in urls if "/api/workspace/pilotage" in u]
+        assert len(pilotage_calls) == 1, f"un seul appel de pilotage attendu — {urls}"
+        assert len(urls) == 5, f"cinq appels réseau exactement au premier rendu (3 sheet, capacité, pilotage) — {urls}"
         # La coquille « chargement… » (#541 point 3) doit être retirée une
         # fois le vrai rendu posé — jamais empilée dessous (root.append sans
         # avoir vidé root d'abord serait un résidu visible, pas seulement

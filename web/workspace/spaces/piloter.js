@@ -35,6 +35,7 @@
 
 import { renderMarkdown, truncateMarkdown } from '../markdown.js';
 import { renderCapacityPanel } from './capacite.js';
+import { renderFleetPilotage, renderPilotagePanel } from './pilotage.js';
 import {
   actionStatus, badge, copyText, failureText, icon, kpiRow, listNav, rowActions, setActionStatus, spaceHead, STATE_ICON,
 } from '../shell.js';
@@ -1750,7 +1751,10 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   // la coque via `options.onCapacity` — jamais de boucle de sondage dédiée.
   const capacity = renderCapacityPanel(ctx, { project: slug, initial: sheet.capacity });
   wrap.append(capacity.node);
-  if (options.onCapacity) options.onCapacity(capacity.refresh);
+  // Pilotage (pause, reprise, disjoncteur) : même pouls que la capacité.
+  const pilotage = renderPilotagePanel(ctx, { slug, name: name || slug });
+  wrap.insertBefore(pilotage.node, capacity.node);
+  if (options.onCapacity) options.onCapacity(() => { capacity.refresh(); pilotage.refresh(); });
 
   root.append(wrap);
 
@@ -2407,7 +2411,13 @@ export async function mount(root, ctx) {
       const attention = await ctx.api.attention(true).catch(() => null);
       // Un autre rendu (zoom sur un projet, rafraîchissement) a pris la main : on ne l'écrase pas.
       if (ctx.signal.aborted || root.firstElementChild !== painted) return;
-      paintFleet(attention, false);
+      const fleet = paintFleet(attention, false);
+      // Pilotage : une ligne par projet et le bouton de la machine, relus au pouls (lu seulement quand l'hôte les sert).
+      if (cockpit && fleet) {
+        const pilotage = renderFleetPilotage(ctx);
+        fleet.insertBefore(pilotage.node, fleet.children[2] || null);
+        capacityLive.refresh = pilotage.refresh;
+      }
     } else {
       // #548 : `loadSheet()` porte désormais le nom du projet aussi (fiche
       // `sheet.name`, résolue côté serveur depuis le registre) — plus de

@@ -383,6 +383,15 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     reload: (message) => reload(message),
     say: (message) => { status.textContent = message; },
     editing: () => Boolean(sheet.querySelector('.is-editing')),
+    // La mascotte de l'assistant : combien de suggestions attendent, et la première mise sous les yeux.
+    suggestions: () => state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0),
+    showSuggestion: () => {
+      const card = sheet.querySelector('.at-sugg');
+      if (!card) return false;
+      card.scrollIntoView({ block: 'center' });
+      (card.querySelector('button') || card).focus({ preventScroll: true });
+      return true;
+    },
   });
   const pendingNote = el('span', 'at-pending', null, { 'data-role': 'doc-sugg-count' });
   const commentNote = el('span', 'at-pending', null, { 'data-role': 'doc-comment-count' });
@@ -390,6 +399,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     const waiting = state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0);
     pendingNote.textContent = waiting ? ` ${waiting} suggestion${waiting > 1 ? 's' : ''} en attente.` : '';
     commentNote.textContent = cm.summary();
+    assist.sync();
   };
 
   const phaseNav = () => {

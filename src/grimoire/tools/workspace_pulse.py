@@ -70,8 +70,10 @@ from typing import Any
 from grimoire.core import file_memo
 from grimoire.core.standard_generation import PROPOSALS_DIR, TRACES_DIR
 from grimoire.core.standard_state import LEDGER_RELPATH
+from grimoire.missions.breaker import BREAKER_RELPATH
 from grimoire.missions.lease import LEASES_DIRNAME, parse_instant
 from grimoire.missions.mandate import AuthorityJournal
+from grimoire.missions.pause import PAUSE_RELPATH, global_pause_path
 from grimoire.tools.project_registry import load_registry, slug_for_path
 from grimoire.tools.workspace_portfolio import DEFAULT_LIVE_MINUTES, RUNS_RELPATH
 
@@ -174,6 +176,12 @@ def _watched(root: Path) -> list[Path]:
     # Le pilote automatique et le mandat vivent dans le journal d'autorité (hors du projet) : un geste fait
     # par la CLI change ce que « À traiter » doit montrer.
     files.append(AuthorityJournal().path)
+    # La pause (projet et machine) et le disjoncteur : posés par la CLI, le tick ou une règle d'usage, ils
+    # doivent atteindre le bloc « Pilotage » au pouls suivant.
+    files.extend((root / PAUSE_RELPATH, root / BREAKER_RELPATH))
+    machine_pause = global_pause_path()
+    if machine_pause is not None:
+        files.append(machine_pause)
     return files
 
 
