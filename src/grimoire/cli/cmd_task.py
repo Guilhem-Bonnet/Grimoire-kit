@@ -180,7 +180,7 @@ def _emit_move(ctx: typer.Context, move: Any, root: Path | None = None) -> None:
     from grimoire.missions.dispatch_advice import model_hint
 
     resume = (
-        f" [dim]· {verifiabilite.get('class', '?')} → {model_hint(move_dict)}[/dim]"
+        f" [dim]· {verifiabilite.get('class', '?')} → modèle de sous-agent : {model_hint(move_dict)}[/dim]"
         if verifiabilite
         else ""
     )

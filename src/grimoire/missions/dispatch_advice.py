@@ -129,7 +129,7 @@ def model_hint(advice: dict[str, Any]) -> str:
     model = advice.get("recommended_model")
     if model:
         return str(model)
-    return "aucun — omets le paramètre model, garde celui de la session"
+    return "aucun conseillé pour un sous-agent — omets le paramètre model, il garde celui de la session"
 
 
 def _task_host(task: MissionTask) -> str:

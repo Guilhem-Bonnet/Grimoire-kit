@@ -775,6 +775,7 @@ def _display_report(
     detected_service: str = "local",
     no_cockpit: bool = False,
     memory_summary: dict[str, Any] | None = None,
+    standard_follows: bool = False,
 ) -> None:
     """Display a rich post-install report."""
     console.print()
@@ -877,6 +878,7 @@ def _display_report(
         backend=backend,
         no_cockpit=no_cockpit,
         layer_profile=(memory_summary or {}).get("served", ""),
+        standard_follows=standard_follows,
     )
     offer = brownfield_offer(target)
     body_lines = [
@@ -1439,6 +1441,8 @@ def run_init(
             detected_service=detected_service,
             no_cockpit=no_cockpit,
             memory_summary=memory_summary,
+            # `grimoire up` installs the standard right after init: its panel must not call it "not started".
+            standard_follows=ctx.info_name == "up" and not (ctx.params or {}).get("no_standard", False),
         )
 
     _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)

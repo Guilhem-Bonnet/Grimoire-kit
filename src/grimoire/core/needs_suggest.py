@@ -39,6 +39,41 @@ def _has_any(root: Path, patterns: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(found)
 
 
+#: The MCP server the kit writes into host configs itself (``hosts/collect.py``).
+_KIT_MCP_SERVER = "grimoire"
+
+
+def _foreign_mcp_configs(root: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
+    """MCP config files that declare a server other than the kit's own.
+
+    ``grimoire up`` writes ``.mcp.json`` with its own ``grimoire`` server; that
+    file alone says nothing about the project's tool surface, so it must not
+    trigger the tool-mediation suggestion. A file that cannot be parsed is kept
+    (it is not provably the kit's).
+    """
+    import json
+
+    found: list[str] = []
+    for rel in paths:
+        path = root / rel
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            found.append(rel)
+            continue
+        servers: dict[str, Any] = {}
+        if isinstance(data, dict):
+            for key in ("mcpServers", "servers"):
+                section = data.get(key)
+                if isinstance(section, dict):
+                    servers.update(section)
+        if any(name != _KIT_MCP_SERVER for name in servers):
+            found.append(rel)
+    return tuple(found)
+
+
 def _docs_corpus(root: Path) -> tuple[str, ...]:
     docs = root / "docs"
     if docs.is_dir() and any(docs.rglob("*.md")):
@@ -92,7 +127,7 @@ def suggest_needs(
             )
         )
 
-    mcp = _has_any(root, (".mcp.json", "mcp.json", ".vscode/mcp.json"))
+    mcp = _foreign_mcp_configs(root, (".mcp.json", "mcp.json", ".vscode/mcp.json"))
     if mcp:
         raw.append(
             NeedSuggestion(

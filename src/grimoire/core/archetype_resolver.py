@@ -204,10 +204,15 @@ def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
     detected = {d.name for d in scan.stacks}
 
     if not detected:
+        from grimoire.core.project_kind import detect_project_kind
+
+        has_code = detect_project_kind(scan.root).kind == "brownfield"
         return StackRecommendation(
             archetype="stack",
             reason=(
-                "No stack marker detected (empty repo, or README only) — stack "
+                ("Source files found, but in a language the kit does not recognise yet"
+                 if has_code else "No stack marker detected (empty repo, or README only)")
+                + " — stack "
                 "(Atlas, the kit's generalist for any stack without an asserted "
                 "domain) is the honest default; pick a specific domain via "
                 "guided discovery."
