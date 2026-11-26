@@ -113,6 +113,10 @@ def chat_mode(root: Path | None = None) -> tuple[str, tuple[str, ...], str]:
     alias = chosen_alias(root) if root is not None else (os.environ.get(HOST_ENV, "").strip() or "claude")
     if alias == KANBAN:
         return "kanban", (), "repli choisi : le chat écrit dans le kanban"
+    if not alias:  # aucun choix explicite et aucun hôte utilisable : le dire, ne pas démarrer sur un hôte mort
+        from grimoire.hosts.acp_hosts import no_host_reason
+
+        return "unavailable", (), no_host_reason(root)  # type: ignore[arg-type]
     host_id = resolve_host(alias)
     if host_id is None:
         raise AcpError(f"hôte inconnu pour l'orchestrateur : {alias!r}")
@@ -324,8 +328,13 @@ class Conversation:
                 self.session_id = client.session_id
                 self.resumed = resumed
         except AcpError as exc:
-            self._emit({"type": "error", "message": str(exc)})
-            raise
+            # La cause ET le geste de réparation, dits dans le fil : un hôte qui ne démarre pas n'est jamais muet.
+            from grimoire.hosts.acp_hosts import start_failure_remedy
+
+            failure = AcpError(f"{exc}{start_failure_remedy(self.root)}")
+            failure.published = True  # type: ignore[attr-defined]  # déjà dans le fil : `_run_turn` ne le répète pas
+            self._emit({"type": "error", "message": str(failure)})
+            raise failure from exc
         finally:
             with self._cond:
                 self._starting = False
@@ -363,6 +372,8 @@ class Conversation:
         mode, _command, reason = chat_mode(self.root)
         if mode == "kanban":
             return self._send_kanban(text, task_id, reason)
+        if mode == "unavailable":
+            raise ValueError(reason)  # dit avant tout démarrage : aucun hôte utilisable, et quoi installer
         shown: dict[str, Any] = {"type": "user", "text": text}
         if context:
             shown["chantier"] = {"slug": context["slug"], "titre": context["titre"], "phase": context.get("phase", "")}
@@ -528,7 +539,8 @@ class Conversation:
                 elif event["type"] == "error":
                     self._emit({"type": "error", "message": event.get("message", "")})
         except AcpError as exc:
-            self._emit({"type": "error", "message": str(exc)})
+            if not getattr(exc, "published", False):
+                self._emit({"type": "error", "message": str(exc)})
             self._emit({"type": "turn_ended", "stop_reason": "error"})
             if self._client is not None and self._client.state == "closed":
                 self.close()

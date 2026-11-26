@@ -64,6 +64,13 @@ def test_copilot_is_flagged_preview_and_gemini_documents_the_antigravity_move() 
 # ── Le choix de l'hôte par projet ───────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _probe_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ces tests posent un faux ``PATH`` : l'exécutable factice « répond » à ``initialize`` (la sonde a ses propres tests)."""
+    acp_hosts.clear_probe_cache()
+    monkeypatch.setattr(acp_hosts, "_probe_initialize", lambda _command, _cwd: None)
+
+
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv(workspace_chat.AGENT_COMMAND_ENV, raising=False)

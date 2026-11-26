@@ -134,6 +134,13 @@ export function createAssistant(ctx, slug, hooks) {
       el('p', 'at-muted'),
     );
     node.lastChild.append('Le même cadrage se mène au terminal : ', el('code', null, v.equivalent), '.');
+    // Le geste existe mais refuse d'avance, avec sa raison, plutôt que d'échouer après coup.
+    if (!v.started) {
+      const start = button('Démarrer le cadrage', 'start', () => {}, { primary: true, iconName: 'i-act-send' });
+      start.disabled = true;
+      start.title = v.agent.reason || 'Aucun agent d’hôte utilisable';
+      node.append(start);
+    }
     return node;
   };
 

@@ -147,12 +147,16 @@ export function createChat({ readOnly = () => false } = {}) {
     busy = value;
     mascotte.setBusy(value);
     stop.hidden = !value;
-    send.disabled = value || readOnly();
+    send.disabled = value || readOnly() || Boolean(noHost);
     element.setAttribute('aria-busy', String(value));
   }
 
+  // Aucun hôte d'agent utilisable : la raison (et la commande d'installation) remplace tout autre message d'état, et
+  // la saisie comme l'envoi sont fermés — plutôt qu'un orchestrateur « au repos » qui ne répondra jamais.
+  let noHost = '';
+
   function setStatus(text) {
-    status.textContent = text;
+    status.textContent = noHost || text;
   }
 
   function note(text, kind = 'info') {
@@ -423,6 +427,17 @@ export function createChat({ readOnly = () => false } = {}) {
       if (host.note) option.title = host.note;
       hostSelect.append(option);
     }
+    // Aucun hôte n'est choisi (ni explicitement, ni par défaut : aucun ne répond) : on le dit en tête de liste.
+    if (!state.hosts.some((h) => h.selected)) {
+      const none = mk('option', { value: '', text: 'Aucun hôte utilisable — choisir…' });
+      none.selected = true;
+      hostSelect.prepend(none);
+    }
+    noHost = state.mode === 'unavailable' ? (state.reason || 'Aucun hôte d’agent utilisable.') : '';
+    input.disabled = Boolean(noHost) || readOnly();
+    send.disabled = Boolean(noHost) || busy || readOnly();
+    send.title = noHost;
+    if (noHost) setStatus(noHost);
     if (state.mode === 'kanban') {
       setStatus(`Mode différé : ${state.reason || 'le chat écrit dans le kanban'}. Les réponses arrivent par les notes des sessions.`);
     }
