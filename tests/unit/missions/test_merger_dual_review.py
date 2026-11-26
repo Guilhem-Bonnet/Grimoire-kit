@@ -266,10 +266,16 @@ def test_les_deux_listes_couvrent_exactement_les_chemins_reserves_de_main() -> N
     beyond_main = sorted(path for path in added if not matched_paths([path], MAIN_PROTECTED_PATHS))
     assert beyond_main == [
         "src/grimoire/__init__.py", "src/grimoire/bridges/__init__.py", "src/grimoire/bridges/schemas.py",
+        "src/grimoire/cli/cmd_cadrage.py", "src/grimoire/cli/cmd_cockpit.py", "src/grimoire/cli/cockpit_write_target.py",
         "src/grimoire/evidence/__init__.py", "src/grimoire/evidence/service.py", "src/grimoire/flows/__init__.py",
         "src/grimoire/flows/autonomy.py", "src/grimoire/hosts/__init__.py", "src/grimoire/hosts/host_version.py",
-        "src/grimoire/hosts/model_table.py", "src/grimoire/hosts/sync.py", "src/grimoire/providers/*", "src/grimoire/tools/__init__.py",
-        "src/grimoire/tools/workspace_work.py",
+        "src/grimoire/hosts/model_table.py", "src/grimoire/hosts/sync.py", "src/grimoire/providers/*",
+        "src/grimoire/tools/__init__.py", "src/grimoire/tools/forge_http.py", "src/grimoire/tools/human_gesture.py",
+        "src/grimoire/tools/page_security.py", "src/grimoire/tools/request_guard.py",
+        "src/grimoire/tools/workspace_accept_merged.py", "src/grimoire/tools/workspace_pilotage.py",
+        "src/grimoire/tools/workspace_providers_write.py", "src/grimoire/tools/workspace_routes.py",
+        "src/grimoire/tools/workspace_work.py", "src/grimoire/tools/workspace_write_guard.py",
+        "src/grimoire/voice/dictation.py", "src/grimoire/voice/safety.py",
     ]
     samples = (
         "src/grimoire/missions/merger.py", "src/grimoire/missions/dual_review.py", "src/grimoire/missions/review_seal.py",
@@ -1750,6 +1756,35 @@ def test_la_consigne_de_la_seconde_relecture_n_accepte_qu_un_depot_fige_bien_for
               if argv[:2] == ["claude", "--bg"] and f"grimoire-review-{tid}" in argv][-1][-1]
     assert f"`gh pr diff task/{tid}`" in prompt and " -R " not in prompt and "rm -rf" not in prompt
     assert host.of("gh", "pr", "merge") == []
+
+
+def test_tout_module_qui_verifie_la_cle_de_controle_est_reserve() -> None:
+    """Garde : un module de ``src/grimoire/`` qui appelle ``verify_control_key`` (ou ``require_human_key``, le point de
+    passage commun) porte un geste d'autorité ; il doit correspondre à ``HUMAN_ONLY_PATHS``."""
+    import ast
+
+    package = Path(dual_review.__file__).resolve().parents[1]  # …/grimoire
+    gate_names = {"verify_control_key", "require_human_key"}
+    callers: list[str] = []
+    for source in sorted(package.rglob("*.py")):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            # appel (direct ou par attribut) ou import du nom, sous alias compris : `import x as y` puis `y.nom(...)`
+            # ne cite le nom qu'à l'appel ; `from m import nom as alias` le cite à l'import
+            if isinstance(node, ast.Call):
+                func = node.func
+                name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+            elif isinstance(node, ast.ImportFrom):
+                name = next((a.name for a in node.names if a.name in gate_names), "")
+            elif isinstance(node, ast.Import):
+                name = next((a.name.rpartition(".")[2] for a in node.names if a.name.rpartition(".")[2] in gate_names), "")
+            else:
+                continue
+            if name in gate_names:
+                callers.append(f"src/grimoire/{source.relative_to(package).as_posix()}")
+                break
+    assert callers, "le gardien ne trouve plus aucun appelant : sa lecture est cassée"
+    unreserved = [path for path in callers if not matched_paths([path], HUMAN_ONLY_PATHS)]
+    assert not unreserved, f"vérifient la clé de contrôle sans figurer dans HUMAN_ONLY_PATHS : {unreserved}"
 
 
 def test_le_module_ne_lit_aucun_evenement_du_ledger() -> None:

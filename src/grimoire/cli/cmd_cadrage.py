@@ -330,7 +330,13 @@ def cadrage_approve(
     La validation est scellée au journal d'autorité, avec l'empreinte du texte validé : un agent ou l'orchestrateur,
     même sous mandat, ne peut pas la poser, et modifier l'exigence ensuite la retire (la MOA a validé ce texte-là).
     """
-    from grimoire.missions.requirement_gate import approve_requirement, lookup, normalize_key, origin_root
+    from grimoire.missions.requirement_gate import (
+        approve_requirement,
+        fingerprint,
+        lookup,
+        normalize_key,
+        origin_root,
+    )
 
     root = path.resolve()
     key = _guard(lambda: normalize_key(requirement, chantier))
@@ -339,7 +345,10 @@ def cadrage_approve(
         console.print(f"[bold]{key}[/bold] — {_safe(found.title)}" + (f" [dim]({_safe(found.priority)})[/dim]" if found.priority else ""))
         for criterion in found.criteria:
             console.print(f"  - {_safe(criterion)}")
-    entry = _guard(lambda: approve_requirement(root, key, actor=actor))  # l'origine s'établit dedans
+    seen = fingerprint(key, found) if found is not None else ""  # l'empreinte du texte AFFICHÉ, avant la confirmation
+    entry = _guard(  # l'origine s'établit dedans ; le texte scellé est celui qui vient d'être affiché
+        lambda: approve_requirement(root, key, actor=actor, expected_fingerprint=seen)
+    )
     console.print(
         f"[green]exigence validée[/green] — {entry['requirement']} par la MOA {_safe(entry['moa'])} "
         f"[dim](journal d'autorité, entrée {entry['seq']})[/dim]"
@@ -392,7 +401,10 @@ def cadrage_recette(
             '--motif "…"[/cyan]'
         )
         return
-    done = _guard(lambda: moa.pronounce(root, key, verdict, motif, actor=actor, service=service))
+    shown = view.fingerprint  # l'empreinte du texte affiché ci-dessus : c'est elle que le scellement doit retrouver
+    done = _guard(
+        lambda: moa.pronounce(root, key, verdict, motif, actor=actor, service=service, expected_fingerprint=shown)
+    )
     entry = done["entry"]
     console.print(
         f"[green]recette scellée[/green] — {key} : {entry['verdict']} par la MOA {_safe(entry['moa'])} "
