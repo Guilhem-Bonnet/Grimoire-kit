@@ -50,7 +50,16 @@ from grimoire.missions.liveness import Attention
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState
 from grimoire.missions.schemas import MissionTask, TaskState
 from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT as _QUOTA_CONSUMED
-from grimoire.missions.usage_rules import RuleStatus, UsageRule, describe, evaluate, next_midnight, parse_rules
+from grimoire.missions.usage_rules import (
+    RuleStatus,
+    UsageRule,
+    describe,
+    evaluate,
+    event_day,
+    next_midnight,
+    parse_rules,
+    unknown_counts_today,
+)
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import MissionLedger
@@ -413,21 +422,23 @@ def _consumed_today(events: list[Any], now: datetime) -> TokenUse:
     today = _today(now)
     summed, dispatched = 0, 0
     measured = False
-    unknown: set[str] = set()  # sessions dont le dernier événement du jour dit « inconnu »
+    latest: dict[str, bool] = {}  # session -> son dernier état connu pèse-t-il « inconnu » sur aujourd'hui ?
     for event in events:
         stamp = parse_instant(event.created_at)
-        if stamp is None or _today(stamp) != today:
+        if stamp is None:
             continue
         if event.event_type == QUOTA_CONSUMED_EVENT:
             tokens = event.payload.get("tokens")
             key = str(event.payload.get("session") or event.id)
             if event.payload.get("status") == "unknown":
-                unknown.add(key)
+                latest[key] = unknown_counts_today(event.payload, stamp, now)
             elif isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
-                summed, measured = summed + tokens, True
-                unknown.discard(key)
-        elif event.event_type == "task.dispatched":
+                latest[key] = False  # un état connu défait l'inconnu qui le précède
+                if event_day(event.payload, _today(stamp)) == today:
+                    summed, measured = summed + tokens, True
+        elif event.event_type == "task.dispatched" and _today(stamp) == today:
             dispatched += 1
+    unknown = {key for key, weighs in latest.items() if weighs}
     if measured:
         return TokenUse(summed, "partial" if unknown else "lower_bound", len(unknown))
     # Des appels ont eu lieu aujourd'hui sans qu'aucun chiffre de tokens n'existe : on ne sait pas.

@@ -21,6 +21,7 @@ from grimoire.missions.pause import (
     CONTROL_HOME_ENV,
     DRAIN,
     PauseState,
+    clear_pause,
     project_pause_path,
     read_flag,
     read_pause,
@@ -30,6 +31,7 @@ from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.usage_rules import (
     HOLD_EVENT,
+    PAUSE_ORIGIN,
     apply_effects,
     consumption_today,
     evaluate,
@@ -235,7 +237,7 @@ def test_pause_is_posed_drain_with_the_rule_as_reason_and_never_overwrites(proje
     apply_effects(service, plan.rules, apply=True, now=now, attention=notes)
     flag = read_flag(project_pause_path(projet), "project")
     assert flag is not None and flag.mode == DRAIN and not flag.tasks
-    assert "gros" in flag.reason and flag.actor == "usage-rule:project:gros" and flag.origin == ""
+    assert "gros" in flag.reason and flag.actor == "usage-rule:project:gros" and flag.origin == PAUSE_ORIGIN
     assert "orchestrate resume" in notes[0] and "geste humain" in notes[0]
     # Une pause déjà posée (ici la sienne, puis celle d'un humain) n'est jamais réécrite.
     notes.clear()
@@ -279,13 +281,42 @@ def test_a_task_rule_stays_silent_for_a_task_that_is_not_in_the_queue(projet: Pa
 def test_a_day_pause_lifts_itself_on_the_next_day_but_no_other_pause_does(projet: Path) -> None:
     now = datetime.now(UTC)
     yesterday = now - timedelta(days=1)
-    write_pause(projet, mode=DRAIN, actor="usage-rule:day:jour", reason="règle jour", now=yesterday)
+    write_pause(projet, mode=DRAIN, actor="usage-rule:day:jour", reason="règle jour", origin=PAUSE_ORIGIN, now=yesterday)
     assert not lift_day_pauses(projet, yesterday)  # le même jour : elle tient
     assert lift_day_pauses(projet, now) and read_pause(projet).flags == ()
-    for actor in ("usage-rule:project:gros", "usage-rule:task:t", "guilhem"):
-        write_pause(projet, mode=DRAIN, actor=actor, reason="x", now=yesterday)
+    for actor, origin in (
+        ("usage-rule:project:gros", PAUSE_ORIGIN), ("usage-rule:task:t", PAUSE_ORIGIN), ("guilhem", "human"),
+        ("usage-rule:day:jour", "human"),  # l'acteur imite une règle, l'origine dit qu'un humain l'a posée
+        ("usage-rule:day:jour", "agent"), ("usage-rule:day:jour", ""),
+    ):
+        write_pause(projet, mode=DRAIN, actor=actor, reason="x", origin=origin, now=yesterday)
         assert not lift_day_pauses(projet, now)
         assert read_pause(projet).flags
+        clear_pause(projet)
+
+
+def test_a_day_pause_that_cannot_be_lifted_is_reported_not_fatal(projet: Path, service: TaskService, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import usage_rules
+
+    def boom(*_a: object, **_k: object) -> bool:
+        raise OSError("disque en lecture seule")
+
+    monkeypatch.setattr(usage_rules, "lift_day_pauses", boom)
+    report = run_tick(projet)
+    assert report.status in ("idle", "ran") and any("levée en erreur" in line for line in report.attention)
+    write_pause(projet, mode=DRAIN, actor="guilhem", reason="je tiens", origin="human")
+    paused = run_tick(projet)
+    assert paused.status == "paused" and any("levée en erreur" in line for line in paused.attention)
+
+
+@pytest.mark.parametrize("bad", [".nan", ".inf", "-.inf", "-3", "0", "-0.5"])
+def test_a_non_finite_negative_or_null_threshold_is_an_invalid_rule(projet: Path, bad: str) -> None:
+    _rules(projet, f"  - {{id: a, scope: day, metric: usd, threshold: {bad}, action: warn}}\n")
+    capacity = load_capacity(projet)
+    assert capacity.usage_rules == () and len(capacity.rule_issues) == 1 and not capacity.errors
+    assert "fini strictement positif" in capacity.rule_issues[0]
+    rules, issues = parse_rules([{"id": "a", "scope": "day", "metric": "usd", "threshold": float("nan"), "action": "warn"}])
+    assert rules == () and len(issues) == 1
 
 
 # ── Dans le tick et en lecture ─────────────────────────────────────────────────

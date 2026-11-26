@@ -139,6 +139,11 @@ def _render_rules(report: dict[str, Any]) -> None:
         f"{today['usd']:.4f} USD{_bound(today, 'usd')}, {today['sessions']} session(s) — "
         f"plafond {quota['tokens_per_day']} tokens/jour, consommation inconnue : {quota['on_unknown']}"
     )
+    follow = report["tracking"]
+    console.print(
+        f"Sessions suivies : {follow['sessions']} (connues {follow['known']}, inconnues {follow['unknown']} dont "
+        f"{follow['pending_reread']} en attente de relecture, jamais mesurées {follow['never_measured']})"
+    )
     for section, reason in report["capacity_errors"].items():
         console.print(f"[red]capacité illisible ({section}) : {reason}[/red]")
     if not report["rules"]:

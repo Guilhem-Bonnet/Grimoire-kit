@@ -28,12 +28,15 @@ le kit : seul l'humain édite ``capacity.yaml``.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from grimoire.missions.lease import parse_instant
 
 if TYPE_CHECKING:
     from grimoire.missions.service import TaskService
@@ -42,6 +45,8 @@ __all__ = [
     "ACTIONS",
     "HOLD_EVENT",
     "METRICS",
+    "ONGOING_WINDOW",
+    "PAUSE_ORIGIN",
     "QUOTA_CONSUMED_EVENT",
     "SCOPES",
     "SESSION_EVENTS",
@@ -50,6 +55,7 @@ __all__ = [
     "apply_effects",
     "describe",
     "evaluate",
+    "event_day",
     "lift_day_pauses",
     "parse_rules",
     "rule_dict",
@@ -74,6 +80,9 @@ _KEYS = frozenset({"id", "scope", "metric", "threshold", "action", "enabled"})
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _ACTOR = "usage-rule"
 _PAUSE_ACTOR_PREFIX = "usage-rule:"
+#: L'origine que le drapeau d'une pause posée par une règle porte : ce n'est ni ``human`` ni ``agent`` (qu'un canal
+#: d'appel pose), seule :func:`apply_effects` l'écrit et seule :func:`lift_day_pauses` la reconnaît. ``--actor`` n'y change rien.
+PAUSE_ORIGIN = "usage-rule"
 _CAPACITY_FILE = "_grimoire/standard/capacity.yaml"
 
 
@@ -114,8 +123,8 @@ def rule_dict(rule: UsageRule) -> dict[str, Any]:
 
 
 def _threshold(value: Any, metric: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-        raise ValueError(f"threshold doit être un nombre strictement positif, pas {value!r}")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"threshold doit être un nombre fini strictement positif, pas {value!r}")
     if metric != "usd" and (isinstance(value, float) and not value.is_integer()):
         raise ValueError(f"threshold de {metric} doit être un entier, pas {value!r}")
     return float(value)
@@ -175,12 +184,32 @@ class _Record:
     cost: float | None
 
 
+def event_day(payload: Mapping[str, Any], written: str) -> str:
+    """Le jour (UTC) auquel un ``quota.consumed`` se compte : son ``day`` (consommé avant minuit), sinon son écriture."""
+    day = payload.get("day")
+    return day if isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else written
+
+
 def _num(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-def _records(events: Iterable[Any]) -> list[_Record]:
+#: Un « inconnu en cours » (journal à relire, trop gros) compte pour le jour courant tant qu'il date de moins de cela.
+ONGOING_WINDOW = timedelta(hours=48)
+
+
+def unknown_counts_today(payload: Mapping[str, Any], stamp: datetime | None, now: datetime) -> bool:
+    """Un ``quota.consumed`` inconnu pèse sur *now* : écrit aujourd'hui, ou « en cours » et récent."""
+    if stamp is None:
+        return False
+    if stamp.astimezone(UTC).date() == now.astimezone(UTC).date():
+        return True
+    return bool(payload.get("ongoing")) and now - stamp <= ONGOING_WINDOW
+
+
+def _records(events: Iterable[Any], now: datetime) -> list[_Record]:
     out: list[_Record] = []
+    today = now.astimezone(UTC).date().isoformat()
     for event in events:
         payload = event.payload
         day = str(event.created_at)[:10]
@@ -188,8 +217,11 @@ def _records(events: Iterable[Any]) -> list[_Record]:
             key = str(payload.get("session") or event.id)
             task = str(payload.get("task_id") or "")
             if payload.get("status") == "unknown":
+                if unknown_counts_today(payload, parse_instant(str(event.created_at)), now):
+                    day = today
                 out.append(_Record(day, task, key, "unknown", 0, None))
                 continue
+            day = event_day(payload, day)
             tokens = payload.get("tokens")
             if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
                 out.append(_Record(day, task, key, "consumed", tokens, _num(payload.get("cost_usd"))))
@@ -204,7 +236,11 @@ def _measure(rule: UsageRule, records: list[_Record]) -> tuple[float, bool]:
     """``(valeur connue, complète ?)`` de la mesure de *rule* sur *records*."""
     if rule.metric == "sessions":
         return float(len({r.key for r in records if r.kind == "launch"})), True
-    unknown = {r.key for r in records if r.kind == "unknown"} - {r.key for r in records if r.kind == "consumed"}
+    last: dict[str, str] = {}
+    for r in records:  # chronologique : le dernier état d'une session fait foi (un inconnu récent défait un connu ancien)
+        if r.kind in ("consumed", "unknown"):
+            last[r.key] = r.kind
+    unknown = {key for key, kind in last.items() if kind == "unknown"}
     consumed = [r for r in records if r.kind == "consumed"]
     if rule.metric == "tokens":
         return float(sum(r.tokens for r in consumed)), not unknown
@@ -214,7 +250,7 @@ def _measure(rule: UsageRule, records: list[_Record]) -> tuple[float, bool]:
 
 def evaluate(rules: Iterable[UsageRule], events: Iterable[Any], now: datetime) -> tuple[RuleStatus, ...]:
     """Chaque règle face à la consommation. Une règle désactivée n'est pas mesurée (état ``désactivée``)."""
-    records = _records(events)
+    records = _records(events, now)
     today = now.astimezone(UTC).date().isoformat()
     out: list[RuleStatus] = []
     for rule in rules:
@@ -236,7 +272,7 @@ def evaluate(rules: Iterable[UsageRule], events: Iterable[Any], now: datetime) -
 def consumption_today(events: Iterable[Any], now: datetime) -> dict[str, Any]:
     """La consommation du jour (UTC), en borne basse : ``complete`` dit si tout est connu (jamais un inconnu compté zéro)."""
     today = now.astimezone(UTC).date().isoformat()
-    records = [r for r in _records(events) if r.day == today]
+    records = [r for r in _records(events, now) if r.day == today]
     out: dict[str, Any] = {"day": today}
     for metric in METRICS:
         value, complete = _measure(UsageRule("-", "day", metric, 1.0, "warn"), records)
@@ -249,9 +285,12 @@ def rules_report(
     rules: Iterable[UsageRule], issues: Iterable[str], events: Iterable[Any], now: datetime
 ) -> dict[str, Any]:
     """Ce que ``grimoire queue rules --json`` et la fiche Capacité du cockpit montrent : lecture seule."""
+    from grimoire.missions.quota_usage import tracking
+
     events = list(events)
     return {
         "consumption_today": consumption_today(events, now),
+        "tracking": tracking(events),
         "rules": [
             {**rule_dict(s.rule), "state": s.state, "value": s.value, "complete": s.complete, "crossed": s.crossed,
              "scope_key": s.scope_key}
@@ -333,7 +372,7 @@ def apply_effects(
                 try:
                     write_pause(
                         root, mode=DRAIN, scope=SCOPE_PROJECT, tasks=tasks,
-                        actor=f"{_PAUSE_ACTOR_PREFIX}{rule.scope}:{rule.id}", reason=line, now=now,
+                        actor=f"{_PAUSE_ACTOR_PREFIX}{rule.scope}:{rule.id}", reason=line, origin=PAUSE_ORIGIN, now=now,
                     )
                 except PauseError as exc:
                     attention.append(f"{line} : pause non posée ({exc})")
@@ -346,14 +385,18 @@ def apply_effects(
 def lift_day_pauses(project_root: Path, now: datetime) -> bool:
     """Lève la pause qu'une règle de portée ``day`` a posée un jour précédent ; ``True`` si elle l'a levée.
 
-    Seule une pause dont l'acteur est ``usage-rule:day:<id>`` est concernée : une pause humaine, ou posée par
-    une règle de portée ``project`` ou ``task``, ne se lève jamais d'elle-même.
+    Seule une pause d'origine :data:`PAUSE_ORIGIN` ET d'acteur ``usage-rule:day:<id>`` est concernée : l'acteur seul
+    (une option ``--actor`` libre) ne suffit pas. Une pause humaine, ou posée par une règle de portée ``project`` ou
+    ``task``, ne se lève jamais d'elle-même.
     """
     from grimoire.missions.pause import SCOPE_PROJECT, clear_pause, home_root, project_pause_path, read_flag
 
     root = home_root(project_root)
     flag = read_flag(project_pause_path(root), SCOPE_PROJECT)
-    if flag is None or flag.unreadable or flag.tasks or not flag.actor.startswith(f"{_PAUSE_ACTOR_PREFIX}day:"):
+    if (
+        flag is None or flag.unreadable or flag.tasks or flag.origin != PAUSE_ORIGIN
+        or not flag.actor.startswith(f"{_PAUSE_ACTOR_PREFIX}day:")
+    ):
         return False
     since = flag.since[:10]
     if not since or since >= now.astimezone(UTC).date().isoformat():

@@ -173,7 +173,8 @@ def test_the_step_is_bounded(tmp_path: Path, service: TaskService) -> None:
     outcomes = record_consumption(service, now=_now(), max_sessions=1)
     assert sorted(o.status for o in outcomes) == ["recorded", "skipped"]
     record_consumption(service, now=_now(), max_sessions=1)
-    assert len(_consumed(service)) == 2
+    events = _consumed(service)
+    assert sorted(str(e["status"]) for e in events) == ["lower_bound", "lower_bound", "unknown"]  # l'attente, puis les deux
 
 
 def test_an_oversized_journal_is_unknown_not_guessed(tmp_path: Path, service: TaskService) -> None:
@@ -184,13 +185,12 @@ def test_an_oversized_journal_is_unknown_not_guessed(tmp_path: Path, service: Ta
     assert event["status"] == "unknown" and "plafond" in str(event["reason"])
 
 
-def test_an_old_counted_finished_session_is_not_read_again(tmp_path: Path, service: TaskService) -> None:
+def test_a_known_session_that_is_old_and_unchanged_is_no_longer_examined(tmp_path: Path, service: TaskService) -> None:
     tid = _task(service)
     _launch(service, tid, SESSION_A)
     _journal(tmp_path, "x", SESSION_A, 1)
     record_consumption(service, now=_now())
-    service.ledger.transition_task(tid, TaskState.CANCELLED)
-    assert record_consumption(service, now=datetime.now(UTC) + timedelta(days=3)) == []
+    assert record_consumption(service, now=datetime.now(UTC) + timedelta(days=40)) == []
 
 
 # ── L'admission lit enfin une consommation ────────────────────────────────────
@@ -239,12 +239,24 @@ def test_on_unknown_is_closed_by_default_and_refuses_a_bad_word(service: TaskSer
 
 
 def test_the_tick_step_records_and_reports_unknown_sessions(tmp_path: Path, service: TaskService) -> None:
-    from grimoire.missions.orchestrate import _usage_stage
+    from grimoire.missions.orchestrate import _consumption_stage
 
     tid = _task(service)
     _launch(service, tid, SESSION_A)
+    _launch(service, tid, SESSION_B)  # sans journal, et assez vieille pour être déclarée inconnue
     _journal(tmp_path, "x", SESSION_A, 1)
     attention: list[str] = []
-    _usage_stage(service, "apply", attention)
+    _consumption_stage(service, "plan", attention)
+    assert _consumed(service) == []  # en plan, rien ne s'écrit
+    _consumption_stage(service, "apply", attention)
     assert [e["tokens"] for e in _consumed(service)] == [1500]
-    assert _usage_stage(service, "plan", attention) == ()
+    assert attention == []  # la session B est neuve : pas encore inconnue
+    import grimoire.missions.quota_usage as quota
+
+    original = quota.GRACE
+    quota.GRACE = timedelta(0)
+    try:
+        _consumption_stage(service, "apply", attention)
+    finally:
+        quota.GRACE = original
+    assert any("inconnue" in line for line in attention)

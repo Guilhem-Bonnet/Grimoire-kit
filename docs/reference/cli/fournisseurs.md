@@ -460,8 +460,23 @@ est `unknown` : refusée en autonome (`GRIMOIRE_UNATTENDED=1`), affichée en int
 pour les rôles dont le ledger ne garde que le condensé), l'événement porte le *delta* depuis le dernier et le total
 cumulé, rejouer le tick n'écrit rien. C'est une **borne basse** (`status: lower_bound`) : le kit voit le journal de
 l'hôte, pas la facture. Journal introuvable, illisible, au-dessus de 50 Mo ou d'un hôte non lu : `status: unknown` avec
-la `reason`, jamais un chiffre inventé ; une session lancée depuis moins de 10 minutes n'est pas déclarée inconnue
-(son journal peut ne pas exister encore).
+la `reason` (stable, sans grandeur qui varie : un seul événement par changement d'état réel), jamais un chiffre
+inventé ; un lancement sans identifiant de session est inconnu lui aussi ; une session lancée depuis moins de
+10 minutes n'est pas déclarée inconnue faute de journal (il peut ne pas exister encore).
+
+**Suivi tournant** : au plus 20 journaux sont lus par tick. Un journal dont la taille et la date n'ont pas changé
+depuis sa dernière lecture n'en consomme pas (cache `_grimoire-output/control/quota-reads.json`, perdu il ne coûte
+qu'une relecture) ; les autres passent par ordre de dernière lecture, la plus ancienne d'abord, donc aucune session
+n'est affamée. Une session dont le journal a changé sans pouvoir être relue à ce tick est marquée inconnue
+(« relecture en attente »), un journal déjà compté devenu trop gros aussi : la consommation du jour est alors
+`partial` (jamais « complète » à tort) et suit `quota.on_unknown`, le dernier total connu restant la borne basse.
+`grimoire queue rules` et la fiche Capacité disent combien de sessions sont suivies, inconnues, en attente de
+relecture. La consommation est écrite **avant** le plan d'admission du tick.
+
+**Jour d'un delta** : un delta est daté de son écriture, mais les appels dont l'horodatage précède minuit UTC se
+comptent pour la veille (`day` dans l'événement). Limite restante : un appel sans horodatage lisible compte pour le
+jour de la mesure, et une veille mesurée plusieurs jours plus tard est datée de la veille entière ; le coût d'un delta
+coupé en deux est réparti au prorata des jetons.
 
 **Consommation partiellement inconnue** (`quota.on_unknown`) : sous un plafond fini, quand une partie des sessions du
 jour n'a pas de chiffre, le défaut est `refuse` (sens fermé : `Defer(unknown)` en autonome), sauf si le connu seul
@@ -509,10 +524,15 @@ la liste d'attention, quelle règle est franchie. **Pour lever** : un humain rel
 règle dans `capacity.yaml` ; une règle de portée `day` se lève d'elle-même à minuit UTC. Aucun agent ne le fait.
 
 **Pause posée par une règle** : jamais écrasée si une pause existe déjà (humaine ou autre), la règle le dit seulement.
-Elle ne porte pas d'origine, donc seul un humain la lève (`grimoire orchestrate resume`) ; elle ne se lève **pas** quand
-la consommation repasse sous le seuil. Seule exception : une pause de portée `day` (acteur `usage-rule:day:<id>`) est
-levée par le tick au changement de jour UTC. Une pause humaine, ou posée par une règle de portée `project` ou `task`, ne
-se lève jamais d'elle-même.
+Elle porte une origine propre (`usage-rule`, qu'aucune option `--actor` ne peut imiter), donc seul un humain la lève
+(`grimoire orchestrate resume`) ; elle ne se lève **pas** quand la consommation repasse sous le seuil. Seule exception :
+une pause de portée `day` (origine `usage-rule` ET acteur `usage-rule:day:<id>`) est levée par le tick au changement de
+jour UTC. Une pause humaine, ou posée par une règle de portée `project` ou `task`, ne se lève jamais d'elle-même ; une
+erreur à la levée remonte dans la liste d'attention sans faire échouer le tick.
+
+**Pause d'une session d'agent** (`orchestrate pause`, `orchestrate resume`) : une session d'agent ne remplace jamais une
+pause qui n'est pas la sienne (humaine, d'une règle, d'une autre session) : le geste est refusé et la pause reste ; elle
+ne lève que sa propre pause. Un humain remplace et lève tout, comme avant.
 
 **Règle invalide** : signalée (`capacity.yaml : usage_rules[2] ignorée : …` dans la liste d'attention et sous
 « ignorées » dans `queue rules`) et ignorée ; les autres règles tiennent. Un `capacity.yaml` illisible reste fermé

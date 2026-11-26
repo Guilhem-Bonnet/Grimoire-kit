@@ -126,6 +126,13 @@ function usageBlock(usage) {
     'span', 'cp-usage-day',
     `aujourd’hui : ${bound('tokens')}${fmtInt(today.tokens || 0)} tokens · ${bound('usd')}${Number(today.usd || 0).toFixed(2)} USD · ${fmtInt(today.sessions || 0)} session(s)`,
   ));
+  const follow = usage.tracking;
+  if (follow && (follow.unknown || follow.never_measured)) {
+    block.append(badge(
+      `${follow.unknown} session(s) inconnue(s)`, 'warn',
+      `${follow.sessions} suivie(s), dont ${follow.pending_reread} en attente de relecture et ${follow.never_measured} jamais mesurée(s)`,
+    ));
+  }
   for (const r of rules) {
     block.append(badge(`${r.id} : ${r.state}`, r.state === 'franchie' ? 'warn' : '',
       `${r.scope}${r.scope_key ? ` ${r.scope_key}` : ''} · ${r.metric} ${r.value} / ${r.threshold} · action ${r.action}`));
