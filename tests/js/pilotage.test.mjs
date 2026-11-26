@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  appliedPause, availableGestures, clockText, confirmLines, machineStops, pauseMeta,
+  appliedPause, availableGestures, clockText, confirmLines, gestureNotice, machineStops, noteKeeper, pauseMeta,
 } from '../../web/workspace/spaces/pilotage-logic.js';
 
 const breaker = (extra = {}) => ({ open: false, failures: 0, threshold: 3, reason: '', source: '', ...extra });
@@ -76,6 +76,25 @@ test('refermer le disjoncteur affiche son motif d’ouverture ; l’ouvrir dit c
   assert.match(lines[0], /Ouvert \(count\) : 3 échecs consécutifs/);
   assert.match(confirmLines('reset', { pause: {}, breaker: breaker({ open: true }) }, 'Alpha')[0], /motif non noté/);
   assert.match(confirmLines('trip', { pause: {}, breaker: breaker() }, 'Alpha')[0], /Plus aucune session/);
+});
+
+test('la note d’un geste survit aux repaints suivants (pouls) jusqu’au geste suivant', () => {
+  const keeper = noteKeeper();
+  assert.equal(keeper.get(), '');
+  keeper.set(gestureNotice({ notice: 'Pause posée par la règle d’usage day:gros levée.', journaled: true }));
+  // Un pouls repeint le bloc : chaque rendu relit la note du bloc, il ne la reconstruit pas.
+  for (let paint = 0; paint < 3; paint += 1) assert.match(keeper.get(), /^Pause posée par la règle d’usage day:gros levée\.$/);
+  keeper.set(gestureNotice({ notice: 'Aucune pause à lever.', journaled: true }));
+  assert.equal(keeper.get(), 'Aucune pause à lever.');
+  keeper.clear();
+  assert.equal(keeper.get(), '');
+});
+
+test('le journal qui n’a pas pu inscrire un geste s’ajoute à sa note', () => {
+  assert.equal(gestureNotice({ notice: 'Fait.', journaled: false }), 'Fait. Le journal d’autorité n’a pas pu l’inscrire.');
+  assert.equal(gestureNotice({ journaled: false }), 'Le journal d’autorité n’a pas pu l’inscrire.');
+  assert.equal(gestureNotice({ notice: 'Fait.' }), 'Fait.');
+  assert.equal(gestureNotice(null), '');
 });
 
 test('la pause de la machine nomme tous les projets qui seront arrêtés', () => {

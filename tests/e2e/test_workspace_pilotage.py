@@ -211,8 +211,15 @@ def test_une_pause_de_regle_d_usage_s_affiche_avec_son_auteur_et_se_leve_en_le_d
     _capture(page, "04-reprendre-pause-d-une-regle")
     _confirm(page, _key())
 
-    expect(page.locator(f"{PANEL} .pi-note")).to_contain_text("Pause posée par la règle d'usage day:gros levée")
+    note = page.locator(f"{PANEL} .pi-note")
+    expect(note).to_contain_text("Pause posée par la règle d'usage day:gros levée")
     assert not project_pause_path(root).exists()
+
+    # Un pouls arrive après le geste : une pause posée ailleurs fait repeindre tout le bloc, la note doit y survivre.
+    write_pause(root, mode=DRAIN, actor="guilhem", reason="posée ailleurs")
+    expect(page.locator(f"{PANEL} .pi-line")).to_contain_text("En pause", timeout=20_000)
+    expect(note).to_contain_text("Pause posée par la règle d'usage day:gros levée")
+    expect(note).to_be_visible()
 
 
 def test_un_disjoncteur_ouvert_affiche_son_motif_et_se_referme(page_alpha: Page, clean: dict[str, Path]) -> None:

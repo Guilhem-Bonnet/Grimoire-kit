@@ -71,6 +71,25 @@ export function confirmLines(gesture, state, name) {
   return lines;
 }
 
+/**
+ * La phrase que le serveur rend d'un geste accompli (« Pause posée par … levée. »), et la mention du journal quand il
+ * n'a pas pu inscrire l'événement.
+ */
+export function gestureNotice(answer) {
+  const said = (answer && answer.notice) || '';
+  return answer && answer.journaled === false ? `${said} Le journal d’autorité n’a pas pu l’inscrire.`.trim() : said;
+}
+
+/**
+ * La note du dernier geste. Elle appartient au bloc, pas à son rendu : un rafraîchissement au pouls repeint tout le
+ * bloc, et la note doit y SURVIVRE jusqu'au geste suivant (sinon l'humain ne la lit jamais, le pouls arrive en
+ * quelques dixièmes de seconde après un geste).
+ */
+export function noteKeeper() {
+  let text = '';
+  return { set(value) { text = value || ''; }, clear() { text = ''; }, get() { return text; } };
+}
+
 /** Ce que la pause de toute la machine arrête, en une phrase qui nomme les projets. */
 export function machineStops(rows) {
   const names = rows.map((r) => r.name || r.slug);

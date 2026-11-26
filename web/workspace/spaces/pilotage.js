@@ -9,7 +9,9 @@
 
 import { api } from '../api.js';
 import { icon } from '../shell.js';
-import { appliedPause, availableGestures, confirmLines, machineStops, pauseMeta } from './pilotage-logic.js';
+import {
+  appliedPause, availableGestures, confirmLines, gestureNotice, machineStops, noteKeeper, pauseMeta,
+} from './pilotage-logic.js';
 
 function el(tag, className, textContent) {
   const node = document.createElement(tag);
@@ -187,7 +189,7 @@ function timerLine(timer) {
   return `Minuteur du tick : posé, ${every} · dernier tick : non consigné par le kit`;
 }
 
-function renderInto(node, ctx, slug, name, state, onChange) {
+function renderInto(node, ctx, slug, name, state, onChange, keeper) {
   node.replaceChildren();
   const h = el('h3');
   h.append(icon('bolt'), document.createTextNode('Pilotage'));
@@ -208,9 +210,9 @@ function renderInto(node, ctx, slug, name, state, onChange) {
   if (state.pause && state.pause.machine && !(state.pause && state.pause.project)) {
     node.append(el('p', 'pi-meta', 'Pause de toute la machine : elle se lève depuis « Tous les projets ».'));
   }
-  const note = el('p', 'pi-note');
+  const note = el('p', 'pi-note', keeper.get());
   note.setAttribute('role', 'status');
-  note.hidden = true;
+  note.hidden = !keeper.get();
   const bar = el('div', 'pi-actions');
   const disabled = ctx.host.readOnly ? 'Cockpit en lecture seule : le pilotage se règle depuis le projet.' : '';
   for (const g of availableGestures(state, 'project')) {
@@ -220,8 +222,9 @@ function renderInto(node, ctx, slug, name, state, onChange) {
         const answer = await runGesture(dialogOptions(g.id, state, name), callFor(g.id, slug, state));
         if (answer) { if (onChange) onChange(answer); }
       } catch (failure) {
+        keeper.set(`Pilotage : ${failure && failure.message ? failure.message : 'geste refusé'}`);
         note.hidden = false;
-        note.textContent = `Pilotage : ${failure && failure.message ? failure.message : 'geste refusé'}`;
+        note.textContent = keeper.get();
       } finally {
         b.disabled = !!disabled;
       }
@@ -247,7 +250,8 @@ export function renderPilotagePanel(ctx, { slug, name, initial = null }) {
   node.dataset.panel = 'pilotage';
   let generation = 0;
   let current = initial;
-  const paint = (state) => { current = state; renderInto(node, ctx, slug, name, state, apply); };
+  const keeper = noteKeeper();
+  const paint = (state) => { current = state; renderInto(node, ctx, slug, name, state, apply, keeper); };
   const refresh = async () => {
     const mine = ++generation;
     const state = await api.pilotage(slug).catch(() => null);
@@ -256,13 +260,8 @@ export function renderPilotagePanel(ctx, { slug, name, initial = null }) {
   };
   function apply(answer) {
     generation += 1;
+    keeper.set(gestureNotice(answer)); // avant le rendu : tout repaint suivant (pouls) la remontre
     paint(answer.pilotage);
-    const said = answer.notice || '';
-    const status = node.querySelector('.pi-note');
-    if (status && (said || answer.journaled === false)) {
-      status.hidden = false;
-      status.textContent = answer.journaled === false ? `${said} Le journal d’autorité n’a pas pu l’inscrire.`.trim() : said;
-    }
   }
   if (current) paint(current); else { node.append(el('p', 'pi-line', 'Chargement du pilotage…')); refresh(); }
   return { node, refresh };
