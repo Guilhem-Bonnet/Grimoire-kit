@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.122.0] - 2026-11-26
+
+- fix(security): durcissement de la validation et des gestes d'autorité, trois classes de défaut fermées : le texte scellé par `cadrage approve` et `cadrage recette` est désormais celui qui a été affiché (changé pendant la confirmation, le scellement est refusé sans rien écrire, et les contrôles d'avant la confirmation sont refaits sur le texte relu) — cela vaut pour la commande ; un appel de l'API sans empreinte garde le comportement antérieur ; les fichiers qui portent des gestes d'autorité (recette, commandes de cadrage, garde de requête, routes du cockpit, dictée) rejoignent la liste réservée à l'humain, avec un test gardien sur les modules qui vérifient la clé de contrôle (alias d'import compris) ; aucun geste à clé de contrôle (mandat, pilote automatique, fournisseurs, acceptation en lot, pauses) ne s'exécute plus à partir d'un texte dicté, par un point de passage commun — défense en profondeur : la clé de contrôle reste la barrière (#1438)
+
 ## [3.121.0] - 2026-11-26
 
 - feat(atelier): le modèle optionnel de l'Atelier inscrit la consommation connue de chaque réponse facturée au quota du kit (`quota.consumed`, origine `atelier`, idempotent par identifiant de réponse, par le seul point d'entrée `quota_usage.record_kit_call`), qui entre dans la consommation du jour, les règles d'usage et la fiche Capacité ; une règle d'usage `hold` ou `pause` franchie, ou un `capacity.yaml` illisible, refuse le geste modèle avant tout appel ; le plafond local par jour et par chantier reste en vigueur ; aucun outil MCP, route ni commande n'inscrit ni n'efface une consommation (#1436)
