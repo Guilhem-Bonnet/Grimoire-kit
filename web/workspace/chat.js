@@ -422,9 +422,15 @@ export function createChat({ readOnly = () => false } = {}) {
   }
 
   // ── L'hôte (ACP3) : réglage du projet, hôte détecté par défaut ───────────
+  // Vue « Tous les projets » sans projet cible choisi : les hôtes sont ceux d'un projet, il n'y en a pas encore, donc
+  // rien n'est lu (la lecture retomberait sur un projet implicite) et la saisie reste fermée par `lockForTarget`.
+  const needsTarget = () => host.scopeAll && !currentChatTarget();
+
   async function loadHosts() {
+    if (needsTarget()) return;
     let state;
     try { state = await api.chatHosts(); } catch { hostBar.hidden = true; return; }
+    if (needsTarget()) return; // la cible a été retirée pendant la lecture : cette réponse n'est plus la bonne
     hostBar.hidden = false;
     hostSelect.replaceChildren();
     for (const host of state.hosts) {
@@ -664,7 +670,7 @@ export function createChat({ readOnly = () => false } = {}) {
   // ── La cible en vue globale ─────────────────────────────────────────────
   function lockForTarget(chosen) {
     input.disabled = !chosen;
-    if (!chosen) hostBar.hidden = true;
+    if (!chosen) { hostBar.hidden = true; noHost = ''; } // l'état « aucun hôte » était celui du projet précédent
     send.disabled = !chosen || busy || readOnly();
     if (!chosen) setStatus('Choisissez le projet à qui vous parlez : le chat n’a pas de projet par défaut dans cette vue.');
   }

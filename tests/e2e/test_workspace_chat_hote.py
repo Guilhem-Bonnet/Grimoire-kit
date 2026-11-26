@@ -193,5 +193,35 @@ def test_aucun_hote_utilisable_le_chat_le_dit_avec_la_commande_et_ferme_la_saisi
 
         page.locator("#chat-host").select_option("kanban")
         expect(page.locator(".chat-input")).to_be_enabled(timeout=30_000)
+        # Un seul projet : le sélecteur « Parler au projet » n'existe pas à l'écran.
+        expect(page.locator("[data-role='chat-target-bar']")).to_be_hidden()
     finally:
         context.close()  # type: ignore[attr-defined]
+
+
+def test_en_vue_globale_les_hotes_ne_rouvrent_pas_la_saisie_tant_qu_aucun_projet_n_est_choisi(
+    browser: Browser, serve: Serve
+) -> None:
+    """Vue « Tous les projets » : sans projet cible, `loadHosts` ne lit rien (pas de projet implicite) et la saisie reste fermée."""
+    url = serve(True)
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark")
+    page = context.new_page()
+    chat_reads: list[str] = []
+    page.on("request", lambda r: chat_reads.append(r.url) if "/chat/" in r.url else None)
+    try:
+        page.goto(f"{url}/workspace/index.html?scope=all", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        page.evaluate("() => window.GrimoireWorkspace.setAtelier(true)")
+        page.wait_for_function("() => document.documentElement.dataset.atelier === 'on'")
+        page.locator("[data-dock-tab='orchestrateur']").click()
+        page.wait_for_selector(".chat-input")
+        expect(page.locator("[data-role='chat-target-bar']")).to_be_visible()
+        expect(page.locator(".chat-status")).to_contain_text("Choisissez le projet")
+        page.wait_for_timeout(1500)  # le temps qu'une lecture d'hôtes mal placée, si elle existait, rouvre la saisie
+        expect(page.locator(".chat-input")).to_be_disabled()
+        expect(page.locator("button.chat-send")).to_be_disabled()
+        expect(page.locator("#chat-host")).to_be_hidden()
+        assert chat_reads == [], f"aucune route de chat sans projet cible : {chat_reads}"
+        _capture(page, "chat-hote-04-vue-globale-sans-cible")
+    finally:
+        context.close()

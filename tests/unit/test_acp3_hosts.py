@@ -195,8 +195,13 @@ def test_doctor_marks_a_preview_host(fake_path: Path, tmp_path: Path) -> None:
 
 
 def test_doctor_neither_probes_nor_warns_for_a_host_the_project_does_not_use(
-    fake_path: Path, tmp_path: Path
+    fake_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    def copilot_is_mute(command: tuple[str, ...], _cwd: Path) -> None:
+        if command[0] == "copilot":  # le faux copilot sort aussitôt : il ne parle pas ACP, donc n'est pas le défaut du chat
+            raise AcpError("Broken pipe : Copilot CLI was not found")
+
+    monkeypatch.setattr(acp_hosts, "_probe_initialize", copilot_is_mute)
     _fake_bin(fake_path, "copilot", f"#!{sys.executable}\nimport sys\nsys.exit(1)\n")  # installé, pas dans le projet
     (tmp_path / ".claude").mkdir()  # le seul hôte du projet : Claude Code
     probed: list[tuple[str, ...]] = []
