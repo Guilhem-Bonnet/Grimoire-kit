@@ -27,9 +27,12 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
 import re
 import shutil
+import stat
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -37,7 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
-from grimoire.core.fsio import atomic_write, locked
+from grimoire.core.fsio import atomic_write, lock_files, locked
 from grimoire.core.regular_file import open_regular
 from grimoire.missions.schemas import ORIGIN_HUMAN
 
@@ -47,9 +50,11 @@ __all__ = [
     "MAX_PER_HOUR",
     "TICK_DELAY_S",
     "TICK_REASONS",
+    "WAKE_BUDGET_S",
     "WAKE_REASONS",
     "WakeOutcome",
     "describe_last_wake",
+    "note_tick",
     "read_last_wake",
     "request_tick",
     "tick_wake_reason",
@@ -69,8 +74,15 @@ CHAIN_WINDOW_S = 360
 #: Un réveil demandé par un tick part en différé (secondes) : l'unité est encore active pendant le tick qui le demande,
 #: et un ``start`` sur une unité active ne relance rien.
 TICK_DELAY_S = 30
-_TIMEOUT_S = 5
-_LOCK_TIMEOUT_S = 2.0
+_TIMEOUT_S = 2
+_LOCK_TIMEOUT_S = 1.0
+#: Budget total (secondes) qu'un geste accorde au réveil (verrou + sous-processus) : au-delà, il rend la main, le réveil
+#: continue ou s'abandonne dans son fil détaché, le minuteur fera le travail.
+WAKE_BUDGET_S = 3.0
+#: Un tick démarré moins de ce nombre de secondes après le précédent est lui-même un tick de réveil : il n'en demande pas
+#: un autre. Cette borne ne dépend pas du fichier d'état des réveils (voir :func:`note_tick`).
+TICK_GAP_S = 60
+TICK_MARK_RELPATH = Path("_grimoire-output") / "control" / "tick-last"
 _HISTORY_MAX = 64
 
 STATE_RELPATH = Path("_grimoire-output") / "control" / "tick-wake.json"
@@ -113,15 +125,18 @@ def _state_path(root: Path) -> Path:
     return root / STATE_RELPATH
 
 
-def _read_state(path: Path) -> dict[str, Any]:
-    """L'état ; ``{}`` s'il est absent, abîmé, d'un autre schéma ou n'est pas un fichier ordinaire (jamais d'exception)."""
+def _read_state(path: Path) -> dict[str, Any] | None:
+    """L'état ; ``None`` s'il est absent, abîmé, tronqué, d'un autre schéma ou n'est pas un fichier ordinaire (jamais d'exception).
+
+    ``None`` ne vaut pas « aucun réveil récent » : un réveil de tick n'est pas accordé sans état lisible.
+    """
     try:
         with open_regular(path) as fh:
             raw = json.loads(fh.read(65536).decode("utf-8"))
     except (OSError, ValueError):
-        return {}
+        return None
     if not isinstance(raw, dict) or raw.get("$schema") != _SCHEMA:
-        return {}
+        return None
     last = raw.get("last")
     attempts = raw.get("attempts")
     clean_last = {k: str(v) for k, v in last.items() if k in ("at", "reason", "result", "origin")} if isinstance(last, dict) else {}
@@ -134,17 +149,72 @@ def read_last_wake(project_root: Path) -> dict[str, str]:
     """Le dernier réveil tenté (``at``, ``reason``, ``result``, ``origin``) ; ``{}`` s'il n'y en a pas. Lecture seule."""
     from grimoire.missions.pause import home_root
 
-    last = _read_state(_state_path(home_root(project_root))).get("last")
+    last = (_read_state(_state_path(home_root(project_root))) or {}).get("last")
     return dict(last) if isinstance(last, dict) else {}
 
 
+_RESULT_LABELS = {
+    "started": "unité du tick démarrée",
+    "requested": f"tick demandé dans {TICK_DELAY_S} s (minuteur transitoire créé, tick non confirmé)",
+}
+
+
 def describe_last_wake(project_root: Path) -> str:
-    """Une ligne pour ``orchestrate status`` : le dernier réveil, ou son absence."""
+    """Une ligne pour ``orchestrate status`` : le dernier réveil, ou son absence. Un tick demandé n'est pas dit « tourné »."""
     last = read_last_wake(project_root)
     if not last:
         return "réveil : aucun (le minuteur fait seul le travail)"
     label = WAKE_REASONS.get(last.get("reason", ""), last.get("reason", "?"))
-    return f"réveil : {last.get('at', '?')} — {label} — {last.get('result', '?')}"
+    result = last.get("result", "?")
+    return f"réveil : {last.get('at', '?')} — {label} — {_RESULT_LABELS.get(result, result)}"
+
+
+def note_tick(project_root: Path, *, now: float | None = None) -> float | None:
+    """Note que ce tick démarre et rend l'écart (secondes) avec le début du tick précédent, ``None`` s'il est inconnu.
+
+    L'écart sert à refuser un réveil demandé par un tick qui est lui-même un tick de réveil
+    (:data:`TICK_GAP_S`). Il vient de la date d'un fichier-témoin ordinaire, pas du fichier d'état des réveils : effacer
+    l'un ne désarme pas l'autre. Témoin absent ou non ordinaire : écart inconnu, donc pas de réveil de tick.
+    Ne lève jamais.
+    """
+    from grimoire.missions.pause import home_root
+
+    mark = home_root(project_root) / TICK_MARK_RELPATH
+    moment = time.time() if now is None else now
+    try:
+        before = mark.lstat()
+        gap: float | None = moment - before.st_mtime if stat.S_ISREG(before.st_mode) else None
+    except OSError:
+        gap = None
+    try:
+        atomic_write(mark, f"{moment}\n")
+        os.utime(mark, (moment, moment))
+    except OSError as exc:
+        logger.warning("réveil du tick : témoin du tick non écrit (%s)", exc)
+        return None
+    return gap
+
+
+def _ordinary_or_absent(path: Path) -> bool:
+    """Vrai si *path* n'existe pas ou est un fichier ordinaire (ni lien, ni FIFO, ni dossier)."""
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def _binary(name: str) -> str | None:
+    """Le chemin ABSOLU de l'outil, résolu une fois ; ``None`` s'il n'est pas absolu, ordinaire et exécutable."""
+    found = shutil.which(name)
+    if not found or not Path(found).is_absolute():
+        return None
+    try:
+        ordinary = stat.S_ISREG(Path(found).stat().st_mode)
+    except OSError:
+        return None
+    return found if ordinary and os.access(found, os.X_OK) else None
 
 
 def _enabled(root: Path) -> bool:
@@ -166,22 +236,30 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
 
 def _argv(unit: str, *, delayed: bool) -> list[str] | None:
     """La ligne de commande : ``systemctl --user start <unité> --no-block``, ou en différé par ``systemd-run`` ; ``None`` sans l'outil."""
-    start = ["systemctl", "--user", "start", "--no-block", unit]
-    if not delayed:
-        return start if shutil.which("systemctl") else None
-    if not (shutil.which("systemctl") and shutil.which("systemd-run")):
+    systemctl = _binary("systemctl")
+    if systemctl is None:
         return None
-    return ["systemd-run", "--user", "--quiet", "--collect", f"--on-active={TICK_DELAY_S}s", "--", *start]
+    start = [systemctl, "--user", "start", "--no-block", unit]
+    if not delayed:
+        return start
+    systemd_run = _binary("systemd-run")
+    if systemd_run is None:
+        return None
+    return [systemd_run, "--user", "--quiet", "--collect", f"--on-active={TICK_DELAY_S}s", "--", *start]
 
 
 def request_tick(
     project_root: Path, reason: str, *, run: Runner | None = None, now: float | None = None,
-    control_home: Path | None = None,
+    control_home: Path | None = None, tick_gap: float | None = None,
 ) -> WakeOutcome:
     """Demande un tick proche ; ne l'exécute jamais ici. Ne lève pas pour un refus : le résultat dit pourquoi.
 
-    *run* est le lanceur d'argv (défaut : ``subprocess.run``, 5 s) ; *now* l'horloge en secondes ; *control_home*
-    le dossier de contrôle de la machine (pause globale).
+    *run* est le lanceur d'argv (défaut : ``subprocess.run``, 2 s) ; *now* l'horloge en secondes ; *control_home*
+    le dossier de contrôle de la machine (pause globale) ; *tick_gap* l'écart avec le tick précédent
+    (:func:`note_tick`), exigé pour un motif de tick.
+
+    Sens fermé pour un réveil de tick (:data:`TICK_REASONS`) : état des réveils absent ou illisible, écart de tick
+    inconnu ou de moins de :data:`TICK_GAP_S` : pas de réveil. Un geste humain reste accordé et recrée l'état.
     """
     from grimoire.missions.breaker import read_breaker
     from grimoire.missions.pause import home_root, read_pause
@@ -204,11 +282,19 @@ def request_tick(
     argv = _argv(unit, delayed=delayed)
     if argv is None:
         return _skipped("systemd absent : le minuteur ou le cron fera le travail")
+    if delayed and (tick_gap is None or tick_gap < TICK_GAP_S):
+        return _skipped("écart avec le tick précédent inconnu ou trop court : ce tick est déjà un tick de réveil")
     moment = time.time() if now is None else now
     path = _state_path(root)
+    if not all(_ordinary_or_absent(p) for p in lock_files(path)):  # `locked` ouvre ce fichier : une FIFO figerait le geste
+        logger.warning("réveil du tick : fichier de verrou non ordinaire, pas de réveil")
+        return _skipped("fichier de verrou non ordinaire")
     try:
         with locked(path, timeout=_LOCK_TIMEOUT_S):
-            state = _read_state(path)
+            known = _read_state(path)
+            if delayed and known is None:
+                return _skipped("état des réveils absent ou illisible : le minuteur fait le travail")
+            state = known or {}
             attempts = [a for a in state.get("attempts", []) if moment - 3600 < a <= moment]
             last_epoch = max(attempts, default=0.0)
             last = state.get("last", {})
@@ -218,7 +304,7 @@ def request_tick(
                 return _skipped(f"plafond de {MAX_PER_HOUR} réveils par heure atteint : le minuteur fait le travail")
             if delayed and last.get("origin") == "tick" and 0 <= moment - last_epoch < CHAIN_WINDOW_S:
                 return _skipped("le dernier réveil venait déjà d'un tick : pas de chaîne")
-            outcome = _start(argv, run or _run)
+            outcome = _start(argv, run or _run, delayed=delayed)
             record = {"at": _now(), "reason": reason, "result": f"{outcome.status} : {outcome.detail}" if outcome.detail else outcome.status,
                       "origin": "tick" if delayed else "geste"}
             try:
@@ -234,7 +320,7 @@ def request_tick(
         return _skipped(f"état du réveil indisponible ({type(exc).__name__})")
 
 
-def _start(argv: list[str], run: Runner) -> WakeOutcome:
+def _start(argv: list[str], run: Runner, *, delayed: bool = False) -> WakeOutcome:
     try:
         result = run(argv)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -244,16 +330,32 @@ def _start(argv: list[str], run: Runner) -> WakeOutcome:
         detail = (result.stderr or "").strip()[:200] or f"code {result.returncode}"
         logger.warning("réveil du tick : %s a répondu %s", argv[0], detail)
         return WakeOutcome("failed", detail)
-    return WakeOutcome("started")
+    # Différé : le minuteur transitoire est créé, le tick n'a pas tourné et rien ne dit qu'il tournera.
+    return WakeOutcome("requested" if delayed else "started")
 
 
-def wake_after(project_root: Path, reason: str) -> None:
-    """Le réveil en fin de geste : toute erreur est avalée et journalisée, le geste n'échoue jamais à cause de lui."""
-    try:
-        outcome = request_tick(project_root, reason)
-        logger.debug("réveil du tick (%s) : %s %s", reason, outcome.status, outcome.detail)
-    except Exception:  # un réveil est un confort, jamais une condition du geste
-        logger.warning("réveil du tick (%s) : erreur avalée", reason, exc_info=True)
+def wake_after(
+    project_root: Path, reason: str, *, tick_gap: float | None = None, budget: float = WAKE_BUDGET_S
+) -> threading.Thread:
+    """Le réveil en fin de geste : toute erreur est avalée et journalisée, le geste n'échoue jamais à cause de lui.
+
+    Le réveil tourne dans un fil détaché (démon) et le geste ne lui accorde que *budget* secondes : verrou ou
+    sous-processus lents, le geste rend la main et le minuteur fera le travail. Rend le fil (les tests le joignent).
+    """
+
+    def work() -> None:
+        try:
+            outcome = request_tick(project_root, reason, tick_gap=tick_gap)
+            logger.debug("réveil du tick (%s) : %s %s", reason, outcome.status, outcome.detail)
+        except Exception:  # un réveil est un confort, jamais une condition du geste
+            logger.warning("réveil du tick (%s) : erreur avalée", reason, exc_info=True)
+
+    thread = threading.Thread(target=work, name="grimoire-tick-wake", daemon=True)
+    thread.start()
+    thread.join(budget)
+    if thread.is_alive():
+        logger.warning("réveil du tick (%s) : budget de %g s dépassé, le geste rend la main", reason, budget)
+    return thread
 
 
 def wakes_after_human(reason: str) -> Callable[[Callable[P, R]], Callable[P, R]]:

@@ -680,12 +680,17 @@ l'appel `request_tick(racine, motif)` de `missions/tick_wake.py`, en fin de gest
   laisse le tick tourner : le réveil aussi.
 - **Bornes** : au plus un réveil par fenêtre de 20 s et par projet, 12 par heure ; un tick qui a fusionné ou récolté une
   session ne provoque qu'un seul tick de plus (pas de chaîne dans les 6 min, sauf geste humain entre-temps) et un tick qui
-  n'a rien fait ne réveille rien. L'état tient dans `_grimoire-output/control/tick-wake.json` ; un fichier abîmé ou non
-  ordinaire est ignoré.
+  n'a rien fait ne réveille rien. L'état tient dans `_grimoire-output/control/tick-wake.json`. Sens fermé : un état
+  absent, abîmé, tronqué ou non ordinaire ne vaut pas « aucun réveil récent » : un réveil demandé par un tick n'est alors
+  pas accordé, un geste humain l'est et recrée l'état. Une seconde borne ne dépend pas de ce fichier : un tick démarré
+  moins de 60 s après le précédent (date du témoin `tick-last`) ne demande aucun réveil. Le réveil ne retient jamais le
+  geste plus de 3 s (fil détaché, verrou non ordinaire refusé avant d'être ouvert) ; `systemctl` et `systemd-run` sont
+  lancés par leur chemin absolu, vérifié ordinaire et exécutable.
 - **Sans risque pour le geste** : une erreur du réveil est avalée et journalisée, la réponse ou l'acceptation aboutit.
   Seuls les gestes d'origine humaine réveillent ; un agent ne gagne rien (le motif vient d'une liste fermée, le nom
   d'unité est dérivé du chemin du projet, la ligne de commande n'a aucune entrée externe).
 - **Voir le dernier réveil** : `grimoire orchestrate status` (clé `last_wake` en `--json`) : date, motif, résultat.
+  Un réveil différé est dit « demandé » (minuteur transitoire créé, tick non confirmé), jamais « démarré ».
   Le serveur MCP n'expose ni réponse ni acceptation : il n'est pas un point de réveil.
 
 ### Hôte du worker : Claude Code ou opencode (#1281, lot L4)

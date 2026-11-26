@@ -301,6 +301,11 @@ def orchestrate_tick(
         typer.echo("--apply et --plan s'excluent.", err=True)
         raise typer.Exit(2)
 
+    tick_gap = None
+    if apply:
+        from grimoire.missions.tick_wake import note_tick
+
+        tick_gap = note_tick(project_root.resolve())  # écart avec le tick précédent, pour la borne anti-chaîne des réveils
     try:
         report = run_tick(project_root.resolve(), ledger_root=ledger_root, apply=apply)
     except GrimoireError as exc:
@@ -310,7 +315,7 @@ def orchestrate_tick(
         from grimoire.missions.tick_wake import tick_wake_reason, wake_after
 
         if (wake_reason := tick_wake_reason(report)) is not None:  # un tick qui a fait quelque chose : au plus un tick de plus
-            wake_after(project_root.resolve(), wake_reason)
+            wake_after(project_root.resolve(), wake_reason, tick_gap=tick_gap)
     if _as_json(ctx, json_output):
         typer.echo(json.dumps({**report.to_dict(), "applied": apply}, indent=2, ensure_ascii=False))
     else:

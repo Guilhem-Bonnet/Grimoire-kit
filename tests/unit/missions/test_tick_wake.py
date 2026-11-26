@@ -33,6 +33,7 @@ from grimoire.missions.tick_wake import (
 from grimoire.missions.timer import _unit_name, plan_timer
 
 runner = CliRunner()
+REAL_RUN = tick_wake._run  # capturé à l'import, avant la garde autouse
 POLICY = Path("_grimoire/standard/orchestration-policy.yaml")
 
 
@@ -72,10 +73,34 @@ def projet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root.mkdir()
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv(CONTROL_HOME_ENV, str(tmp_path / "ctl"))
-    monkeypatch.setattr(tick_wake.shutil, "which", lambda name: f"/usr/bin/{name}")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for name in ("systemctl", "systemd-run"):  # de vrais fichiers exécutables, jamais lancés : le lanceur est un faux
+        (tools / name).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (tools / name).chmod(0o755)
+    monkeypatch.setattr(tick_wake.shutil, "which", lambda name: str(tools / name))
     write_policy(root)
     install_timer_files(root)
     return root
+
+
+@pytest.fixture(autouse=True)
+def _jamais_de_vrai_lanceur(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Garde : sans faux injecté, le lanceur par défaut échoue le test au lieu de lancer un vrai ``systemctl``."""
+
+    def forbidden(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        pytest.fail(f"lanceur réel appelé sans faux : {argv}")
+
+    monkeypatch.setattr(tick_wake, "_run", forbidden)
+
+
+def seed_human_wake(root: Path, at: float = 100.0) -> None:
+    """Un état lisible (un réveil humain antérieur) : sans lui, un réveil de tick n'est pas accordé."""
+    assert request_tick(root, "reponse_humaine", run=FakeRun(), now=at).status == "started"
+
+
+def tool(root: Path, name: str) -> str:
+    return str(root.parent / "bin" / name)
 
 
 def unit_of(root: Path) -> str:
@@ -89,12 +114,12 @@ def test_demarre_l_unite_installee_sans_shell_ni_motif(projet: Path) -> None:
     run = FakeRun()
     outcome = request_tick(projet, "reponse_humaine", run=run, now=1000.0)
     assert outcome.status == "started"
-    assert run.calls == [["systemctl", "--user", "start", "--no-block", unit_of(projet)]]
+    assert run.calls == [[tool(projet, "systemctl"), "--user", "start", "--no-block", unit_of(projet)]]  # chemin absolu
     assert all(isinstance(a, str) and not any(c in a for c in " ;|&$`\n") for a in run.calls[0])
     assert "reponse_humaine" not in " ".join(run.calls[0])  # le motif ne va jamais sur la ligne de commande
     last = read_last_wake(projet)
     assert (last["reason"], last["result"], last["origin"]) == ("reponse_humaine", "started", "geste")
-    assert "réponse humaine" in describe_last_wake(projet) and "started" in describe_last_wake(projet)
+    assert "réponse humaine" in describe_last_wake(projet) and "démarrée" in describe_last_wake(projet)
 
 
 def test_lanceur_par_defaut_sans_shell_et_borne(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,9 +130,33 @@ def test_lanceur_par_defaut_sans_shell_et_borne(projet: Path, monkeypatch: pytes
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(tick_wake.subprocess, "run", fake_run)
+    monkeypatch.setattr(tick_wake, "_run", REAL_RUN)  # le seul test qui passe par le vrai lanceur, avec un faux subprocess.run
     assert request_tick(projet, "acceptation", now=1.0).status == "started"
-    assert seen[0]["argv"][:3] == ["systemctl", "--user", "start"] and not seen[0].get("shell")
-    assert seen[0]["timeout"] == 5 and seen[0]["check"] is False
+    assert seen[0]["argv"][:3] == [tool(projet, "systemctl"), "--user", "start"] and not seen[0].get("shell")
+    assert seen[0]["timeout"] == 2 and seen[0]["check"] is False
+
+
+@pytest.mark.parametrize("kind", ["relatif", "absent", "non_executable", "dossier"])
+def test_binaire_refuse_s_il_n_est_pas_absolu_ordinaire_et_executable(projet: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    bad = {"relatif": "systemctl", "absent": str(projet.parent / "rien"), "dossier": str(projet.parent)}.get(kind)
+    if kind == "non_executable":
+        plain = projet.parent / "plain"
+        plain.write_text("x", encoding="utf-8")
+        plain.chmod(0o644)
+        bad = str(plain)
+    monkeypatch.setattr(tick_wake.shutil, "which", lambda name: bad)
+    run = FakeRun()
+    assert request_tick(projet, "reponse_humaine", run=run, now=1.0).status == "skipped"
+    assert not run.calls
+
+
+def test_le_reveil_differe_dit_demande_pas_demarre(projet: Path) -> None:
+    seed_human_wake(projet)
+    run = FakeRun()
+    assert request_tick(projet, "fusion", run=run, now=1000.0, tick_gap=300.0).status == "requested"
+    assert read_last_wake(projet)["result"] == "requested"
+    text = describe_last_wake(projet)
+    assert "demandé" in text and "non confirmé" in text and "démarrée" not in text
 
 
 def test_sans_reveil_enregistre_le_statut_le_dit(projet: Path) -> None:
@@ -143,7 +192,7 @@ def test_systemd_absent(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tick_wake.shutil, "which", lambda name: None)
     run = FakeRun()
     assert "systemd absent" in request_tick(projet, "reprise", run=run).detail
-    assert request_tick(projet, "fusion", run=run).status == "skipped"  # le différé a besoin de systemd-run aussi
+    assert request_tick(projet, "fusion", run=run, tick_gap=300.0).detail.startswith("systemd absent")  # le différé a besoin de systemd-run aussi
     assert not run.calls
 
 
@@ -246,23 +295,112 @@ def test_ecriture_d_etat_impossible_ne_cache_pas_le_demarrage(projet: Path, monk
 
 
 def test_un_reveil_de_tick_part_en_differe_et_ne_se_chaine_pas(projet: Path) -> None:
+    seed_human_wake(projet)
     run = FakeRun()
-    assert request_tick(projet, "fusion", run=run, now=1000.0).status == "started"
+    assert request_tick(projet, "fusion", run=run, now=1000.0, tick_gap=300.0).status == "requested"
     argv = run.calls[0]
-    assert argv[0] == "systemd-run" and f"--on-active={tick_wake.TICK_DELAY_S}s" in argv and argv[-5:] == [
-        "systemctl", "--user", "start", "--no-block", unit_of(projet)]
+    assert argv[0] == tool(projet, "systemd-run") and f"--on-active={tick_wake.TICK_DELAY_S}s" in argv and argv[-5:] == [
+        tool(projet, "systemctl"), "--user", "start", "--no-block", unit_of(projet)]
     assert read_last_wake(projet)["origin"] == "tick"
-    again = request_tick(projet, "fin_de_session", run=run, now=1000.0 + DEBOUNCE_S + 5)
+    again = request_tick(projet, "fin_de_session", run=run, now=1000.0 + DEBOUNCE_S + 5, tick_gap=300.0)
     assert again.status == "skipped" and "pas de chaîne" in again.detail
-    assert request_tick(projet, "fusion", run=run, now=1000.0 + CHAIN_WINDOW_S + 1).status == "started"
+    assert request_tick(projet, "fusion", run=run, now=1000.0 + CHAIN_WINDOW_S + 1, tick_gap=300.0).status == "requested"
     assert len(run.calls) == 2
 
 
 def test_un_geste_humain_entre_deux_ticks_rouvre_la_chaine(projet: Path) -> None:
+    seed_human_wake(projet)
     run = FakeRun()
-    request_tick(projet, "fusion", run=run, now=1000.0)
+    request_tick(projet, "fusion", run=run, now=1000.0, tick_gap=300.0)
     assert request_tick(projet, "reponse_humaine", run=run, now=1030.0).status == "started"
-    assert request_tick(projet, "fusion", run=run, now=1060.0).status == "started"
+    assert request_tick(projet, "fusion", run=run, now=1060.0, tick_gap=300.0).status == "requested"
+
+
+def test_sens_ferme_etat_absent_ou_illisible_pas_de_reveil_de_tick(projet: Path) -> None:
+    """P3 : effacer l'état entre deux demandes n'annule plus le plafond ni l'anti-chaîne."""
+    run = FakeRun()
+    path = projet / STATE_RELPATH
+    granted = 0
+    for i in range(40):
+        if path.exists():
+            path.unlink()
+        granted += request_tick(projet, "fusion", run=run, now=1000.0 + 40 * i, tick_gap=300.0).status == "requested"
+    assert granted == 0 and not run.calls
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"$schema": "grimoire-tick-wake/v1", "attempts": [1.0', encoding="utf-8")  # tronqué
+    assert request_tick(projet, "fusion", run=run, now=9e4, tick_gap=300.0).status == "skipped" and not run.calls
+    # un geste humain reste accordé et recrée l'état, ce réveil compté
+    assert request_tick(projet, "reponse_humaine", run=run, now=9e4).status == "started"
+    assert json.loads(path.read_text(encoding="utf-8"))["attempts"] == [9e4]
+
+
+def test_etat_gonfle_au_dela_de_64k_vaut_absent(projet: Path) -> None:
+    seed_human_wake(projet)
+    path = projet / STATE_RELPATH
+    path.write_text(" " * 70000 + path.read_text(encoding="utf-8"), encoding="utf-8")  # tronqué à 64 Kio : illisible
+    assert request_tick(projet, "fusion", run=FakeRun(), now=1000.0, tick_gap=300.0).status == "skipped"
+
+
+@pytest.mark.parametrize("gap", [None, 0.0, tick_wake.TICK_GAP_S - 1])
+def test_borne_independante_de_l_etat_ecart_de_tick(projet: Path, gap: float | None) -> None:
+    """Le tick précédent date de moins que la fenêtre : un tick de réveil ne s'enchaîne pas, état intact ou non."""
+    seed_human_wake(projet)
+    run = FakeRun()
+    assert request_tick(projet, "fusion", run=run, now=1000.0, tick_gap=gap).status == "skipped" and not run.calls
+    assert request_tick(projet, "fusion", run=run, now=1000.0, tick_gap=float(tick_wake.TICK_GAP_S)).status == "requested"
+
+
+def test_note_tick_rend_l_ecart_avec_le_tick_precedent(projet: Path) -> None:
+    assert tick_wake.note_tick(projet, now=1000.0) is None  # premier tick : écart inconnu
+    assert tick_wake.note_tick(projet, now=1030.0) == pytest.approx(30.0)
+    assert tick_wake.note_tick(projet, now=1330.0) == pytest.approx(300.0)
+    mark = projet / tick_wake.TICK_MARK_RELPATH
+    mark.unlink()
+    mark.symlink_to(projet.parent / "etranger")
+    assert tick_wake.note_tick(projet, now=1400.0) is None  # non ordinaire : inconnu, et remplacé par un ordinaire
+    assert not mark.is_symlink()
+    assert tick_wake.note_tick(projet, now=1450.0) == pytest.approx(50.0)
+
+
+def test_note_tick_ne_leve_jamais(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(*_a: Any, **_k: Any) -> None:
+        raise OSError("lecture seule")
+
+    monkeypatch.setattr(tick_wake, "atomic_write", refuse)
+    assert tick_wake.note_tick(projet, now=1.0) is None
+
+
+def test_verrou_fifo_pas_de_reveil_et_pas_de_blocage(projet: Path) -> None:
+    """P5 : un fichier non ordinaire à la place du verrou ne fige pas le geste."""
+    import os
+    import time
+
+    control = (projet / STATE_RELPATH).parent
+    control.mkdir(parents=True)
+    os.mkfifo(control / ".tick-wake.json.lock")
+    run = FakeRun()
+    started = time.monotonic()
+    outcome = request_tick(projet, "reponse_humaine", run=run, now=1.0)
+    assert outcome.status == "skipped" and "non ordinaire" in outcome.detail and not run.calls
+    assert time.monotonic() - started < 2
+    thread = wake_after(projet, "reponse_humaine", budget=2.0)
+    assert not thread.is_alive()
+
+
+def test_wake_after_rend_la_main_dans_le_budget_meme_si_le_reveil_s_eternise(
+    projet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    release = threading.Event()
+    monkeypatch.setattr(tick_wake, "request_tick", lambda *_a, **_k: release.wait(10))
+    started = time.monotonic()
+    thread = wake_after(projet, "reponse_humaine", budget=0.2)
+    assert time.monotonic() - started < 2 and thread.is_alive()  # le geste a rendu la main, le fil détaché continue
+    release.set()
+    thread.join(5)
+    assert not thread.is_alive()
 
 
 def _report(**fields: Any) -> Any:
@@ -296,7 +434,7 @@ def test_wake_after_avale_toute_erreur(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 def test_decorateur_humain_reussi_seulement(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen: list[tuple[Path, str]] = []
-    monkeypatch.setattr(tick_wake, "request_tick", lambda root, reason: seen.append((root, reason)))
+    monkeypatch.setattr(tick_wake, "request_tick", lambda root, reason, **_k: seen.append((root, reason)))
 
     class Geste:
         project_root = tmp_path
@@ -315,7 +453,7 @@ def test_decorateur_humain_reussi_seulement(monkeypatch: pytest.MonkeyPatch, tmp
 
 
 def test_decorateur_sans_racine_ne_fait_rien(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tick_wake, "request_tick", lambda *_a: pytest.fail("pas de racine : pas de réveil"))
+    monkeypatch.setattr(tick_wake, "request_tick", lambda *_a, **_k: pytest.fail("pas de racine : pas de réveil"))
 
     class Sans:
         @wakes_after_human("acceptation")
@@ -340,7 +478,7 @@ def _waiting(root: Path) -> tuple[TaskService, str]:
 
 def test_reponse_humaine_reveille_le_tick(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
-    monkeypatch.setattr(tick_wake, "request_tick", lambda root, reason: seen.append(reason))
+    monkeypatch.setattr(tick_wake, "request_tick", lambda root, reason, **_k: seen.append(reason))
     service, tid = _waiting(tmp_path)
     assert seen == []
     service.answer(tid, "a", "guilhem", origin="human")
@@ -358,7 +496,7 @@ def test_reponse_humaine_ne_casse_pas_si_le_reveil_casse(tmp_path: Path, monkeyp
 
 
 def test_la_reponse_d_un_agent_ne_reveille_rien(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tick_wake, "request_tick", lambda *_a: pytest.fail("un agent ne réveille pas le tick"))
+    monkeypatch.setattr(tick_wake, "request_tick", lambda *_a, **_k: pytest.fail("un agent ne réveille pas le tick"))
     service, tid = _waiting(tmp_path)
     with pytest.raises(Exception, match=r"refus|humain|origine|mandat"):
         service.answer(tid, "a", "claude", origin="agent")
@@ -370,7 +508,7 @@ def test_acceptation_service_est_un_point_de_reveil() -> None:
 
 def test_cli_reprise_reveille_seulement_si_une_pause_est_levee(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
-    monkeypatch.setattr(tick_wake, "request_tick", lambda root, reason: seen.append(reason))
+    monkeypatch.setattr(tick_wake, "request_tick", lambda root, reason, **_k: seen.append(reason))
     monkeypatch.setattr("grimoire.cli.cmd_task._comment_origin", lambda: "human")
     root = ["--project-root", str(projet)]
     assert runner.invoke(app, ["orchestrate", "resume", *root]).exit_code == 0 and seen == []  # rien à lever
@@ -393,7 +531,7 @@ def test_cli_reprise_reussit_meme_si_le_reveil_casse(projet: Path, monkeypatch: 
 
 def _tick_cli(projet: Path, monkeypatch: pytest.MonkeyPatch, report: TickReport, *args: str) -> list[str]:
     seen: list[str] = []
-    monkeypatch.setattr(tick_wake, "request_tick", lambda root, reason: seen.append(reason))
+    monkeypatch.setattr(tick_wake, "request_tick", lambda root, reason, **_k: seen.append(reason))
     monkeypatch.setattr("grimoire.missions.orchestrate.run_tick", lambda *_a, **_k: report)
     result = runner.invoke(app, ["orchestrate", "tick", *args, "--project-root", str(projet), "--json"])
     assert result.exit_code == 0, result.output
