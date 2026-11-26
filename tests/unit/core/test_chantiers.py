@@ -293,3 +293,40 @@ def test_cli_plan_on_a_chantier_uses_its_mission_and_prefixed_keys(tmp_path: Pat
     [task] = [t for t in TaskService(tmp_path).list_tasks() if covers_of(t)]
     assert covers_of(task) == ["alpha/REQ-001"] and task.mission_id == mission
     assert runner.invoke(app, ["cadrage", "plan", root, "--chantier", "absent"]).exit_code == 1
+
+
+def test_init_chantier_without_chantier_yaml_is_listed_without_writing(tmp_path: Path) -> None:
+    # `cadrage init -c jetable` (versions ≤ 3.122.0) : cinq gabarits, pas de chantier.yaml.
+    root = str(tmp_path)
+    assert runner.invoke(app, ["cadrage", "init", root, "-c", "jetable"]).exit_code == 0
+    directory = cadrage_dir(tmp_path, "jetable")
+    assert not (directory / "chantier.yaml").exists()
+    before = sorted(p.name for p in directory.iterdir())
+    [chantier] = list_chantiers(tmp_path)
+    assert (chantier.slug, chantier.titre, chantier.etat, chantier.default) == ("jetable", "jetable", "idee", False)
+    assert chantier.progress == "0/5" and not chantier.error
+    result = runner.invoke(app, ["cadrage", "list", root, "-o", "json"])
+    assert result.exit_code == 0 and "jetable" in result.output
+    from grimoire.tools.workspace_atelier import list_view
+
+    assert [row["slug"] for row in list_view(tmp_path)["chantiers"]] == ["jetable"]  # bibliothèque de l'Atelier
+    assert sorted(p.name for p in directory.iterdir()) == before  # la lecture n'écrit rien
+    # Un fichier de phase rempli fait passer l'état déduit à « en-discussion » ; un dossier vide ou à slug
+    # invalide n'est pas un chantier.
+    (directory / "01-brief.md").write_text("## Le problème\n\nun vrai problème, décrit.\n", encoding="utf-8")
+    assert list_chantiers(tmp_path)[0].etat == "en-discussion"
+    (cadrage_dir(tmp_path, "vide")).mkdir()
+    (tmp_path / CADRAGE_DIR / "Pas Valide").mkdir()
+    ((tmp_path / CADRAGE_DIR / "Pas Valide") / "01-brief.md").write_text("x", encoding="utf-8")
+    assert [c.slug for c in list_chantiers(tmp_path)] == ["jetable"]
+    # Une action explicite (état) écrit alors le chantier.yaml, comme pour un chantier créé par `new`.
+    assert set_state(tmp_path, "jetable", "pret-a-valider").etat == "pret-a-valider"
+    assert (directory / "chantier.yaml").is_file()
+
+
+def test_has_only_named_chantiers_sees_init_chantier(tmp_path: Path) -> None:
+    from grimoire.core.chantiers import has_only_named_chantiers
+
+    assert not has_only_named_chantiers(tmp_path)
+    scaffold(tmp_path, project_name="x", chantier="alpha")
+    assert has_only_named_chantiers(tmp_path)

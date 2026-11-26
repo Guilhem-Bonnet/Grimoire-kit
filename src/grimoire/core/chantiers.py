@@ -140,12 +140,14 @@ def read_chantier(root: Path, slug: str | None = None) -> Chantier:
     progress = _progress(root, None if default else slug)
     path = directory / CHANTIER_FILE
     if not path.is_file():
-        if not default:
+        if not default and not _has_phase_file(directory, name):
             raise GrimoireValidationError(f"chantier inconnu : {name!r}")
-        report = status(root)
+        # Défaut, ou chantier nommé créé par ``cadrage init -c`` : pas de chantier.yaml, l'état se déduit des phases.
+        report = status(root, None if default else name)
         started = any(r["state"] in ("partiel", "rempli") for r in report["phases"])
         return Chantier(
-            DEFAULT_CHANTIER, "Principal", "en-discussion" if started else "idee", progress=progress, default=True,
+            DEFAULT_CHANTIER if default else name, "Principal" if default else name,
+            "en-discussion" if started else "idee", progress=progress, default=default,
         )
     try:
         data = _read_yaml(path)
@@ -166,10 +168,30 @@ def has_only_named_chantiers(root: Path) -> bool:
     base = root / CADRAGE_DIR
     if not base.is_dir() or any((base / p.filename).is_file() for p in PHASES):
         return False
-    return any(child.is_dir() and (child / CHANTIER_FILE).is_file() for child in base.iterdir())
+    return any(_is_named_chantier(child) for child in base.iterdir())
 
 
-def _mtime(path: Path) -> float:
+def _has_phase_file(directory: Path, name: str) -> bool:
+    """Vrai si *directory*, au nom de slug valide, porte au moins un fichier de phase (``cadrage init -c``)."""
+    if name == DEFAULT_CHANTIER or not _SLUG_RE.match(name) or len(name) > MAX_SLUG:
+        return False
+    return directory.is_dir() and any((directory / p.filename).is_file() for p in PHASES)
+
+
+def _is_named_chantier(directory: Path) -> bool:
+    """Un chantier nommé existe par son ``chantier.yaml`` (``new``) ou, à défaut, par un fichier de phase
+    (``init -c``, versions publiées jusqu'à 3.122.0) : la lecture ne l'écrit pas."""
+    return directory.is_dir() and ((directory / CHANTIER_FILE).is_file() or _has_phase_file(directory, directory.name))
+
+
+def _mtime(directory: Path) -> float:
+    """La date du ``chantier.yaml`` ; sans lui, celle du fichier de phase le plus récent."""
+    if (directory / CHANTIER_FILE).is_file():
+        return _stamp(directory / CHANTIER_FILE)
+    return max((_stamp(directory / p.filename) for p in PHASES), default=0.0)
+
+
+def _stamp(path: Path) -> float:
     try:
         return path.stat().st_mtime
     except OSError:
@@ -185,8 +207,8 @@ def list_chantiers(root: Path) -> list[Chantier]:
         out.append(read_chantier(root))
     if not base.is_dir():
         return out
-    named = [c for c in base.iterdir() if c.is_dir() and (c / CHANTIER_FILE).is_file()]
-    named.sort(key=lambda c: (-_mtime(c / CHANTIER_FILE), c.name))
+    named = [c for c in base.iterdir() if _is_named_chantier(c)]
+    named.sort(key=lambda c: (-_mtime(c), c.name))
     out.extend(read_chantier(root, c.name) for c in named)
     return out
 
