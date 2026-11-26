@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.116.0",
+ "generated_for": "3.117.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -309,6 +309,10 @@
   "1513069c4cfb4442b99cb5743d775589ad4255cae96a9424279669642c1ba42f": {
    "version": "3.24.0",
    "path": "archetypes/infra-ops/agents/monitoring-specialist.md"
+  },
+  "1532c4b30180112ef8b3a428e6aa8345e5105f62dec43245795dfb3d28558607": {
+   "version": "3.115.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
   },
   "15990368804f5dc21f1bf10fc721e143c9741c65db501011be96b04f9eda2f18": {
    "version": "3.4.2",
@@ -3341,6 +3345,10 @@
   "c5b01b66ac8ba050179e67ea04584c4ab885c77ebc16578e119bb14d9cd77a02": {
    "version": "3.10.2",
    "path": "framework/memory/mem0-bridge.py"
+  },
+  "c5b5c85298214ccde0902179d1988c5a88d167623f356af16f2a0bc83264064f": {
+   "version": "3.115.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
   },
   "c5ebf6a14079a1e68dc8c075dd724f579031e554139119c82c8230c0db7556f9": {
    "version": "3.4.2",
