@@ -149,7 +149,9 @@ def test_a_failure_costs_only_the_warm(project: Path, monkeypatch: pytest.Monkey
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="nice par fil : Linux")
-def test_warm_thread_runs_at_lower_priority(project: Path, no_sheet: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_warm_thread_runs_at_lower_priority(
+    project: Path, no_sheet: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     niceness: list[int] = []
     real = os.setpriority
 
@@ -189,10 +191,13 @@ class _FakeServer:
         self._log.append("close")
 
 
-def _patch_serve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raises: BaseException, log: list[str]) -> list[Path | None]:
+def _patch_serve(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raises: BaseException, log: list[str]
+) -> list[Path | None]:
     from grimoire.cli import cmd_cockpit
 
     started: list[Path | None] = []
+
     class _LoggedEvent(threading.Event):
         def set(self) -> None:
             log.append("warm-stop")
@@ -207,7 +212,7 @@ def _patch_serve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raises: BaseEx
     monkeypatch.setattr(cmd_cockpit, "_select_cwd_project", lambda root=None: None)
     monkeypatch.setattr(cmd_cockpit, "_serve_dir", lambda: tmp_path)
     monkeypatch.setattr(cmd_cockpit, "_sync_site", lambda serve_dir: None)
-    monkeypatch.setattr(cmd_cockpit, "load_registry", lambda: [])
+    monkeypatch.setattr(cmd_cockpit, "load_registry", list)
     monkeypatch.setattr(cmd_cockpit, "_unregistered_cwd_notice", lambda projects: None)
     monkeypatch.setattr(cmd_cockpit, "new_session_token", lambda: None)
     monkeypatch.setattr(cmd_cockpit, "ThreadingHTTPServer", lambda addr, handler: _FakeServer(raises, log))
