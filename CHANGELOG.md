@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.124.0] - 2026-11-26
+
+- fix(cockpit): le chat de l'orchestrateur et l'assistant de l'Atelier ne démarrent plus sur un hôte mort : l'hôte par défaut est le premier dont l'agent ACP répond réellement à `initialize` (verdict gardé, aucun coût de modèle), un hôte détecté par ses seuls fichiers ou dont l'exécutable ne parle pas ACP n'est jamais choisi, les hôtes inutilisables sont grisés avec leur raison et leur commande d'installation, « aucun hôte utilisable » est dit en clair (saisie, envoi et « Démarrer le cadrage » fermés), et un démarrage qui échoue affiche la cause et le geste de réparation dans le fil (#1446)
+
 ## [3.123.0] - 2026-11-26
 
 - fix(cadrage): un chantier créé par `grimoire cadrage init -c <slug>` apparaît désormais dans `grimoire cadrage list` et dans la bibliothèque de l'Atelier : un dossier de chantier compte dès qu'il porte un fichier de phase, sans `chantier.yaml` (état déduit des phases, comme pour le chantier principal). Les dossiers déjà créés par les versions publiées deviennent visibles sans geste ni écriture à la lecture ; `chantier.yaml` n'est écrit qu'à la première action explicite (état, mission) (#1444)
