@@ -13,6 +13,8 @@ nom neutre : aucune valeur d'apparence réelle n'est écrite d'un bloc dans le d
 
 from __future__ import annotations
 
+import string
+
 import pytest
 
 from grimoire.memory.validation import redact_secrets, redaction_audit
@@ -60,6 +62,9 @@ _VALUES: dict[str, tuple[str, str, str]] = {
 _NEIGHBOURS = ("", "a", "Z", "é", "É", "7", "_", ".", "(", ":", "\n", " ")
 
 
+_SHORT_PREFIX = frozenset({"anthropic-key", "openai-key-legacy", "openai-key-project"})
+
+
 @pytest.mark.parametrize("family", sorted(_VALUES))
 @pytest.mark.parametrize("before", _NEIGHBOURS, ids=repr)
 @pytest.mark.parametrize("after", _NEIGHBOURS, ids=repr)
@@ -67,6 +72,17 @@ def test_value_is_redacted_whatever_touches_it(family: str, before: str, after: 
     label, value, fragment = _VALUES[family]
     text = f"{before}{value}{after}"
     redacted, hits = redact_secrets(text)
+    if family in _SHORT_PREFIX and before.isalpha():
+        # Choix assumé : `sk-` derrière une lettre est la fin d'un mot (« task-… »). Couper le mot en plein
+        # milieu est pire que manquer une clé collée à une lettre ; la clé collée à un chiffre, un souligné
+        # ou une ponctuation, elle, est reconnue.
+        assert redacted == text
+        return
+    if family == "aws-access-key-id" and after and after in string.ascii_uppercase + string.digits:
+        # Un identifiant AWS fait 20 caractères : suivi d'une majuscule ou d'un chiffre, ce serait autre chose,
+        # et caviarder la partie laisserait un fragment.
+        assert redacted == text
+        return
     assert fragment not in redacted
     assert label in hits
     assert label in redaction_audit(text)
@@ -76,6 +92,8 @@ def test_value_is_redacted_whatever_touches_it(family: str, before: str, after: 
 @pytest.mark.parametrize("before", ("a", "é", "7", "_"), ids=repr)
 def test_value_inside_a_sentence_keeps_the_rest(family: str, before: str) -> None:
     _, value, fragment = _VALUES[family]
+    if family in _SHORT_PREFIX and before.isalpha():
+        return
     redacted, _ = redact_secrets(f"début {before}{value} fin")
     assert fragment not in redacted
     assert redacted.startswith("début ")
