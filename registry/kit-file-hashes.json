@@ -310,6 +310,10 @@
    "version": "3.24.0",
    "path": "archetypes/infra-ops/agents/monitoring-specialist.md"
   },
+  "1532c4b30180112ef8b3a428e6aa8345e5105f62dec43245795dfb3d28558607": {
+   "version": "3.115.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
+  },
   "15990368804f5dc21f1bf10fc721e143c9741c65db501011be96b04f9eda2f18": {
    "version": "3.4.2",
    "path": "framework/tools/grimoire-completion.zsh"
