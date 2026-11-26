@@ -22,8 +22,9 @@ and an ignored check is worse than no check.
 
 from __future__ import annotations
 
+import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -146,21 +147,61 @@ def has_kit_tier(project_root: Path) -> bool:
     return (project_root / "_grimoire" / "kit").is_dir()
 
 
-def _nested_repository_roots(project_root: Path) -> set[Path]:
-    """Directories under *project_root* that are repositories of their own.
+#: What a directory is to the nested-repository filter.
+#: A vendored clone, a submodule or a worktree checked out inside a project is
+#: not something this kit installed here: its paths answer to its own tree. A
+#: Forge carrying a clone of the kit reported 345 dead references from it —
+#: noise the user cannot act on from ``grimoire doctor``, and a check that
+#: reports what nobody can fix is a check people learn to skip.
+_CLEAN, _NESTED, _UNREACHABLE = 0, 1, 2
 
-    A vendored clone, a submodule or a worktree checked out inside a project is
-    not something this kit installed here: its paths answer to its own tree. A
-    Forge carrying a clone of the kit reported 345 dead references from it —
-    noise the user cannot act on from ``grimoire doctor``, and a check that
-    reports what nobody can fix is a check people learn to skip.
+
+def _directory_state(project_root: Path, directory: Path, memo: dict[Path, int]) -> int:
+    """Whether *directory* is, or sits under, a repository nested in *project_root*.
+
+    ``_NESTED`` : it holds a ``.git`` entry itself or under such a directory.
+    ``_UNREACHABLE`` : a symbolic link lies on the way down, so a ``.git`` below
+    is not seen (a recursive search does not cross links, and this keeps the
+    answer the same as the exhaustive search that used to run here).
+    ``_CLEAN`` : neither. The project's own ``.git`` never makes it nested.
+
+    One ``lexists`` and one ``is_symlink`` per directory, memoised by *memo*,
+    which belongs to one scan: nothing outlives the call that made it.
     """
-    nested: set[Path] = set()
-    for git_entry in project_root.rglob(".git"):
-        root = git_entry.parent
-        if root != project_root:
-            nested.add(root)
-    return nested
+    if directory == project_root:
+        return _CLEAN
+    known = memo.get(directory)
+    if known is not None:
+        return known
+    state = _directory_state(project_root, directory.parent, memo)
+    if state == _CLEAN:
+        if directory.is_symlink():
+            state = _UNREACHABLE
+        elif os.path.lexists(directory / ".git"):
+            state = _NESTED
+    memo[directory] = state
+    return state
+
+
+def _collect_tree(project_root: Path, top: Path, memo: dict[Path, int]) -> Iterator[Path]:
+    """Entries under *top* that can still matter, without entering what cannot.
+
+    Does not descend into an excluded directory (``_SKIPPED_DIRS``) nor under a
+    nested repository: no file there is ever kept, so listing it only costs.
+    Yields file names, not directories (the caller keeps regular files only).
+    """
+    state = _directory_state(project_root, top, memo)
+    if state == _NESTED:
+        return
+    detect = state == _CLEAN
+    for dirpath, dirnames, filenames in os.walk(top):
+        here = Path(dirpath)
+        if detect and here != top and (".git" in dirnames or ".git" in filenames):
+            dirnames.clear()
+            continue
+        dirnames[:] = [name for name in dirnames if name not in _SKIPPED_DIRS]
+        for name in filenames:
+            yield here / name
 
 
 def _is_managed(path: Path) -> bool:
@@ -185,16 +226,22 @@ def _readable_files(project_root: Path) -> list[Path]:
     plus the files carrying its emitters' managed marker in trees it shares
     with the project.
     """
-    nested = _nested_repository_roots(project_root)
+    # Only the delivered and shared trees are listed, once, and never below an
+    # excluded directory or a nested repository (worktrees of agents included):
+    # the cost follows what the kit delivered, not what the project holds.
+    memo: dict[Path, int] = {}
 
     delivered: set[Path] = set()
     for tree in _DELIVERED_TREES:
-        delivered.update((project_root / tree).rglob("*"))
-    delivered.update(project_root / name for name in _DELIVERED_FILES)
+        delivered.update(_collect_tree(project_root, project_root / tree, memo))
+    for name in _DELIVERED_FILES:
+        path = project_root / name
+        if _directory_state(project_root, path.parent, memo) != _NESTED:
+            delivered.add(path)
 
     shared: set[Path] = set()
     for tree in _SHARED_TREES:
-        shared.update((project_root / tree).rglob("*"))
+        shared.update(_collect_tree(project_root, project_root / tree, memo))
     shared -= delivered
 
     files: list[Path] = []
@@ -202,8 +249,6 @@ def _readable_files(project_root: Path) -> list[Path]:
         if not path.is_file() or path.suffix not in _READABLE_SUFFIXES:
             continue
         if any(part in _SKIPPED_DIRS for part in path.relative_to(project_root).parts):
-            continue
-        if any(root in path.parents for root in nested):
             continue
         if path in shared and not _is_managed(path):
             continue
@@ -238,10 +283,14 @@ def target_is_dead(project_root: Path, target: str) -> bool:
     return not (project_root / target).exists()
 
 
-def dead_path_references(project_root: Path) -> list[DeadReference]:
-    """Input paths named by delivered files that do not resolve in the project."""
+def dead_path_references(project_root: Path, files: Sequence[Path] | None = None) -> list[DeadReference]:
+    """Input paths named by delivered files that do not resolve in the project.
+
+    *files* is the list :func:`_readable_files` returned, when the caller already
+    holds it (``integrity_checks`` lists the project once for both checks).
+    """
     dead: list[DeadReference] = []
-    for path in _readable_files(project_root):
+    for path in _readable_files(project_root) if files is None else files:
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -345,15 +394,18 @@ def missing_referenced_agents(project_root: Path) -> list[str]:
     return sorted(referenced - installed_agent_tags(project_root))
 
 
-def roster_incoherences(project_root: Path) -> RosterReport:
-    """Compare every routing map in the project against the installed roster."""
+def roster_incoherences(project_root: Path, files: Sequence[Path] | None = None) -> RosterReport:
+    """Compare every routing map in the project against the installed roster.
+
+    *files* : see :func:`dead_path_references`.
+    """
     report = RosterReport()
     installed = installed_agent_tags(project_root)
     if not installed:
         return report
 
     routed: set[str] = set()
-    for path in _readable_files(project_root):
+    for path in _readable_files(project_root) if files is None else files:
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -382,7 +434,8 @@ def integrity_checks(project_root: Path) -> list[tuple[str, bool, str]]:
 
     records: list[tuple[str, bool, str]] = []
 
-    dead = dead_path_references(project_root)
+    files = _readable_files(project_root)  # une seule fois pour les deux contrôles
+    dead = dead_path_references(project_root, files)
     if dead:
         shown = ", ".join(str(ref) for ref in dead[:3])
         more = f" (+{len(dead) - 3})" if len(dead) > 3 else ""
@@ -393,7 +446,7 @@ def integrity_checks(project_root: Path) -> list[tuple[str, bool, str]]:
     else:
         records.append(("paths_resolve", True, "tous les chemins du kit cités se résolvent"))
 
-    roster = roster_incoherences(project_root)
+    roster = roster_incoherences(project_root, files)
     if roster.routed_but_absent:
         records.append((
             "roster_coherent", False,
