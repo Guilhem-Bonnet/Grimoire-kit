@@ -72,9 +72,14 @@ jamais le document. Elle est traitée comme un texte non fiable (caviardée, bor
   (`quota.consumed`, origine `atelier`, modèle, jetons d'entrée et de sortie, chantier) par le seul point d'entrée
   `missions/quota_usage.py::record_kit_call`, que le client appelle après chaque réponse facturée. Il entre ainsi dans la
   consommation du jour, les règles d'usage (`capacity.yaml`) et la fiche Capacité du cockpit. L'inscription est
-  idempotente (clé : l'identifiant de la réponse, `kit:atelier:<id>`), n'est jamais un second compte du compteur local, et
-  n'a lieu que si le projet a un ledger de missions ; un échec d'inscription ne fait pas échouer le geste (le compteur
-  local tient).
+  idempotente (clé `kit:atelier:<condensé de l'identifiant distant>.<identifiant de l'appel local>` : l'identifiant du
+  service, absent, vide ou hors motif compris, n'est jamais pris tel quel ni perdu, et deux appels distincts de même
+  identifiant s'inscrivent tous deux ; seul le rejeu du même appel local est sans effet, sous le verrou du ledger), n'est
+  jamais un second compte du compteur local, et n'a lieu que si le projet a un ledger de missions. Un échec d'inscription
+  ne fait pas échouer le geste (le compteur local tient) : il est journalisé et la réponse porte un `avertissement`.
+- Ces jetons **s'additionnent** à la consommation du jour mais ne la rendent jamais « connue » : si des sessions lancées
+  aujourd'hui n'ont pas de mesure, le statut reste « inconnu » ou « partiel » (et `quota.on_unknown` s'applique), les
+  règles d'usage restent incomplètes. Les clés `kit:` sont réservées au kit ; un doublon ne compte jamais deux fois.
 - Avant tout appel, le client lit la même source que l'admission : une règle d'usage de portée `project` ou `day`
   franchie dont l'action est `hold` ou `pause` **refuse le geste** (« règle d'usage … : geste du modèle refusé »), sans
   appel ni réservation. `warn` ne retient rien ; une règle de portée `task` ne vise pas un geste d'Atelier. Un

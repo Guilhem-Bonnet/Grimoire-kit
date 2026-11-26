@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ACTIONS",
     "HOLD_EVENT",
+    "KIT_KEY_PREFIX",
     "METRICS",
     "PAUSE_ORIGIN",
     "QUOTA_CONSUMED_EVENT",
@@ -63,6 +64,9 @@ __all__ = [
 
 #: Des tokens consommés : la seule source de la consommation (écrite par :mod:`.quota_usage`).
 QUOTA_CONSUMED_EVENT = "quota.consumed"
+#: Les clés de consommation du kit lui-même (appels de modèle, hors sessions) : réservées au kit. Elles s'ajoutent aux
+#: jetons mais ne comptent jamais comme la MESURE d'une session dans la décision connu / inconnu.
+KIT_KEY_PREFIX = "kit:"
 #: Événement de lancement -> rôle. Valeurs de ``launcher``, ``reviewer``, ``arbiter``, ``orchestrator_session``
 #: (un test l'affirme), littérales ici pour ne pas importer les modules du tick.
 SESSION_EVENTS: dict[str, str] = {
@@ -207,6 +211,7 @@ def unknown_counts_today(payload: Mapping[str, Any], stamp: datetime | None, now
 
 def _records(events: Iterable[Any], now: datetime) -> list[_Record]:
     out: list[_Record] = []
+    kit_seen: set[str] = set()
     today = now.astimezone(UTC).date().isoformat()
     for event in events:
         payload = event.payload
@@ -223,6 +228,12 @@ def _records(events: Iterable[Any], now: datetime) -> list[_Record]:
             day = event_day(payload, day)
             tokens = payload.get("tokens")
             if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
+                if key.startswith(KIT_KEY_PREFIX):
+                    if key in kit_seen:
+                        continue  # un doublon d'une clé du kit ne compte jamais deux fois
+                    kit_seen.add(key)
+                    out.append(_Record(day, task, key, "kit", tokens, _num(payload.get("cost_usd"))))
+                    continue
                 out.append(_Record(day, task, key, "consumed", tokens, _num(payload.get("cost_usd"))))
         elif event.event_type in SESSION_EVENTS:
             key = str(payload.get("session_id") or payload.get("session_sha256") or event.id)
@@ -240,11 +251,15 @@ def _measure(rule: UsageRule, records: list[_Record]) -> tuple[float, bool]:
         if r.kind in ("consumed", "unknown", "settled"):
             last[r.key] = r.kind
     unknown = {key for key, kind in last.items() if kind == "unknown"}
-    consumed = [r for r in records if r.kind == "consumed"]
+    # Une session lancée sans aucune mesure laisse la lecture incomplète ; les appels du kit s'ajoutent sans jamais la
+    # rendre « complète » (ils ne sont pas la mesure d'une session).
+    unmeasured = {r.key for r in records if r.kind == "launch"} - set(last)
+    consumed = [r for r in records if r.kind in ("consumed", "kit")]
+    complete = not unknown and not unmeasured
     if rule.metric == "tokens":
-        return float(sum(r.tokens for r in consumed)), not unknown
+        return float(sum(r.tokens for r in consumed)), complete
     costs = [r.cost for r in consumed]
-    return sum(c for c in costs if c is not None), not unknown and all(c is not None for c in costs)
+    return sum(c for c in costs if c is not None), complete and all(c is not None for c in costs)
 
 
 def evaluate(rules: Iterable[UsageRule], events: Iterable[Any], now: datetime) -> tuple[RuleStatus, ...]:

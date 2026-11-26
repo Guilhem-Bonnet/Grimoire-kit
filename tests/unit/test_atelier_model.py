@@ -345,7 +345,9 @@ def test_la_consommation_connue_entre_au_quota_du_kit_par_le_seul_point_d_entree
     events = [e for e in TaskService(project).ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT]
     assert len(events) == 1
     payload = events[0].payload
-    assert (payload["session"], payload["role"], payload["tokens"], payload["chantier"]) == ("kit:atelier:msg_01ABC", "atelier", 160, "un")
+    assert (payload["role"], payload["tokens"], payload["chantier"]) == ("atelier", 160, "un")
+    assert str(payload["session"]).startswith("kit:atelier:")  # condensé de l'identifiant distant + identifiant de l'appel local
+    assert "msg_01ABC" not in str(payload["session"])  # jamais l'identifiant distant tel quel
     assert (payload["input_tokens"], payload["output_tokens"]) == (120, 40) and payload["task_id"] == ""
     assert am.usage(project, "un")["day"] == 160  # le compteur local reste en vigueur, à côté
     assert "append_event" not in Path(am.__file__).read_text(encoding="utf-8")
@@ -360,6 +362,48 @@ def test_une_reponse_sans_identifiant_donne_un_identifiant_neuf_par_appel(projec
         asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
     events = [e for e in TaskService(project).ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT]
     assert len({e.payload["session"] for e in events}) == 2 and am.usage(project, "un")["day"] == 320
+
+
+@pytest.mark.parametrize("remote_id", ["msg/abc", "", "x" * 300, "même-identifiant", None])
+def test_un_identifiant_distant_hors_motif_ou_repete_n_efface_ni_ne_fusionne_aucun_appel(
+    project: Path, keyed: None, transport: _Transport, remote_id: str | None
+) -> None:
+    from grimoire.missions.service import TaskService
+    from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT
+
+    TaskService(project).ledger.create_mission(title="Chantier", origin="test", created_by="test")
+    transport.reply = {**answer("Une version plus claire du bloc.")} | ({} if remote_id is None else {"id": remote_id})
+    for _ in range(2):  # deux appels distincts, même identifiant distant : deux inscriptions
+        asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
+    events = [e for e in TaskService(project).ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT]
+    assert len({e.payload["session"] for e in events}) == 2 and sum(e.payload["tokens"] for e in events) == 320
+
+
+def test_la_meme_reponse_rejouee_pour_le_meme_appel_local_n_inscrit_qu_une_fois(project: Path) -> None:
+    from grimoire.missions.service import TaskService
+    from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT
+
+    TaskService(project).ledger.create_mission(title="Chantier", origin="test", created_by="test")
+    raw = json.dumps({**answer("x"), "id": "msg_9"}).encode("utf-8")
+    assert am._record_billed(project, "un", "claude-haiku-5-5", raw, "appel-local-1") == ""
+    assert am._record_billed(project, "un", "claude-haiku-5-5", raw, "appel-local-1") == ""
+    assert am._record_billed(project, "un", "claude-haiku-5-5", raw, "appel-local-2") == ""
+    events = [e for e in TaskService(project).ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT]
+    assert len(events) == 2
+
+
+def test_une_inscription_echouee_se_dit_sans_faire_echouer_le_geste(
+    project: Path, keyed: None, transport: _Transport, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from grimoire.missions import quota_usage
+    from grimoire.missions.service import TaskService
+
+    TaskService(project).ledger.create_mission(title="Chantier", origin="test", created_by="test")
+    monkeypatch.setattr(quota_usage, "record_kit_call", lambda *_a, **_k: "error")
+    with caplog.at_level(logging.WARNING):
+        done = asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
+    assert done["ok"] is True and "non inscrite au quota du kit" in done["avertissement"]
+    assert any("non inscrite" in r.message for r in caplog.records) and am.usage(project, "un")["day"] == 160
 
 
 def test_une_regle_d_usage_qui_retient_refuse_le_geste_avant_tout_appel(project: Path, keyed: None, transport: _Transport) -> None:

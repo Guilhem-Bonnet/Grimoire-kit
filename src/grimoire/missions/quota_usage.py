@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.fsio import atomic_write
 from grimoire.core.regular_file import open_regular
 from grimoire.missions.lease import parse_instant
-from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT, SESSION_EVENTS
+from grimoire.missions.usage_rules import KIT_KEY_PREFIX, QUOTA_CONSUMED_EVENT, SESSION_EVENTS
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import QueuePlan
@@ -139,6 +139,8 @@ def _sessions(events: list[Any]) -> dict[str, _Session]:
         payload = event.payload
         session_id = str(payload.get("session_id") or "")
         key = session_id or str(payload.get("session_sha256") or "")
+        if key.startswith(KIT_KEY_PREFIX):  # les clés « kit: » sont réservées au kit : jamais celle d'une session
+            key = ""
         no_id = not key
         key = key or f"event:{event.id}"  # un lancement sans identité n'est pas compté zéro en silence
         if key in found:
@@ -463,9 +465,10 @@ def _record(service: TaskService, session: _Session, measure: dict[str, Any], mi
 
 #: Les origines que le kit peut inscrire : une liste fermée, choisie ici (jamais une valeur venue d'un appelant externe).
 KIT_ORIGINS = ("atelier",)
-_KIT_CALL_ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+_KIT_CALL_ID = re.compile(r"(?!.*\.\.)[A-Za-z0-9._:-]{1,128}")
 _KIT_SLUG = re.compile(r"[A-Za-z0-9._-]{1,64}")
-_KIT_MODEL = re.compile(r"[A-Za-z0-9._:\[\]/@-]{1,64}")
+#: Lettres, chiffres, ``-``, ``_``, ``.`` isolé, ``:`` ; ni ``/`` ni suite ``..`` ; 64 caractères au plus.
+_KIT_MODEL = re.compile(r"(?!.*\.\.)[A-Za-z0-9._:-]{1,64}")
 #: Au-delà, un total de jetons déclaré pour un seul appel n'est pas plausible : refusé, jamais borné en silence.
 MAX_KIT_TOKENS = 10_000_000
 
@@ -476,16 +479,21 @@ def _kit_count(value: object) -> int | None:
 
 def record_kit_call(
     root: Path, *, origin: str, call_id: str, model: str, input_tokens: int, output_tokens: int, chantier: str = "",
-) -> bool:
+) -> str:
     """Inscrit la consommation CONNUE d'un appel de modèle que le kit a lui-même facturé (``quota.consumed``).
 
     Appelée par le code du kit après une réponse facturée, jamais par un outil MCP ni une commande : ``origin`` est
     l'une de :data:`KIT_ORIGINS`, les jetons sont ceux que la réponse déclare. Idempotente : la clé est
-    ``kit:<origine>:<call_id>`` (l'identifiant de la réponse), rejouer le même appel n'écrit rien. Une valeur hors
-    forme, un ledger absent ou illisible : ``False``, rien n'est écrit. Rend ``True`` si un événement a été écrit.
-    La consommation entre dans la fiche Capacité et les règles d'usage ; ce n'est pas un second compte : le compteur local
-    du client (plafond par jour et par chantier) reste distinct et reste en vigueur.
+    ``kit:<origine>:<call_id>``, rejouer le même appel (même ``call_id``) n'écrit rien ; le contrôle d'existence et
+    l'écriture se font sous le verrou du ledger, et la lecture ne compte une clé du kit qu'une fois. Le
+    ``call_id`` est celui de l'APPEL local (jamais le seul identifiant d'une réponse distante).
+
+    Rend l'issue : ``recorded``, ``duplicate`` (déjà inscrit), ``refused`` (valeur hors forme), ``no_ledger`` (projet
+    sans ledger de missions) ou ``error`` (l'écriture a échoué : l'appelant le dit). Rien d'autre n'est écrit.
+    La consommation entre dans la fiche Capacité et les règles d'usage sans jamais rendre « connue » une journée dont
+    des sessions sont sans mesure ; le compteur local du client reste distinct et en vigueur.
     """
+    from grimoire.missions.ledger_files import ledger_file_lock
     from grimoire.missions.service import TaskService
 
     tokens_in, tokens_out = _kit_count(input_tokens), _kit_count(output_tokens)
@@ -494,31 +502,35 @@ def record_kit_call(
         or not isinstance(call_id, str) or not _KIT_CALL_ID.fullmatch(call_id)
         or not isinstance(model, str) or not _KIT_MODEL.fullmatch(model)
     ):
-        return False
+        return "refused"
     slug = chantier if isinstance(chantier, str) and _KIT_SLUG.fullmatch(chantier) else ""
     try:
         service = TaskService(root)
         if not service.has_ledger:
-            return False
-        key = f"kit:{origin}:{call_id}"
-        if any(e.event_type == QUOTA_CONSUMED_EVENT and e.payload.get("session") == key for e in service.ledger.list_events()):
-            return False
+            return "no_ledger"
+        key = f"{KIT_KEY_PREFIX}{origin}:{call_id}"
         from grimoire.providers.registry import read_model_pricing
         from grimoire.traces.transcript_usage import UsageCall, call_cost_usd
 
         cost = call_cost_usd(
             UsageCall(call_id, model, tokens_in, tokens_out, 0, 0, 0, 0, "", "", ""), read_model_pricing(root).get(model)
         )
-        service.ledger.append_event(
-            QUOTA_CONSUMED_EVENT, f"kit-{origin}", "task", _ACTOR,
-            {"session": key, "role": origin, "task_id": "", "chantier": slug, "model": model, "status": "lower_bound",
-             "tokens": tokens_in + tokens_out, "session_total_tokens": tokens_in + tokens_out,
-             "input_tokens": tokens_in, "output_tokens": tokens_out, "calls": 1, "cost_usd": cost,
-             "session_cost_usd": cost, "cost_status": "exact" if cost is not None else "unknown"},
-        )
-    except Exception:  # inscrire ne doit jamais faire échouer le geste déjà facturé ; le compteur local reste
-        return False
-    return True
+        ledger = service.ledger
+        payload = {
+            "session": key, "role": origin, "task_id": "", "chantier": slug, "model": model, "status": "lower_bound",
+            "tokens": tokens_in + tokens_out, "session_total_tokens": tokens_in + tokens_out,
+            "input_tokens": tokens_in, "output_tokens": tokens_out, "calls": 1, "cost_usd": cost,
+            "session_cost_usd": cost, "cost_status": "exact" if cost is not None else "unknown",
+        }
+        with ledger_file_lock(ledger._events_path):  # le contrôle et l'écriture sous le même verrou que `append_event`
+            ledger._invalidate()
+            ledger._load()
+            if any(e.event_type == QUOTA_CONSUMED_EVENT and e.payload.get("session") == key for e in ledger.list_events()):
+                return "duplicate"
+            ledger._append_event(QUOTA_CONSUMED_EVENT, f"kit-{origin}", "task", _ACTOR, payload, lock_held=True)
+    except Exception:  # inscrire ne doit jamais faire échouer le geste déjà facturé : l'appelant le dit (``error``)
+        return "error"
+    return "recorded"
 
 
 def kit_call_refusal(root: Path, *, now: datetime | None = None) -> str:
