@@ -212,6 +212,96 @@ Ici le projet n'a pas de mémoire configurée : la dernière ligne le dit, les
 deux autres sources répondent. Une exigence tracée jusqu'au code ajoute une
 ligne `code : tâches … ; fichiers …`.
 
+## Sortir le cadrage du projet : `grimoire cadrage export`
+
+`grimoire cadrage export [--chantier <nom>] --out <dossier> [--json]` écrit un
+chantier en **lot portable**, lisible sans Grimoire : des fichiers Markdown à
+en-tête YAML (`name`, `description`, `type`), reliés par des liens relatifs et un
+`index.md`, dans la forme de l'Open Knowledge Format v0.1. C'est un format
+d'**échange** : le lot se montre, se transmet, se vérifie ; il ne se réimporte pas
+et ne remplace ni le cadrage ni la mémoire.
+
+- `index.md` : titre, état du chantier, date, version du kit, sommaire lié ;
+- `phases/<phase>.md` : les cinq phases (corps tel quel, en-tête remplacé) ;
+- `requirements/REQ-nnn.md` : une fiche par exigence : priorité, état, validation
+  MOA (qui, quand), « modifiée depuis la validation » le cas échéant, critères,
+  tâches liées, fichiers touchés, recette, liens vers les phases et les fiches citées ;
+- `decisions.md` : pistes écartées et questions ouvertes du brainstorm, suggestions
+  acceptées et refusées avec leur motif (si le magasin existe) ;
+- `manifest.json` (`grimoire-cadrage-export/v1`) : l'empreinte SHA-256 de chaque
+  fichier et l'empreinte globale du lot.
+
+`grimoire cadrage export --verify <dossier>` relit le manifeste et rend le code 1
+si un fichier est altéré, manquant, ou ajouté après coup. Lecture seule sur le
+projet : rien n'est écrit au ledger, au journal d'autorité ni au cadrage. Le lot
+est caviardé des secrets, sans chemin absolu ni nom d'utilisateur de la machine,
+et ses noms de fichiers viennent d'identifiants (`REQ-001`), jamais d'un titre.
+Le dossier de sortie doit être neuf ou vide (`--force` n'écrase que les fichiers du
+lot et ne supprime rien) ; deux exports du même état donnent le même lot, hors la
+date (`--date AAAA-MM-JJ` la fixe).
+
+```text
+$ grimoire cadrage export --out lot --date 2026-11-25
+lot exporté — 10 fichier(s) et le manifeste dans lot, empreinte ef757eeb…f757
+$ grimoire cadrage export --verify lot
+lot intact — 10 fichier(s) vérifiés, empreinte ef757eeb…f757
+$ find lot -type f | sort
+lot/decisions.md
+lot/index.md
+lot/manifest.json
+lot/phases/brainstorm.md
+lot/phases/brief.md
+lot/phases/cahier-des-charges.md
+lot/phases/comprehension.md
+lot/phases/exigences.md
+lot/requirements/REQ-001.md
+lot/requirements/REQ-002.md
+lot/requirements/REQ-003.md
+```
+
+Et `lot/requirements/REQ-002.md`, produite par cette commande sur un cadrage sans
+MOA déclarée :
+
+```markdown
+---
+name: "REQ-002"
+description: "le client exporte ses commandes en CSV, comme la connexion de REQ-001"
+type: "requirement"
+chantier: "principal"
+priorite: "should"
+etat: "proposée"
+validation_moa: "non validée"
+---
+
+# REQ-002 — le client exporte ses commandes en CSV, comme la connexion de REQ-001
+
+Phases : [exigences](../phases/exigences.md) · [cahier-des-charges](../phases/cahier-des-charges.md)
+
+## Critères d'acceptation
+
+- le fichier s'ouvre dans un tableur
+
+## Validation MOA
+
+Non validée : aucune MOA déclarée : aucune exigence ne peut être validée ni recettée.
+
+## Tâches liées
+
+_aucune tâche ne sert cette exigence_
+
+## Fichiers touchés
+
+_aucun fichier connu_
+
+## Recette
+
+Aucune recette prononcée (état : proposée (non validée)).
+
+## Fiches liées
+
+- [REQ-001](REQ-001.md)
+```
+
 ## Le gate, dans `standard verify`
 
 `cadrage check` (la commande) et le gate du standard (`grimoire standard
