@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.fsio import atomic_write
 from grimoire.core.regular_file import open_regular
 from grimoire.missions.lease import parse_instant
-from grimoire.missions.usage_rules import KIT_KEY_PREFIX, QUOTA_CONSUMED_EVENT, SESSION_EVENTS
+from grimoire.missions.usage_rules import KIT_KEY_PREFIX, QUOTA_CONSUMED_EVENT, SESSION_EVENTS, launch_session_key
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import QueuePlan
@@ -138,11 +138,7 @@ def _sessions(events: list[Any]) -> dict[str, _Session]:
             continue
         payload = event.payload
         session_id = str(payload.get("session_id") or "")
-        key = session_id or str(payload.get("session_sha256") or "")
-        if key.startswith(KIT_KEY_PREFIX):  # les clés « kit: » sont réservées au kit : jamais celle d'une session
-            key = ""
-        no_id = not key
-        key = key or f"event:{event.id}"  # un lancement sans identité n'est pas compté zéro en silence
+        key, no_id = launch_session_key(event)  # un lancement sans identité n'est pas compté zéro en silence
         if key in found:
             continue
         task = "" if role == "orchestrator" else event.entity_id
@@ -400,7 +396,7 @@ def record_consumption(
             continue
         total = int(measure["total"])
         state[key] = {"size": stamp[0], "mtime_ns": stamp[1], "read_at": moment.isoformat(), "total": max(total, mine.total)}
-        if total <= mine.total and mine.status != "unknown":
+        if total <= mine.total and mine.status == "known":  # jamais mesurée (ou inconnue) : un état connu est écrit, même à zéro
             outcomes.append(ConsumedOutcome(key[:12], session.role, session.task_id, "unchanged"))
             continue
         _record(service, session, measure, mine, total, day_start)
@@ -523,7 +519,7 @@ def record_kit_call(
             "session_cost_usd": cost, "cost_status": "exact" if cost is not None else "unknown",
         }
         with ledger_file_lock(ledger._events_path):  # le contrôle et l'écriture sous le même verrou que `append_event`
-            ledger._invalidate()
+            ledger._refresh()  # ne rejoue que si l'empreinte du journal a bougé
             ledger._load()
             if any(e.event_type == QUOTA_CONSUMED_EVENT and e.payload.get("session") == key for e in ledger.list_events()):
                 return "duplicate"

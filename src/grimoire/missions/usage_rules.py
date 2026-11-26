@@ -56,6 +56,7 @@ __all__ = [
     "describe",
     "evaluate",
     "event_day",
+    "launch_session_key",
     "lift_day_pauses",
     "next_midnight",
     "parse_rules",
@@ -198,6 +199,20 @@ def _num(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
+def launch_session_key(event: Any) -> tuple[str, bool]:
+    """``(clé, sans identité)`` d'un événement de lancement : l'identifiant de session, sinon son condensé.
+
+    Une seule construction, partagée par ``quota_usage`` (qui inscrit la mesure sous cette clé) et par la lecture des
+    règles : un lancement sans identifiant ni condensé, ou dont l'identifiant porte la clé réservée du kit, prend la
+    clé ``event:<id de l'événement>`` et se lit « sans identité ».
+    """
+    payload = event.payload
+    key = str(payload.get("session_id") or payload.get("session_sha256") or "")
+    if key.startswith(KIT_KEY_PREFIX):  # les clés « kit: » sont réservées au kit : jamais celle d'une session
+        key = ""
+    return (key or f"event:{event.id}"), not key
+
+
 def unknown_counts_today(payload: Mapping[str, Any], stamp: datetime | None, now: datetime) -> bool:
     """Un ``quota.consumed`` inconnu pèse sur *now* : écrit aujourd'hui, ou « en cours » (journal à relire ou trop gros).
 
@@ -236,7 +251,7 @@ def _records(events: Iterable[Any], now: datetime) -> list[_Record]:
                     continue
                 out.append(_Record(day, task, key, "consumed", tokens, _num(payload.get("cost_usd"))))
         elif event.event_type in SESSION_EVENTS:
-            key = str(payload.get("session_id") or payload.get("session_sha256") or event.id)
+            key = launch_session_key(event)[0]  # la clé sous laquelle ``quota_usage`` inscrit la mesure de ce lancement
             task = "" if SESSION_EVENTS[event.event_type] == "orchestrator" else str(event.entity_id)
             out.append(_Record(day, task, key, "launch", 0, None))
     return out

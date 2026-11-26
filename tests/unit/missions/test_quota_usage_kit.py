@@ -154,6 +154,17 @@ def test_a_duplicate_kit_key_in_the_ledger_never_counts_twice(projet: Path, serv
     assert _consumed_today(events, now).tokens == 160 and consumption_today(events, now)["tokens"] == 160
 
 
+def test_queue_plan_says_unknown_with_the_known_kit_tokens_not_a_plain_lower_bound(projet: Path, service: TaskService) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+
+    service.ledger.append_event("task.dispatched", "T-1", "task", "tick", {})  # un appel de session sans chiffre
+    _call(projet, "k", input_tokens=10, output_tokens=5)
+    result = CliRunner().invoke(app, ["queue", "plan", "--project-root", str(projet)], terminal_width=200)
+    assert "inconnue (au moins 15 connus)" in result.output and ">= 15" not in result.output
+
+
 # ── Idempotence sous concurrence, clés réservées ───────────────────────────────
 
 
