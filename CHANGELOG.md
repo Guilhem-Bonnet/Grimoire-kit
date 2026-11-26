@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.121.0] - 2026-11-26
+
+- feat(atelier): le modèle optionnel de l'Atelier inscrit la consommation connue de chaque réponse facturée au quota du kit (`quota.consumed`, origine `atelier`, idempotent par identifiant de réponse, par le seul point d'entrée `quota_usage.record_kit_call`), qui entre dans la consommation du jour, les règles d'usage et la fiche Capacité ; une règle d'usage `hold` ou `pause` franchie, ou un `capacity.yaml` illisible, refuse le geste modèle avant tout appel ; le plafond local par jour et par chantier reste en vigueur ; aucun outil MCP, route ni commande n'inscrit ni n'efface une consommation (#1436)
+- fix(cockpit): la Flotte ne crée plus une lane par appel pour un journal de session sans champ `effort` (les suites de même modèle fusionnent) et borne les lanes à 200, en disant combien ont été oubliées (`lanes_dropped`) ; sur un banc simulé sans effort, 150 sessions passent de 11,4 Mo à 1,5 Mo de réponse (Refs #1243) (#1435)
+
 ## [3.120.0] - 2026-11-26
 
 - feat(cockpit): Atelier de spec (en test) : « Rattacher ici » ancre un commentaire orphelin à la sélection du document ou au bloc courant (geste de l'écran, jeton de session, refusé en dictée, passage revérifié ; l'historique du fil garde l'ancienne et la nouvelle ancre, aucun outil MCP n'y touche), et la dérive d'une exigence validée se montre en diff « validé → courant » dans `grimoire cadrage trace` (JSON compris) et dans l'Atelier, la validation rangeant désormais aussi le texte validé (2 000 caractères au plus, affichage seulement : l'empreinte reste la seule référence) ; une validation antérieure reste signalée sans détail, avec une phrase qui le dit (#1430)
