@@ -57,6 +57,30 @@ class TestSuggestNeeds:
         assert "multi-agent-orchestration" in ids
         assert "hooks-skills-governance" in ids
 
+    def test_kit_written_hooks_and_skills_do_not_suggest_governance(self, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text(
+            '{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "grimoire-hook --host claude"}]}]}}',
+            encoding="utf-8",
+        )
+        (tmp_path / ".github" / "hooks").mkdir(parents=True)
+        (tmp_path / ".github" / "hooks" / "k.json").write_text('{"bash": "grimoire-hook"}', encoding="utf-8")
+        (tmp_path / ".github" / "skills" / "grimoire-evidence").mkdir(parents=True)
+        ids = [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+        assert "hooks-skills-governance" not in ids
+
+    def test_a_project_own_hook_or_skill_suggests_governance(self, tmp_path: Path) -> None:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text(
+            '{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "./lint.sh"}]}]}}', encoding="utf-8"
+        )
+        assert "hooks-skills-governance" in [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+        (tmp_path / ".claude" / "settings.json").write_text("{oops", encoding="utf-8")
+        assert "hooks-skills-governance" in [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+        (tmp_path / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        (tmp_path / ".github" / "skills" / "mine").mkdir(parents=True)
+        assert "hooks-skills-governance" in [s.need_id for s in suggest_needs(_scan(tmp_path), _CATALOG)]
+
     def test_foreign_mcp_server_suggests_tool_mediation(self, tmp_path: Path) -> None:
         (tmp_path / ".mcp.json").write_text(
             '{"mcpServers": {"grimoire": {"command": "grimoire-mcp"}, "db": {"command": "dbmcp"}}}', encoding="utf-8"

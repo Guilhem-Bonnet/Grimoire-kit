@@ -11,9 +11,9 @@
     "grimoire task answer GAO-choisir-base-001 sqlite",
     "grimoire task show GAO-choisir-base-001"
   ],
-  "kit_version": "3.104.0",
-  "recorded_at": "2026-11-23T18:52:18Z",
-  "output_sha256": "1ed9923823318aab7921b508a88d6aa335cf9ab99c86dd71ca78ca08ec9a330f",
+  "kit_version": "3.122.0",
+  "recorded_at": "2026-11-26T19:35:59Z",
+  "output_sha256": "a5fa2a83d2e651b66b7f87b597675085555cc28f15208ab9b9e92ee03ff8187d",
   "frames": [
     {
       "kind": "run",
@@ -25,31 +25,31 @@
       "kind": "run",
       "command": "grimoire task claim GAO-choisir-base-001",
       "exit_code": 0,
-      "output": "OK GAO-choisir-base-001 — Choisir base (ready → claimed) · V2 → aucun — omets le paramètre model,\ngarde celui de la session"
+      "output": "OK GAO-choisir-base-001 — Choisir base (ready → claimed) · V2 → modèle de sous-agent : aucun\nconseillé pour un sous-agent — omets le paramètre model, il garde celui de la session"
     },
     {
       "kind": "run",
       "command": "grimoire task ask GAO-choisir-base-001 \"Quelle base de données ?\" --option sqlite --option postgres",
       "exit_code": 0,
-      "output": "OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → aucun — omets le paramètre model,\ngarde celui de la session\n! question sans option recommandée. Avec `--recommended <option>` (l'une des options proposées) et\n`--why \"<raison>\"`, celui qui tranchera sait ce que tu conseilles."
+      "output": "OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → modèle de sous-agent : aucun\nconseillé pour un sous-agent — omets le paramètre model, il garde celui de la session\n! question sans option recommandée. Avec `--recommended <option>` (l'une des options proposées) et\n`--why \"<raison>\"`, celui qui tranchera sait ce que tu conseilles."
     },
     {
       "kind": "run",
       "command": "grimoire task show GAO-choisir-base-001",
       "exit_code": 0,
-      "output": "GAO-choisir-base-001 — Choisir base\n  état    : waiting (board : blocked)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n      fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier\nattendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `<commande>`\nretourne 0 »\n  usage   : none\n  données : classe non déclarée (aucun fournisseur externe)\n  porté par : cli"
+      "output": "GAO-choisir-base-001 — Choisir base\n  état    : waiting (board : blocked)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun conseillé pour un sous-agent — omets le paramètre model, il garde celui\nde la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n      fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier\nattendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `<commande>`\nretourne 0 »\n  usage   : none\n  données : classe non déclarée (aucun fournisseur externe)\n  porté par : cli"
     },
     {
       "kind": "run",
       "command": "grimoire task answer GAO-choisir-base-001 sqlite",
       "exit_code": 0,
-      "output": "Cette note sera enregistrée au nom d'un humain. Est-ce bien toi qui la donnes ? [o/N] o\nOK GAO-choisir-base-001 — Choisir base (waiting → ready) · V2 → aucun — omets le paramètre model,\ngarde celui de la session"
+      "output": "Cette note sera enregistrée au nom d'un humain. Est-ce bien toi qui la donnes ? [o/N] o\nOK GAO-choisir-base-001 — Choisir base (waiting → ready) · V2 → modèle de sous-agent : aucun\nconseillé pour un sous-agent — omets le paramètre model, il garde celui de la session"
     },
     {
       "kind": "run",
       "command": "grimoire task show GAO-choisir-base-001",
       "exit_code": 0,
-      "output": "GAO-choisir-base-001 — Choisir base\n  état    : ready (board : ready)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n      fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier\nattendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `<commande>`\nretourne 0 »\n  usage   : none\n  données : classe non déclarée (aucun fournisseur externe)\n  porté par : cli\n  consignes de l'orchestrateur :\n    - [directive, human, non lue] cli, <date> : Réponse à « Quelle base de données ? » :\nsqlite  dir-<hex>"
+      "output": "GAO-choisir-base-001 — Choisir base\n  état    : ready (board : ready)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun conseillé pour un sous-agent — omets le paramètre model, il garde celui\nde la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n      fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier\nattendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `<commande>`\nretourne 0 »\n  usage   : none\n  données : classe non déclarée (aucun fournisseur externe)\n  porté par : cli\n  consignes de l'orchestrateur :\n    - [directive, human, non lue] cli, <date> : Réponse à « Quelle base de données ? » :\nsqlite  dir-<hex>"
     }
   ]
 }

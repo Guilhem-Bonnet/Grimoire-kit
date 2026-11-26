@@ -1136,6 +1136,7 @@ def run_init(
     memory_collection: str = "",
     interactive: bool = False,
     memory_stack: str = "",
+    standard_follows: bool = False,
 ) -> None:
     """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report.
 
@@ -1442,7 +1443,7 @@ def run_init(
             no_cockpit=no_cockpit,
             memory_summary=memory_summary,
             # `grimoire up` installs the standard right after init: its panel must not call it "not started".
-            standard_follows=ctx.info_name == "up" and not (ctx.params or {}).get("no_standard", False),
+            standard_follows=standard_follows,
         )
 
     _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)

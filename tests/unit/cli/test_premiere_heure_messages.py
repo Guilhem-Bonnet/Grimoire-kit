@@ -92,6 +92,23 @@ class TestUpSaysOneThing:
         assert text.count(GITIGNORE_MARKER) == 1
 
 
+def test_a_project_created_like_the_cockpit_does_still_initialises(tmp_path: Path) -> None:
+    """Le cockpit appelle l'init avec un faux contexte (``SimpleNamespace``), pas celui de Click."""
+    from grimoire.tools.ext_manager import ExtensionError, InstallResult
+    from grimoire.tools.project_setup import execute_setup_plan
+
+    def no_extensions(_source: str) -> InstallResult:
+        raise ExtensionError("aucune extension dans ce test")
+
+    plan = execute_setup_plan(
+        tmp_path / "cockpit-proj",
+        {"name": "demo", "user": "guilhem", "archetype": "minimal", "backend": "local"},
+        install=no_extensions,
+    )
+    assert plan["run"]["ok"] is True
+    assert all(s["status"] != "failed" for s in plan["run"]["steps"])
+
+
 class TestPanelStandardFollows:
     def test_the_standard_hints_are_left_out_when_the_standard_follows(self, bare_project: Path) -> None:
         from grimoire.core.archetype_resolver import ArchetypeResolver
