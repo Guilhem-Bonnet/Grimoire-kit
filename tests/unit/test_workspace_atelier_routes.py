@@ -30,7 +30,7 @@ def _put(root: Path, slug: str, block: str, body: dict) -> tuple[int, dict]:
 
 
 def test_flag_off_by_default_and_atelier_routes_are_404(project: Path) -> None:
-    assert workspace_get(project, f"{P}features", {}) == {"atelier": False}
+    assert workspace_get(project, f"{P}features", {}) == {"atelier": False, "mascotte": False}
     for path in ("atelier/chantiers", "atelier/chantiers/x"):
         with pytest.raises(FileNotFoundError):
             workspace_get(project, P + path, {})
@@ -40,11 +40,11 @@ def test_flag_off_by_default_and_atelier_routes_are_404(project: Path) -> None:
 
 
 def test_flag_write_keeps_comments_and_round_trips(project: Path) -> None:
-    assert workspace_post(project, f"{P}features", {"atelier": True}) == {"atelier": True}
+    assert workspace_post(project, f"{P}features", {"atelier": True}) == {"atelier": True, "mascotte": False}
     text = (project / "project-context.yaml").read_text(encoding="utf-8")
     assert "# réglages du projet" in text and "# le nom" in text
     assert "cockpit:" in text and "atelier: true" in text
-    assert workspace_post(project, f"{P}features", {"atelier": False}) == {"atelier": False}
+    assert workspace_post(project, f"{P}features", {"atelier": False}) == {"atelier": False, "mascotte": False}
     with pytest.raises(ValueError):
         workspace_post(project, f"{P}features", {"atelier": "oui"})
 

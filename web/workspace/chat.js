@@ -16,6 +16,7 @@
 
 import { api, host, projectName } from './api.js';
 import { renderMarkdown } from './markdown.js';
+import { createMascotteLink } from './mascotte_lazy.js';
 import { createVoiceInput } from './voice.js';
 import { createVoiceOutbox, liveTarget, withoutSpokenTag } from './voice_outbox.js';
 
@@ -87,11 +88,15 @@ export function createChat({ readOnly = () => false } = {}) {
   const form = mk('form', { class: 'chat-form', 'aria-label': 'Message à l’orchestrateur' },
     mk('label', { for: 'chat-input', class: 'sr-only', text: 'Message à l’orchestrateur' }),
     input, mk('div', { class: 'chat-actions' }, send, stop));
+  // La mascotte vocale (en test, éteinte par défaut) : elle observe la dictée, les tours et la lecture, sans rien ouvrir.
+  const mascotte = createMascotteLink({ api, place: (node) => element.insertBefore(node, form) });
   const voice = createVoiceInput({
     api, input, slot: form.querySelector('.chat-actions'), readOnly,
     note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text),
+    onMic: { open: (session) => mascotte.micOpened(session), close: () => mascotte.micClosed() },
   });
   const voiceOut = createVoiceOutbox({
+    onPlay: (audio) => mascotte.playing(audio), onStop: () => mascotte.stopped(),
     note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text), api,
     onReply: (message) => replyToVoiceQuestion(message),
     onOption: (message, option) => answerVoiceQuestion(message, option),
@@ -126,6 +131,7 @@ export function createChat({ readOnly = () => false } = {}) {
 
   function setBusy(value) {
     busy = value;
+    mascotte.setBusy(value);
     stop.hidden = !value;
     send.disabled = value || readOnly();
     element.setAttribute('aria-busy', String(value));
@@ -580,6 +586,7 @@ export function createChat({ readOnly = () => false } = {}) {
           loadHosts();
           voice.refresh();
           voiceOut.refresh();
+          mascotte.refresh();
           connect();
         }
       }
@@ -589,6 +596,7 @@ export function createChat({ readOnly = () => false } = {}) {
     close() {
       voice.abort();
       voiceOut.abort();
+      mascotte.destroy();
       if (stream) stream.close();
       stream = null;
       opened = false;
