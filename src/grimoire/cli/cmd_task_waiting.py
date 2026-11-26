@@ -257,7 +257,8 @@ def register(task_app: typer.Typer) -> None:
         from grimoire.core.exceptions import GrimoireError
         from grimoire.missions.human_acceptance import accept_task, acceptance_roots
         from grimoire.missions.mandate import gesture_origin
-        from grimoire.missions.schemas import TaskState
+        from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
+        from grimoire.missions.tick_wake import wake_after
 
         service = ct._service(project_root, ledger_root)
         task = ct._require_task(service, task_id)
@@ -294,6 +295,8 @@ def register(task_app: typer.Typer) -> None:
             # La clôture relit la preuve et le reçu là où l'acceptation vient de les écrire : dans le
             # worktree noté, un TaskService posé là retrouve le ledger du projet par son marqueur.
             ct._transition(ctx, task_id, TaskState.CLOSED, proof_root, ledger_root, actor, lesson=lesson)
+        if origin == ORIGIN_HUMAN:  # l'acceptation a eu lieu : le tick suivant peut venir plus tôt (sans jamais la faire échouer)
+            wake_after(root, "acceptation")
 
     @task_app.command("wait")
     def task_wait(

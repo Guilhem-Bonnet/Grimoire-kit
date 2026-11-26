@@ -662,6 +662,32 @@ orchestrator:
 - **Avant de lancer** : `grimoire orchestrate tick` (le plan, sans `--apply`) affiche `Routage prévu : <id> — fort
   | habituel : <raison>` pour chaque tâche admise, et la clé `routes` en `--json`.
 
+### Réveil du tick sur événement
+
+Le minuteur (`orchestrate install-timer`, 5 min par défaut) reste le filet de sécurité et sa cadence ne change pas.
+Cinq événements demandent en plus un tick **proche** au lieu d'attendre le suivant : une réponse humaine à une question
+(CLI, cockpit, chat du cockpit), l'acceptation humaine d'une tâche, `orchestrate resume` qui lève une pause, la fin d'une
+session de worker et une fusion, ces deux derniers vus par le tick lui-même. Aucun hook n'est ajouté : le réveil est
+l'appel `request_tick(racine, motif)` de `missions/tick_wake.py`, en fin de geste.
+
+- **Ce que ça fait** : `systemctl --user start --no-block grimoire-tick-<nom>-<empreinte>.service`, l'unité déjà posée
+  par `install-timer`, jamais le tick dans le processus du geste. Le verrou du tick, la pause, le disjoncteur et la
+  politique s'appliquent donc comme pour un tick du minuteur. Un réveil demandé par un tick part en différé de 30 s
+  (par `systemd-run --user --on-active`), car l'unité est encore active pendant le tick qui le demande.
+- **Ce que ça ne fait jamais** : activer l'autonomie. Rien ne part sans rôle autonome activé dans
+  `orchestration-policy.yaml`, sans minuteur installé, sous une pause de tout le périmètre (projet ou machine), disjoncteur
+  ouvert ou sans systemd (le minuteur ou le cron fait alors le travail). Une pause qui ne vise que des tâches nommées
+  laisse le tick tourner : le réveil aussi.
+- **Bornes** : au plus un réveil par fenêtre de 20 s et par projet, 12 par heure ; un tick qui a fusionné ou récolté une
+  session ne provoque qu'un seul tick de plus (pas de chaîne dans les 6 min, sauf geste humain entre-temps) et un tick qui
+  n'a rien fait ne réveille rien. L'état tient dans `_grimoire-output/control/tick-wake.json` ; un fichier abîmé ou non
+  ordinaire est ignoré.
+- **Sans risque pour le geste** : une erreur du réveil est avalée et journalisée, la réponse ou l'acceptation aboutit.
+  Seuls les gestes d'origine humaine réveillent ; un agent ne gagne rien (le motif vient d'une liste fermée, le nom
+  d'unité est dérivé du chemin du projet, la ligne de commande n'a aucune entrée externe).
+- **Voir le dernier réveil** : `grimoire orchestrate status` (clé `last_wake` en `--json`) : date, motif, résultat.
+  Le serveur MCP n'expose ni réponse ni acceptation : il n'est pas un point de réveil.
+
 ### Hôte du worker : Claude Code ou opencode (#1281, lot L4)
 
 Le worker du tick passe par une interface d'hôte (`WorkerHost`, `missions/worker_host.py`). Elle porte ce qui dépend
