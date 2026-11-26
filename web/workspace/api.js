@@ -617,6 +617,14 @@ export const api = {
   // depuis le dépôt répond 409 (suggestion périmée, rien n'est écrit).
   atelierDecision: (slug, id, decision, motif) =>
     post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/suggestions/' + encodeURIComponent(id), { decision, motif }),
+  // Document vivant (lot 4) : l'état réel de ce qui sert chaque exigence (lecture), puis « Valider et découper » :
+  // l'aperçu (lecture), puis l'écriture confirmée (`digest` : l'empreinte de l'aperçu confirmé ; 409 si le plan a
+  // changé ou si une exigence Must n'est pas validée). Aucune route ne valide une exigence : la MOA le fait au terminal.
+  // `req` : le détail complet d'une exigence quand le chantier en compte trop pour que chaque ligne le porte.
+  atelierTrace: (slug, req) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/trace', req ? { req } : undefined),
+  atelierDecoupage: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/decoupage'),
+  atelierDecouper: (slug, digest) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/decoupage', { confirm: true, digest }),
   // Boîte à idées (I13) : garder sans trier ; « annuler » d'un écart est `undo: true`, un événement de plus.
   ideas: () => get(WS + 'ideas'),
   ideaAdd: (text) => post(WS + 'ideas/add', { text }),

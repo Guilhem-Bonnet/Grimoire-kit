@@ -78,6 +78,26 @@
 .at-sugg-why { margin: 0; color: var(--ink2); font-size: var(--t-s); }
 .at-sugg .at-form { background: var(--panel); }
 .at-pending { color: var(--acc); font-weight: 600; }
+/* Document vivant (lot 4) : une ligne d'état par exigence, détail repliable ; « Valider et découper ». */
+.at-live { margin: 0 calc(var(--sp-3) * -1) var(--sp-2); padding: 0 var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
+.at-live[hidden], .at-live-detail[hidden] { display: none; }
+.at-live-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+.at-live-toggle { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-height: var(--h-ctl); padding: 0 var(--sp-2); margin-left: calc(var(--sp-2) * -1); border: 0; border-radius: var(--r); background: none; color: var(--ink2); font-size: var(--t-s); cursor: pointer; text-align: left; }
+.at-live-toggle:hover { background: var(--hover); }
+.at-live-toggle:focus-visible, .at-live .at-btn:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.at-live-detail { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-1) 0 var(--sp-2) var(--sp-3); border-left: 2px solid var(--line); font-size: var(--t-s); }
+.at-live-detail p { margin: 0; }
+.at-live-tasks { margin: 0; padding-left: var(--sp-4); }
+.at-live-gap { color: var(--ink); font-weight: 500; }
+.at-live-do { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); padding-top: var(--sp-1); }
+.at-live-cmd { display: block; max-width: 100%; box-sizing: border-box; padding: var(--sp-2) var(--sp-3); border-radius: var(--r); background: var(--hover); font-family: var(--mono); font-size: var(--t-s); overflow-wrap: anywhere; user-select: all; }
+.at-live-bar { margin: var(--sp-1) 0; }
+.at-live-bar .at-muted { flex: 1 1 240px; min-width: 0; }
+.at-split h4 { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--t-m); font-weight: 600; }
+.at-split-crit { margin: var(--sp-1) 0 var(--sp-2); font-size: var(--t-s); }
+.at-split-crit > summary { cursor: pointer; }
+.at-split-crit ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); }
+.at-split-list { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); }
 @container canvas (max-width: 900px) {
   .at-body { padding: var(--sp-4); }
   .at-cols { display: none; }

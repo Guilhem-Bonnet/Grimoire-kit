@@ -227,7 +227,7 @@ def cadrage_plan(
     import sys
 
     from grimoire.core.chantiers import read_chantier
-    from grimoire.missions.cadrage_plan import apply_plan, build_plan
+    from grimoire.missions.cadrage_plan import apply_locked, build_plan
     from grimoire.missions.service import TaskService
 
     root = path.resolve()
@@ -251,7 +251,7 @@ def cadrage_plan(
                 f"Créer {len(plan.proposals)} tâche(s) et poser {n_questions} question(s) ?", default=True
             )
         if yes:
-            plan = apply_plan(service, plan, actor)
+            plan = _guard(lambda: apply_locked(root, service, plan, actor))
     code = plan.exit_code(check=check_only)
     if fmt == "json":
         typer.echo(json.dumps({**plan.to_dict(), "exit_code": code}, indent=2, ensure_ascii=False))
