@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from grimoire.missions.cadrage_plan import CadragePlan
+    from grimoire.missions.cadrage_trace import CadrageTrace, FileTrace
     from grimoire.missions.moa_acceptance import RequirementView
 
 console = Console()
@@ -431,6 +432,117 @@ def _print_recette(view: RequirementView) -> None:
         console.print(f"Dernier verdict : {_safe(last.get('verdict'))}"
                       + (f" — {_safe(last.get('motif'))}" if last.get("motif") else "")
                       + f" [dim]({_safe(last.get('ts', ''))})[/dim]")
+
+
+@cadrage_app.command("trace")
+def cadrage_trace(
+    requirement: str | None = typer.Argument(None, help="Une exigence : REQ-001, ou <chantier>/REQ-001 (défaut : toutes)."),
+    path: Path = _path_opt,
+    chantier: str | None = _chantier_opt,
+    file: str = typer.Option("", "--file", help="Le sens inverse : les exigences servies par ce fichier (chemin du projet)."),
+    as_json: bool = typer.Option(False, "--json", help="La trace en JSON stable (lecture seule, pour les intégrations)."),
+) -> None:
+    """Traçabilité d'une exigence : validation, tâches, commits et fichiers, preuves, recette — et ses trous.
+
+    Lecture seule : tout est dérivé du cadrage, du journal d'autorité, du ledger et de git. Signale aussi une exigence
+    modifiée depuis sa validation (la validation garde l'empreinte du texte, pas le texte)."""
+    import json
+
+    from grimoire.missions.cadrage_trace import build_trace, normalize_file
+    from grimoire.missions.requirement_gate import normalize_key, origin_root
+    from grimoire.missions.service import TaskService
+
+    root = path.resolve()
+    key = _guard(lambda: normalize_key(requirement, chantier)) if requirement else ""
+    full = _guard(lambda: build_trace(root, TaskService(origin_root(root)), chantier))
+    if key and not any(r.key == key for r in full.requirements):
+        console.print(f"[red]exigence {escape(key)} introuvable parmi les exigences planifiées du cadrage.[/red]")
+        raise typer.Exit(1)
+    scoped = full.only(key) if key else full
+    if file:
+        wanted = normalize_file(root, file)
+        by_file = scoped.for_file(wanted)
+        if as_json:
+            typer.echo(json.dumps(by_file.to_dict(), indent=2, ensure_ascii=False))
+        else:
+            _print_file_trace(by_file)
+        return
+    if as_json:
+        typer.echo(json.dumps(scoped.to_dict(), indent=2, ensure_ascii=False))
+        return
+    _print_trace(scoped)
+
+
+def _print_file_trace(found: FileTrace) -> None:
+    if not found.served:
+        console.print(
+            f"{_safe(found.path)} : aucune exigence ne sert ce fichier "
+            "[dim](aucune tâche rattachée à une exigence ne l'a touché)[/dim]"
+        )
+        return
+    console.print(f"[bold]{_safe(found.path)}[/bold] — servi par {len(found.requirements)} exigence(s) :")
+    for row in found.requirements:
+        via = ", ".join(
+            f"{t['id']}" + (f" PR #{t['pr']}" if t["pr"] else "") + f" ({len(t['commits'])} commit(s))"
+            for t in row["tasks"]
+        )
+        flag = " [yellow]modifiée depuis la validation[/yellow]" if row["drift"] else ""
+        console.print(f"  {row['requirement']} ({row['stage_label']}) « {_safe(row['title'])} » via {_safe(via)}{flag}")
+
+
+def _print_trace(trace: CadrageTrace) -> None:
+    from grimoire.missions.moa_acceptance import PROOF_SOURCE
+
+    for note in trace.notes:
+        console.print(f"[yellow]{_safe(note)}[/yellow]")
+    for req in trace.requirements:
+        console.print(
+            f"\n[bold]{req.key}[/bold] — {_safe(req.title) or 'sans formulation'} "
+            f"[{_STAGE_STYLE.get(req.stage, 'white')}]{req.stage_label}[/{_STAGE_STYLE.get(req.stage, 'white')}]"
+        )
+        if req.validated:
+            console.print(f"  validation : par la MOA {_safe(req.validated_by)} [dim]({_safe(req.validated_at)})[/dim]")
+        elif req.drift is None:
+            console.print(f"  validation : [dim]{_safe(req.reason)}[/dim]")
+        if req.drift is not None:
+            console.print(
+                f"  [yellow]modifiée depuis la validation[/yellow] — {req.drift.what}"
+                + (f" : « {_safe(req.drift.validated_title)} » → « {_safe(req.drift.current_title)} »" if req.drift.title_changed else "")
+            )
+            if req.drift.tasks:
+                console.print(f"    tâches concernées : {_safe(', '.join(req.drift.tasks))}")
+            if req.drift.files:
+                console.print(f"    fichiers concernés : {_safe(', '.join(req.drift.files))}")
+        for task in req.tasks:
+            pr = f" PR #{task.pr}" if task.pr else ""
+            console.print(
+                f"  tâche {_safe(task.id)} ({_safe(task.status)}){pr} — {len(task.commits)} commit(s), "
+                f"{len(task.files)} fichier(s)"
+            )
+            for commit in task.commits:
+                console.print(f"    {commit.sha} {_safe(commit.subject)}")
+            for name in task.files:
+                console.print(f"    {_safe(name)}" + (" [dim](test)[/dim]" if name in task.tests else ""))
+            proofs = [p for p in (f"verdict {task.verdict}" if task.verdict else "",
+                                  f"pack {task.evidence_pack}" if task.evidence_pack else "", task.merged) if p]
+            if proofs:
+                console.print(f"    preuves : {_safe('; '.join(proofs))} [dim]({_safe(PROOF_SOURCE)})[/dim]")
+            for note in task.notes:
+                console.print(f"    [dim]{_safe(note)}[/dim]")
+        if req.verdict:
+            console.print(f"  recette : {_safe(req.verdict.get('verdict'))} [dim]({_safe(req.verdict.get('ts', ''))})[/dim]")
+        for gap in req.gaps:
+            console.print(f"  [red]trou[/red] : {_safe(gap.label)} — {_safe(gap.detail)}")
+    summary = f"{len(trace.requirements)} exigence(s), {len(trace.gaps)} trou(s)"
+    if trace.drifted:
+        summary += f", modifiée(s) depuis la validation : {', '.join(trace.drifted)}"
+    console.print(f"\n{summary}")
+
+
+_STAGE_STYLE = {
+    "proposed": "dim", "validated": "cyan", "in_progress": "yellow", "delivered": "yellow", "accepted": "green",
+    "rework": "red",
+}
 
 
 # ── entretien de cadrage : sept angles, profondeur selon la demande ──────────
