@@ -639,7 +639,7 @@ orchestrator:
     worker:
       provider: deepseek
       model_by_class: true
-      sensitive_route: strong   # off (défaut) : inchangé ; toute autre valeur rend la politique invalide
+      sensitive_route: strong   # défaut `strong` sans réglage de modèle (voir plus bas), sinon `off` ; toute autre valeur rend la politique invalide
       sensitive_paths: []       # motifs ajoutés aux chemins réservés ci-dessous
 ```
 
@@ -661,6 +661,46 @@ orchestrator:
   le détail du lancement.
 - **Avant de lancer** : `grimoire orchestrate tick` (le plan, sans `--apply`) affiche `Routage prévu : <id> — fort
   | habituel : <raison>` pour chaque tâche admise, et la clé `routes` en `--json`.
+
+### Modèle du worker : défauts, trace et montée en gamme
+
+Sans réglage de modèle dans `orchestrator.roles.worker` (ni `model`, `tier`, `provider` ni `model_by_class`, hôte
+Claude Code), le palier du worker suit la classe de la tâche : V0 `cheap` (`haiku`), V1 `mid` (`sonnet`), V2 `strong`
+(`opus`). Une tâche qui cite un chemin sensible part au palier fort, `sensitive_route` valant alors `strong` par
+défaut. Un seul réglage explicite écarte ces défauts : le routage du projet reste celui qu'il a écrit. `sensitive_route`
+posé explicitement (`off` compris) prime toujours. Avant ce changement, un projet sans réglage lançait ses workers sur
+le modèle par défaut de l'hôte ; pour le retrouver, poser `model_by_class: false`.
+
+| Clé absente | Défaut | Pour le garder comme avant |
+|---|---|---|
+| `model_by_class`, `tier`, `model`, `provider` (aucune des quatre) | V0 `cheap`, V1 `mid`, V2 `strong` | `model_by_class: false` |
+| `sensitive_route` (sous la même condition) | `strong` | `sensitive_route: off` |
+
+- **Trace** : chaque lancement note, dans `task.session_launched`, un bloc `routing` : `class`, `tier`, `model`,
+  `reason` (`default_class`, `policy_class`, `policy_tier`, `policy_model`, `sensitive_path`, `router`,
+  `provider_route`, `host_default`, `host_model`) et un `detail` éventuel. `grimoire task show <id>` l'affiche
+  (`routage : haiku (palier cheap, classe V0) — défaut du kit pour cette classe`) ; `--json` le porte dans
+  `last_launch.routing`.
+- **Montée en gamme** : réservée aux projets sans réglage de modèle (ceux dont les défauts ci-dessus s'appliquent,
+  relus au moment de la reprise : un projet qui a posé `tier`, `model`, `provider` ou `model_by_class` ne monte
+  jamais). Après un refus de relecture (`NOT-READY`), le worker repart un palier au-dessus du modèle réellement
+  lancé (`haiku` → `sonnet` → `opus`), une marche par refus, plafonnée au palier fort ; un modèle que la table ne
+  connaît pas ne monte pas, et un modèle n'est jamais remplacé par un modèle de rang inférieur. `claude --resume` ne
+  reçoit pas de modèle : la montée est une session neuve sur le même worktree, avec la consigne du worker et les
+  constats du relecteur. Elle passe par les mêmes contrôles qu'un lancement (plafond `sessions_per_day`, mandat,
+  disjoncteur) et exige que l'ancienne session soit arrêtée de façon prouvée. Si une condition manque, ou si la session
+  neuve échoue (lancement refusé, aucun identifiant dans la sortie, identité non résolue, inscription refusée), la
+  conversation est reprise comme avant, sans montée et sans échec compté au disjoncteur. La session de montée est notée
+  dans `task.session_launched` (`relaunch: true`, `routing.reason: step_up`) et `task.worker_session_resumed` ;
+  `grimoire task show` l'affiche une fois, sur la ligne `routage :`.
+- **À savoir** :
+  - Sans réglage, une tâche dont un critère d'acceptation est ambigu (aucun verdict qu'un programme puisse rendre)
+    est classée V2 et part sur le modèle fort. Pour la faire descendre, reformuler le critère
+    (`grimoire task show` explique la classe) ; pour revenir au comportement d'avant pour tout le projet, poser
+    `model_by_class: false` et `sensitive_route: off`.
+  - Les règles d'usage (`usage_rules`) ne distinguent pas les modèles : une session `opus` compte comme une session
+    `haiku` dans le plafond `sessions_per_day` et dans les règles. Les défauts font partir davantage de tâches sur le
+    modèle fort sans que ces règles le voient.
 
 ### Réveil du tick sur événement
 

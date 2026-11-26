@@ -36,6 +36,7 @@ from grimoire.missions.launcher import (
     _seal_worker_for_dual_review,
     attest_session,
 )
+from grimoire.missions.model_routing import REASON_PROVIDER_ROUTE
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.worker_guard import new_opencode_home, pre_start_refusal, prepare_opencode_home
 from grimoire.missions.worker_host import OPENCODE_HOST, OpencodeWorkerHost, SessionSpec, opencode_route, worker_log
@@ -153,6 +154,7 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
             "log": str(log),
             "kit_home": str(kit_home),
             "model_source": route.source,
+            "routing": launcher.routing_trace(task, route.model, reason=REASON_PROVIDER_ROUTE),
             "lean": role.lean,
             "permission_mode": role.permission_mode,
             "cwd": str(wt.path),

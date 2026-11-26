@@ -188,7 +188,7 @@ def _launcher_models(root: Path) -> dict[str, Any]:
     worker: dict[str, str] = {}
     for by_class in (False, True):
         for tier in ("", "cheap", "mid", "strong"):
-            role = SimpleNamespace(model="", model_by_class=by_class, tier=tier)
+            role = SimpleNamespace(model="", model_by_class=by_class, tier=tier, default_routing=False)
             fake = SimpleNamespace(_policy=SimpleNamespace(worker=role), _service=service)
             for asked in (None, "cheap", "strong"):
                 key = f"by_class={by_class}|tier={tier}|asked={asked}"

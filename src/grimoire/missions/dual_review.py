@@ -157,6 +157,7 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/provider_failure.py", "src/grimoire/missions/questions.py",
     "src/grimoire/missions/verifiability.py", "src/grimoire/missions/waiting.py",
     "src/grimoire/missions/worker_provider.py", "src/grimoire/missions/sensitive_route.py",
+    "src/grimoire/missions/model_routing.py",
     "src/grimoire/missions/worker_host.py", "src/grimoire/missions/worker_lifecycle.py",
     "src/grimoire/missions/worker_guard.py", "src/grimoire/missions/gemini_host.py",
     "src/grimoire/missions/gemini_lifecycle.py",
