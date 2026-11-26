@@ -918,12 +918,24 @@ def workspace(browser: Browser, served: str) -> Iterator[Page]:
         viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark"
     )
     page = context.new_page()
+    throttle_cpu(page)
     page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     try:
         yield page
     finally:
         context.close()
+
+
+def throttle_cpu(page: Page) -> None:
+    """Ralentit le processeur du navigateur si ``GRIMOIRE_E2E_CPU_THROTTLE`` > 1 (CDP, ``Emulation.setCPUThrottlingRate``).
+
+    Reproduit un runner de CI chargé : un test qui ne tient que sur un poste rapide (attente non synchronisée, seuil
+    de temps fixe) échoue alors à coup sûr au lieu de « passer à la relance ». Sans la variable, rien ne change.
+    """
+    slow = float(os.environ.get("GRIMOIRE_E2E_CPU_THROTTLE", "1"))
+    if slow > 1:
+        page.context.new_cdp_session(page).send("Emulation.setCPUThrottlingRate", {"rate": slow})
 
 
 def open_scope_all(page: Page, hash_: str = "#flotte") -> None:

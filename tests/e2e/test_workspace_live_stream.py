@@ -24,6 +24,8 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser, Page
 
+from .conftest import throttle_cpu
+
 # Recopiés de `tests/e2e/conftest.py` plutôt qu'importés : sans `tests/__init__.py`, un
 # `from tests.e2e.conftest import …` réexécuterait le conftest sous un second nom de module.
 
@@ -108,6 +110,7 @@ def stream_url(stream_project: Path, tmp_path_factory: pytest.TempPathFactory) -
 def page(browser: Browser, stream_url: str) -> Iterator[Page]:
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     opened = context.new_page()
+    throttle_cpu(opened)
     opened.goto(f"{stream_url}/workspace/index.html", wait_until="domcontentloaded")
     opened.wait_for_selector("body[data-ready='1']", timeout=30_000)
     try:
