@@ -129,23 +129,38 @@ def _wait_idle(page: Page) -> None:
     encore (la conversation est partagée par le module) est ignoré par le champ, qui se dit occupé ;
     envoyé pendant la reprise de l'agent, il attendait un démarrage lent. On attend donc le « bonjour »
     du flux (`hello`, qui remplace « Connexion… »), puis la fin de tout tour, côté page et côté serveur.
+
+    Le prédicat est lu dans le navigateur, mais l'état du serveur est interrogé d'ici : un prédicat `async` passé à
+    `wait_for_function` rend une promesse, donc une valeur « vraie » dès le premier sondage — l'attente ne durait pas,
+    et sur un poste chargé le test écrivait avant le `hello` ou pendant le tour du test précédent (#1386). Chaque
+    sondage est une lecture ponctuelle ; l'attente reste bornée par un délai de 30 s, la durée d'un démarrage
+    réellement bloqué, jamais une durée supposée suffisante.
     """
-    page.wait_for_function(
-        """async () => {
-            const status = document.querySelector('.chat-status');
-            const chat = document.querySelector('.chat');
-            if (!status || !chat || status.textContent.startsWith('Connexion') || chat.getAttribute('aria-busy') !== 'false') return false;
-            const state = await (await fetch('/api/workspace/chat/state')).json();
-            return state.busy === false;
-        }""",
-        polling=250,
-        timeout=30_000,
-    )
+    deadline = time.monotonic() + 30
+    while True:
+        seen = page.evaluate(
+            """async () => {
+                const status = document.querySelector('.chat-status');
+                const chat = document.querySelector('.chat');
+                const page = Boolean(status && chat && !status.textContent.startsWith('Connexion')
+                    && chat.getAttribute('aria-busy') === 'false');
+                const state = await (await fetch('/api/workspace/chat/state')).json();
+                return { page, server: state.busy === false };
+            }"""
+        )
+        if seen["page"] and seen["server"]:
+            return
+        if time.monotonic() > deadline:
+            raise AssertionError(f"le chat n'est pas au repos après 30 s : {seen}")
+        time.sleep(0.25)
 
 
 def _open(browser: Browser, url: str, *, scheme: str = "dark") -> tuple[Page, object]:
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme=scheme)  # type: ignore[arg-type]
     page = context.new_page()
+    slow = float(os.environ.get("GRIMOIRE_E2E_CPU_THROTTLE", "1"))
+    if slow > 1:  # processeur du navigateur ralenti (CDP) : reproduit un runner de CI chargé
+        context.new_cdp_session(page).send("Emulation.setCPUThrottlingRate", {"rate": slow})
     page.goto(f"{url}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     _show_chat(page)
