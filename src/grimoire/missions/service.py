@@ -67,6 +67,7 @@ from grimoire.missions.schemas import (
     TaskState,
 )
 from grimoire.missions.task_worktree import home_of_worktree
+from grimoire.missions.tick_wake import wakes_after_human
 from grimoire.missions.waiting import (
     ABANDON,
     HUMAN_ANSWERED_EVENT,
@@ -937,6 +938,7 @@ class TaskService:
             )
         return self.transition(task_id, TaskState.RUNNING, actor, "reprise sur place", lease_epoch=signed)
 
+    @wakes_after_human("reponse_humaine")
     def answer(
         self, task_id: str, text: str, actor: str, *, origin: str, question_id: str = "",
         attested_by_flow: bool = False, provenance: Mapping[str, Any] | None = None,
@@ -1021,6 +1023,7 @@ class TaskService:
             abandon_reason=f"pilote automatique : {decision.justification}" if decision is not None else "",
         )
 
+    @wakes_after_human("acceptation")
     def accept(
         self, task_id: str, reason: str, actor: str, *, origin: str, provenance: Mapping[str, Any] | None = None,
         evidence_root: Path | None = None, lesson: str = "",
