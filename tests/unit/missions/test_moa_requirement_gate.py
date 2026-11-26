@@ -216,6 +216,33 @@ def test_moa_requirement_api_expected_fingerprint_refuses_changed_text_and_accep
     assert nothing_shown.value.code == "changed"
 
 
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("[Must]", "[Won't]"),  # hors périmètre pendant la confirmation
+        (
+            "  - le lien expire après 15 minutes\n",
+            "  - le lien expire après 15 minutes\n- REQ-001 [Must] : formulation concurrente\n",  # conflit
+        ),
+    ],
+)
+def test_moa_requirement_checks_are_redone_on_the_text_reread_after_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old: str, new: str
+) -> None:
+    root = _project(tmp_path)
+    seen = rg.fingerprint("REQ-001", rg.lookup(root, "REQ-001"))  # type: ignore[arg-type]
+
+    def confirm(*_: object) -> bool:
+        path = root / CADRAGE_DIR / "04-exigences.md"
+        path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(rg, "_confirm_human_turn", confirm)
+    with pytest.raises(rg.RequirementRefusedError):
+        rg.approve_requirement(root, "REQ-001", actor="ada", expected_fingerprint=seen)
+    assert AuthorityJournal().read() == []
+
+
 def test_moa_requirement_validation_sealed_with_fingerprint(tmp_path: Path) -> None:
     root = _project(tmp_path)
     entry = _approve(root)

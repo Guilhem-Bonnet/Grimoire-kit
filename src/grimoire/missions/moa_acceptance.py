@@ -584,10 +584,12 @@ def pronounce(
     _refuse_unready(view)
     rg.attest_human_turn(RECETTE_GESTURE)
     shown = view.fingerprint if expected_fingerprint is None else expected_fingerprint
+    view = requirement_view(project, key, service=service, journal=journal, proofs=False)  # relue après le « oui »
     if shown != view.fingerprint:
         raise rg.RequirementRefusedError(
             "changed", f"recette de {key} refusée : l'exigence a changé pendant la validation, relis-la."
         )
+    _refuse_unready(view)  # les contrôles d'avant la confirmation, refaits sur l'état relu
     rg.refuse_changed_requirement(project, key, shown)
     head, _, _ = key.rpartition("/")
     entry = journal.append(

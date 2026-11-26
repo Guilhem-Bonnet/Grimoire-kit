@@ -18,13 +18,16 @@ __all__ = ["AUTHORITY_DICTATION_REFUSAL", "require_human_key"]
 AUTHORITY_DICTATION_REFUSAL = "un geste d'autorité ne se dicte pas : il se confirme par un clic à l'écran"
 
 
-def require_human_key(project_root: Path, body: dict[str, Any], refusal: str) -> None:
-    """Refuse (rien d'écrit) un corps issu d'une dictée (:class:`ValueError`, 400), puis une clé de contrôle absente
-    ou invalide (:class:`PermissionError`, 403, message *refusal*)."""
+def require_human_key(
+    project_root: Path, body: dict[str, Any], refusal: str, dictation_refusal: str = AUTHORITY_DICTATION_REFUSAL
+) -> None:
+    """Refuse (rien d'écrit) un corps issu d'une dictée (:class:`ValueError`, 400, message *dictation_refusal*), puis
+    une clé de contrôle absente ou invalide (:class:`PermissionError`, 403, message *refusal*). Le refus de dictée est
+    une défense en profondeur : la clé de contrôle reste la barrière."""
     from grimoire.missions.mandate import verify_control_key
     from grimoire.voice.dictation import sent_as_dictation
 
     if sent_as_dictation(project_root, body):
-        raise ValueError(AUTHORITY_DICTATION_REFUSAL)
+        raise ValueError(dictation_refusal)
     if not verify_control_key(body.get("control_key")):
         raise PermissionError(refusal)

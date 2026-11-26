@@ -325,15 +325,13 @@ def _get(project_root: Path, query: dict[str, list[str]]) -> Any:
 
 def _gate(project_root: Path, body: dict[str, Any], what: str) -> None:
     """Les refus communs, dans l'ordre : projet confirmé, pas de dictée, clé de contrôle (403, rien d'écrit)."""
-    from grimoire.missions.mandate import verify_control_key
+    from grimoire.tools.human_gesture import require_human_key
     from grimoire.tools.project_registry import refuse_foreign_body
-    from grimoire.voice.dictation import sent_as_dictation
 
     refuse_foreign_body(project_root, body)
-    if sent_as_dictation(project_root, body):
-        raise ValueError(DICTATION_REFUSAL)
-    if not verify_control_key(body.get("control_key")):
-        raise PermissionError(f"clé de contrôle absente ou invalide : {what} est un geste d'humain")
+    require_human_key(
+        project_root, body, f"clé de contrôle absente ou invalide : {what} est un geste d'humain", DICTATION_REFUSAL
+    )
 
 
 def _journal_readable() -> bool:

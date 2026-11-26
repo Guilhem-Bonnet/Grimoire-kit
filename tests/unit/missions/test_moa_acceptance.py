@@ -276,6 +276,22 @@ def test_moa_acceptance_refused_when_text_changed_during_confirmation(
     assert refused.value.code == "changed" and _recettes() == []
 
 
+def test_moa_acceptance_checks_are_redone_after_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une tâche rouverte pendant le « oui » : les contrôles d'avant la confirmation sont refaits, rien n'est scellé."""
+    root = _project(tmp_path)
+    service, _ = _delivered(root)
+    shown = moa.requirement_view(root, "REQ-001", service=service).fingerprint
+
+    def confirm(*_: object) -> bool:
+        _task(service, title="nouvelle tâche ouverte")
+        return True
+
+    monkeypatch.setattr(rg, "_confirm_human_turn", confirm)
+    with pytest.raises(rg.RequirementRefusedError) as refused:
+        moa.pronounce(root, "REQ-001", "conforme", actor="ada", service=service, expected_fingerprint=shown)
+    assert refused.value.code == "not_delivered" and _recettes() == []
+
+
 def test_moa_acceptance_refused_when_text_changed_since_validation(tmp_path: Path) -> None:
     root = _project(tmp_path)
     _delivered(root)

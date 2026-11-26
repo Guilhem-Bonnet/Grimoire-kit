@@ -185,6 +185,9 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     # … le jeton de session et ce qui le sert, l'exige ou le pose : la garde d'écriture, les serveurs du cockpit
     "src/grimoire/tools/request_guard.py", "src/grimoire/tools/workspace_write_guard.py",
     "src/grimoire/tools/page_security.py", "src/grimoire/tools/forge_http.py", "src/grimoire/cli/cmd_cockpit.py",
+    # … les commandes de validation et de recette de la MOA, la lecture des exigences qu'elles scellent, et la sécurité
+    # de la voix (ce qui décide qu'un texte est dicté)
+    "src/grimoire/cli/cmd_cadrage.py", "src/grimoire/core/cadrage_requirements.py", "src/grimoire/voice/safety.py",
 )
 
 #: Les chemins réservés qu'une double relecture peut juger : le reste de

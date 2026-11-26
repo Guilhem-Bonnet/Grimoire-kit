@@ -387,7 +387,20 @@ def refuse_changed_requirement(
         raise RequirementRefusedError(
             "changed", f"exigence {key} refusée : l'exigence a changé pendant la validation, relis-la."
         )
+    _refuse_unvalidatable(key, fresh)  # les contrôles d'avant la confirmation, refaits sur l'exigence relue
     return fresh
+
+
+def _refuse_unvalidatable(key: str, requirement: Requirement) -> None:
+    """Les refus qui tiennent à l'exigence elle-même : conflit, sans formulation, hors périmètre."""
+    if requirement.conflicts:
+        raise RequirementRefusedError(
+            "conflict", f"exigence {key} en conflit (deux formulations dans un même fichier) : à trancher avant."
+        )
+    if not requirement.title.strip():
+        raise RequirementRefusedError("no_text", f"exigence {key} sans formulation : rien à valider.")
+    if not requirement.planned:
+        raise RequirementRefusedError("out_of_scope", f"exigence {key} hors périmètre (ou Won't) : rien à valider.")
 
 
 def approve_requirement(
@@ -426,14 +439,7 @@ def approve_requirement(
             f"exigence {key} introuvable dans le cadrage : `grimoire cadrage interview`, puis l'écrire "
             "(04-exigences.md ou 05-cahier-des-charges.md, une ligne `- REQ-001 : …`).",
         )
-    if requirement.conflicts:
-        raise RequirementRefusedError(
-            "conflict", f"exigence {key} en conflit (deux formulations dans un même fichier) : à trancher avant."
-        )
-    if not requirement.title.strip():
-        raise RequirementRefusedError("no_text", f"exigence {key} sans formulation : rien à valider.")
-    if not requirement.planned:
-        raise RequirementRefusedError("out_of_scope", f"exigence {key} hors périmètre (ou Won't) : rien à valider.")
+    _refuse_unvalidatable(key, requirement)
     attest_human_turn(APPROVE_GESTURE)
     if expected_fingerprint is not None:  # texte vu = texte scellé : relu après la confirmation
         requirement = refuse_changed_requirement(project, key, expected_fingerprint, requirement)
