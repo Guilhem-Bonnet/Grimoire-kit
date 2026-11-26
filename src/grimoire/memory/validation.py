@@ -508,11 +508,12 @@ _NOT_A_VALUE_NUMBER = re.compile(r"[+-]?\d[\d_.,]*")
 # Un appel : un nom de code (avec séparateur `_` ou `.`, ou en camelCase) suivi d'une parenthèse. Une valeur
 # alphanumérique brute collée à une parenthèse n'est pas un appel : elle reste caviardée.
 _NOT_A_VALUE_CALL = re.compile(
-    r"(?:[A-Za-z_][A-Za-z0-9]*[_.][A-Za-z0-9_.]*|[a-z]+(?:[A-Z][a-z0-9]+)+)\("
+    r"(?:[A-Za-z_][A-Za-z0-9]{0,63}[_.][A-Za-z0-9_.]{0,200}|[a-z]{1,40}(?:[A-Z][a-z0-9]{1,40}){1,10})\("
 )
 _NOT_A_VALUE_WORD = re.compile(r"(?:true|false|none|null)", re.IGNORECASE)
 _NOT_A_VALUE_IDENT = re.compile(
-    r"(?:[a-z]+[0-9]{0,4}|[A-Z]+[0-9]{0,4})(?:[_.](?:[a-z]+[0-9]{0,4}|[A-Z]+[0-9]{0,4}|[0-9]{1,4}))+"
+    r"(?:[a-z]{1,40}[0-9]{0,4}|[A-Z]{1,40}[0-9]{0,4})"
+    r"(?:[_.](?:[a-z]{1,40}[0-9]{0,4}|[A-Z]{1,40}[0-9]{0,4}|[0-9]{1,4})){1,12}"
 )
 
 
@@ -552,6 +553,9 @@ def _looks_sensitive(run: str) -> bool:
     Un appel de fonction, un identifiant de code (``a.b_c_2026``), une date ou un
     horodatage ISO, un booléen, un nombre seul. Ne sert qu'à la seconde série.
     """
+    if len(run) > 512:
+        # Aucun appel, identifiant, date ni nombre n'est aussi long ; et les motifs ci-dessous sont bornés.
+        return True
     if _NOT_A_VALUE_CALL.match(run):
         return False
     core = run.rstrip(",;)]}")

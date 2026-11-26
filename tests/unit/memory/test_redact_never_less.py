@@ -244,6 +244,26 @@ def test_shape_rules_have_no_unbounded_assertion(label: str, pattern: re.Pattern
     assert not _assertion_with_unbounded_repeat(parsed), f"{label} : lookahead/lookbehind non borné (quadratique)"
 
 
+def _has_unbounded_repeat(items: Any) -> bool:
+    maxrepeat = importlib.import_module("re._constants").MAXREPEAT
+    for op, arg in items:
+        name = str(op)
+        if name in _UNBOUNDED_REPEATS:
+            if arg[1] == maxrepeat or _has_unbounded_repeat(arg[2]):
+                return True
+        elif (name == "SUBPATTERN" and _has_unbounded_repeat(arg[-1])) or (
+            name == "BRANCH" and any(_has_unbounded_repeat(sub) for sub in arg[1])
+        ):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("name", ["_NOT_A_VALUE_CALL", "_NOT_A_VALUE_IDENT"])
+def test_not_a_value_patterns_have_only_bounded_quantifiers(name: str) -> None:
+    pattern: re.Pattern[str] = getattr(validation, name)
+    assert not _has_unbounded_repeat(importlib.import_module("re._parser").parse(pattern.pattern, pattern.flags))
+
+
 def test_the_structural_check_catches_an_unbounded_lookahead() -> None:
     parsed = importlib.import_module("re._parser").parse(r"x(?=[a-z]*\d)[a-z]{12,}", 0)
     assert _assertion_with_unbounded_repeat(parsed)
@@ -257,7 +277,10 @@ _HOSTILE = (
     ("long-values", (_NAME_PW + "=" + "a" * 14 + ",") * 3000),
     ("quoted-names", ('"' + _NAME_TK + '":') * 6000),
     ("spaces-after-name", _NAME_TK + " " * 40000),
-    ("many-names-one-run", ("x_" + _NAME_SC + "=" + "k" * 13) * 3000 + "7"),
+    # Les deux entrées que décrivait CodeQL (py/polynomial-redos) : une longue suite d'une même lettre.
+    ("many-capital-A", _NAME_PW + "=" + "A" * 40000 + "1"),
+    ("many-small-a", _NAME_PW + "=" + "a" * 40000 + "1"),
+    ("many-names-one-run",("x_" + _NAME_SC + "=" + "k" * 13) * 3000 + "7"),
 )
 
 
