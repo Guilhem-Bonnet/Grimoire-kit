@@ -15,6 +15,7 @@ le test vérifie ce que l'agent a *vu*) et réagit au texte du prompt :
 import json
 import os
 import sys
+import time
 
 LOG = sys.argv[1]
 # Le client parle UTF-8 : sous Windows les flux par défaut suivent la page de code (cp1252).
@@ -46,8 +47,13 @@ def read() -> dict | None:
 
 
 def main() -> int:
+    # ``FAKE_START_DELAY_S`` : un agent lent à démarrer, à reprendre ou à répondre (runner de CI chargé), pour que
+    # les tests prouvent qu'ils se synchronisent sur des événements et non sur une durée.
+    delay = float(os.environ.get("FAKE_START_DELAY_S", "0"))
     while (msg := read()) is not None:
         method, rid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+        if delay and method in ("initialize", "session/new", "session/load", "session/prompt"):
+            time.sleep(delay)
         if method == "initialize":
             caps = {} if os.environ.get("FAKE_NO_LOAD") else {"loadSession": True}
             send({"jsonrpc": "2.0", "id": rid, "result": {"protocolVersion": 1, "agentCapabilities": caps}})
