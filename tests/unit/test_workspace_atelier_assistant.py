@@ -384,6 +384,38 @@ def test_un_bloc_homonyme_est_accepte_s_il_existe(project: Path, fake: _Fake) ->
             asst.act(project, "un", {"geste": "challenger-explorer", "block_id": bad})
 
 
+def test_les_entrees_demesurees_sont_refusees_par_la_longueur_sans_analyse(
+    project: Path, fake: _Fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    huge = "-" * 50_000
+    # Aucune fonction d'analyse n'est atteinte : le rejet se fait sur la longueur, avant tout motif.
+    reached: list[str] = []
+    monkeypatch.setattr(asst, "_block_shaped", lambda value: reached.append(value) or False)
+    monkeypatch.setattr(wa, "_slug", lambda value: reached.append(value) or value)
+    with pytest.raises(ValueError, match="block_id"):
+        asst.act(project, "un", {"geste": "challenger-explorer", "block_id": huge})
+    with pytest.raises(FileNotFoundError):
+        asst.act(project, huge, {"geste": "demarrer"})
+    with pytest.raises(FileNotFoundError):
+        asst.entretien_view(project, huge)
+    assert asst.resolve_context(project, {"slug": huge}) is None
+    assert huge not in reached  # seul le slug légitime « un » a été analysé
+    assert fake.sent == []
+    # La réponse de l'agent n'est lue que sur sa fin, bornée ; un marqueur démesuré ne donne aucun angle.
+    assert asst.split_reply("Q ?\nangle: " + "-" * 15_000) == ("Q ?", "")
+    assert asst.split_reply("Q ?\nangle: " + huge)[1] == ""  # plus long que la fenêtre analysée : tronqué, aucun angle
+    long_reply = "x " * (asst.MAX_REPLY_CHARS * 3) + "\n\nUne question ?\nangle: criteres"
+    assert asst.split_reply(long_reply) == ("Une question ?", "criteres")
+
+
+def test_la_forme_d_un_bloc_se_valide_sans_expression_reguliere() -> None:
+    ok = "cahier-des-charges.0123456789"
+    assert asst._block_shaped(ok) and asst._block_shaped(ok + ".12")
+    for bad in ("brainstorm", "inconnue.0123456789", "brainstorm.0123456789.", "brainstorm.0123456789.12345",
+                "brainstorm.012345678g", "brainstorm.0123456789.1.2", "brainstorm.0123456789.١"):
+        assert not asst._block_shaped(bad), bad
+
+
 # ── drapeau éteint et hôtes ─────────────────────────────────────────────────
 
 

@@ -18,18 +18,30 @@ il ne valide rien. Aucune route ici ne valide, n'accepte ni ne découpe.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.cadrage import PHASES
+from grimoire.core.chantiers import MAX_SLUG
 
 __all__ = ["GESTES", "POSTURES", "act", "brief", "clean_title", "entretien_view", "question_of", "resolve_context", "split_reply"]
 
 POSTURES: tuple[str, ...] = ("explorer", "sceptique", "simplificateur")
 MAX_ANSWER_CHARS = 4000
 #: Forme des identifiants que produit `atelier_blocs.split` : `<phase>.<10 hex>`, plus `.<n>` pour un bloc homonyme.
-_BLOCK = re.compile(r"[a-z-]+\.[0-9a-f]{10}(?:\.[0-9]{1,4})?")
+#: Plus long identifiant possible : « cahier-des-charges.0123456789.9999 » (37) ; au-delà, refus immédiat.
+_BLOCK_MAX = 48
+
+
+def _block_shaped(block_id: str) -> bool:
+    """La forme d'un identifiant de bloc, sans expression régulière (longueur déjà bornée par l'appelant)."""
+    parts = block_id.split(".")
+    if len(parts) not in (2, 3) or parts[0] not in {p.id for p in PHASES}:
+        return False
+    digest = parts[1]
+    if len(digest) != 10 or any(c not in "0123456789abcdef" for c in digest):
+        return False
+    return len(parts) == 2 or (parts[2].isascii() and parts[2].isdigit() and len(parts[2]) <= 4)
 
 #: Les consignes des boutons : une liste fermée, choisie ici. La page n'envoie jamais le texte d'une consigne.
 GESTES: dict[str, str] = {
@@ -82,6 +94,15 @@ def brief(slug: str, phase: str) -> str:
     return _BRIEF.format(slug=slug, phase=phase or "-")
 
 
+def _slug(raw: str) -> str:
+    """Le slug venu du client : longueur bornée avant la validation de forme de la route (``wa._slug``)."""
+    from grimoire.tools import workspace_atelier as wa
+
+    if not isinstance(raw, str) or len(raw) > MAX_SLUG:
+        raise FileNotFoundError("chantier inconnu")
+    return wa._slug(raw)
+
+
 def resolve_context(root: Path, raw: Any) -> dict[str, str] | None:
     """``{"slug", "titre", "phase"}`` d'un contexte venu de la page, ou ``None`` (drapeau éteint, forme ou chantier inconnu).
 
@@ -92,7 +113,7 @@ def resolve_context(root: Path, raw: Any) -> dict[str, str] | None:
     if not isinstance(raw, dict) or not wa.enabled(root):
         return None
     slug, phase = raw.get("slug"), raw.get("phase")
-    if not isinstance(slug, str) or not wa._SLUG.match(slug):
+    if not isinstance(slug, str) or len(slug) > MAX_SLUG:  # borne AVANT toute analyse ; le slug est ensuite retrouvé dans la liste
         return None
     from grimoire.core.chantiers import list_chantiers
 
@@ -107,11 +128,14 @@ def resolve_context(root: Path, raw: Any) -> dict[str, str] | None:
 def _known_block(root: Path, slug: str, block_id: Any) -> str:
     from grimoire.tools import workspace_atelier as wa
 
-    if not isinstance(block_id, str) or not _BLOCK.fullmatch(block_id):
+    if not isinstance(block_id, str) or len(block_id) > _BLOCK_MAX:  # borne AVANT toute analyse
         raise ValueError("block_id requis : l'identifiant d'un bloc du document")
+    # Le bloc doit être l'un des blocs du document : l'appartenance directe tranche, sans expression régulière.
     for phase in wa.document(root, slug)["phases"]:
         if any(b["id"] == block_id and b.get("editable") for b in phase["blocks"]):
             return block_id
+    if not _block_shaped(block_id):
+        raise ValueError("block_id requis : l'identifiant d'un bloc du document")
     raise FileNotFoundError(f"bloc inconnu : {block_id!r}")
 
 
@@ -128,10 +152,9 @@ def agent_status(root: Path) -> dict[str, Any]:
 
 def act(root: Path, slug: str, body: dict[str, Any]) -> dict[str, Any]:
     """Un geste de la barre : un tour du chat, avec le contexte du chantier. Rien n'est écrit dans le document ici."""
-    from grimoire.tools import workspace_atelier as wa
     from grimoire.tools.workspace_chat import _conversation
 
-    slug = wa._slug(slug)
+    slug = _slug(slug)
     context = resolve_context(root, {"slug": slug, "phase": body.get("phase")})
     if context is None:
         raise FileNotFoundError(f"chantier inconnu : {slug!r}")
@@ -175,8 +198,11 @@ def act(root: Path, slug: str, body: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-_TAGS = re.compile(r"[*_`#>]+")
-_MARK = re.compile(r"angle:[ \t]*([a-z]+(?:-[a-z]+)*)")
+#: Une réponse d'agent n'est analysée que sur sa fin (le marqueur et la question y sont) : borne avant toute analyse.
+MAX_REPLY_CHARS = 20_000
+_MARK_PREFIX = "angle:"
+_MARK_MAX = 40  # « angle: » plus le plus long identifiant d'angle, avec de la marge
+_MD_MARKS = str.maketrans("", "", "*_`#>")
 
 
 def split_reply(reply: str) -> tuple[str, str]:
@@ -186,13 +212,17 @@ def split_reply(reply: str) -> tuple[str, str]:
     forme fermée en DERNIÈRE ligne, ``angle: <id>``, retiré de la question ; une dernière ligne ``angle:`` mal formée
     est retirée aussi et ne donne aucun angle. Le serveur valide l'angle parmi les angles ouverts (voir ``Conversation``).
     """
-    lines = reply.replace("\r", "").rstrip().split("\n")
+    from grimoire.core.cadrage_interview import ANGLES
+
+    lines = reply[-MAX_REPLY_CHARS:].replace("\r", "").rstrip().split("\n")
     angle = ""
-    if lines and lines[-1].strip().lower().startswith("angle:"):
-        found = _MARK.fullmatch(lines.pop().strip())
-        angle = found.group(1) if found else ""
+    if lines and lines[-1].strip().lower().startswith(_MARK_PREFIX):
+        last = lines.pop().strip()
+        # Pas d'expression régulière : longueur bornée, préfixe exact, puis appartenance à la liste des angles connus.
+        value = last[len(_MARK_PREFIX) :].strip(" \t") if len(last) <= _MARK_MAX and last.startswith(_MARK_PREFIX) else ""
+        angle = value if value in {a.id for a in ANGLES} else ""
     for para in reversed([p.strip() for p in "\n".join(lines).split("\n\n") if p.strip()]):
-        flat = " ".join(_TAGS.sub("", para).split())
+        flat = " ".join(para.translate(_MD_MARKS).split())
         if flat.endswith("?"):
             return (flat if len(flat) <= 500 else flat[:499] + "…"), angle
     return "", angle
@@ -216,10 +246,9 @@ def clean_title(raw: str, limit: int = 80) -> str:
 def entretien_view(root: Path, slug: str) -> dict[str, Any]:
     """L'état de l'entretien d'un chantier et les faits du chat. Lecture seule : rien n'est écrit, aucune intake lancée."""
     from grimoire.core.cadrage_interview import ANGLES, interview_states
-    from grimoire.tools import workspace_atelier as wa
     from grimoire.tools.workspace_chat import _conversation
 
-    slug = wa._slug(slug)
+    slug = _slug(slug)
     context = resolve_context(root, {"slug": slug})
     if context is None:
         raise FileNotFoundError(f"chantier inconnu : {slug!r}")
