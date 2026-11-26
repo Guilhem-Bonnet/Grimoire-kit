@@ -642,6 +642,10 @@
    "version": "3.36.0",
    "path": "framework/tools/agent-forge.py"
   },
+  "27a318abf7779f7acea08dfe37c16d949b06461bb146dd4bd4915de94c0aa2db": {
+   "version": "3.113.0",
+   "path": "framework/hosts/skills/grimoire-cadrage.md"
+  },
   "27b26377d16e98c4e0776aebc7177a394776b9ca6bd1a64cc1927edda584f224": {
    "version": "3.24.0",
    "path": "archetypes/platform-engineering/agents/backend-engineer.md"
