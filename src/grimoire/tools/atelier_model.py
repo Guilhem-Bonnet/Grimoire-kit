@@ -30,6 +30,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -185,6 +186,8 @@ def _today(now: datetime | None) -> str:
 
 def _read_usage(path: Path, day: str) -> dict[str, Any]:
     """Le compteur du jour ; ``{}`` s'il n'existe pas encore ; ``ModelError`` s'il est illisible (échec fermé)."""
+    if path.is_symlink():
+        raise ModelError("compteur de jetons en lien symbolique : appel refusé")
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -214,6 +217,11 @@ def _adjust(root: Path, slug: str, delta: int, *, cfg: Settings | None, now: dat
     from grimoire.core.fsio import atomic_write, locked
 
     path = root / USAGE_RELPATH
+    walk = root
+    for part in USAGE_RELPATH.parts:  # aucun maillon du chemin du compteur n'est un lien : rien n'est écrit hors du projet
+        walk = walk / part
+        if walk.is_symlink():
+            raise ModelError("compteur de jetons en lien symbolique : appel refusé")
     path.parent.mkdir(parents=True, exist_ok=True)
     day = _today(now)
     try:
@@ -231,6 +239,12 @@ def _adjust(root: Path, slug: str, delta: int, *, cfg: Settings | None, now: dat
         raise ModelError("compteur de jetons verrouillé : appel refusé") from exc
     except OSError as exc:
         raise ModelError("compteur de jetons inscriptible impossible : appel refusé") from exc
+
+
+def _give_back(root: Path, slug: str, reserved: int, now: datetime | None) -> None:
+    """Rend la réservation d'un appel qui n'a rien consommé ; si le compteur résiste, elle reste comptée (prudence)."""
+    with contextlib.suppress(ModelError):
+        _adjust(root, slug, -reserved, cfg=None, now=now)
 
 
 def _record_ledger(root: Path, slug: str, geste: str, model: str, tokens: int) -> None:
@@ -276,7 +290,8 @@ def default_transport(url: str, headers: dict[str, str], body: bytes, timeout: f
     if not url.startswith("https://"):  # le transport ne parle qu'HTTPS : jamais file:, ftp: ni http:
         raise ModelError("URL du service refusée : HTTPS seulement")
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")  # noqa: S310 — https vérifié ci-dessus
-    opener = urllib.request.build_opener(_NoRedirect)
+    # Aucun proxy d'environnement (HTTPS_PROXY, etc.) : la clé ne transite que vers l'hôte de l'API.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     try:
         with opener.open(request, timeout=timeout) as response:
             return int(response.status), bytes(response.read(MAX_RESPONSE_BYTES + 1))
@@ -284,24 +299,32 @@ def default_transport(url: str, headers: dict[str, str], body: bytes, timeout: f
         return int(exc.code), bytes(exc.read(MAX_RESPONSE_BYTES + 1))
 
 
+#: Marge de l'estimation : l'habillage de la requête (rôles, système) que les caractères ne comptent pas.
+_MARGIN_TOKENS = 64
+_FENCE = re.compile(r"<\s*/?\s*bloc", re.IGNORECASE)
+_MAX_BLOCK_SOURCE = 20_000  # un bloc fait une page au plus (voir `workspace_atelier.MAX_BLOCK_CHARS`)
+
+
 def _estimate(text: str, max_output: int) -> int:
-    """Estimation prudente, comptée AVANT l'appel : un jeton pour trois caractères d'entrée, plus la sortie permise."""
-    return len(text) // 3 + 1 + max_output
+    """Estimation prudente, comptée AVANT l'appel : un jeton PAR caractère d'entrée, la sortie permise et une marge."""
+    return len(text) + max_output + _MARGIN_TOKENS
 
 
 def _prompt(title: str, phase: str, kind: str, text: str) -> str:
+    """Le message envoyé. Le caviardage passe AVANT toute troncature : un secret à cheval sur la limite ne laisse rien."""
     from grimoire.memory.validation import redact_secrets
 
-    safe, _labels = redact_secrets(text[:MAX_BLOCK_CHARS])
-    safe = safe.replace("</bloc", "<\\/bloc")
-    context = f"Chantier : {title[:80]}\nPhase : {phase}\nType de bloc : {kind}\n"
-    return redact_secrets(context)[0] + f"<bloc>\n{safe}\n</bloc>"
+    safe = _FENCE.sub(lambda m: "<\\" + m.group(0)[1:], redact_secrets(text[:_MAX_BLOCK_SOURCE])[0][:MAX_BLOCK_CHARS])
+    name = " ".join(redact_secrets(title[:_MAX_BLOCK_SOURCE])[0].split())[:80]
+    return f"Chantier : {name}\nPhase : {phase}\nType de bloc : {kind}\n<bloc>\n{safe}\n</bloc>"
 
 
-def _answer(status_code: int, raw: bytes) -> tuple[str, int]:
-    """``(texte, jetons)`` d'une réponse ; ``ModelError`` pour tout ce qui n'est pas la forme attendue."""
-    if status_code != 200:
-        raise ModelError(f"le service a répondu {status_code} : appel sans effet")
+def _answer(raw: bytes, limit: int) -> tuple[str, int]:
+    """``(texte, jetons)`` d'une réponse 200 ; ``ModelError`` pour tout ce qui n'est pas la forme attendue.
+
+    Tout échec de décodage (dont une imbrication démesurée) est un refus générique : jamais le texte de l'exception.
+    ``limit`` : le plus grand usage plausible (ce qui a été réservé) ; au-delà, la réponse est tenue pour malformée.
+    """
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ModelError("réponse du modèle trop volumineuse : ignorée")
     try:
@@ -310,11 +333,14 @@ def _answer(status_code: int, raw: bytes) -> tuple[str, int]:
         text = block["text"]
         used = data["usage"]
         counts = (used["input_tokens"], used["output_tokens"])
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ModelError("réponse du modèle malformée : ignorée") from exc
-    if block.get("type") != "text" or not isinstance(text, str) or not text.strip() \
+        kind = block.get("type")
+    except Exception:  # décodage : tout échec (RecursionError comprise) devient « malformée », sans cause chaînée
+        raise ModelError("réponse du modèle malformée : ignorée") from None
+    if kind != "text" or not isinstance(text, str) or not text.strip() \
             or not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in counts):
         raise ModelError("réponse du modèle malformée : ignorée")
+    if counts[0] + counts[1] > limit:
+        raise ModelError("usage déclaré incohérent : réponse ignorée")  # plus que ce qui a été réservé
     return text, counts[0] + counts[1]
 
 
@@ -360,8 +386,11 @@ def run(
     alias, model = resolve_model(cfg, geste, choice)
     block_id = assistant._known_block(root, slug, block_id)  # le bloc est l'un des blocs du document
     found = next(b for p in wa.document(root, slug)["phases"] for b in p["blocks"] if b["id"] == block_id)
-    context = assistant.resolve_context(root, {"slug": slug})
-    title = context["titre"] if context else slug
+    from grimoire.core.chantiers import list_chantiers
+
+    # Le titre COMPLET (nettoyé, pas encore tronqué) : le caviardage passe avant la troncature, dans `_prompt`.
+    raw_title = next((c.titre for c in list_chantiers(root) if c.slug == slug), "")
+    title = assistant.clean_title(str(raw_title), _MAX_BLOCK_SOURCE) or slug
     content = _prompt(title, block_id.split(".", 1)[0], str(found.get("kind", "")), str(found["text"]))
     body = json.dumps({
         "model": model, "max_tokens": cfg.max_output, "system": spec.instruction,
@@ -372,14 +401,19 @@ def run(
     headers = {"content-type": "application/json", "x-api-key": key, "anthropic-version": API_VERSION}
     try:
         code, raw = (transport or default_transport)(API_URL, headers, body, cfg.timeout_s)
-    except TimeoutError as exc:
-        raise ModelError(f"délai dépassé ({cfg.timeout_s:g} s) : aucun nouvel essai") from exc
-    except (OSError, urllib.error.URLError) as exc:
-        reason = getattr(exc, "reason", None)
-        if isinstance(reason, TimeoutError):
-            raise ModelError(f"délai dépassé ({cfg.timeout_s:g} s) : aucun nouvel essai") from exc
-        raise ModelError("service injoignable : aucun nouvel essai") from exc
-    text, tokens = _answer(code, raw)
+    except ModelError:
+        _give_back(root, slug, reserved, now)  # refusé avant toute connexion
+        raise
+    except Exception as exc:  # tout échec du transport : un refus générique, jamais `str(exc)`
+        if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+            # Délai dépassé : la requête a pu partir et être facturée, la réservation reste comptée.
+            raise ModelError(f"délai dépassé ({cfg.timeout_s:g} s) : aucun nouvel essai") from None
+        _give_back(root, slug, reserved, now)  # la connexion a échoué : rien n'a été consommé
+        raise ModelError("service injoignable : aucun nouvel essai") from None
+    if code != 200:
+        _give_back(root, slug, reserved, now)  # une réponse d'erreur ne consomme rien
+        raise ModelError(f"le service a répondu {code} : appel sans effet")
+    text, tokens = _answer(raw, reserved)  # malformée : la requête a abouti, la réservation reste comptée
     with contextlib.suppress(ModelError):  # sinon l'estimation prudente reste comptée
         _adjust(root, slug, tokens - reserved, cfg=None, now=now)  # la consommation réelle remplace l'estimation
     _record_ledger(root, slug, geste, model, tokens)

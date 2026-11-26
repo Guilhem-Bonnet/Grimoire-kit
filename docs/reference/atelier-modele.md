@@ -30,6 +30,13 @@ La clé se lit dans la variable d'environnement `ANTHROPIC_API_KEY`, sinon dans 
 (`grimoire providers set-key anthropic`). Elle n'est jamais écrite dans un fichier du projet, jamais journalisée,
 jamais renvoyée au navigateur. Sans clé, la fonction est indisponible et la page le dit.
 
+## Qui peut déclencher un geste payant
+
+Une fois l'option allumée et la clé présente, **tout processus local qui peut lire la page du cockpit** (donc aussi un
+agent qui dispose d'un shell sur ta machine) peut déclencher un geste, donc une dépense, sans que tu cliques. Seuls le
+plafond par jour et par chantier la bornent. **Fixe un plafond bas** (`daily_tokens`, `chantier_tokens`), adapté à ce que
+tu acceptes de payer sans regarder ; laisse l'option éteinte sur un poste où tu ne fais pas confiance aux processus locaux.
+
 ## Les gestes
 
 Sur un bloc, « Challenger ce bloc » ouvre un menu. Les trois postures existantes passent par l'agent de l'hôte (marquées
@@ -37,7 +44,7 @@ Sur un bloc, « Challenger ce bloc » ouvre un menu. Les trois postures existant
 haiku ou sonnet) et quatre gestes :
 
 | Geste | Modèle par défaut | Résultat |
-|---|---|---|
+| --- | --- | --- |
 | `modele-reformuler` | haiku | suggestion (posture simplificateur) |
 | `modele-suggerer` | sonnet | suggestion (posture explorer) |
 | `modele-challenger` | sonnet | suggestion (posture sceptique) |
@@ -50,8 +57,15 @@ jamais le document. Elle est traitée comme un texte non fiable (caviardée, bor
 
 - Part au modèle : le texte du bloc visé (4000 caractères au plus) et un contexte minimal (titre, phase, type de bloc),
   après le caviardage des secrets du kit.
-- Le plafond est réservé **avant** l'appel (une estimation prudente : un jeton pour trois caractères d'entrée plus la sortie
-  permise) ; un compteur illisible refuse l'appel. La consommation réelle remplace ensuite l'estimation.
+- Le plafond est réservé **avant** l'appel (une estimation prudente : un jeton par caractère d'entrée, plus la sortie
+  permise et une marge de 64) ; un compteur illisible, verrouillé, non inscriptible ou en lien symbolique refuse l'appel.
+  La consommation réelle remplace ensuite l'estimation. La réservation est **rendue** quand le service répond autre chose
+  que 200 ou que la connexion échoue ; elle est **gardée** sur un délai dépassé (la requête a pu être facturée) et sur une
+  réponse 200 inutilisable.
+- Si l'usage déclaré par la réponse dépasse ce qui a été réservé, la réponse est ignorée avec le refus distinct
+  « usage déclaré incohérent » (la réservation reste comptée, jamais le chiffre déclaré).
+- Le transport n'utilise aucun proxy d'environnement (`HTTPS_PROXY`, etc.) et ne suit aucune redirection : la clé ne part
+  que vers `api.anthropic.com`, en HTTPS.
 - Le compteur vit dans `_grimoire-runtime-output/atelier/modele-usage.json` ; la consommation va aussi au ledger par
   l'événement `quota.consumed`, quand le projet en a un.
 
