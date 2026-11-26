@@ -9,6 +9,7 @@ Ici, le texte est exact et complet, sans récit.
 - [Commandes](cli/index.md), rangées par outil.
 - [Configuration du projet](configuration.md) et [`grimoire.yaml`](grimoire-yaml.md).
 - [API Python](api.md) et [API de l'observatoire](observatoire.md).
+- [Atelier de spec : le modèle optionnel du kit](atelier-modele.md).
 - [Surfaces hôtes](hotes.md) : ce que chaque hôte exécute.
 - [Contrôles gouvernés](../standard/controles-gouvernes.md) : la liste des contrôles du standard.
 - [Référence des flows](../nodal/reference/index.md).

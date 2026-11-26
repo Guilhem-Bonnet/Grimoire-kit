@@ -191,6 +191,7 @@ nav:
       - API Python: reference/api.md
       - API de l'observatoire: reference/observatoire.md
       - Surfaces hôtes: reference/hotes.md
+      - Atelier de spec, modèle du kit: reference/atelier-modele.md
       - Contrôles gouvernés: standard/controles-gouvernes.md
       - Flows (généré): nodal/reference/
       - Glossaire: glossaire.md

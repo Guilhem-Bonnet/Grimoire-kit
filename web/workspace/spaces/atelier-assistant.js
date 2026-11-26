@@ -11,6 +11,7 @@ import { badge, icon } from '../shell.js';
 const PHASE_NAMES = { brief: 'Brief', brainstorm: 'Brainstorm', comprehension: 'Compréhension', exigences: 'Exigences', 'cahier-des-charges': 'Cahier des charges' };
 const PHASE_ORDER = ['brief', 'brainstorm', 'comprehension', 'exigences', 'cahier-des-charges'];
 const POSTURES = [['explorer', 'Explorer'], ['sceptique', 'Sceptique'], ['simplificateur', 'Simplificateur']];
+const MODEL_GESTES = [['modele-reformuler', 'Reformuler'], ['modele-suggerer', 'Suggérer'], ['modele-challenger', 'Challenger'], ['modele-relance', 'Relancer']];
 const FAST_MS = 1000;
 const SLOW_MS = 5000;
 
@@ -101,6 +102,18 @@ export function createAssistant(ctx, slug, hooks) {
     syncMascotte();
   }).catch(() => { /* sans mascotte, la barre reste telle quelle */ });
 
+  /** Le moteur de chaque geste, dit en clair : l'agent de l'hôte (sans modèle du kit), ou le modèle optionnel du kit. */
+  const engineNote = (v) => {
+    const m = v.modele;
+    let text = 'Moteur : agent de l’hôte, sans modèle du kit.';
+    if (m && m.enabled && m.available) {
+      text = `Moteur : agent de l’hôte (sans modèle) ; modèle du kit actif sur les blocs, haiku ou sonnet au choix. Jetons du jour : ${m.budget.day} sur ${m.budget.day_cap}.`;
+    } else if (m && m.enabled) {
+      text = `Moteur : agent de l’hôte, sans modèle. Modèle du kit indisponible : ${m.reason}.`;
+    }
+    return el('p', 'at-muted at-asst-engine', text, { 'data-role': 'engine-note' });
+  };
+
   const unavailable = (v) => {
     const node = el('div', 'at-asst-body');
     node.append(
@@ -119,7 +132,7 @@ export function createAssistant(ctx, slug, hooks) {
     const busy = Boolean(v.turn.mine);
     const where = v.current ? `${v.current.title}, ${PHASE_NAMES[v.current.phase] || v.current.phase}` : '';
     const progress = v.started && v.total ? `${v.covered} angle${v.covered > 1 ? 's' : ''} sur ${v.total} couvert${v.covered > 1 ? 's' : ''}` : '';
-    main.append(head(progress));
+    main.append(head(progress), engineNote(v));
     if (!v.agent.available) { main.append(unavailable(v)); return; }
     const body = el('div', 'at-asst-body');
     main.append(body);
@@ -236,6 +249,7 @@ export function createAssistant(ctx, slug, hooks) {
     const close = () => { menu.hidden = true; open.setAttribute('aria-expanded', 'false'); };
     for (const [id, label] of POSTURES) {
       const item = el('button', 'at-btn', label, { type: 'button', 'data-posture': id });
+      item.append(el('span', 'at-ch-tag', ' · sans modèle')); // l'agent de l'hôte, pas le modèle du kit
       item.addEventListener('click', async (event) => {
         event.stopPropagation();
         close();
@@ -247,8 +261,48 @@ export function createAssistant(ctx, slug, hooks) {
       });
       menu.append(item);
     }
+    // Le modèle optionnel du kit (éteint par défaut) : un sélecteur et quatre gestes, seulement si l'option est active.
+    const modelBox = el('div', 'at-ch-model', null, { 'data-role': 'model-box' });
+    menu.append(modelBox);
+    const fillModel = () => {
+      modelBox.replaceChildren();
+      const m = view && view.modele;
+      if (!m || !m.enabled) return;
+      if (!m.available) {
+        modelBox.append(el('p', 'at-muted', `Modèle du kit indisponible : ${m.reason}.`, { 'data-role': 'model-off' }));
+        return;
+      }
+      const pick = el('select', 'at-ch-engine', null, { 'aria-label': 'Modèle du kit pour ce geste', 'data-role': 'engine' });
+      pick.append(
+        el('option', null, 'Modèle par défaut du geste', { value: '' }),
+        el('option', null, `Haiku (${m.models.haiku})`, { value: 'haiku' }),
+        el('option', null, `Sonnet (${m.models.sonnet})`, { value: 'sonnet' }),
+      );
+      modelBox.append(pick);
+      for (const [geste, label] of MODEL_GESTES) {
+        const go = el('button', 'at-btn', null, { type: 'button', 'data-geste': geste });
+        const tag = () => { go.textContent = `${label} · ${pick.value || m.defaults[geste]}`; };
+        tag();
+        pick.addEventListener('change', tag);
+        go.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          close();
+          hooks.say('Appel du modèle du kit…');
+          try {
+            const done = await ctx.api.atelierAssistant(slug, { geste, block_id: block.id, modele: pick.value, phase: hooks.focus() });
+            await hooks.reload(`Proposition de ${done.modele} déposée (${done.jetons} jetons) : à relire sous le bloc.`);
+          } catch (cause) {
+            if (!ctx.signal.aborted) hooks.say(`Modèle du kit : ${cause.message || cause}`);
+          }
+          await tick();
+        });
+        modelBox.append(go);
+      }
+      modelBox.append(el('p', 'at-muted', `Jetons du jour : ${m.budget.day} sur ${m.budget.day_cap} ; ce chantier : ${m.budget.chantier} sur ${m.budget.chantier_cap}.`));
+    };
     open.addEventListener('click', (event) => {
       event.stopPropagation(); // n'ouvre pas l'édition du bloc
+      fillModel();
       menu.hidden = !menu.hidden;
       open.setAttribute('aria-expanded', String(!menu.hidden));
     });

@@ -306,3 +306,46 @@ def test_drapeau_eteint_rien(flag_off: str) -> None:
         raise AssertionError("le geste part alors que le drapeau est éteint")
     except urllib.error.HTTPError as exc:
         assert exc.code in (403, 404)
+
+
+@pytest.fixture(scope="module")
+def model_on_without_key(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str]]:
+    """Option du modèle du kit allumée, AUCUNE clé (HOME isolé, variable vide) : aucun appel réseau n'est possible."""
+    root, slug = _init(tmp_path_factory, "asst-model", flag=True)
+    context = root / "project-context.yaml"
+    text = context.read_text(encoding="utf-8").replace("atelier: true", "atelier: true\n  atelier_model:\n    enabled: true", 1)
+    assert "atelier_model" in text
+    context.write_text(text, encoding="utf-8")
+    home = tmp_path_factory.mktemp("asst-home")
+    yield from ((url, slug) for url in _serve(root, tmp_path_factory, {
+        "HOME": str(home), "USERPROFILE": str(home), "ANTHROPIC_API_KEY": "",
+        "GRIMOIRE_CHAT_AGENT_COMMAND": f"{sys.executable} {AGENT} {home / 'log.jsonl'}"}))
+
+
+def test_modele_du_kit_indique_sans_cle_que_la_fonction_est_indisponible(
+    browser: Browser, model_on_without_key: tuple[str, str]
+) -> None:
+    url, slug = model_on_without_key
+    for page in _open(browser, url, f"#atelier?chantier={slug}"):
+        note = page.locator("[data-role='engine-note']")
+        note.wait_for(timeout=APPEAR_MS)
+        assert "sans modèle" in note.inner_text() and "aucune clé" in note.inner_text()
+        block = page.locator(".at-blk", has_text="Le bouton maintenu").first
+        block.hover()
+        block.locator("[data-act='challenge']").click()
+        assert "sans modèle" in block.locator("[data-posture='sceptique']").inner_text()
+        off = block.locator("[data-role='model-off']")
+        off.wait_for(timeout=APPEAR_MS)
+        assert "aucune clé" in off.inner_text()
+        assert block.locator("[data-geste]").count() == 0  # pas de bouton mort
+        _capture(page, "09-modele-sans-cle-1440x900")
+
+
+def test_modele_du_kit_eteint_par_defaut_aucun_selecteur(browser: Browser, with_agent: str, on_root: tuple[Path, str]) -> None:
+    _root, slug = on_root
+    for page in _open(browser, with_agent, f"#atelier?chantier={slug}"):
+        assert "sans modèle du kit" in page.locator("[data-role='engine-note']").inner_text()
+        block = page.locator(".at-blk", has_text="Le bouton maintenu").first
+        block.hover()
+        block.locator("[data-act='challenge']").click()
+        assert block.locator("[data-role='engine']").count() == 0 and block.locator("[data-role='model-off']").count() == 0
