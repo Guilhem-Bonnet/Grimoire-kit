@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ from grimoire.missions.model_routing import (
     tier_for,
 )
 from grimoire.missions.orchestrator_policy import WorkerRole, load_orchestrator_policy
+from grimoire.missions.pause import DRAIN, HOLD, write_pause
 from grimoire.missions.schemas import TaskCheck, TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.verifiability import Verifiability
@@ -183,11 +185,11 @@ def _worker_en_revue(projet: Path, host: FakeHost, service: TaskService, *, v0: 
     return tid
 
 
-def _renvoi(projet: Path, tid: str, host: object, *, escalate: bool = True) -> ExecResult:
+def _renvoi(projet: Path, tid: str, host: object, *, escalate: bool = True, now: datetime | None = None) -> ExecResult:
     launch = launched_sessions(TaskService(projet))[tid]
     TaskService(projet).ledger.transition_task(tid, TaskState.RUNNING, actor_id="reviewer")
     return resume_worker(
-        TaskService(projet), host, "claude", tid, launch, "corrige", permission_mode="acceptEdits", escalate=escalate  # type: ignore[arg-type]
+        TaskService(projet), host, "claude", tid, launch, "corrige", permission_mode="acceptEdits", escalate=escalate, now=now  # type: ignore[arg-type]
     )
 
 
@@ -349,3 +351,53 @@ def test_le_detail_de_trace_est_borne_et_sans_caractere_de_controle() -> None:
     line = describe_routing({"model": "m\x1b[2J", "reason": "r\n" * 500, "detail": "d" * 5000, "tier": "t\x00"})
     assert len(line) < 600 and all(c.isprintable() for c in line)
     assert describe_routing({"reason": "inconnue"}) == "modèle par défaut de l'hôte — inconnue"
+
+
+@pytest.mark.parametrize("mode", [DRAIN, HOLD])
+@pytest.mark.parametrize("par_tache", [False, True])
+def test_r2_une_pause_en_vigueur_interdit_la_montee(projet: Path, service: TaskService, host: FakeHost, mode: str, par_tache: bool) -> None:
+    write_policy(projet, per_day=9)
+    tid = _worker_en_revue(projet, host, service)
+    launch = launched_sessions(TaskService(projet))[tid]
+    TaskService(projet).ledger.transition_task(tid, TaskState.RUNNING, actor_id="reviewer")
+    write_pause(projet, mode=mode, tasks=[tid] if par_tache else [], actor="guilhem")  # posée après la reprise en revue
+    result = resume_worker(TaskService(projet), host, "claude", tid, launch, "corrige", permission_mode="acceptEdits", escalate=True)
+    assert result.returncode == 0
+    assert len(_bg_neuves(host)) == 1 and host.of("claude", "--bg", "--resume")  # reprise ordinaire, inchangée
+
+
+def test_r2_une_pause_d_une_autre_tache_ne_bloque_pas_la_montee(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, per_day=9)
+    tid = _worker_en_revue(projet, host, service)
+    write_pause(projet, mode=HOLD, tasks=["GAO-autre-001"], actor="guilhem")
+    _renvoi(projet, tid, host)
+    assert len(_bg_neuves(host)) == 2
+
+
+def test_r1_une_session_de_montee_sans_identifiant_mais_lancee_est_arretee(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, per_day=9)
+    tid = _worker_en_revue(projet, host, service)
+    ancienne = host.bg[-1]["id"]
+
+    def exec_(argv, cwd, env):  # type: ignore[no-untyped-def]
+        done = host(argv, cwd, env)
+        if "--bg" in argv and "--resume" not in argv:
+            return ExecResult(0, "aucun identifiant ici\n")  # la session est partie, sa sortie ne le dit pas
+        return done
+
+    assert _renvoi(projet, tid, exec_).returncode == 0
+    neuve = [b["id"] for b in host.bg if b["id"] != ancienne and b["name"] == f"grimoire-{tid}"]
+    assert len(neuve) == 1 and neuve[0] in host.stopped  # jamais une session non attestée vivante
+    assert ancienne not in host.stopped or host.of("claude", "--bg", "--resume")
+    assert _modele_courant(projet, tid) == "haiku"
+
+
+def test_r3_le_plafond_du_jour_se_lit_a_l_horloge_du_tick(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, per_day=1)
+    tid = _worker_en_revue(projet, host, service)
+    _renvoi(projet, tid, host, now=datetime.now(UTC))
+    assert len(_bg_neuves(host)) == 1  # aujourd'hui : plafond atteint
+    _to_review(projet, tid)
+    tick(projet, host)
+    _renvoi(projet, tid, host, now=datetime.now(UTC) + timedelta(days=2))
+    assert len(_bg_neuves(host)) == 2  # le jour du tick n'a aucun lancement
