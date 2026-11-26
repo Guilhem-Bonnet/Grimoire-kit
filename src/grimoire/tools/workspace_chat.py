@@ -167,6 +167,8 @@ class Conversation:
         self._turn_text: list[str] = []
         self._spoken_token: str | None = None  # jeton du message parlé du tour en cours, un par tour
         self._interview: str | None = None  # chantier dont l'entretien de cadrage est en cours pour ce tour (lot V4)
+        self._atelier: dict[str, str] | None = None  # contexte Atelier du tour en cours (chantier, phase, geste)
+        self._questions: dict[str, dict[str, str]] = {}  # chantier -> dernière question de l'assistant (en mémoire)
 
     # ── journal ──────────────────────────────────────────────────────────
 
@@ -339,8 +341,12 @@ class Conversation:
         answer_to: tuple[str, str] | None = None,
         *,
         dictation: bool = False,
+        context: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Un message de la personne. ``dictation`` : le texte vient d'une dictée vocale (lot V5).
+
+        ``context`` : le chantier ouvert dans l'Atelier (déjà validé côté serveur, voir
+        :func:`grimoire.tools.workspace_atelier_assistant.resolve_context`) ; le tour en porte le contexte de forme fixe.
 
         Une dictée ne résout jamais une permission : tant qu'une demande attend, elle est refusée (seul le
         clic à l'écran, ``decide``, la tranche). Répondant à une question, le texte part tel quel — la mention
@@ -357,6 +363,9 @@ class Conversation:
         mode, _command, reason = chat_mode(self.root)
         if mode == "kanban":
             return self._send_kanban(text, task_id, reason)
+        shown: dict[str, Any] = {"type": "user", "text": text}
+        if context:
+            shown["chantier"] = {"slug": context["slug"], "titre": context["titre"], "phase": context.get("phase", "")}
         with self._cond:
             # Le cockpit rouvert relance l'agent (reprise de session) pendant que la personne tape déjà :
             # le message attend la fin de ce démarrage au lieu d'être refusé comme « un tour en cours ».
@@ -366,13 +375,28 @@ class Conversation:
             if self._busy or self._starting:
                 raise ValueError("un tour est déjà en cours : attendez sa fin ou arrêtez-le")
             self._busy = True
+            self._atelier = dict(context) if context else None
+            if context:
+                self._questions.pop(context["slug"], None)  # la personne a répondu : l'ancienne question est caduque
         try:
-            self._emit({"type": "user", "text": text})
+            self._emit(shown)
         except Exception:
             self._busy = False
             raise
         threading.Thread(target=self._run_turn, args=(text,), name="chat-turn", daemon=True).start()
         return {"ok": True, "accepted": True}
+
+    def atelier_facts(self, slug: str) -> tuple[dict[str, Any], dict[str, str] | None]:
+        """Faits lisibles du chat pour l'Atelier : le tour en cours (et son geste) et la dernière question du chantier."""
+        with self._cond:
+            mine = bool(self._atelier and self._atelier.get("slug") == slug)
+            turn = {
+                "busy": self._busy,
+                "mine": self._busy and mine,
+                "geste": (self._atelier or {}).get("geste", "") if self._busy and mine else "",
+                "permission": bool(self._decision_ready),
+            }
+            return turn, self._questions.get(slug)
 
     def _answer_question(self, text: str, task_id: str, question_id: str, *, dictation: bool = False) -> dict[str, Any]:
         """La réponse tapée à une question du pilote : un tour humain qui tranche, sans passer par l'agent (ACP4).
@@ -488,6 +512,10 @@ class Conversation:
             if client is None:  # l'agent s'est arrêté entre son démarrage et le tour : le dire, jamais un tour muet
                 raise AcpError("l'agent s'est arrêté avant le tour : renvoyez le message")
             prompt = self._with_spoken_brief(text)  # avant turn_started : un arrêt annoncé trouve le tour envoyé
+            if self._atelier:  # contexte Atelier : forme fixe, jamais le texte du document
+                from grimoire.tools.workspace_atelier_assistant import brief
+
+                prompt = f"{prompt}\n\n{brief(self._atelier['slug'], self._atelier.get('phase', ''))}"
             started: dict[str, Any] = {"type": "turn_started"}
             if self._spoken_token:  # le navigateur masque cette balise-là, et elle seule
                 started["spoken_token"] = self._spoken_token
@@ -553,9 +581,32 @@ class Conversation:
         from grimoire.tools import workspace_chat_pilot
 
         text, self._turn_text = "".join(self._turn_text), []
+        self._note_question(text)
         self._record_spoken(text)
         for on in dict.fromkeys(workspace_chat_pilot.proposals(text)):
             self._emit({"type": "pilot_gesture", "on": on})
+
+    def _note_question(self, reply: str) -> None:
+        """Tour d'Atelier fini : la question posée par l'agent, avec l'angle ouvert d'après l'état de l'entretien."""
+        atelier, self._atelier = self._atelier, None
+        if not atelier:
+            return
+        try:
+            from grimoire.tools import workspace_atelier_assistant as assistant
+
+            question = assistant.question_of(reply)
+            if not question:
+                return
+            if str(atelier.get("geste", "")).startswith("challenger-"):
+                return  # un challenge répond par suggestion ou commentaire, pas par une question d'entretien
+            view = assistant.entretien_view(self.root, atelier["slug"])
+            current = view.get("current") or {}
+            self._questions[atelier["slug"]] = {
+                "text": question, "angle": str(current.get("angle", "")), "title": str(current.get("title", "")),
+                "phase": str(current.get("phase", "")),
+            }
+        except Exception:  # la barre est un confort : un état illisible ne casse jamais le tour
+            return
 
     def _ask(self, request: PermissionRequest) -> str | None:
         """Pose la demande à la page et attend sa réponse ; sans réponse, rien n'est accordé."""
@@ -718,8 +769,15 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
                 and isinstance(target.get("question_id"), str)):
             raise ValueError("answer_to : {task_id, question_id} attendus")
         answer_to = (target["task_id"], target["question_id"])
+    from grimoire.tools.workspace_atelier_assistant import resolve_context
+
+    # Message tapé depuis l'Atelier : le chantier ouvert (validé ici, drapeau compris) ; hors Atelier, rien ne change.
+    context = resolve_context(root, body.get("chantier")) if body.get("chantier") is not None else None
+    if context is not None:
+        context["geste"] = "libre"
     result = _conversation(root).send(
-        text, task_id if isinstance(task_id, str) and task_id else None, answer_to, dictation=dictation
+        text, task_id if isinstance(task_id, str) and task_id else None, answer_to, dictation=dictation,
+        context=context,
     )
     transcriptions.consume(recognized.keys)  # consommées par un envoi accepté seulement : un refus les laisse vivantes
     return result
