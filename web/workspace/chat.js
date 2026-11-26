@@ -232,6 +232,13 @@ export function createChat({ readOnly = () => false } = {}) {
     }
   }
 
+  /** Ce qui attend la personne (questions et permissions non tranchées) : la mascotte y reste « en attente ». */
+  function refreshWaiting() {
+    let count = 0;
+    for (const entry of [...permissions.values(), ...questions.values()]) if (!entry.box.classList.contains('is-done')) count += 1;
+    mascotte.setWaiting(count);
+  }
+
   // ── Permissions ─────────────────────────────────────────────────────────
   function permission(event) {
     current = null;
@@ -262,6 +269,7 @@ export function createChat({ readOnly = () => false } = {}) {
     permissions.set(String(event.request_id), { box, buttons, result });
     append(box);
     buttons[0].focus({ preventScroll: true });
+    refreshWaiting();
   }
 
   function permissionResolved(event) {
@@ -271,6 +279,7 @@ export function createChat({ readOnly = () => false } = {}) {
     const chosen = event.option_id ? event.option_id : null;
     entry.result.textContent = event.outcome === 'cancelled' ? 'Annulée : rien n’a été accordé.' : `Réponse envoyée à l’agent (${chosen}).`;
     entry.box.classList.add('is-done');
+    refreshWaiting();
   }
 
   // ── Le pilote automatique (ACP4) ─────────────────────────────────────────
@@ -318,6 +327,7 @@ export function createChat({ readOnly = () => false } = {}) {
     questions.set(key, entry);
     reply.addEventListener('click', () => setTarget(target === entry ? null : entry));
     append(box);
+    refreshWaiting();
   }
 
   /** « Répondre » sur une question vocale : la saisie vise cette question (dictée ou texte, relue avant l'envoi). */
@@ -347,6 +357,7 @@ export function createChat({ readOnly = () => false } = {}) {
     entry.reply.disabled = true;
     entry.state.textContent = 'Tranchée.';
     if (target === entry) setTarget(null);
+    refreshWaiting();
   }
 
   function gesture(event) {
@@ -465,10 +476,11 @@ export function createChat({ readOnly = () => false } = {}) {
         const update = event.update || {};
         const kind = update.sessionUpdate;
         const text = update.content && update.content.type === 'text' ? update.content.text : null;
-        if (kind === 'agent_message_chunk' && text != null) addText('agent', text);
+        const lived = !(event.seq && event.seq <= replayUntil); // un rejeu n'est pas vécu : la mascotte l'ignore
+        if (kind === 'agent_message_chunk' && text != null) { addText('agent', text); if (lived) mascotte.wrote(); }
         else if (kind === 'agent_thought_chunk' && text != null) addText('thought', text);
         else if (kind === 'user_message_chunk' && text != null) addText('user', text);
-        else if (kind === 'tool_call' || kind === 'tool_call_update') toolCall(update);
+        else if (kind === 'tool_call' || kind === 'tool_call_update') { toolCall(update); if (lived) mascotte.toolCall(update); }
         else if (kind === 'plan') plan(update.entries);
         break;
       }
@@ -497,6 +509,7 @@ export function createChat({ readOnly = () => false } = {}) {
         current = null;
         planBox = null;
         if (!(event.seq && event.seq <= replayUntil)) setBusy(false);
+        mascotte.turnEnded(event.stop_reason, Boolean(event.seq && event.seq <= replayUntil));
         voiceOut.refreshInterview();
         const label = STOP_LABEL[event.stop_reason];
         if (label) note(label, event.stop_reason === 'error' ? 'error' : 'info');

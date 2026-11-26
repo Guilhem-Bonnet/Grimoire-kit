@@ -609,13 +609,34 @@ async function loadSheet(ctx, slug) {
   // la demande, jamais au premier rendu. `slug` explicite (jamais
   // `host.project` implicite) : cette fiche peut être celle d'un AUTRE
   // projet que celui déjà résolu par l'hôte (navigation Flotte → Projet).
-  const sheet = await ctx.api.sheet(slug).catch(() => null);
-  return (
-    sheet || {
-      health: null, memory: null, doctor: null, agents: null,
-      proposals: null, setupRun: null, upgradeRuns: null, flowRuns: null, name: null, capacity: null,
-    }
-  );
+  //
+  // #1243 : la fiche entière attendait sa sous-vue la plus lente (agents et
+  // propositions lisent le journal des traces, capacité le registre de
+  // fournisseurs : ~4 s à froid sur un vrai poste). Les requêtes partent donc
+  // TOUTES ensemble, mais la fiche se peint dès que les sous-vues rapides sont
+  // là ; agents et propositions suivent, chacune à son arrivée (`slow`), et la
+  // capacité se charge par son propre panneau (`GET /api/workspace/capacity`).
+  const section = (name) => ctx.api.sheet(slug, [name]).then((part) => part[name] ?? null).catch(() => null);
+  const slow = { agents: section('agents'), proposals: section('proposals') };
+  const fast = await ctx.api.sheet(slug, FAST_SHEET_SECTIONS).catch(() => null);
+  return {
+    sheet: fast || {
+      health: null, memory: null, setupRun: null, upgradeRuns: null, flowRuns: null, name: null,
+    },
+    slow,
+  };
+}
+
+// Les sous-vues de la fiche qui ne lisent ni le journal des traces ni le registre de fournisseurs.
+const FAST_SHEET_SECTIONS = ['health', 'memory', 'setupRun', 'upgradeRuns', 'flowRuns', 'name'];
+
+// État de chargement d'une section lente : le titre, puis une ligne sobre (même encre que les états vides).
+function loadingSection(title, label) {
+  const section = document.createElement('div');
+  section.className = 'pl-section';
+  section.setAttribute('aria-busy', 'true');
+  section.append(text('h3', null, title), text('p', 'soft', label));
+  return section;
 }
 
 // ── Propositions d'artefact (#395) : à la répétition d'un non-choix ────────
@@ -2195,7 +2216,11 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     renderAgentBlock();
   };
 
-  agentsSection = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
+  // #1243 : tant que `options.slow` n'a pas livré les agents, un état de chargement tient leur place.
+  const slow = options.slow || null;
+  agentsSection = slow
+    ? loadingSection('Agents', 'Chargement des agents…')
+    : renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
   wrap.append(agentsSection);
 
   // ── Propositions (#395) : section agents, sous la table ────────────────
@@ -2222,8 +2247,31 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     agentsSection = freshAgentsSection;
   };
 
-  proposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
+  proposalsSection = slow
+    ? loadingSection('Propositions', 'Chargement des propositions…')
+    : renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
   wrap.append(proposalsSection);
+
+  // Chaque section lente se pose à son arrivée, sans redessiner le reste de la fiche. Une fiche déjà remplacée
+  // (rafraîchissement, changement de portée) n'est plus touchée : `signal` annulé, ou section détachée.
+  if (slow) {
+    slow.agents.then((payload) => {
+      if (ctx.signal.aborted) return;
+      agentsPayload = payload;
+      const fresh = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
+      agentsSection.replaceWith(fresh);
+      agentsSection = fresh;
+    });
+    slow.proposals.then((payload) => {
+      if (ctx.signal.aborted) return;
+      proposalsPayload = payload;
+      updateReviewButton(proposalsPayload);
+      const fresh = renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
+      proposalsSection.replaceWith(fresh);
+      proposalsSection = fresh;
+      if (options.onProposals) options.onProposals();
+    });
+  }
 }
 
 // À traiter (P32) ouvre la fiche sur ce qui attend : `#flotte?focus=kit`,
@@ -2366,12 +2414,15 @@ export async function mount(root, ctx) {
       // second tour réseau via `projects()` pour l'obtenir côté cockpit
       // (restes #541 point 2, où les deux appels partaient déjà au moins en
       // parallèle plutôt qu'en série ; ici il n'y en a plus qu'un).
-      const sheet = await loadSheet(ctx, selected);
+      const { sheet, slow } = await loadSheet(ctx, selected);
       const name = cockpit ? sheet.name || null : ctx.host.status?.slug || null;
       if (ctx.signal.aborted) return;
       root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderSheet(root, ctx, selected, name, sheet, {
         refresh: draw,
+        slow,
+        // Une proposition visée (`focus=proposal`) n'existe qu'une fois la section arrivée : on la révèle alors.
+        onProposals: () => { if (ctx.params?.focus === 'proposal') revealFocus(root, ctx); },
         onCapacity: (fn) => { capacityLive.refresh = fn; },
       });
       revealFocus(root, ctx);

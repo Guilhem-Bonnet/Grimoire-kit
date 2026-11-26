@@ -126,6 +126,16 @@ def _add_task(root: Path, title: str, *, ready: bool) -> str:
 
 @pytest.fixture(scope="module")
 def served_portfolio(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, object]]:
+    yield from _serve_portfolio(tmp_path_factory)
+
+
+@pytest.fixture
+def own_portfolio(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, object]]:
+    """Un cockpit à part pour le test qui ANNULE une tâche : il ne partage ni ledger ni décomptes avec les autres."""
+    yield from _serve_portfolio(tmp_path_factory)
+
+
+def _serve_portfolio(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, object]]:
     """Le cockpit dédié du portefeuille : projets A (réclamée, vivante), B
     (libre, éteinte) et C (chemin absent au registre)."""
     from grimoire.missions.ledger import MissionLedger
@@ -236,6 +246,19 @@ def portfolio_page(browser: Browser, served_portfolio: dict[str, object]) -> Ite
     page = context.new_page()
     slugs = served_portfolio["slugs"]
     page.goto(f"{served_portfolio['url']}/workspace/index.html?project={slugs['a']}", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    try:
+        yield page
+    finally:
+        context.close()
+
+
+@pytest.fixture
+def own_page(browser: Browser, own_portfolio: dict[str, object]) -> Iterator[Page]:
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    slugs = own_portfolio["slugs"]
+    page.goto(f"{own_portfolio['url']}/workspace/index.html?project={slugs['a']}", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     try:
         yield page
@@ -357,3 +380,49 @@ def test_une_transition_gatee_depuis_le_portefeuille_ecrit_dans_le_ledger_du_bon
     assert TaskService(roots["b"]).require(task_b).status.value == "ready"
     assert TaskService(roots["a"]).ledger.get_task(task_b) is None
     assert TaskService(roots["a"]).require(served_portfolio["task_a"]).status.value == "claimed"
+
+
+def test_les_gestes_du_panneau_depuis_la_vue_globale_visent_le_projet_de_la_ligne(
+    own_page: Page, own_portfolio: dict[str, object]
+) -> None:
+    """Priorité, consigne et annulation lancées depuis la ligne de B (portée « Tous les projets »).
+
+    Chaque requête nomme le projet de la ligne (`?project=<slug de B>`), le bouton dit dans quel projet il agit,
+    et seul le ledger de B change — jamais celui de A, ni un refus « lecture seule » faute de cible.
+    """
+    from grimoire.missions.service import TaskService
+
+    page = own_page
+    slugs = own_portfolio["slugs"]
+    roots = own_portfolio["roots"]
+    task_b = own_portfolio["task_b"]
+    posts: list[str] = []
+    page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
+    _open_portfolio(page)
+    page.locator(".ex-card").filter(has_text=TITLE_B).first.dispatch_event("click")
+    inspector = page.locator("#inspector-body")
+    inspector.get_by_text(task_b, exact=True).wait_for()
+
+    with page.expect_response(lambda r: "/prioritize" in r.url) as prioritized:
+        inspector.locator("select[data-role='priority']").select_option("critical")
+    assert prioritized.value.ok, prioritized.value.status
+    inspector.locator("textarea[data-role='directive-text']").fill("consigne depuis la vue globale")
+    inspector.locator("button[data-role='directive-submit']").click()
+    inspector.locator(".ex-directive").filter(has_text="consigne depuis la vue globale").first.wait_for()
+
+    inspector.locator("button[data-role='more']").click()
+    cancel = inspector.locator("button[data-role='cancel-submit']")
+    assert "projet-beta" in cancel.inner_text(), "le bouton nomme le projet où il agit"
+    inspector.locator("input[data-role='cancel-reason']").fill("annulation depuis la vue globale")
+    with page.expect_response(lambda r: "/cancel" in r.url) as cancelled:
+        cancel.click()
+    assert cancelled.value.ok, cancelled.value.status
+    _capture(page, "07-portefeuille-gestes-du-panneau")
+
+    assert posts and all(f"project={slugs['b']}" in url for url in posts), posts
+    task = TaskService(roots["b"]).require(task_b)
+    assert task.status.value == "cancelled" and task.priority == "critical"
+    assert [d.text for d in task.directives] == ["consigne depuis la vue globale"]
+    other = TaskService(roots["a"])
+    assert other.ledger.get_task(task_b) is None
+    assert other.require(own_portfolio["task_a"]).status.value == "claimed"

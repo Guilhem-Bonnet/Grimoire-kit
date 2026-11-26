@@ -141,6 +141,16 @@ def transcript_is_missing(session_id: str, *, home: Path | None = None) -> bool:
     return missing
 
 
+def _is_copilot_claim(task: Any) -> bool:
+    """La session de la tâche est-elle une session GitHub Copilot ? (``session_host``, sinon l'hôte du claim.)"""
+    from grimoire.bridges.schemas import HostId
+    from grimoire.missions.session_link import canonical_host
+
+    claim = task.claim
+    named = str(getattr(claim, "session_host", "") or "") or str(getattr(claim, "host_id", "") or "")
+    return canonical_host(named) == HostId.GITHUB_COPILOT.value
+
+
 def _claim_window(service: Any, task: Any) -> tuple[str, str]:
     """``(since, until)`` : la dernière réclamation jusqu'à maintenant (à la dernière trace du ledger si la tâche est terminée)."""
     events = service.ledger.events_for(task.id)
@@ -176,19 +186,20 @@ def fold_pending(
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.missions.task_worktree import find_task_worktree
     from grimoire.providers.registry import read_model_pricing
+    from grimoire.traces.copilot_usage import copilot_logs_location, fold_copilot_journal, locate_session_journal
     from grimoire.traces.ledger import TraceLedger
-    from grimoire.traces.transcript_usage import SOURCE_CLAUDE_TRANSCRIPT, SOURCE_TAG_PREFIX, fold_claude_transcript
+    from grimoire.traces.transcript_usage import FOLDED_SOURCES, SOURCE_TAG_PREFIX, fold_claude_transcript
 
     report = UsageFoldReport(dry_run=dry_run)
     traces_path = service.home_root / TRACES_DIR
     ledger = TraceLedger(traces_path)
     pricing_for = read_model_pricing(service.home_root).get
     has_traces = (traces_path / "traces.jsonl").is_file()
+    source_tags = {f"{SOURCE_TAG_PREFIX}{source}" for source in FOLDED_SOURCES}
     folded_tasks = {
-        t.task_id
-        for t in (ledger.list_traces() if has_traces else [])
-        if f"{SOURCE_TAG_PREFIX}{SOURCE_CLAUDE_TRANSCRIPT}" in t.tags
+        t.task_id for t in (ledger.list_traces() if has_traces else []) if source_tags.intersection(t.tags)
     }
+    copilot_logs = copilot_logs_location(service.home_root)
 
     candidates = []
     for task in service.list_tasks():
@@ -207,8 +218,15 @@ def fold_pending(
         if not _SAFE_SESSION_RE.match(session_id):
             report.outcomes.append(FoldOutcome(task.id, "refused", detail=f"identifiant de session refusé : {session_id!r}"))
             continue
-        worktree = find_task_worktree(service, task.id)
-        path = locate_transcript(session_id, worktree=worktree.path if worktree else None, home=home)
+        copilot = _is_copilot_claim(task)
+        if copilot:
+            if not copilot_logs.usable or copilot_logs.path is None:
+                report.outcomes.append(FoldOutcome(task.id, "missing", detail=copilot_logs.message))
+                continue
+            path = locate_session_journal(copilot_logs.path, session_id)
+        else:
+            worktree = find_task_worktree(service, task.id)
+            path = locate_transcript(session_id, worktree=worktree.path if worktree else None, home=home)
         if path is None:
             report.outcomes.append(FoldOutcome(task.id, "missing", detail=MISSING_LABEL))
             continue
@@ -232,6 +250,24 @@ def fold_pending(
         report.bytes += size
         if dry_run:
             report.outcomes.append(FoldOutcome(task.id, "folded", size_bytes=size, detail="lu à blanc"))
+            continue
+        if copilot:
+            try:
+                copilot_result = fold_copilot_journal(
+                    ledger, path, task_id=task.id, mission_id=task.mission_id,
+                    base=copilot_logs.path, pricing_for=pricing_for,
+                )
+            except (OSError, ValueError) as exc:
+                report.outcomes.append(FoldOutcome(task.id, "error", size_bytes=size, detail=f"{type(exc).__name__}: {exc}"))
+                continue
+            if copilot_result.skipped:
+                report.outcomes.append(
+                    FoldOutcome(task.id, "deferred", size_bytes=size, detail=f"session Copilot non repliée ({copilot_result.skipped})")
+                )
+            else:
+                report.outcomes.append(
+                    FoldOutcome(task.id, "folded", copilot_result.new_calls, copilot_result.already_folded, size)
+                )
             continue
         since, until = _claim_window(service, task)
         try:

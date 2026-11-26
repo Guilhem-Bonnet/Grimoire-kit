@@ -105,11 +105,13 @@ def test_piloter_kit_aligne_distinct_de_installe_ne_dit_pas_a_jour(browser: Brow
     def _divergent_kit(route) -> None:
         response = route.fetch()
         payload = response.json()
-        payload["health"]["kit"] = {
-            **payload["health"]["kit"],
-            "scaffolded": True, "upToDate": True, "behind": 0,
-            "aligned": "3.36.0", "installed": "3.38.0", "upVersion": None,
-        }
+        # La fiche se charge par sections (#1243) : seule celle qui porte `health` est falsifiée.
+        if "health" in payload:
+            payload["health"]["kit"] = {
+                **payload["health"]["kit"],
+                "scaffolded": True, "upToDate": True, "behind": 0,
+                "aligned": "3.36.0", "installed": "3.38.0", "upVersion": None,
+            }
         route.fulfill(response=response, body=json.dumps(payload))
 
     # Depuis #548 : la fiche Piloter lit `health` via l'agrégat
@@ -151,11 +153,13 @@ def test_piloter_kit_exactement_synchronise_dit_a_jour(browser: Browser, served:
     def _synced_kit(route) -> None:
         response = route.fetch()
         payload = response.json()
-        payload["health"]["kit"] = {
-            **payload["health"]["kit"],
-            "scaffolded": True, "upToDate": True, "behind": 0,
-            "aligned": "3.39.0", "installed": "3.39.0", "upVersion": None,
-        }
+        # La fiche se charge par sections (#1243) : seule celle qui porte `health` est falsifiée.
+        if "health" in payload:
+            payload["health"]["kit"] = {
+                **payload["health"]["kit"],
+                "scaffolded": True, "upToDate": True, "behind": 0,
+                "aligned": "3.39.0", "installed": "3.39.0", "upVersion": None,
+            }
         route.fulfill(response=response, body=json.dumps(payload))
 
     # Depuis #548 : la fiche Piloter lit `health` via l'agrégat

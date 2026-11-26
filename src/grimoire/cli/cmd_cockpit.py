@@ -91,7 +91,7 @@ from grimoire.tools.request_guard import (
 )
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 from grimoire.tools.workspace_read_cache import cacheable_read
-from grimoire.tools.workspace_write_guard import cockpit_journal_path, guard_write
+from grimoire.tools.workspace_write_guard import cockpit_journal_path, declares_global_scope, guard_write
 from grimoire.voice.stt_service import MAX_BODY_BYTES, declared_length, discard_body
 
 cockpit_app = typer.Typer(
@@ -837,7 +837,8 @@ class _CockpitHandler(SecureHandlerMixin, SimpleHTTPRequestHandler):
             self._send_json(403, {"ok": False, "error": "confirmation explicite requise"})
             return
         project_slug = str(data.get("project", "")).strip()
-        proot = _resolve_project_path(project_slug or None)
+        scoped = declares_global_scope(self.headers) and not project_slug  # portée globale : jamais le repli par défaut
+        proot = None if scoped else _resolve_project_path(project_slug or None)
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
