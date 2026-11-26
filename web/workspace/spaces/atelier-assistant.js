@@ -28,6 +28,10 @@ function el(tag, className, text, attrs) {
  */
 export function createAssistant(ctx, slug, hooks) {
   const bar = el('section', 'at-asst', null, { 'aria-label': 'Assistant du cadrage', 'data-role': 'assistant' });
+  // Le contenu change à chaque état ; la mascotte (si la fonction en test est allumée) reste posée à côté, jamais refaite.
+  const main = el('div', 'at-asst-main');
+  bar.append(main);
+  let mascotte = null;
   let view = null;
   let signature = '';
   let wasMine = false;
@@ -61,6 +65,42 @@ export function createAssistant(ctx, slug, hooks) {
     return who;
   };
 
+  /** Les faits que la mascotte reflète : ce que l'assistant dit (entretien) et les suggestions du document. */
+  const syncMascotte = () => {
+    if (!mascotte) return;
+    const v = view;
+    const turn = (v && v.turn) || {};
+    mascotte.update({
+      error: v ? v.error : '',
+      unavailable: Boolean(v && v.agent && !v.agent.available),
+      question: Boolean(v && v.question && !turn.mine),
+      permission: Boolean(turn.permission),
+      suggestions: hooks.suggestions ? hooks.suggestions() : 0,
+      busy: Boolean(turn.mine),
+      text: v && v.question ? v.question.text : '',
+    });
+  };
+
+  /** Le clic sur la mascotte : le panneau passe au premier plan sur ce qui attend. */
+  const activate = (target) => {
+    if (target === 'suggestion') { if (hooks.showSuggestion && hooks.showSuggestion()) return; }
+    bar.scrollIntoView({ block: 'nearest' });
+    const aim = (target === 'question' && bar.querySelector('.at-asst-area'))
+      || (target === 'permission' && bar.querySelector('[data-act="open-chat"]'))
+      || bar.querySelector('.at-asst-area, button:not([disabled])');
+    if (aim) aim.focus();
+  };
+
+  // La mascotte : seulement si la fonction en test « Mascotte » est allumée (sinon ce module n'est jamais demandé).
+  ctx.api.testFeatures().then(async (features) => {
+    if (!features || features.mascotte !== true || ctx.signal.aborted) return;
+    const { createAtelierMascotte } = await import('./atelier-mascotte.js');
+    if (ctx.signal.aborted) return;
+    mascotte = createAtelierMascotte(ctx, { activate });
+    bar.prepend(mascotte.element);
+    syncMascotte();
+  }).catch(() => { /* sans mascotte, la barre reste telle quelle */ });
+
   const unavailable = (v) => {
     const node = el('div', 'at-asst-body');
     node.append(
@@ -73,15 +113,16 @@ export function createAssistant(ctx, slug, hooks) {
 
   const render = () => {
     const v = view;
-    bar.replaceChildren();
+    main.replaceChildren();
+    syncMascotte();
     if (!v) return;
     const busy = Boolean(v.turn.mine);
     const where = v.current ? `${v.current.title}, ${PHASE_NAMES[v.current.phase] || v.current.phase}` : '';
     const progress = v.started && v.total ? `${v.covered} angle${v.covered > 1 ? 's' : ''} sur ${v.total} couvert${v.covered > 1 ? 's' : ''}` : '';
-    bar.append(head(progress));
-    if (!v.agent.available) { bar.append(unavailable(v)); return; }
+    main.append(head(progress));
+    if (!v.agent.available) { main.append(unavailable(v)); return; }
     const body = el('div', 'at-asst-body');
-    bar.append(body);
+    main.append(body);
     if (v.error) { body.append(el('p', 'at-error', v.error, { role: 'alert' })); return; }
     if (v.turn.permission) {
       const ask = el('p', null, 'L’agent attend une permission dans l’onglet Orchestrateur.', { 'data-role': 'assistant-permission' });
@@ -222,5 +263,5 @@ export function createAssistant(ctx, slug, hooks) {
 
   ctx.signal.addEventListener('abort', () => clearTimeout(timer));
   tick();
-  return { element: bar, challenge, refresh: () => { signature = ''; return tick(); } };
+  return { element: bar, challenge, sync: syncMascotte, refresh: () => { signature = ''; return tick(); } };
 }

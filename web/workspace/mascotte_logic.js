@@ -9,8 +9,9 @@
 
 /**
  * Les formes du prototype, dans l'ordre des poids du shader (`u_w[i]`). `label` : ce que dit le libellé visible.
- * `propose` (suggestion de l'Atelier), `delegue` et `attend` (sous-agents, workers) existent dans le shader mais ne
- * sont pas branchés : le fil du chat n'expose aucun événement qui les dise.
+ * `propose` (une suggestion de l'assistant de l'Atelier attend la personne) est branché par l'Atelier seulement ;
+ * `delegue` et `attend` (sous-agents, workers) existent dans le shader mais ne sont pas branchés : aucun événement
+ * du chat ni de l'Atelier ne les dit.
  */
 export const ACTIONS = {
   repos: { i: 0, label: 'au repos' },
@@ -27,7 +28,7 @@ export const ACTIONS = {
 export const SHAPE_COUNT = 10;
 
 /** Les actions que `setAction` accepte : celles que le fil du chat (ou le vocal) sait dire. */
-export const WIRED_ACTIONS = ['repos', 'ecoute', 'reflechit', 'parle', 'ecrit', 'question', 'livre'];
+export const WIRED_ACTIONS = ['repos', 'ecoute', 'reflechit', 'parle', 'ecrit', 'propose', 'question', 'livre'];
 /** Les actions que seul le vocal commande. */
 export const VOCAL_ACTIONS = ['ecoute', 'parle'];
 
@@ -212,9 +213,52 @@ export function simulatedBands(level, t, out = new Float32Array(8)) {
  * un signal (écoute, parole) ne sont jamais « arrivées » ; les autres le sont une fois l'animation d'entrée posée.
  * `swirlTarget` : le tourbillon visé par l'action (plus vif quand il réfléchit).
  */
-export function isSettled({ action, speed, vy, sy, audio, peak, wobble, wobbleTarget, swirl, swirlTarget = 1, via }) {
+export function isSettled({
+  action, speed, vy, sy, audio, peak, wobble, wobbleTarget, swirl, swirlTarget = 1, via, glow = 0, glowTarget = 0,
+}) {
   return MOTION[action] !== 'live' && !via && speed < 0.02 && Math.abs(vy) < 0.02 && Math.abs(sy - 1) < 0.003
-    && audio < 0.01 && peak < 0.01 && Math.abs(wobble - wobbleTarget) < 0.003 && Math.abs(swirl - swirlTarget) < 0.02;
+    && audio < 0.01 && peak < 0.01 && Math.abs(wobble - wobbleTarget) < 0.003 && Math.abs(swirl - swirlTarget) < 0.02
+    && Math.abs(glow - glowTarget) < 0.01;
+}
+
+/** L'éclat de l'ampoule (« propose ») `elapsed` secondes après son entrée : le filament s'allume en deux temps. */
+export function glowTargetAt(action, elapsed) {
+  if (action !== 'propose') return 0;
+  const u = elapsed;
+  return u < 0.7 ? 0 : u < 0.78 ? 0.85 : u < 0.9 ? 0.12 : u < 0.96 ? 0.7 : u < 1.04 ? 0.25 : 1;
+}
+
+/**
+ * L'état de la mascotte de l'assistant de l'Atelier, d'après ce que l'assistant dit réellement :
+ * `error` (l'entretien est en erreur) > `unavailable` (aucun agent d'hôte, sauf suggestions à relire) > `waiting` (une question de l'assistant attend la personne, ou une permission)
+ * > `suggestions` (suggestions déposées en attente de décision) > `busy` (une requête à l'agent est en cours) > repos.
+ * Rend `{ action, count, tone, caption }` ; `count` est le nombre de choses qui attendent la personne.
+ * L'erreur garde la forme du repos : le shader n'a pas de forme d'erreur, le ton et le libellé la disent.
+ */
+export function assistantState({
+  error = '', unavailable = false, question = false, permission = false, suggestions = 0, busy = false,
+} = {}) {
+  const count = (question ? 1 : 0) + (permission ? 1 : 0) + Math.max(0, Number(suggestions) || 0);
+  if (error) return { action: 'repos', count: 0, tone: 'error', caption: 'erreur de l’assistant' };
+  if (unavailable && !(suggestions > 0)) return { action: 'repos', count: 0, tone: 'off', caption: 'assistant indisponible' };
+  if (question || permission) {
+    const plural = count > 1;
+    return { action: 'question', count, tone: 'wait', caption: plural ? `${count} choses attendent ta réponse` : 'attend ta réponse' };
+  }
+  if (suggestions > 0) {
+    const n = Math.floor(suggestions);
+    return { action: 'propose', count: n, tone: 'wait', caption: n > 1 ? `${n} suggestions en attente` : 'une suggestion en attente' };
+  }
+  if (busy) return { action: 'reflechit', count: 0, tone: 'busy', caption: 'réfléchit' };
+  return { action: 'repos', count: 0, tone: 'idle', caption: 'au repos' };
+}
+
+/** Ce qu'un clic sur la mascotte de l'assistant vise : la question (ou la permission), sinon la suggestion, sinon la barre. */
+export function assistantTarget({ question = false, permission = false, suggestions = 0 } = {}) {
+  if (question) return 'question';
+  if (permission) return 'permission';
+  if (suggestions > 0) return 'suggestion';
+  return 'panel';
 }
 
 /**

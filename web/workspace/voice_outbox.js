@@ -96,7 +96,7 @@ function playWav(base64) {
 }
 
 /** Le navigateur lit le texte avec sa propre voix (moteur « navigateur »). */
-function speakText(text, lang) {
+export function speakText(text, lang) {
   const synth = window.speechSynthesis;
   const utterance = new window.SpeechSynthesisUtterance(text);
   if (lang) utterance.lang = lang;

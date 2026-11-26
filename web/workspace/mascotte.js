@@ -23,8 +23,8 @@
 
 import { FRAGMENT, VERTEX } from './mascotte_shader.js';
 import {
-  SHAPE_COUNT, adaptScale, clamp01, frameIntervalMs, isSettled, isWiredAction, labelFor, lerp, needsVia, penPose,
-  shouldRun, smoothBands, smoothValue, stepWeights,
+  SHAPE_COUNT, adaptScale, clamp01, frameIntervalMs, glowTargetAt, isSettled, isWiredAction, labelFor, lerp, needsVia,
+  penPose, shouldRun, smoothBands, smoothValue, stepWeights,
 } from './mascotte_logic.js';
 
 const UNIFORMS = [
@@ -97,13 +97,14 @@ export function createMascotte(canvas, options = {}) {
   const pushedBands = new Float32Array(8);
   const zeros = new Float32Array(8);
   const pushed = { level: 0, at: -1e9 };
-  const fx = { now: 0, viaUntil: 0, wobKick: 0 };
+  const fx = { now: 0, viaUntil: 0, wobKick: 0, proposeAt: -9 };
   let action = 'repos';
   let sy = 1;
   let vy = 0;
   let wobble = 0.06;
   let audio = 0;
   let swirl = 1;
+let glow = 0;
   let speed = 0;
   let wobbleTarget = 0.06;
   let settled = false;
@@ -222,7 +223,10 @@ export function createMascotte(canvas, options = {}) {
     }
     audio = smoothValue(audio, level, dt, 14, 14);
     const peak = smoothBands(bands, rawBands, dt);
-    settled = isSettled({ action, speed, vy, sy, audio, peak, wobble, wobbleTarget, swirl, swirlTarget, via });
+    // L'ampoule de « propose » : le filament s'allume en deux temps, puis l'éclat reste.
+    const glowTarget = glowTargetAt(action, fx.now - fx.proposeAt);
+    glow = lerp(glow, glowTarget, 1 - Math.exp(-(glowTarget > glow ? 30 : 6) * dt));
+    settled = isSettled({ action, speed, vy, sy, audio, peak, wobble, wobbleTarget, swirl, swirlTarget, via, glow, glowTarget });
   }
 
   function draw() {
@@ -236,7 +240,7 @@ export function createMascotte(canvas, options = {}) {
     gl.uniform1f(loc.u_sy, sy);
     gl.uniform1f(loc.u_sxz, 1 / Math.sqrt(sy));
     gl.uniform1f(loc.u_spark, 1);
-    gl.uniform1f(loc.u_glow, 0);
+    gl.uniform1f(loc.u_glow, glow);
     gl.uniform1f(loc.u_swirl, swirl);
     gl.uniform1f(loc.u_exposure, 1);
     gl.uniform3fv(loc.u_penTip, pen.tip);
@@ -300,6 +304,7 @@ export function createMascotte(canvas, options = {}) {
       action = name;
       // Entre deux objets il se ramasse d'abord en sphère : une seule matière, jamais un fondu.
       fx.viaUntil = needsVia(previous, name) ? fx.now + 0.32 : 0;
+      if (name === 'propose') fx.proposeAt = fx.now;
       vy -= 1.3;
       fx.wobKick = 0.7;
       settled = false;
