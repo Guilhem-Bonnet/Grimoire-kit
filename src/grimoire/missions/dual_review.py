@@ -162,6 +162,9 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/gemini_lifecycle.py",
     # … le plafond de sessions par jour du relecteur et du merger : un worker ne réécrit pas la borne qui le contient
     "src/grimoire/missions/session_cap.py",
+    # … et la consommation et les règles d'usage : le tick lève une pause par ``lift_day_pauses`` et l'admission dépend
+    # de ``quota_usage`` ; un worker ne réécrit pas ce qui borne ses propres lancements
+    "src/grimoire/missions/usage_rules.py", "src/grimoire/missions/quota_usage.py",
     # … hors de missions/ : les flows d'autonomie, la preuve, l'hôte, les schémas de pont, le transcript de session
     "src/grimoire/flows/autonomy.py", "src/grimoire/evidence/service.py", "src/grimoire/hosts/host_version.py",
     "src/grimoire/hosts/sync.py", "src/grimoire/hosts/model_table.py", "src/grimoire/bridges/schemas.py",
