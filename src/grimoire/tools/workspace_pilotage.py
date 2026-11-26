@@ -31,7 +31,7 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 __all__ = ["COCKPIT_ACTOR", "GET_ROUTES", "POST_ROUTES", "authority_view", "clear_cache", "pilotage_state"]
 
@@ -247,30 +247,47 @@ class _ReadOnceJournal:
             raise self._error
         return list(self._entries or [])
 
+    def append(self, *_a: Any, **_k: Any) -> Any:
+        raise PermissionError("lecture seule : un GET n'écrit jamais dans le journal d'autorité")
+
+    def mark_revoked(self, *_a: Any, **_k: Any) -> Any:
+        raise PermissionError("lecture seule : un GET n'écrit jamais dans le journal d'autorité")
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._real, name)
 
 
+_UNREADABLE = "lecture du journal d'autorité impossible"
+
+
 def authority_view(root: Path, journal: Any = None) -> dict[str, Any]:
-    """Le pilote automatique et le mandat d'un projet, pour une ligne de la vue globale. Lecture seule.
+    """Le pilote automatique et le mandat d'un projet, pour une ligne de la vue globale. LECTURE SEULE, vraiment.
 
     Rien de ce que le mandat porte (gestes, types, plafond) ne sort : l'interface a besoin de savoir s'il est actif,
-    jusqu'à quand, et pourquoi il ne l'est pas. Un journal illisible se dit (``error``), jamais un « coupé » inventé.
+    jusqu'à quand, et pourquoi il ne l'est pas (un code, jamais le texte d'un motif ni un chemin). Un journal
+    illisible se dit (``error``), jamais un « coupé » inventé. Le magasin du mandat révoque d'ordinaire à l'échéance
+    (``state()`` écrit) : ici l'état est calculé SANS révocation automatique et le journal refuse toute écriture ; un
+    mandat échu s'affiche « expired » sans que le GET n'inscrive quoi que ce soit.
     """
+    from grimoire.missions import mandate as md
     from grimoire.missions.autopilot import AutopilotStore
 
     try:
-        store = AutopilotStore(root, journal)
-        mandate = store.mandates.state()
+        store = AutopilotStore(root, cast("Any", journal if journal is not None else _ReadOnceJournal()))
+        mandates = store.mandates
+        mandates.state = lambda now=None: mandates._state(now or md._now(), auto_revoke=False)  # type: ignore[method-assign]
+        mandate = mandates.state()
         pilot = store.state()
     except Exception as exc:
-        return {"error": _clean(f"{type(exc).__name__}: {exc}", 120), "autopilot": None, "mandate": None}
+        return {"error": f"{_UNREADABLE} ({type(exc).__name__})", "autopilot": None, "mandate": None}
+    if mandate.reason == md.JOURNAL_UNREADABLE or pilot.reason.startswith("journal d'autorité illisible"):
+        return {"error": _UNREADABLE, "autopilot": None, "mandate": None}
     return {
         "error": "",
-        "autopilot": {"active": pilot.active, "since": pilot.since, "reason": _clean(pilot.reason, 120)},
+        "autopilot": {"active": pilot.active, "since": pilot.since},
         "mandate": {
             "active": mandate.active, "until": mandate.mandate.until if mandate.mandate else "",
-            "reason": _clean(mandate.reason, 80),
+            "reason": _clean(mandate.reason.split(":", 1)[0], 40),
         },
     }
 

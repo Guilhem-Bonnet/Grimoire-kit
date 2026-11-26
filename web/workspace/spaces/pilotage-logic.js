@@ -100,9 +100,16 @@ export function authorityLine(authority) {
     ? `Pilote automatique : activé${clockText(autopilot.since) ? ` depuis ${clockText(autopilot.since)}` : ''}`
     : 'Pilote automatique : coupé';
   const until = mandate.until ? ` jusqu’au ${String(mandate.until).slice(0, 10)}` : '';
-  const grant = mandate.active ? `Mandat : actif${until}` : `Mandat : inactif${mandate.reason ? ` (${mandate.reason})` : ''}`;
+  const why = MANDATE_WHY[mandate.reason] || mandate.reason;
+  const grant = mandate.active ? `Mandat : actif${until}` : `Mandat : inactif${why ? ` (${why})` : ''}`;
   return `${pilot} · ${grant}`;
 }
+
+/** Les raisons qu'un mandat inactif peut donner, en clair (le code reste affiché s'il est inconnu). */
+const MANDATE_WHY = {
+  expired: 'expiré', revoked: 'révoqué', cap_exceeded: 'plafond du jour atteint', no_mandate: 'aucun mandat',
+  malformed: 'mandat illisible', escalation_policy_changed: 'politique d’escalade changée',
+};
 
 /**
  * Le bouton du pilote d'une ligne : `{ on, label, disabled, why }`. `on` est l'état visé par le clic. Le mandat n'est

@@ -84,6 +84,26 @@ test('la cible du chat ne s’applique pas hors vue globale', async () => {
   assert.ok(call.url.includes('project=projet-ouvert') && !call.url.includes('projet-b'), call.url);
 });
 
+test('aucun appel voice/ ne part en vue globale, même avec une cible de chat choisie', async () => {
+  setChatTarget('projet-b');
+  await assert.rejects(api.voiceConfig(), /Voix indisponible/);
+  await assert.rejects(api.voiceOutbox(), /Voix indisponible/);
+  await assert.rejects(api.voiceInterview(), /Voix indisponible/);
+  await assert.rejects(api.voiceTranscribe('AAAA'), /Voix indisponible/);
+  await assert.rejects(api.voiceOutboxPlay('m1'), /Voix indisponible/);
+  assert.equal(sent.length, 0);
+  host.scopeAll = false;
+  host.project = 'projet-ouvert';
+  await api.voiceConfig();
+  assert.equal(sent.length, 1);
+});
+
+test('un mandat échu se dit expiré, jamais une lecture illisible ni un pilote « coupé » inventé', () => {
+  const expired = authorityLine({ error: '', autopilot: { active: false }, mandate: { active: false, until: '', reason: 'expired' } });
+  assert.match(expired, /Mandat : inactif \(expiré\)/);
+  assert.match(authorityLine({ error: 'lecture du journal d’autorité impossible', autopilot: null, mandate: null }), /lecture impossible/);
+});
+
 const row = (autopilot, mandate) => ({ error: '', autopilot, mandate });
 
 test('la ligne d’un projet dit le pilote et le mandat', () => {

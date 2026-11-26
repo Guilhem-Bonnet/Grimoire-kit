@@ -72,7 +72,9 @@ def test_un_journal_illisible_se_dit_et_n_invente_pas_un_pilote_coupe(tmp_path: 
 
     monkeypatch.setattr(AuthorityJournal, "read", broken)
     view = workspace_pilotage.authority_view(tmp_path)
-    assert view["autopilot"] is None and view["mandate"] is None and "journal rompu" in view["error"]
+    assert view["autopilot"] is None and view["mandate"] is None
+    assert "journal rompu" not in view["error"], "le message de l'exception ne sort pas, seulement son type"
+    assert "OSError" in view["error"]
 
 
 def test_la_vue_globale_ne_lit_le_journal_d_autorite_qu_une_fois_pour_toutes_les_lignes(
@@ -104,7 +106,50 @@ def test_un_journal_illisible_est_lu_une_fois_et_dit_sur_chaque_ligne(
 
     monkeypatch.setattr(AuthorityJournal, "read", broken)
     rows = workspace_pilotage.portfolio_view()["projects"]
-    assert len(calls) == 1 and all("journal rompu" in r["authority"]["error"] for r in rows)
+    assert len(calls) == 1 and all(r["authority"]["error"] and r["authority"]["autopilot"] is None for r in rows)
+
+
+@pytest.mark.parametrize("content", [b"{not json\n", b"\xff\xfe" * 10], ids=["json-invalide", "octets-non-utf8"])
+def test_un_journal_corrompu_se_dit_lecture_impossible_jamais_coupe(
+    duo: tuple[int, Path, Path], content: bytes  # noqa: F811
+) -> None:
+    port, _alpha, _beta = duo
+    _grant(port, "beta")
+    AuthorityJournal().path.write_bytes(content)
+    for row in _rows(port).values():
+        authority = row["authority"]
+        assert authority["error"] and authority["autopilot"] is None and authority["mandate"] is None
+        assert "/" not in authority["error"] and "\\" not in authority["error"], "aucun chemin local dans l'erreur"
+
+
+def test_lire_la_vue_globale_n_ecrit_rien_et_un_mandat_echu_se_dit_expire(
+    duo: tuple[int, Path, Path], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    from datetime import timedelta
+
+    from grimoire.missions import mandate as md
+
+    port, _alpha, _beta = duo
+    _grant(port, "beta")
+    assert _set(port, "beta", True)[0] == 200
+    journal = AuthorityJournal().path
+    before = journal.read_bytes()
+    real_now = md._now
+    monkeypatch.setattr(md, "_now", lambda: real_now() + timedelta(days=3))
+
+    first = _rows(port)["beta"]["authority"]
+    second = _rows(port)["beta"]["authority"]
+    assert first["mandate"]["active"] is False and first["mandate"]["reason"] == "expired"
+    assert first["autopilot"]["active"] is False and second == first
+    assert journal.read_bytes() == before, "un GET n'inscrit aucune révocation au journal de la machine"
+
+
+def test_la_facade_de_lecture_refuse_toute_ecriture() -> None:
+    journal = workspace_pilotage._ReadOnceJournal()
+    with pytest.raises(PermissionError):
+        journal.append({"type": "x"})
+    with pytest.raises(PermissionError):
+        journal.mark_revoked("m", "r", "t")
 
 
 def test_allumer_le_pilote_d_un_projet_nomme_ne_touche_que_ce_projet_et_se_journalise(duo: tuple[int, Path, Path]) -> None:  # noqa: F811

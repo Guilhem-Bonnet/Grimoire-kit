@@ -177,6 +177,10 @@ function untargetedError() {
 async function request(path, options = {}) {
   // La cible est jugée sur l'URL FINALE : celle du chat choisi dans le sélecteur y est déjà posée.
   const target = withProject(liveMark(path, options));
+  // La voix n'a pas de cible : le chat de la vue globale est texte seul, aucun appel `voice/…` n'y part (lecture ou écriture).
+  if (host.scopeAll && host.kind === 'cockpit' && path.split('?')[0].startsWith(WS + 'voice/')) {
+    throw new ApiError('Voix indisponible dans la vue « Tous les projets » : ouvrez un projet.', 400, { noTarget: true });
+  }
   if (writeIsUntargeted(target, options)) throw untargetedError();
   let response;
   try {
