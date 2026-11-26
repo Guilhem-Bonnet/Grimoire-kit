@@ -1,0 +1,1 @@
+- perf(doctor): le contrôle d'intégrité du kit ne compare plus chaque fichier à chaque dépôt imbriqué et ne parcourt plus tout le projet deux fois : un projet qui porte des milliers de worktrees d'agents passe de plus de 400 s à quelques secondes, avec la même liste de fichiers lus et les mêmes constats
