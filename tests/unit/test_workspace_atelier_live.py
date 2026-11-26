@@ -509,6 +509,64 @@ def _tasks_or_none(root: Path) -> list[Any]:
     return service.list_tasks() if service.has_ledger else []
 
 
+def _cli_plan(root: Path, *args: str) -> Any:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+
+    return CliRunner().invoke(app, ["cadrage", "plan", str(root), *args])
+
+
+def test_cli_writes_nothing_when_the_cadrage_changes_between_the_plan_and_the_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.core.cadrage import CADRAGE_DIR, scaffold
+    from grimoire.missions import cadrage_plan as cp
+
+    root = tmp_path / "cli"
+    scaffold(root, project_name="demo")
+    path = root / CADRAGE_DIR / "04-exigences.md"
+    path.write_text("# Exigences\n\n- REQ-002 (Should) : repli\n  - le repli marche hors ligne\n", encoding="utf-8")
+    real, calls = cp.build_plan, []
+
+    def racing(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 2:  # la reconstruction sous verrou : le fichier a changé pendant l'invite
+            path.write_text(path.read_text(encoding="utf-8").replace("hors ligne", "sans revue"), encoding="utf-8")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cp, "build_plan", racing)
+    result = _cli_plan(root, "--yes")
+    assert result.exit_code != 0 and "a changé depuis l'aperçu" in result.output and "rien n'est écrit" in result.output
+    assert not TaskService(root).has_ledger or TaskService(root).list_tasks() == []
+
+
+def test_cli_nominal_plan_still_writes_what_it_showed(tmp_path: Path) -> None:
+    from grimoire.core.cadrage import CADRAGE_DIR, scaffold
+
+    root = tmp_path / "cli"
+    scaffold(root, project_name="demo")
+    (root / CADRAGE_DIR / "04-exigences.md").write_text(EXIGENCES, encoding="utf-8")
+    result = _cli_plan(root, "--yes")
+    assert "tâche(s) créée(s)" in result.output
+    planned = [t for t in TaskService(root).list_tasks() if (t.extra or {}).get("cadrage") == "plan"]
+    assert len(planned) == 2 and "le fichier s'ouvre" not in result.output
+
+
+def test_apply_locked_refuses_a_changed_plan_and_cockpit_shares_the_digest(project: Path) -> None:
+    from grimoire.missions.cadrage_plan import PlanChangedError, apply_locked, build_plan, plan_digest
+
+    slug = _chantier(project)
+    service = TaskService(project)
+    shown = build_plan(project, service, slug, "")
+    assert live._digest(shown) == plan_digest(shown) == _get(project, slug, "decoupage")["digest"]
+    path = project / "_grimoire" / "cadrage" / slug / "04-exigences.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("2 secondes", "9 secondes"), encoding="utf-8")
+    with pytest.raises(PlanChangedError):
+        apply_locked(project, service, shown, "cli")
+    assert _tasks_or_none(project) == []
+
+
 def test_the_trace_payload_is_json_serialisable(project: Path, human: None) -> None:
     slug = _chantier(project)
     _approve(project, slug, "REQ-001")

@@ -56,12 +56,14 @@ __all__ = [
     "PLANNED",
     "Ambiguity",
     "CadragePlan",
+    "PlanChangedError",
     "Proposal",
     "apply_locked",
     "apply_plan",
     "build_plan",
     "covers_of",
     "is_anchor",
+    "plan_digest",
     "plan_lock",
 ]
 
@@ -532,11 +534,43 @@ def plan_lock(root: Path, chantier: str | None, *, timeout: float | None = None)
     return locked(cadrage_dir(root, chantier) / "decoupage", timeout=LOCK_TIMEOUT_S if timeout is None else timeout)
 
 
-def apply_locked(root: Path, service: TaskService, plan: CadragePlan, actor: str) -> CadragePlan:
-    """Écrit *plan* sous :func:`plan_lock`, après l'avoir reconstruit : ce que la CLI confirme est rejoué sur l'état
-    du ledger au moment d'écrire, pas sur celui de l'aperçu."""
+class PlanChangedError(GrimoireMissionError):
+    """Le cadrage ou le ledger a changé depuis le plan montré : rien n'est écrit."""
+
+
+def plan_digest(plan: CadragePlan) -> str:
+    """Empreinte de tout ce que :func:`apply_plan` écrirait : tâches (critères, commandes, priorité, vérifiabilité,
+    origine du critère), mission et questions à poser. Partagée par la CLI et le cockpit."""
+    import json
+
+    written = {
+        "mission": plan.mission,
+        "tasks": [
+            [p.requirement, p.title, list(p.acceptance), [c.cmd for c in p.checks], p.priority, p.verifiability,
+             p.criterion_origin]
+            for p in plan.proposals
+        ],
+        "questions": [
+            [q.ambiguity.key, q.status, q.ambiguity.blocking, q.ambiguity.text]
+            for q in plan.questions
+            if q.status in ("new", "unanswered")
+        ],
+    }
+    raw = json.dumps(written, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def apply_locked(
+    root: Path, service: TaskService, plan: CadragePlan, actor: str, *, digest: str | None = None
+) -> CadragePlan:
+    """Écrit *plan* sous :func:`plan_lock`, après l'avoir reconstruit **et comparé** : si le plan reconstruit n'a pas
+    l'empreinte du plan montré (*digest*, par défaut celle de *plan*), rien n'est écrit (:class:`PlanChangedError`)."""
+    expected = plan_digest(plan) if digest is None else digest
     try:
         with plan_lock(root, plan.chantier):
-            return apply_plan(service, build_plan(root, service, plan.chantier, plan.mission), actor)
+            fresh = build_plan(root, service, plan.chantier, plan.mission)
+            if plan_digest(fresh) != expected:
+                raise PlanChangedError("le cadrage a changé depuis l'aperçu : rien n'est écrit, relancez `grimoire cadrage plan`")
+            return apply_plan(service, fresh, actor)
     except TimeoutError as exc:
         raise GrimoireMissionError(f"un autre découpage de ce chantier est en cours : {exc}") from exc

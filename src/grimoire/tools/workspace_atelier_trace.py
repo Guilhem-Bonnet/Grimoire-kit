@@ -224,23 +224,9 @@ def _unvalidated_musts(root: Path, plan: Any, slug: str) -> list[dict[str, str]]
 
 def _digest(plan: Any) -> str:
     """Empreinte de ce que l'aperçu promet de créer : la confirmation porte sur ces tâches-là."""
-    import json
+    from grimoire.missions.cadrage_plan import plan_digest
 
-    written = {
-        "mission": plan.mission,
-        "tasks": [
-            [p.requirement, p.title, list(p.acceptance), [c.cmd for c in p.checks], p.priority, p.verifiability,
-             p.criterion_origin]
-            for p in plan.proposals
-        ],
-        "questions": [
-            [q.ambiguity.key, q.status, q.ambiguity.blocking, q.ambiguity.text]
-            for q in plan.questions
-            if q.status in ("new", "unanswered")
-        ],
-    }
-    raw = json.dumps(written, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return plan_digest(plan)  # la même empreinte que la CLI (`apply_locked`)
 
 
 def _skipped(plan: Any) -> list[dict[str, str]]:
