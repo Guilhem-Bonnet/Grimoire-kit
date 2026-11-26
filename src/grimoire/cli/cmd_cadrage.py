@@ -590,6 +590,64 @@ def cadrage_recall(
         console.print(f"[yellow]dégradé :[/yellow] {_safe(issue)}")
 
 
+_export_out_opt = typer.Option(None, "--out", "-o", help="Dossier du lot (neuf ou vide).")
+_export_verify_opt = typer.Option(None, "--verify", help="Vérifier un lot déjà exporté (code 1 s'il est altéré).")
+
+
+@cadrage_app.command("export")
+def cadrage_export(
+    path: Path = _path_opt,
+    chantier: str | None = _chantier_opt,
+    out: Path | None = _export_out_opt,
+    force: bool = typer.Option(False, "--force", "-f", help="Écrire dans un dossier non vide : n'écrase que les fichiers du lot."),
+    verify: Path | None = _export_verify_opt,
+    date: str | None = typer.Option(None, "--date", help="Date du lot, AAAA-MM-JJ (défaut : aujourd'hui ; pour des essais reproductibles)."),
+    as_json: bool = typer.Option(False, "--json", help="Le résultat en JSON stable."),
+) -> None:
+    """Exporte un chantier en lot Markdown portable (compatible OKF v0.1), ou vérifie un lot (--verify).
+
+    Lecture seule sur le projet : rien n'est écrit au ledger, au journal d'autorité ni au cadrage. Le lot ne s'importe pas."""
+    import json
+
+    from grimoire.missions.cadrage_export import ExportError, build_export, verify_export, write_export
+
+    if verify is not None:
+        checked = verify_export(verify)
+        if as_json:
+            typer.echo(json.dumps(checked.to_dict(), indent=2, ensure_ascii=False))
+        elif checked.ok:
+            console.print(f"[green]lot intact[/green] — {checked.checked} fichier(s) vérifiés, empreinte {checked.digest}")
+        else:
+            console.print("[red]lot altéré ou incomplet[/red]")
+            for problem in checked.problems:
+                console.print(f"  {_safe(problem)}")
+        raise typer.Exit(0 if checked.ok else 1)
+    if out is None:
+        console.print("[red]--out <dossier> est requis (ou --verify <dossier>).[/red]")
+        raise typer.Exit(1)
+    from grimoire.missions.requirement_gate import origin_root
+    from grimoire.missions.service import TaskService
+
+    root = path.resolve()
+
+    def _run() -> Any:
+        try:
+            result = build_export(root, TaskService(origin_root(root)), chantier, date=date)
+            return result, write_export(result, out, origin_root(root), force=force)
+        except ExportError as exc:
+            raise ValueError(str(exc)) from exc
+
+    result, written = _guard(_run)
+    if as_json:
+        typer.echo(json.dumps({**result.to_dict(), "written": len(written)}, indent=2, ensure_ascii=False))
+        return
+    console.print(f"[green]lot exporté[/green] — {len(written) - 1} fichier(s) et le manifeste dans {_safe(out)}, "
+                  f"empreinte {result.digest}")
+    for note in result.notes:
+        console.print(f"[yellow]réserve :[/yellow] {_safe(note)}")
+    console.print("[dim]Vérifier plus tard :[/dim] [cyan]grimoire cadrage export --verify <dossier>[/cyan]")
+
+
 # ── entretien de cadrage : sept angles, profondeur selon la demande ──────────
 
 interview_app = typer.Typer(help="Entretien de cadrage : questions par angle, profondeur selon la demande.")

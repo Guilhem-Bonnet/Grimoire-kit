@@ -439,6 +439,70 @@ def test_atelier_writes_leave_their_governed_trace(atelier: Host) -> None:
     assert phase.read_bytes()
 
 
+def _armed_comment(host: Host) -> tuple[str, Path, str]:
+    """Un chantier avec un fil ouvert ; rend (id, magasin des commentaires, chemin de la route du fil)."""
+    from grimoire.tools import workspace_atelier as wa
+    from grimoire.tools import workspace_atelier_comments as com
+
+    _sid, phase, _route = _armed_suggestion(host)
+    block = next(b for p in wa.document(host.root, "un")["phases"] for b in p["blocks"] if b["text"] == "- Une piste")
+    made = com.create(host.root, "un", {"block_id": block["id"], "texte": "Une question"}, "humain")["comment"]
+    return str(made["id"]), phase.parent / "comments.json", f"/api/workspace/atelier/chantiers/un/comments/{made['id']}"
+
+
+@pytest.mark.no_session_token
+@pytest.mark.parametrize("fixture_name", ["cockpit", "atelier"])
+def test_the_atelier_comment_routes_refuse_everything_but_the_page(
+    fixture_name: str, request: pytest.FixtureRequest
+) -> None:
+    """Résoudre, répondre, supprimer et commenter : sans jeton, avec un faux, d'une origine tierce, hors JSON, par PUT ou GET."""
+    from grimoire.core import atelier_comments as store
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    host: Host = request.getfixturevalue(fixture_name)
+    cid, saved, route = _armed_comment(host)
+    token = {SESSION_HEADER: session_token()}
+    before_store = saved.read_bytes()
+    before = host.snapshot()
+    for target, body in (
+        (route, json.dumps({"action": "resolve"}).encode()),
+        (route, json.dumps({"action": "delete"}).encode()),
+        (route, json.dumps({"action": "reply", "texte": "x"}).encode()),
+        (route.rsplit("/", 1)[0], json.dumps({"block_id": "brainstorm.x", "texte": "x"}).encode()),
+    ):
+        url = f"{target}?project={host.slug}"
+        attempts = {
+            "POST sans jeton": ("POST", JSON, body),
+            "POST jeton faux": ("POST", {**JSON, SESSION_HEADER: "pas-le-bon"}, body),
+            "POST origine tierce": ("POST", {**JSON, **token, "Origin": EVIL}, body),
+            "POST fetch inter-sites": ("POST", {**JSON, **token, "Sec-Fetch-Site": "cross-site"}, body),
+            "POST hors JSON": ("POST", {"Content-Type": "text/plain", **token}, body),
+            "PUT": ("PUT", {**JSON, **token}, body),
+        }
+        for label, (method, headers, payload) in attempts.items():
+            code = host.request(method, url, payload, headers)
+            assert code in (400, 403, 404, 405, 415, 501), f"{label} a répondu {code}"
+            assert saved.read_bytes() == before_store, f"{label} a écrit dans les commentaires"
+    assert host.snapshot() == before
+    assert [c.etat for c in store.load(saved.parent)] == ["ouvert"]
+    # Et la page, elle, tranche : même requête avec le jeton valide.
+    assert host.request("POST", f"{route}?project={host.slug}", json.dumps({"action": "resolve"}).encode(), {**JSON, **token}) == 200
+    assert [c.etat for c in store.load(saved.parent)] == ["resolu"]
+    assert cid
+
+
+def test_atelier_comment_writes_leave_their_governed_trace(atelier: Host) -> None:
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    cid, _saved, route = _armed_comment(atelier)
+    headers = {**JSON, SESSION_HEADER: session_token()}
+    assert atelier.request("POST", route, json.dumps({"action": "resolve"}).encode(), headers) == 200
+    journal = atelier.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+    entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    routes = [e["route"] for e in entries if e["action"] == "workspace.post"]
+    assert f"atelier/chantiers/un/comments/{cid}" in routes, routes
+
+
 @pytest.mark.no_session_token
 def test_the_atelier_split_is_guarded_and_leaves_its_governed_trace(atelier: Host) -> None:
     """« Valider et découper » : refusé sans le jeton de la page, journalisé avec lui, et aucune route ne valide."""

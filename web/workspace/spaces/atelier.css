@@ -98,7 +98,56 @@
 .at-split-crit > summary { cursor: pointer; }
 .at-split-crit ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); }
 .at-split-list { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); }
+/* Commentaires ancrés (lot 3) : le passage surligné discrètement, le fil dans la marge (large) ou sous le bloc (étroit).
+   L'humain est rond, l'agent est carré et teinté : l'étiquette dit le nom, la forme ne dépend pas de la couleur. */
+::highlight(at-cm) { background-color: color-mix(in srgb, var(--acc) 20%, transparent); }
+::highlight(at-cm-on) { background-color: color-mix(in srgb, var(--acc) 42%, transparent); text-decoration: underline; text-decoration-color: var(--acc); }
+.at-blk { position: relative; }
+.at-blk.cm-block { box-shadow: inset 3px 0 0 var(--acc); }
+.at-cm-add { position: absolute; top: -13px; right: var(--sp-3); z-index: 1; height: 26px; padding: 0 var(--sp-2); display: inline-flex; align-items: center; gap: var(--sp-1); border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--panel); color: var(--ink2); font-size: var(--t-s); cursor: pointer; opacity: 0; }
+.at-cm-add .ico { width: 14px; height: 14px; }
+.at-blk:hover .at-cm-add, .at-blk:focus-within .at-cm-add, .at-blk.has-sel .at-cm-add, .at-cm-add:focus-visible { opacity: 1; }
+.at-cm-add:hover { background: var(--hover); color: var(--ink); }
+.at-cm-add:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+@media (hover: none) { .at-cm-add { opacity: 1; } }
+.at-cmrow { display: block; }
+.at-cm-margin { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.at-cm-margin:empty { display: none; }
+.at-sheet.has-cm .at-cmrow { display: grid; grid-template-columns: minmax(0, 1fr) 288px; gap: var(--sp-4); align-items: start; }
+.at-cm { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--ink3); border-radius: var(--r); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--t-s); min-width: 0; }
+.at-cm[data-author="agent"] { border-left-color: var(--acc); background: var(--acc-soft); }
+.at-cm.is-orphan { border-style: dashed; border-left-color: var(--warn); }
+.at-cm.is-resolved { background: none; border-left-color: var(--ok); }
+.at-cm:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.at-cm-body { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.at-cm-flags { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
+.at-cm-flags:empty { display: none; }
+.at-cm-quote { margin: 0; padding: var(--sp-1) var(--sp-2); border-left: 2px solid var(--line); color: var(--ink2); font-style: italic; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7em; overflow: auto; }
+.at-cm-msg { display: flex; flex-direction: column; gap: var(--sp-1); }
+.at-cm-msg + .at-cm-msg { border-top: 1px solid var(--line); padding-top: var(--sp-2); }
+.at-cm-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+.at-cm-who { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.at-cm-ava { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--hover); color: var(--ink2); flex: none; }
+.at-cm-who.is-agent .at-cm-ava { border-radius: 6px; background: var(--acc); color: var(--on-acc); }
+.at-cm-ava .ico { width: 12px; height: 12px; }
+.at-cm-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.at-cm-area { width: 100%; box-sizing: border-box; min-height: 72px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--acc); border-radius: var(--r); background: var(--panel); color: var(--ink); font: inherit; resize: vertical; }
+.at-cm-area:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.at-cm-reply { display: flex; flex-direction: column; gap: var(--sp-2); }
+.at-cm-new .at-error, .at-cm .at-error { flex-basis: auto; }
+.at-cm-sum { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; min-height: var(--h-ctl); list-style-position: inside; }
+.at-cm-sum:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.at-cm-cut { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.at-cm-go { align-self: flex-start; padding-left: 0; }
+.at-cm-confirm { background: var(--panel); }
+.at-cm-orphans { border-top: 1px dashed var(--line); padding-top: var(--sp-3); margin-top: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.at-cm-orphans .at-cm { max-width: 640px; }
+.at-name > .badge { flex: none; white-space: nowrap; }
+.at-cm-orphans h3 { margin: 0; font-size: var(--t-m); font-weight: 600; }
+.at-cm-orphans p { margin: 0; }
 @container canvas (max-width: 900px) {
+  .at-sheet.has-cm .at-cmrow { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+  .at-cm-margin { padding-left: var(--sp-4); }
   .at-body { padding: var(--sp-4); }
   .at-cols { display: none; }
   :where(.at-page) .at-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
