@@ -407,49 +407,6 @@ def task_claim(
         _service(project_root, ledger_root).attach_current_session(task_id, actor=actor)
 
 
-@task_app.command("attach")
-def task_attach(
-    ctx: typer.Context,
-    task_id: Annotated[str, typer.Argument()],
-    session_id: Annotated[
-        str, typer.Option("--session-id", help="Session d'hôte (défaut : GRIMOIRE_SESSION_ID ou CLAUDE_CODE_SESSION_ID).")
-    ] = "",
-    host_version: Annotated[
-        str, typer.Option("--host-version", help="Version de l'hôte (claude --version) : le frein ne se prouve que pour elle.")
-    ] = "",
-    project_root: _PROJECT_ROOT = Path(),
-    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
-    actor: _ACTOR = "cli",
-) -> None:
-    """Rattache cette session au claim de la tâche — quand plusieurs claims coexistent."""
-    from grimoire.core.exceptions import GrimoireError
-    from grimoire.core.standard_state import current_session
-    from grimoire.hosts.host_version import valid_version
-
-    env_session, env_host = current_session()
-    sid = session_id.strip() or env_session
-    if not sid:
-        console.print(
-            "[red]✗[/red] Aucune session identifiable : ni --session-id, ni GRIMOIRE_SESSION_ID, "
-            "ni la variable d'environnement de l'hôte (CLAUDE_CODE_SESSION_ID)."
-        )
-        raise typer.Exit(1)
-    service = _service(project_root, ledger_root)
-    _require_task(service, task_id)
-    try:
-        task = service.attach_session(
-            task_id, sid, session_host=env_host if not session_id.strip() else "", actor=actor, explicit=True,
-            host_version=valid_version(host_version),
-        )
-    except GrimoireError as exc:
-        console.print(f"[red]✗[/red] {exc}")
-        raise typer.Exit(1) from exc
-    if _fmt(ctx) == "json":
-        typer.echo(json.dumps({"task_id": task.id, "session_id": sid}, indent=2, ensure_ascii=False))
-        return
-    console.print(f"[green]✓[/green] Session {sid} rattachée à {task.id}")
-
-
 @task_app.command("renew")
 def task_renew(
     ctx: typer.Context,
@@ -1498,3 +1455,8 @@ register_a2a_commands(task_app)
 from grimoire.cli.cmd_task_usage import _usage_line, _usage_of, register_usage_commands  # noqa: E402
 
 register_usage_commands(task_app)
+
+# `task attach` (avec --host, lot C2 de #1280) dans son module (plafond de taille).
+from grimoire.cli.cmd_task_attach import register_attach_command  # noqa: E402
+
+register_attach_command(task_app)

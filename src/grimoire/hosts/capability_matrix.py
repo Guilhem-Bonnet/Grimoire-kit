@@ -213,11 +213,21 @@ def _session_link(ctx: _Ctx, surface: Surface) -> Cell:
     if surface.remote:
         return Cell(CellState.UNSUPPORTED, _REMOTE)
     host = ctx.host_id.value
+    # Chemin de rattachement : le hook de début de session (session_id de la charge, ``link_session``) quand
+    # l'hôte le déclenche, et toujours ``grimoire task attach --session-id … --host …`` (explicite).
+    via = (
+        "rattachée au claim par le hook SessionStart (identifiant de la charge) ou `grimoire task attach --host`"
+        if ctx.profile.supports_event(HookEvent.SESSION_START)
+        else "rattachée au claim par `grimoire task attach --host`"
+    )
+    unverified = (
+        "" if recorded_contract(ctx.host_id).host_version else " ; identifiant vu dans des fixtures, jamais sur une session réelle"
+    )
     if host in RESUME_COMMANDS and host in LOGS_COMMANDS:
-        return Cell(CellState.UNVERIFIED, "identifiant rattaché au claim ; commandes de reprise et de journal connues")
+        return Cell(CellState.UNVERIFIED, f"session {via} ; commandes de reprise et de journal connues{unverified}")
     return Cell(
         CellState.DEGRADED,
-        "identifiant de session rattaché au claim, mais aucune commande de reprise ni de journal connue",
+        f"session {via}, mais aucune commande de reprise ni de journal connue{unverified}",
         fallback="la carte de tâche montre l'identifiant seul, jamais une commande inventée",
     )
 
