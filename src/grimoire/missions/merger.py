@@ -121,6 +121,7 @@ from grimoire.missions.reviewer import (
     entered_review_at,
 )
 from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR, TaskState
+from grimoire.missions.session_cap import cap_refusal
 from grimoire.missions.task_worktree import MERGED_EVENT, TASK_BRANCH_PREFIX, find_task_worktree
 from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, Attachment, Choice, clip_context, new_question_id
 
@@ -1379,6 +1380,12 @@ class MergeStage(DualReviewMixin):
             if escalated.status == "done":
                 self._note(MERGE_BOUNCED_EVENT, tid, {"reason": reason, "detail": detail[:600], "cycle": cycle, "escalated": True})
             return escalated
+        capped = cap_refusal(
+            self._service, "merger", self._policy.merger.sessions_per_day, (MERGE_BOUNCED_EVENT,),
+            entity_id=tid, actor=MERGER_ACTOR, now=self._now, not_launch=lambda e: bool(e.payload.get("escalated")),
+        )
+        if capped:  # aucune session reprise, la tâche ne bouge pas : le tick suivant revoit la même chose
+            return MergerOutcome(tid, "bounce", "refused", capped, pr)
         ledger = self._service.ledger
         try:
             ledger.transition_task(tid, TaskState.RUNNING, actor_id=MERGER_ACTOR, reason=f"fusion refusée ({reason}, cycle {cycle}/{max_cycles})")

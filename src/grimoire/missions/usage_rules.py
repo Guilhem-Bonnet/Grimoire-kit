@@ -32,7 +32,7 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -56,8 +56,8 @@ __all__ = [
     "evaluate",
     "event_day",
     "lift_day_pauses",
+    "next_midnight",
     "parse_rules",
-    "read_rules",
     "rule_dict",
 ]
 
@@ -169,22 +169,6 @@ def parse_rules(raw: Any) -> tuple[tuple[UsageRule, ...], tuple[str, ...]]:
         seen.add(rule.id)
         rules.append(rule)
     return tuple(rules), tuple(issues)
-
-
-def read_rules(root: Path) -> tuple[tuple[UsageRule, ...], tuple[str, ...]]:
-    """Les règles de ``capacity.yaml`` et leurs problèmes, lus ici (lecture seule) : ``((), ())`` sans fichier ni table.
-
-    Un fichier illisible rend aussi ``((), ())`` : c'est l'admission, pas ce module, qui le refuse (échec fermé).
-    """
-    from ruamel.yaml import YAML
-    from ruamel.yaml.error import YAMLError
-
-    path = root / "_grimoire" / "standard" / "capacity.yaml"
-    try:
-        data = YAML(typ="safe").load(path.read_text(encoding="utf-8")) if path.is_file() else None
-    except (YAMLError, OSError, UnicodeDecodeError):
-        return (), ()
-    return parse_rules(data.get("usage_rules")) if isinstance(data, dict) else ((), ())
 
 
 # ── Mesure ─────────────────────────────────────────────────────────────────────
@@ -418,3 +402,9 @@ def lift_day_pauses(project_root: Path, now: datetime) -> bool:
         return False
     clear_pause(root, scope=SCOPE_PROJECT)
     return True
+
+
+def next_midnight(now: datetime) -> str:
+    """Minuit UTC suivant *now* (ISO 8601) : la reprise d'un lancement retenu par une règle de portée jour."""
+    moment = now.astimezone(UTC)
+    return (moment.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat()

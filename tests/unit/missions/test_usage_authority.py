@@ -1,8 +1,9 @@
 """Chemin d'autorité : aucun agent ne relève un plafond, ne désactive une règle, n'efface une consommation.
 
 Le plafond et les règles vivent dans ``capacity.yaml`` (un humain l'édite) ; la consommation est un journal
-append-only que seul le tick écrit d'après les journaux de session. Ces tests le prouvent : aucune surface d'agent
-(outils MCP, routes et commandes du cockpit) n'y touche, et les lectures n'écrivent rien.
+append-only que seul le tick écrit d'après les journaux de session. Ces tests le prouvent de trois façons :
+aucune surface d'agent (outils MCP, routes et commandes du cockpit) n'y touche ; les lectures n'écrivent rien ;
+la pause posée par une règle ne se lève pas par un agent.
 """
 
 from __future__ import annotations
@@ -16,10 +17,12 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
-from grimoire.missions.pause import CONTROL_HOME_ENV
-from grimoire.missions.schemas import TaskState
+from grimoire.missions.admission import QUOTA_CONSUMED_EVENT
+from grimoire.missions.orchestrate import run_tick
+from grimoire.missions.pause import CONTROL_HOME_ENV, DRAIN, PauseError, clear_pause, read_pause, write_pause
+from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, TaskState
 from grimoire.missions.service import TaskService
-from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT
+from grimoire.missions.usage_rules import PAUSE_ORIGIN
 
 SRC = Path(__file__).resolve().parents[3] / "src" / "grimoire"
 STANDARD = Path("_grimoire/standard")
@@ -56,7 +59,7 @@ def test_no_mcp_tool_or_cockpit_command_can_change_capacity_quota_or_rules() -> 
     assert [c for c in ALLOWED if re.search(r"capacity|quota|rules|pause|resume", c)] == []
 
 
-def test_only_the_consumption_step_writes_it_and_nothing_writes_the_capacity_file() -> None:
+def test_only_the_tick_step_writes_consumption_and_nothing_writes_the_capacity_file() -> None:
     writers = [p.name for p in _files("**/*.py") if re.search(r"append_event\(\s*QUOTA_CONSUMED_EVENT", p.read_text(encoding="utf-8"))]
     assert writers == ["quota_usage.py"]
     mentioning = [p for p in _files("**/*.py") if any(m in p.read_text(encoding="utf-8") for m in ("capacity.yaml", "CAPACITY_FILE"))]
@@ -105,5 +108,114 @@ def test_reading_commands_write_neither_the_ceiling_nor_the_rules_nor_the_ledger
     assert _digest(projet) == before
     from grimoire.tools.workspace_capacity import capacity_view
 
-    capacity_view(projet, now=datetime.now(UTC))
+    capacity_view(projet)
     assert _digest(projet) == before
+
+
+def test_the_tick_never_edits_the_file_and_the_consumption_only_grows(projet: Path) -> None:
+    file_before = hashlib.sha256((projet / STANDARD / "capacity.yaml").read_bytes()).hexdigest()
+    consumed = lambda: [  # noqa: E731
+        e.id for e in TaskService(projet).ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT
+    ]
+    before = consumed()
+    run_tick(projet, now=datetime.now(UTC))
+    run_tick(projet, now=datetime.now(UTC))
+    assert hashlib.sha256((projet / STANDARD / "capacity.yaml").read_bytes()).hexdigest() == file_before
+    assert set(before) <= set(consumed())
+
+
+def test_a_pause_posed_by_a_rule_is_not_lifted_by_an_agent(projet: Path) -> None:
+    run_tick(projet)
+    (flag,) = read_pause(projet).flags
+    assert flag.actor.startswith("usage-rule:") and flag.origin == PAUSE_ORIGIN
+    with pytest.raises(PauseError):
+        clear_pause(projet, origin=ORIGIN_AGENT, session="une-session-d-agent")
+    assert read_pause(projet).flags
+
+
+def _flag(projet: Path):  # type: ignore[no-untyped-def]
+    (flag,) = read_pause(projet).flags
+    return flag
+
+
+def test_an_agent_cannot_replace_a_rule_pause_then_lift_it(projet: Path) -> None:
+    """Remplacer puis lever contournait le contrôle de la levée : poser par-dessus est refusé, la pause reste."""
+    run_tick(projet)
+    before = _flag(projet)
+    with pytest.raises(PauseError, match="ne la remplace pas"):
+        write_pause(projet, mode=DRAIN, actor="cli", origin=ORIGIN_AGENT, session="s-agent-1")
+    with pytest.raises(PauseError):
+        write_pause(projet, mode="hold", actor="cli", origin=ORIGIN_AGENT, session="s-agent-1", tasks=("T",))
+    assert _flag(projet) == before
+    with pytest.raises(PauseError):
+        clear_pause(projet, origin=ORIGIN_AGENT, session="s-agent-1")
+
+
+def test_an_agent_cannot_replace_a_human_or_another_sessions_pause(projet: Path) -> None:
+    write_pause(projet, mode=DRAIN, actor="guilhem", reason="je tiens la main", origin=ORIGIN_HUMAN)
+    with pytest.raises(PauseError, match="un humain"):
+        write_pause(projet, mode=DRAIN, actor="cli", origin=ORIGIN_AGENT, session="s-agent-1")
+    assert _flag(projet).reason == "je tiens la main" and _flag(projet).origin == ORIGIN_HUMAN
+    clear_pause(projet, origin=ORIGIN_HUMAN)
+    write_pause(projet, mode=DRAIN, actor="cli", origin=ORIGIN_AGENT, session="s-agent-1")
+    with pytest.raises(PauseError, match="autre session"):
+        write_pause(projet, mode=DRAIN, actor="cli", origin=ORIGIN_AGENT, session="s-agent-2")
+    with pytest.raises(PauseError):
+        write_pause(projet, mode=DRAIN, actor="cli", origin=ORIGIN_AGENT, session="")  # une session sans identité non plus
+    assert _flag(projet).session == "s-agent-1"
+
+
+def test_legitimate_pause_behaviours_are_unchanged(projet: Path) -> None:
+    # Un agent pose sa propre pause, la renforce, la lève.
+    write_pause(projet, mode=DRAIN, actor="cli", origin=ORIGIN_AGENT, session="s-agent-1")
+    write_pause(projet, mode=DRAIN, actor="cli", origin=ORIGIN_AGENT, session="s-agent-1", reason="encore")
+    assert _flag(projet).reason == "encore"
+    clear_pause(projet, origin=ORIGIN_AGENT, session="s-agent-1")
+    assert read_pause(projet).flags == ()
+    # Un humain remplace n'importe quelle pause (agent, règle) et lève tout.
+    write_pause(projet, mode=DRAIN, actor="cli", origin=ORIGIN_AGENT, session="s-agent-1")
+    write_pause(projet, mode="hold", actor="guilhem", origin=ORIGIN_HUMAN, reason="à moi")
+    assert _flag(projet).origin == ORIGIN_HUMAN and _flag(projet).mode == "hold"
+    write_pause(projet, mode=DRAIN, actor="usage-rule:day:x", origin=PAUSE_ORIGIN)
+    write_pause(projet, mode=DRAIN, actor="guilhem", origin=ORIGIN_HUMAN)
+    clear_pause(projet, origin=ORIGIN_HUMAN)
+    assert read_pause(projet).flags == ()
+    # Le code du kit (sans origine) pose et remplace comme avant.
+    write_pause(projet, mode=DRAIN, actor="kit")
+    write_pause(projet, mode="hold", actor="kit")
+    assert _flag(projet).mode == "hold"
+
+
+def test_the_orchestrate_cli_applies_the_same_rule_for_pause_and_resume(
+    projet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_tick(projet)
+    before = _flag(projet)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s-agent-cli-1")
+    paused = runner.invoke(app, ["orchestrate", "pause", "--project-root", str(projet), "--actor", "usage-rule:day:gros"])
+    assert paused.exit_code == 1 and "ne la remplace pas" in paused.output
+    resumed = runner.invoke(app, ["orchestrate", "resume", "--project-root", str(projet)])
+    assert resumed.exit_code == 1
+    assert _flag(projet) == before  # ni remplacée par l'option --actor, ni levée
+
+
+def test_a_partial_lift_keeps_the_owner_origin_actor_and_reason_of_the_flag(projet: Path) -> None:
+    write_pause(
+        projet, mode=DRAIN, tasks=("A", "B"), actor="cli", reason="deux tâches", origin=ORIGIN_AGENT, session="s-agent-1"
+    )
+    clear_pause(projet, tasks=("A",), origin=ORIGIN_AGENT, session="s-agent-1")
+    flag = _flag(projet)
+    assert flag.tasks == ("B",) and (flag.origin, flag.session, flag.actor, flag.reason) == (
+        ORIGIN_AGENT, "s-agent-1", "cli", "deux tâches"
+    )
+    clear_pause(projet, origin=ORIGIN_AGENT, session="s-agent-1")  # la session lève encore le reste de SA pause
+    assert read_pause(projet).flags == ()
+
+
+def test_a_partial_lift_does_not_strip_a_rule_pause_of_its_origin(projet: Path) -> None:
+    write_pause(projet, mode=DRAIN, tasks=("A", "B"), actor="usage-rule:task:t", reason="règle", origin=PAUSE_ORIGIN)
+    clear_pause(projet, tasks=("A",), origin=ORIGIN_HUMAN)
+    flag = _flag(projet)
+    assert flag.tasks == ("B",) and flag.origin == PAUSE_ORIGIN and flag.actor == "usage-rule:task:t" and flag.reason == "règle"
+    with pytest.raises(PauseError):
+        clear_pause(projet, origin=ORIGIN_AGENT, session="s-agent-1")

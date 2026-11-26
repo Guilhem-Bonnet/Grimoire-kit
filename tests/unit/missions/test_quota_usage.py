@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from grimoire.missions.quota_usage import SESSION_EVENTS, record_consumption, tracking
+from grimoire.missions.admission import QUOTA_CONSUMED_EVENT, Admit, Defer, admit, derive_view, load_capacity
+from grimoire.missions.quota_usage import SESSION_EVENTS, record_consumption
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
-from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT, consumption_today
 
 ACC = "la consommation est comptée"
 STANDARD = Path("_grimoire/standard")
@@ -115,7 +115,8 @@ def test_a_session_that_grows_adds_only_the_difference(tmp_path: Path, service: 
     _journal(tmp_path, "x", SESSION_A, 5)
     record_consumption(service, now=_now())
     assert [e["tokens"] for e in _consumed(service)] == [3000, 4500]
-    assert consumption_today(service.ledger.list_events(), datetime.now(UTC))["tokens"] == 7500
+    capacity = load_capacity(service.home_root)
+    assert derive_view(service.ledger, capacity, now=datetime.now(UTC)).tokens.tokens == 7500
 
 
 def test_an_unreadable_session_says_unknown_with_its_reason_once_then_heals(tmp_path: Path, service: TaskService) -> None:
@@ -126,11 +127,13 @@ def test_an_unreadable_session_says_unknown_with_its_reason_once_then_heals(tmp_
     (event,) = _consumed(service)
     assert event["status"] == "unknown" and event["tokens"] is None and "introuvable" in str(event["reason"])
     assert "ailleurs" in str(event["reason"])
-    assert tracking(service.ledger.list_events())["unknown"] == 1
+    capacity = load_capacity(service.home_root)
+    view = derive_view(service.ledger, capacity, now=datetime.now(UTC))
+    assert view.tokens.status == "unknown" and view.tokens.unknown_sessions == 1
     _journal(tmp_path, "x", SESSION_A, 1)
     record_consumption(service, now=_now())
-    today = consumption_today(service.ledger.list_events(), datetime.now(UTC))
-    assert today["tokens"] == 1500 and today["tokens_complete"] is True
+    view = derive_view(service.ledger, capacity, now=datetime.now(UTC))
+    assert view.tokens.tokens == 1500 and view.tokens.status == "lower_bound"
 
 
 def test_a_brand_new_session_is_not_declared_unknown(service: TaskService) -> None:
@@ -190,15 +193,70 @@ def test_a_known_session_that_is_old_and_unchanged_is_no_longer_examined(tmp_pat
     assert record_consumption(service, now=datetime.now(UTC) + timedelta(days=40)) == []
 
 
-# ── Ce que les règles et la fiche Capacité lisent ─────────────────────────────
+# ── L'admission lit enfin une consommation ────────────────────────────────────
 
 
-def test_the_recorded_consumption_is_what_the_usage_rules_read(tmp_path: Path, service: TaskService) -> None:
+def _admission(service: TaskService, tid: str, text: str, *, autonomous: bool = True) -> Admit | Defer:
+    (service.home_root / STANDARD / "capacity.yaml").write_text(f"version: 1\nquota:\n{text}", encoding="utf-8")
+    capacity = load_capacity(service.home_root)
+    view = derive_view(service.ledger, capacity, now=datetime.now(UTC))
+    return admit(service.require(tid), None, capacity, view, autonomous=autonomous)
+
+
+def test_a_finite_quota_is_now_usable_below_and_above_the_ceiling(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    other = _task(service, "autre")
+    _launch(service, other, SESSION_A)
+    _journal(tmp_path, "x", SESSION_A, 3)  # 4500 tokens
+    record_consumption(service, now=_now())
+    assert isinstance(_admission(service, tid, "  tokens_per_day: 10000\n"), Admit)
+    over = _admission(service, tid, "  tokens_per_day: 4000\n")
+    assert isinstance(over, Defer) and over.reason == "quota"
+
+
+def test_partly_unknown_consumption_refuses_by_default_and_count_known_relaxes_it(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
     other = _task(service, "autre")
     _launch(service, other, SESSION_A)
     _launch(service, other, SESSION_B)
-    _journal(tmp_path, "x", SESSION_A, 3)  # 4500 jetons ; SESSION_B n'a pas de journal
+    _journal(tmp_path, "x", SESSION_A, 1)  # SESSION_B n'a pas de journal
     record_consumption(service, now=_now())
-    today = consumption_today(service.ledger.list_events(), datetime.now(UTC))
-    assert today["tokens"] == 4500 and today["tokens_complete"] is False  # une session sans chiffre : borne basse
-    assert today["usd"] > 0 and today["sessions"] == 2
+    refused = _admission(service, tid, "  tokens_per_day: 10000\n")
+    assert isinstance(refused, Defer) and refused.reason == "unknown" and "partiellement" in refused.detail
+    assert isinstance(_admission(service, tid, "  tokens_per_day: 10000\n", autonomous=False), Admit)
+    assert isinstance(_admission(service, tid, "  tokens_per_day: 10000\n  on_unknown: count_known\n"), Admit)
+    reached = _admission(service, tid, "  tokens_per_day: 1000\n  on_unknown: refuse\n")
+    assert isinstance(reached, Defer) and reached.reason == "quota"  # atteint sur le connu seul
+
+
+def test_on_unknown_is_closed_by_default_and_refuses_a_bad_word(service: TaskService) -> None:
+    (service.home_root / STANDARD / "capacity.yaml").write_text(
+        "version: 1\nquota:\n  tokens_per_day: 5\n  on_unknown: ignorer\n", encoding="utf-8"
+    )
+    assert "quota" in load_capacity(service.home_root).errors
+    (service.home_root / STANDARD / "capacity.yaml").write_text("version: 1\nquota:\n  tokens_per_day: 5\n", encoding="utf-8")
+    assert load_capacity(service.home_root).on_unknown == "refuse"
+
+
+def test_the_tick_step_records_and_reports_unknown_sessions(tmp_path: Path, service: TaskService) -> None:
+    from grimoire.missions.orchestrate import _consumption_stage
+
+    tid = _task(service)
+    _launch(service, tid, SESSION_A)
+    _launch(service, tid, SESSION_B)  # sans journal, et assez vieille pour être déclarée inconnue
+    _journal(tmp_path, "x", SESSION_A, 1)
+    attention: list[str] = []
+    _consumption_stage(service, "plan", attention)
+    assert _consumed(service) == []  # en plan, rien ne s'écrit
+    _consumption_stage(service, "apply", attention)
+    assert [e["tokens"] for e in _consumed(service)] == [1500]
+    assert attention == []  # la session B est neuve : pas encore inconnue
+    import grimoire.missions.quota_usage as quota
+
+    original = quota.GRACE
+    quota.GRACE = timedelta(0)
+    try:
+        _consumption_stage(service, "apply", attention)
+    finally:
+        quota.GRACE = original
+    assert any("inconnue" in line for line in attention)
