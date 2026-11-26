@@ -1,0 +1,1 @@
+- feat(cockpit): la mascotte est la présence de l'assistant dans le chat, avec ou sans vocal : drapeau allumé, elle vit sur les états du fil (réfléchit, écrit, attend ta réponse, a terminé), un libellé visible dit ce qu'elle fait, une pastille la remplace sans WebGL 2, et la fiche « Fonctions en test » dit où elle est et si la voix est installée (#1197, #1343)
