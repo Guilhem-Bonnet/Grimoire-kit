@@ -25,14 +25,28 @@ const FEATURES = [
       + 'Il est en test : aucune tâche n’est lancée, et tu peux l’éteindre à tout moment.',
   },
   {
-    name: 'mascotte', title: 'Mascotte vocale', action: 'Activer la mascotte', reload: false,
-    note: 'Une petite mascotte, le slime d’encre, apparaît dans le chat quand le mode vocal est actif : elle écoute '
-      + 'pendant la dictée, réfléchit pendant un tour de l’orchestrateur, parle pendant la lecture d’un message '
-      + 'vocal. Elle ne lit que des niveaux sonores : rien n’est enregistré ni envoyé, et le micro reste celui de la dictée.',
+    name: 'mascotte', title: 'Mascotte', action: 'Activer la mascotte', reload: false,
+    where: 'Où : dans le fil de l’orchestrateur, en bas du cockpit.',
+    note: 'Une petite mascotte, le slime d’encre, est la présence de l’assistant dans le chat, avec ou sans voix : '
+      + 'elle réfléchit pendant un tour de l’orchestrateur, écrit quand il produit du texte ou modifie des fichiers, '
+      + 'attend ta réponse quand une question ou une permission est en suspens, et un libellé dit ce qu’elle fait. '
+      + 'Avec le vocal, elle écoute pendant la dictée et parle pendant la lecture d’un message vocal ; elle ne lit que '
+      + 'des niveaux sonores : rien n’est enregistré ni envoyé, et le micro reste celui de la dictée.',
   },
 ];
 
-function featureCard(feature, state, ctx) {
+/** « voix : disponible » ou « voix : non installée » (avec la raison que le serveur donne). */
+async function voiceLine(ctx) {
+  try {
+    const config = await ctx.api.voiceConfig();
+    if (config && config.available === true) return 'Voix : disponible.';
+    return `Voix : non installée${config && config.reason ? ` (${config.reason})` : ''}.`;
+  } catch {
+    return 'Voix : état inconnu.';
+  }
+}
+
+function featureCard(feature, state, ctx, extra) {
   const toggle = el('button', 'ft-switch', null, {
     type: 'button', role: 'switch', 'aria-checked': String(state[feature.name] === true), 'data-feature': feature.name,
   });
@@ -58,7 +72,9 @@ function featureCard(feature, state, ctx) {
   });
 
   const card = el('section', 'ft-card', null, { 'aria-label': feature.title });
-  card.append(el('div', 'ft-line'), el('p', 'ft-note', feature.note), toggle, error);
+  const facts = [feature.where, extra].filter(Boolean);
+  card.append(el('div', 'ft-line'), el('p', 'ft-note', feature.note),
+    ...facts.map((text) => el('p', 'ft-note ft-fact', text)), toggle, error);
   card.firstChild.append(el('h3', null, feature.title), badge('Test', 'warn', 'Fonction en test'));
   return card;
 }
@@ -75,10 +91,12 @@ export async function mount(root, ctx) {
   }
   if (ctx.signal.aborted) return;
 
+  const voice = await voiceLine(ctx);
+  if (ctx.signal.aborted) return;
   const wrap = el('div', 'ft-wrap');
   wrap.append(
     spaceHead('Fonctions en test', 'Ce qui n’est pas encore stable reste éteint tant que tu ne l’allumes pas.'),
-    ...FEATURES.map((feature) => featureCard(feature, state, ctx)),
+    ...FEATURES.map((feature) => featureCard(feature, state, ctx, feature.name === 'mascotte' ? voice : '')),
   );
   root.append(wrap);
 }
