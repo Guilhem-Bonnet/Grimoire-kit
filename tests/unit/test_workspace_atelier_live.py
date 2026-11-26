@@ -353,7 +353,7 @@ def test_the_mcp_server_offers_the_agent_no_way_to_validate_or_split() -> None:
         return register
 
     atelier_tools.register(tool, lambda **_: None)
-    assert names == ["atelier_suggest"]
+    assert names == ["atelier_suggest", "atelier_comment", "atelier_comments"]  # lot 3 : commenter et lire, jamais valider
     assert not hasattr(atelier_tools, "approve") and not hasattr(live, "approve_requirement")
 
 

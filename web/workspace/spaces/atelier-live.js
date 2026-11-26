@@ -98,7 +98,7 @@ function detail(row, say) {
 }
 
 /** Une ligne d'état par exigence ; `open` dit si son détail est ouvert, `toggle` retient son choix. */
-function liveLine(row, { open, toggle, say, more }) {
+function liveLine(row, { open, toggle, say, more, comments = 0 }) {
   const node = el('div', 'at-live', null, { 'data-live': row.id, 'data-state': row.state, role: 'group', 'aria-label': `État de ${row.id} : ${row.label}` });
   const line = el('div', 'at-live-row');
   const fold = el('button', 'at-live-toggle', null, { type: 'button', 'aria-expanded': String(open), 'data-act': 'toggle-detail', 'aria-label': `Détail de ${row.id}` });
@@ -107,6 +107,11 @@ function liveLine(row, { open, toggle, say, more }) {
   fold.append(el('span', 'at-muted', row.task_count ? plural(row.task_count, 'tâche', 'tâches') : 'aucune tâche'));
   if (row.task_count) fold.append(el('span', 'at-muted', plural(row.files, 'fichier', 'fichiers')));
   for (const gap of row.gaps) fold.append(badge(gap.label, 'warn', gap.detail || gap.label));
+  if (comments > 0) { // lot 3 : les fils ouverts sur cette exigence, d'un coup d'œil sur sa ligne d'état
+    const talk = badge(plural(comments, 'commentaire ouvert', 'commentaires ouverts'), 'acc');
+    talk.setAttribute('data-role', 'live-comments');
+    fold.append(talk);
+  }
   line.append(fold);
   let panel = null;
   const sync = (isOpen) => {
@@ -196,7 +201,8 @@ function previewPanel(data, { confirm, cancel }) {
  * de statut du document. Rend `{ line(req), toolbar, refresh }` : `line` pour chaque bloc d'exigence au rendu,
  * `toolbar` à poser dans l'en-tête, `refresh` pour relire l'état.
  */
-export function createLiveDoc(ctx, slug, { sheet, status }) {
+export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) {
+  const commentsOf = (req) => comments(req) || 0; // lot 3 : fils ouverts sur l'exigence, comptés par le document
   const state = { trace: null, open: new Set() };
   const say = (text) => { status.textContent = text; };
   const toolbar = el('div', 'at-actions at-live-bar', null, { 'data-role': 'live-bar' });
@@ -222,7 +228,10 @@ export function createLiveDoc(ctx, slug, { sheet, status }) {
   const line = (req) => {
     const row = rowOf(req);
     if (!row) return el('div', 'at-live', null, { 'data-live': req, hidden: '' }); // pas (encore) dans la trace
-    return liveLine(row, { open: state.open.has(req), toggle: (on) => { if (on) state.open.add(req); else state.open.delete(req); }, say, more });
+    return liveLine(row, {
+      open: state.open.has(req), toggle: (on) => { if (on) state.open.add(req); else state.open.delete(req); }, say, more,
+      comments: commentsOf(req),
+    });
   };
 
   const paint = () => {
