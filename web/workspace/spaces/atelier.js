@@ -16,6 +16,8 @@ import { renderMarkdown } from '../markdown.js';
 import { badge, icon } from '../shell.js';
 import { createLiveDoc } from './atelier-live.js';
 import { createComments } from './atelier-comments.js';
+import { createAssistant } from './atelier-assistant.js';
+import { setAtelierContext } from '../atelier-context.js';
 
 
 /** Ordre des groupes de la bibliothèque ; `archive` vit dans une ligne repliable. */
@@ -372,6 +374,16 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message) });
   const liveDoc = createLiveDoc(ctx, slug, { sheet, status, comments: (req) => cm.openOn(reqBlock.get(req)) });
   let focusId = phaseFocus || state.doc.phases[0].id;
+  // Lot 5 : le chat sait quel chantier est ouvert (et quelle phase) ; la barre de l'assistant guide le cadrage.
+  setAtelierContext({ slug, phase: focusId });
+  ctx.signal.addEventListener('abort', () => setAtelierContext(null));
+  const assist = createAssistant(ctx, slug, {
+    focus: () => focusId,
+    goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
+    reload: (message) => reload(message),
+    say: (message) => { status.textContent = message; },
+    editing: () => Boolean(sheet.querySelector('.is-editing')),
+  });
   const pendingNote = el('span', 'at-pending', null, { 'data-role': 'doc-sugg-count' });
   const commentNote = el('span', 'at-pending', null, { 'data-role': 'doc-comment-count' });
   const countNote = () => {
@@ -389,6 +401,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       button.append(PHASE_NAMES[p.id] || p.title);
       button.addEventListener('click', () => {
         focusId = p.id;
+        setAtelierContext({ slug, phase: focusId });
+        assist.refresh();
         phaseNav();
         const heading = sheet.querySelector(`[data-section="${p.id}"] h2`);
         if (heading) { heading.scrollIntoView({ block: 'start' }); heading.focus(); }
@@ -517,7 +531,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       tabindex: '0', 'data-block': block.id, 'data-kind': block.kind,
       'aria-label': `Modifier le bloc : ${blockTitle(block)}`,
     });
-    host.append(renderBlock(block), cm.addButton(phase, block, host, blockTitle(block)));
+    host.append(renderBlock(block), cm.addButton(phase, block, host, blockTitle(block)), assist.challenge(block));
     const edit = () => { if (!host.classList.contains('is-editing')) editBlock(host, phase, block); };
     // Sélectionner un passage (pour le commenter) ne doit pas ouvrir l'édition du bloc : seul un clic sans sélection le fait.
     host.addEventListener('click', () => {
@@ -591,7 +605,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   left.append(back, title, meta);
   head.append(left);
   drawAll();
-  root.replaceChildren(page(ctx, head, liveDoc.toolbar, nav, status, sheet));
+  root.replaceChildren(page(ctx, head, liveDoc.toolbar, nav, status, sheet, assist.element));
   liveDoc.refresh();
   if (phaseFocus) sheet.querySelector(`[data-section="${phaseFocus}"] h2`)?.scrollIntoView({ block: 'start' });
 }

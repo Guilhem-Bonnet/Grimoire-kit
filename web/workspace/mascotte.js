@@ -1,7 +1,7 @@
-// La mascotte vocale du cockpit : le « slime d'encre » v3.1 (#1197), rendu en WebGL2 sur un champ de distance.
+// La mascotte du cockpit : le « slime d'encre » v3.1 (#1197), rendu en WebGL2 sur un champ de distance.
 //
 //   const mascotte = createMascotte(canvas, { sample, onFallback });
-//   mascotte.setAction('ecoute');                // repos | ecoute | reflechit | parle
+//   mascotte.setAction('ecrit');   // repos | ecoute | reflechit | parle | ecrit | question | livre
 //   mascotte.setLevels(niveau, bandes);          // niveau 0..1, huit bandes 0..1 (ou `options.sample`, tiré à chaque image)
 //   mascotte.start(); mascotte.stop(); mascotte.destroy();
 //
@@ -10,7 +10,9 @@
 // onde qui suit la voix ; qui réfléchit : un nuage et des bulles.
 //
 // Sobriété : la boucle ne tourne que si la mascotte est démarrée, visible à l'écran ET que l'onglet est affiché, et
-// qu'il y a quelque chose à montrer (une action en cours, une transition). Au repos stable : une image, puis arrêt.
+// qu'il y a quelque chose à montrer. Une forme figée une fois arrivée (repos, question en attente, livré) : animation
+// d'entrée, une image, puis arrêt, même pendant des minutes. Une forme qui bouge d'elle-même (réfléchit, écrit) passe
+// à une cadence très basse après l'entrée ; seules l'écoute et la parole (suivies à la voix) tournent à plein régime.
 // `prefers-reduced-motion` ralentit tout et plafonne la cadence. Qualité adaptée à la carte graphique (échelle du rendu).
 //
 // Sans WebGL2, ou si le shader ne compile pas, `createMascotte` ne lève rien : l'objet rendu est inerte
@@ -21,8 +23,8 @@
 
 import { FRAGMENT, VERTEX } from './mascotte_shader.js';
 import {
-  SHAPE_COUNT, adaptScale, clamp01, isSettled, isVocalAction, labelFor, lerp, needsVia, shouldRun,
-  smoothBands, smoothValue, stepWeights,
+  SHAPE_COUNT, adaptScale, clamp01, frameIntervalMs, isSettled, isWiredAction, labelFor, lerp, needsVia, penPose,
+  shouldRun, smoothBands, smoothValue, stepWeights,
 } from './mascotte_logic.js';
 
 const UNIFORMS = [
@@ -33,8 +35,6 @@ const UNIFORMS = [
 
 /** Un niveau poussé par `setLevels` plus vieux que cela est tenu pour éteint (l'appelant a cessé de le nourrir). */
 const LEVELS_TTL_MS = 300;
-/** Cadence plafonnée sous `prefers-reduced-motion`. */
-const REDUCED_FRAME_MS = 50;
 
 function inert(canvas, reason, onFallback) {
   let told = false;
@@ -109,12 +109,13 @@ export function createMascotte(canvas, options = {}) {
   let settled = false;
   let dirty = true;
 
-  // Uniformes que le vocal ne pilote pas : zéros, ce qui désactive les formes branchées plus tard (clones, stylo).
+  // Uniformes des formes non branchées (clones de « délègue », trois points de « attend ») : zéros, elles sont éteintes.
+  // Le stylo de « écrit » est piloté par `penPose`.
   const cl = new Float32Array(24);
   const nk = new Float32Array(12);
   const sat = new Float32Array(24);
   const home = [0, 0, 0];
-  const pen = { tip: [0, -1, 0], X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
+  let pen = penPose(0);
 
   // ── Visibilité, taille, qualité ───────────────────────────────────────────────────────────────────────────────
   let started = false;
@@ -122,6 +123,7 @@ export function createMascotte(canvas, options = {}) {
   let failed = false;
   let visible = typeof IntersectionObserver !== 'function'; // sans observateur : supposée visible, l'onglet caché suffit
   let raf = 0;
+  let timer = 0; // l'attente entre deux images d'une cadence réduite : aucun réveil en continu
   let last = 0;
   let frames = 0;
   let scale = 0.7;
@@ -137,7 +139,7 @@ export function createMascotte(canvas, options = {}) {
   const run = () => shouldRun({ started, destroyed, failed, visible, docHidden: document.hidden, action, settled, dirty });
 
   function wake() {
-    if (raf || !run()) return;
+    if (raf || timer || !run()) return;
     last = performance.now();
     raf = requestAnimationFrame(frame);
   }
@@ -182,6 +184,8 @@ export function createMascotte(canvas, options = {}) {
   function stopLoop() {
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
+    if (timer) clearTimeout(timer);
+    timer = 0;
   }
 
   // ── Un pas de dynamique : ressort des formes, squash and stretch, niveaux lissés ────────────────────────────
@@ -197,7 +201,9 @@ export function createMascotte(canvas, options = {}) {
     fx.wobKick = Math.max(0, fx.wobKick - dt * 1.6);
     wobbleTarget = Math.min(1, 0.06 + speed * 0.3 + Math.abs(vy) * 0.1 + fx.wobKick);
     wobble = lerp(wobble, wobbleTarget, 1 - Math.exp(-6 * dt));
-    swirl = lerp(swirl, action === 'reflechit' ? 3.5 : 1, 1 - Math.exp(-2 * dt));
+    const swirlTarget = action === 'reflechit' ? 3.5 : 1;
+    swirl = lerp(swirl, swirlTarget, 1 - Math.exp(-2 * dt));
+    pen = penPose(fx.now);
 
     // Niveaux : ceux que l'appelant tire (`sample`) ou pousse (`setLevels`) ; seuls l'écoute et la parole en ont.
     let level = 0;
@@ -216,7 +222,7 @@ export function createMascotte(canvas, options = {}) {
     }
     audio = smoothValue(audio, level, dt, 14, 14);
     const peak = smoothBands(bands, rawBands, dt);
-    settled = isSettled({ action, speed, vy, sy, audio, peak, wobble, wobbleTarget, swirl, via });
+    settled = isSettled({ action, speed, vy, sy, audio, peak, wobble, wobbleTarget, swirl, swirlTarget, via });
   }
 
   function draw() {
@@ -252,9 +258,13 @@ export function createMascotte(canvas, options = {}) {
     raf = 0;
     if (!run()) return;
     const ms = now - last;
-    if (reduced && ms < REDUCED_FRAME_MS) { raf = requestAnimationFrame(frame); return; }
+    const interval = frameIntervalMs({ action, settled, reduced });
+    if (ms < interval) { // cadence réduite : on attend sans réveiller la page à chaque image
+      timer = setTimeout(() => { timer = 0; raf = requestAnimationFrame(frame); }, Math.max(1, interval - ms));
+      return;
+    }
     last = now;
-    let dt = Math.min(0.05, ms / 1000);
+    let dt = Math.min(interval > 60 ? 0.15 : 0.05, ms / 1000);
     if (reduced) dt *= 0.35;
     step(dt);
     try {
@@ -272,15 +282,19 @@ export function createMascotte(canvas, options = {}) {
       const next = adaptScale(scale, averageMs);
       if (next !== scale) { scale = next; resize(); }
     }
-    if (run()) raf = requestAnimationFrame(frame);
+    if (run()) {
+      const wait = frameIntervalMs({ action, settled, reduced });
+      if (wait > 60) timer = setTimeout(() => { timer = 0; raf = requestAnimationFrame(frame); }, wait);
+      else raf = requestAnimationFrame(frame);
+    }
   }
 
   return {
     supported: true,
     reason: '',
-    /** Change d'action (quatre pour le vocal). Rend faux, sans rien changer, pour un nom inconnu ou non branché. */
+    /** Change d'action (sept : celles que le fil et le vocal disent). Rend faux, sans rien changer, pour un nom inconnu ou non branché. */
     setAction(name) {
-      if (!isVocalAction(name) || destroyed) return false;
+      if (!isWiredAction(name) || destroyed) return false;
       if (name === action) return true;
       const previous = action;
       action = name;
@@ -290,6 +304,7 @@ export function createMascotte(canvas, options = {}) {
       fx.wobKick = 0.7;
       settled = false;
       paintLabel();
+      if (timer) { clearTimeout(timer); timer = 0; } // une nouvelle action ne attend pas la cadence réduite
       wake();
       return true;
     },
@@ -324,6 +339,6 @@ export function createMascotte(canvas, options = {}) {
       try { const lose = gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); } catch { /* sans extension */ }
     },
     /** Pour les tests et la mesure : images posées, boucle active, échelle du rendu, action. */
-    stats: () => ({ frames, running: raf !== 0, scale, action, settled }),
+    stats: () => ({ frames, running: raf !== 0 || timer !== 0, scale, action, settled }),
   };
 }

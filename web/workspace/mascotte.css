@@ -33,3 +33,19 @@
   color: var(--termink);
   font-size: var(--t-s);
 }
+
+/* Sans WebGL 2 (ou shader refusé) : une pastille sobre à la place du canevas, le libellé reste. */
+.chat-mascotte-dot {
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 var(--sp-2);
+  border-radius: 50%;
+  background: var(--mascotte-night-1);
+  box-shadow: 0 0 0 2px var(--line, currentColor);
+}
+
+.chat-mascotte[data-action="question"] .chat-mascotte-dot {
+  background: var(--acc);
+}

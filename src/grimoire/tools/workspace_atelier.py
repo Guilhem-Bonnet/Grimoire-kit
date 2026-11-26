@@ -19,6 +19,8 @@ Routes (préfixe ``/api/workspace/``) :
   :mod:`grimoire.tools.workspace_atelier_suggestions` (``POST`` rend ses refus par :func:`post_http`).
 - ``GET|POST atelier/chantiers/<slug>/comments``, ``POST …/comments/<id>`` : lot 3, les commentaires ancrés, voir
   :mod:`grimoire.tools.workspace_atelier_comments` (l'auteur est toujours « humain » ici ; l'agent passe par l'outil MCP).
+- ``GET atelier/chantiers/<slug>/entretien``, ``POST …/assistant`` : lot 5, l'assistant qui guide le cadrage, voir
+  :mod:`grimoire.tools.workspace_atelier_assistant` (le geste est un tour du chat ; la consigne vient d'une liste fermée).
 - ``GET atelier/chantiers/<slug>/trace``, ``GET|POST …/decoupage`` : lot 4, le document vivant, voir
   :mod:`grimoire.tools.workspace_atelier_trace`. Aucune route ne valide une exigence : c'est un geste de la MOA, au terminal.
 """
@@ -352,6 +354,10 @@ def get(root: Path, path: str, query: dict[str, list[str]]) -> Any:
         from grimoire.tools import workspace_atelier_comments as comments
 
         return comments.listing(root, rest[1])
+    if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "entretien":
+        from grimoire.tools import workspace_atelier_assistant as assistant
+
+        return assistant.entretien_view(root, rest[1])  # lot 5 : l'assistant, lecture seule
     if len(rest) == 3 and rest[0] == "chantiers" and rest[2] in ("trace", "decoupage"):
         from grimoire.tools import workspace_atelier_trace as live
 
@@ -380,6 +386,10 @@ def post(root: Path, path: str, body: dict[str, Any]) -> Any:
 
         # Lot 3 : l'auteur est celui du canal (cette route = l'humain), jamais un champ du corps.
         return comments.create(root, rest[1], body, "humain") if len(rest) == 3 else comments.act(root, rest[1], rest[3], body)
+    if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "assistant":
+        from grimoire.tools import workspace_atelier_assistant as assistant
+
+        return assistant.act(root, rest[1], body)  # lot 5 : un geste = un tour du chat ; aucune validation ici
     if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "decoupage":
         from grimoire.tools import workspace_atelier_trace as live
 

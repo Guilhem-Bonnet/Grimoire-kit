@@ -35,7 +35,9 @@ Règles, chacune prise sur le journal réel :
   (:attr:`FoldResult.held_by_other_tasks`) plutôt que de les taire. Sans fenêtre,
   tout le journal va à la tâche qui le replie en premier.
 
-Limite : seul le format de journal de Claude Code est lu. Un hôte sans source
+Limite : ce module lit le format de journal de Claude Code ; celui de Copilot
+(non vérifié) est lu par :mod:`grimoire.traces.copilot_usage`, qui replie ses
+traces ici. Un hôte sans source repliée et sans source
 vérifiée (``local_token_usage`` de :mod:`grimoire.hosts.capabilities`) est déclaré
 ``unavailable`` par :func:`task_usage`, pas rempli d'estimations.
 """
@@ -63,6 +65,17 @@ PricingLookup = Callable[[str], "ModelPricing | None"]
 
 #: Valeur de ``usage_source`` pour un appel replié du journal de session Claude Code.
 SOURCE_CLAUDE_TRANSCRIPT = "claude-code-transcript"
+#: Valeur de ``usage_source`` pour une session Copilot repliée (:mod:`grimoire.traces.copilot_usage`, non vérifié).
+SOURCE_COPILOT_SESSION = "copilot-session"
+COPILOT_UNVERIFIED_NOTE = "non vérifié sur un vrai Copilot : format lu d'après les fixtures du dépôt, aucune capture réelle"
+#: Les sources dont les traces repliées font l'usage d'une tâche.
+FOLDED_SOURCES: tuple[str, ...] = (SOURCE_CLAUDE_TRANSCRIPT, SOURCE_COPILOT_SESSION)
+#: Hôte (valeur de ``HostId``) → source d'usage que le kit sait lire dans son journal de session.
+#: Un hôte absent d'ici n'a aucun lecteur : sa matrice de capacités rend jetons et flotte « non pris en charge ».
+USAGE_SOURCE_BY_HOST: dict[str, str] = {
+    "host-claude-code-cli": SOURCE_CLAUDE_TRANSCRIPT,
+    "host-github-copilot": SOURCE_COPILOT_SESSION,
+}
 SOURCE_TAG_PREFIX = "usage.source:"
 CACHE_READ_TAG_PREFIX = "usage.cache_read:"
 CACHE_CREATION_TAG_PREFIX = "usage.cache_creation:"
@@ -477,7 +490,8 @@ def task_usage(
     """Les tokens et le coût d'une tâche (*traces* : celles de la tâche), avec la provenance de chaque chiffre.
 
     ``usage_source`` dit d'où vient le chiffre : ``claude-code-transcript``
-    (journal de l'hôte), ``reported`` (seulement le JSON d'un ouvrier ou un appel
+    (journal de Claude Code), ``copilot-session`` (journal de Copilot, non
+    vérifié sur un vrai Copilot), ``mixed`` (les deux), ``reported`` (seulement le JSON d'un ouvrier ou un appel
     déclaré à la main), ``unavailable`` (l'hôte de la tâche n'a pas de source
     vérifiée, *host_usage_available* est ``False``) ou ``none`` (rien replié).
     ``cost_known`` n'est vrai que si tous les appels comptés sont tarifés.
@@ -491,13 +505,16 @@ def task_usage(
     vues des mêmes dépenses) : ils sont exposés côte à côte, et un écart
     supérieur à :data:`DISCREPANCY_RATIO` est signalé dans ``discrepancy``.
     """
-    folded = [t for t in traces if _tag_value(t.tags, SOURCE_TAG_PREFIX) == SOURCE_CLAUDE_TRANSCRIPT]
+    folded = [t for t in traces if _tag_value(t.tags, SOURCE_TAG_PREFIX) in FOLDED_SOURCES]
     reported = [t for t in traces if t.recipe_id in REPORTED_RECIPE_IDS]
     cost = Cost.total(_trace_cost(t, pricing_for) for t in folded)
     reported_cost = Cost.total(t.token_usage.cost for t in reported)
+    folded_sources = {_tag_value(t.tags, SOURCE_TAG_PREFIX) for t in folded}
 
-    if folded:
-        usage_source = SOURCE_CLAUDE_TRANSCRIPT
+    if len(folded_sources) > 1:
+        usage_source = "mixed"
+    elif folded:
+        usage_source = next(iter(folded_sources))
     elif reported:
         usage_source = "reported"
     elif host_usage_available is False:
@@ -518,7 +535,7 @@ def task_usage(
                 "relative_gap": round(gap, 4),
             }
 
-    return {
+    result: dict[str, Any] = {
         "usage_source": usage_source,
         "calls": len(folded),
         "input_tokens": sum(t.token_usage.prompt_tokens for t in folded),
@@ -542,6 +559,11 @@ def task_usage(
         ),
         "discrepancy": discrepancy,
     }
+    if SOURCE_COPILOT_SESSION in folded_sources:
+        # Le format du journal Copilot n'a été lu que dans des fixtures : le chiffre le dit.
+        result["verified"] = False
+        result["note"] = COPILOT_UNVERIFIED_NOTE
+    return result
 
 
 #: Rendu d'un montant ou d'un total que le ledger ne permet pas d'affirmer.
@@ -562,7 +584,7 @@ def statusline_segment(traces: Sequence[TraceRecord], *, host_usage_available: b
     * un coût inconnu s'écrit ``n/a``, jamais ``0``.
     """
     usage = task_usage(traces, host_usage_available=host_usage_available)
-    if usage["usage_source"] != SOURCE_CLAUDE_TRANSCRIPT or not usage["calls"]:
+    if usage["usage_source"] not in (*FOLDED_SOURCES, "mixed") or not usage["calls"]:
         return STATUSLINE_UNKNOWN
     status = usage["cost_status"]
     if status == "exact":

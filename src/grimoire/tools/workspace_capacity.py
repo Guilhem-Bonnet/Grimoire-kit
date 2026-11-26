@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.missions.admission import (
     Capacity,
     Defer,
@@ -167,6 +168,18 @@ def _queue(plan: QueuePlan, titles: dict[str, str]) -> list[dict[str, Any]]:
 
 
 def capacity_view(
+    project_root: Path,
+    *,
+    now: datetime | None = None,
+    probe: Callable[[], HostReading | None] = read_host,
+) -> dict[str, Any]:
+    """:func:`_capacity_view` dans une lecture d'affichage : le registre de fournisseurs, que le plan relit
+    64 fois, n'est lu et analysé qu'une fois par changement du fichier (#1243)."""
+    with file_memo.view_scope():
+        return _capacity_view(project_root, now=now, probe=probe)
+
+
+def _capacity_view(
     project_root: Path,
     *,
     now: datetime | None = None,

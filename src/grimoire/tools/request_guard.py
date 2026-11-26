@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "LOOPBACK_NAMES",
+    "SCOPE_HEADER",
     "SESSION_HEADER",
     "SESSION_SCRIPT",
     "SESSION_SCRIPT_PATH",
@@ -45,6 +46,10 @@ __all__ = [
 
 #: En-tête exigé sur toute écriture : le jeton généré au démarrage du serveur.
 SESSION_HEADER = "X-Grimoire-Session"
+
+#: En-tête que la page pose sur ses écritures quand elle est en portée « Tous les projets » (valeur ``all``) :
+#: l'hôte refuse alors toute écriture sans projet explicite. Il ne donne aucun droit, il n'en retire qu'un.
+SCOPE_HEADER = "X-Grimoire-Scope"
 
 _session_token = secrets.token_urlsafe(32)
 

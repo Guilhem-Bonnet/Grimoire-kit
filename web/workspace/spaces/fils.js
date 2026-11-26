@@ -196,7 +196,9 @@ function renderDetail(ctx, session) {
   if (model.effort) add('Effort', model.effort);
   add('Dernier signe', session.last_at ? agoText(Date.now() - Date.parse(session.last_at)) : 'aucun signe lu');
   add('Tours', String((session.turns && session.turns.count) || 0));
-  if (session.usage) add('Jetons', `${session.usage.input || 0} entrée, ${session.usage.output || 0} sortie`);
+  // null = inconnu (session Copilot sans arrêt : pas d'entrée connue), jamais « 0 ».
+  if (session.usage) add('Jetons', `${session.usage.input == null ? 'inconnue' : session.usage.input} entrée, ${session.usage.output == null ? 'inconnue' : session.usage.output} sortie`);
+  if (session.host && session.host !== 'host-claude-code-cli') add('Hôte', session.host + (session.usage_verified === false ? ' (non vérifié)' : ''));
   if (session.usage) add('Coût', costText(session.usage.cost_usd !== undefined ? { status: session.usage.cost_usd === null ? 'unknown' : 'exact', usd: session.usage.cost_usd } : null));
   if (session.branch) add('Branche', session.branch);
   if (session.worktree) add('Worktree', session.worktree);
