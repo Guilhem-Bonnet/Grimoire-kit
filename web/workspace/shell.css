@@ -3536,6 +3536,54 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   color: var(--bad-mark);
 }
 
+/* Le mode conversation (chat et Atelier) : un bouton, l'indicateur du micro et l'état annoncé. */
+.conv {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.conv[hidden],
+.conv-mic[hidden] {
+  display: none;
+}
+
+.conv-toggle {
+  min-height: var(--hit);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.conv-toggle:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.conv-toggle[aria-pressed='true'] {
+  border-color: var(--bad-mark);
+  color: var(--bad-mark);
+}
+
+.conv-mic {
+  padding: 0 var(--sp-2);
+  border-radius: var(--r);
+  background: var(--bad-mark);
+  color: var(--onfill);
+  font-size: var(--t-s);
+  font-weight: 600;
+}
+
+.conv-status {
+  font-size: var(--t-s);
+}
+
 .chat-voice-out {
   display: flex;
   flex-direction: column;

@@ -3045,6 +3045,7 @@ const SHORTCUTS = [
   ['1 à 5', 'Ouvrir ou fermer un panneau'],
   ['⇧⌘F', 'Plein écran'],
   ['⇧⌘L', "Afficher ou masquer les panneaux d'atelier"],
+  ['Alt+Maj+V', "Mode conversation vocal (chat, assistant de l'Atelier) : ouvrir ou arrêter ; Échap l'arrête"],
   ['?', "Afficher cette aide"],
   ['Échap', 'Fermer la palette, un tiroir ou cette aide'],
 ];
