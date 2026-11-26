@@ -37,7 +37,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from grimoire.tools.project_registry import registry_home
-from grimoire.tools.request_guard import LOOPBACK_NAMES, SESSION_HEADER, check_mutation
+from grimoire.tools.request_guard import LOOPBACK_NAMES, SCOPE_HEADER, SESSION_HEADER, check_mutation
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     _Headers = Message[str, str]
 
 __all__ = [
+    "GLOBAL_SCOPE_REFUSAL",
     "Refusal",
     "cockpit_journal_path",
     "guard_write",
@@ -61,6 +62,34 @@ _TOKEN_HINT = (
     " — rechargez la page du cockpit : le jeton est servi avec elle "
     f"(en-tête {SESSION_HEADER})"
 )
+
+
+#: Refus d'une écriture sans projet cible venue d'une page en portée « Tous les projets ».
+GLOBAL_SCOPE_REFUSAL = (
+    "portée « Tous les projets » : écriture sans projet cible explicite refusée "
+    "(nommez le projet de la ligne dans ?project=<slug>)"
+)
+
+#: Écritures qui n'ont pas besoin de projet dans l'URL : l'entretien du registre (état de la machine, pas d'un
+#: dépôt) ; ``/api/memory`` nomme son projet dans le corps, vérifié par sa route.
+_UNTARGETED_OK = ("/api/projects/", "/api/memory")
+
+
+def declares_global_scope(headers: _Headers) -> bool:
+    """Vrai si la page se déclare en portée « Tous les projets » (en-tête ``X-Grimoire-Scope: all``)."""
+    return (headers.get(SCOPE_HEADER) or "").strip().lower() == "all"
+
+
+#: Liste FERMÉE des CALCULS envoyés en POST : ``/api/blueprints/<id>/validate|simulate`` ne touchent aucun disque
+#: (voir ``cmd_cockpit``) et lisent leur projet par le repli des lectures. Rien d'autre n'y entre : ``/compile`` écrit.
+_COMPUTE_SUFFIXES = ("/validate", "/simulate")
+
+
+def untargeted_route(route: str) -> bool:
+    """Vrai pour une route d'écriture qui exige un projet explicite dans l'URL."""
+    if route.startswith("/api/blueprints/") and route.endswith(_COMPUTE_SUFFIXES):
+        return False
+    return not route.startswith(_UNTARGETED_OK)
 
 
 def cockpit_journal_path() -> Path:
@@ -114,6 +143,8 @@ def guard_write(
         refused = (403, "cockpit local only")
     else:
         refused = check_mutation(headers, port, with_body=with_body)
+    if refused is None and project is None and declares_global_scope(headers) and untargeted_route(route):
+        refused = (400, GLOBAL_SCOPE_REFUSAL)
     if refused is not None and refused[1] == "jeton de session requis":
         refused = (refused[0], refused[1] + _TOKEN_HINT)
     event: dict[str, object] = {

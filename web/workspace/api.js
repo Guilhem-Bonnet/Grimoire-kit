@@ -72,7 +72,10 @@ class ApiError extends Error {
 export { ApiError };
 
 function withProject(path) {
-  if (!host.project) return path;
+  // Portée « Tous les projets » : le projet servi n'est la cible de rien. Une
+  // requête qui veut un projet le nomme elle-même ; sinon elle part sans (une
+  // lecture retombe sur le repli du serveur, une écriture est refusée plus bas).
+  if (!host.project || host.scopeAll) return path;
   // N'ajoute `project` que s'il est absent : un appel qui cible déjà un AUTRE
   // projet explicitement (`agents(project)`, `proposals(project)`, la Flotte
   // qui interroge chaque projet du registre l'un après l'autre) portait déjà
@@ -116,12 +119,57 @@ function liveMark(path, options) {
   return `${base}?${params.toString()}`;
 }
 
+// ── Cible explicite des écritures en portée « Tous les projets » ────────────
+//
+// Dans cette portée il n'existe pas de « projet courant » : chaque écriture
+// nomme le projet de la ligne ou de l'élément affiché, dans l'URL
+// (`?project=<slug>`) — ou, pour `/api/memory`, dans le corps, comme le lit
+// l'hôte. Sans cible, le client refuse avant d'envoyer quoi que ce soit : il ne
+// devine pas. L'entretien du registre (`/api/projects/…`) n'écrit dans aucun
+// dépôt visé par une page : il reste ouvert.
+const REGISTRY_WRITES = '/api/projects/';
+const MEMORY_WRITES = '/api/memory';
+// Liste FERMÉE des calculs envoyés en POST : valider et simuler un blueprint n'écrivent sur aucun
+// projet (`postOpen`). Rien d'autre n'y entre — `/compile` écrit et reste soumis à la cible.
+const COMPUTE_ROUTES = /^\/api\/blueprints\/[^/]+\/(validate|simulate)$/;
+const SCOPE_HEADER = 'X-Grimoire-Scope';
+
+function writeIsUntargeted(path, options) {
+  if (!host.scopeAll || host.kind !== 'cockpit') return false;
+  if (!options.method || options.method === 'GET') return false;
+  const [base, query = ''] = path.split('?');
+  if (base.startsWith(REGISTRY_WRITES)) return false;
+  if (COMPUTE_ROUTES.test(base)) return false;
+  if (new URLSearchParams(query).get('project')) return false;
+  if (base === MEMORY_WRITES) {
+    try { return !JSON.parse(options.body || '{}').project; } catch { return true; }
+  }
+  return true;
+}
+
+function untargetedError() {
+  return new ApiError(
+    'Portée « Tous les projets » : aucun projet cible pour ce geste — rien n’a été envoyé. '
+      + 'Ouvrez le projet concerné, ou lancez le geste depuis sa ligne.',
+    400,
+    { noTarget: true },
+  );
+}
+
 async function request(path, options = {}) {
+  if (writeIsUntargeted(path, options)) throw untargetedError();
   let response;
   try {
+    const writing = options.method && options.method !== 'GET';
     response = await fetch(withProject(liveMark(path, options)), {
-      headers: { 'Content-Type': 'application/json' },
       ...options,
+      // L'hôte sait ainsi que la page se déclare en portée globale et refuse
+      // toute écriture sans projet explicite, même si ce client se trompait.
+      headers: {
+        'Content-Type': 'application/json',
+        ...(writing && host.scopeAll ? { [SCOPE_HEADER]: 'all' } : {}),
+        ...(options.headers || {}),
+      },
     });
   } catch (cause) {
     // Une requête annulée par l'appelant (onglet masqué) n'est pas une panne.
@@ -585,8 +633,13 @@ export const api = {
   costModel: (model) => get('/api/cost-model', model ? { model } : undefined),
 
   // ── Écritures : atelier seulement, refusées côté cockpit ──────────────────
-  taskAction: (id, action, body) =>
-    post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body),
+  // `project` : le projet de la ligne affichée quand elle n'est pas celui que l'hôte sert (portée
+  // « Tous les projets ») — le geste prend alors la route du portefeuille, cible explicite dans
+  // l'URL et dans le corps. Sans lui, le geste vise le projet ouvert ; en portée globale il est refusé.
+  taskAction: (id, action, body, project) =>
+    (project
+      ? api.portfolioTaskAction(id, action, body, project)
+      : post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body)),
   // GAO-cockpit-tout-001 : « Tout accepter » — les tâches qu'une PR fusionnée a laissées en revue,
   // relues READY par le relecteur du tick. La lecture alimente le compteur du bouton ; l'écriture
   // exige la clé de contrôle, saisie par la personne (le jeton de session ne suffit pas à fermer
