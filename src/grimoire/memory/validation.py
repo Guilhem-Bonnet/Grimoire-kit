@@ -129,7 +129,9 @@ _REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # jusqu'à la fin du texte à chaque ouverture sans fermeture : quadratique.
     # En tête : un bloc caviardé raccourcit le texte que les motifs suivants
     # parcourent (un texte de blocs piégés n'est plus balayé qu'une fois).
-    ("private-key-block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("private-key-block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")),
+    # Première série : les formes à frontières de mot, inchangées. Elles gardent la
+    # main sur tout ce qu'elles reconnaissaient déjà, avec le même découpage.
     ("aws-access-key-id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
     # Jetons fine-grained : `github_pat_` + 22 caractères au moins (82 en pratique).
@@ -150,9 +152,71 @@ _REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Affectation générique. La valeur doit être compacte (aucune espace), longue
     # (douze caractères au moins) et contenir un chiffre : c'est ce qui distingue
     # `password: Tr0ub4dor3xKm9Qz` de `password policy is documented in ADR-004`.  # gitleaks:allow
+    # Le chiffre se cherche dans les 256 premiers caractères de la valeur : sans
+    # borne, chaque occurrence du nom dans une longue suite compacte la rescannerait
+    # jusqu'au bout (quadratique, 13 s sur 108 Ko de « password=password=… »).
     ("credential-assignment", re.compile(
         r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token|"
-        r"password|passwd|secret|token)\b\s*[:=]\s*[\"']?(?=[^\s\"']*\d)"
+        r"password|passwd|secret|token)\b\s*[:=]\s*[\"']?(?=[^\s\"']{0,256}\d)"
+        r"[A-Za-z0-9_\-+/=.~]{12,}[\"']?"
+    )),
+    #
+    # Seconde série : la valeur reconnue à sa FORME (préfixe, longueur, alphabet),
+    # pas au texte qui la touche. Les règles ci-dessus exigent une frontière de mot
+    # avant — et parfois après — la valeur : collée à une lettre, accentuée ou non,
+    # à un chiffre ou à un souligné, elle n'était pas caviardée du tout. Elles
+    # tournent APRÈS la première série, sur son résultat : la nouvelle détection ne
+    # peut qu'ajouter du caviardage, jamais en défaire ni en découper un autre.
+    # Même étiquette que la famille d'origine.
+    #
+    # Deux cas. Un préfixe assez singulier pour ne rien attraper d'ordinaire
+    # (`ghp_` + 30 alphanumériques, `xoxb-`, `eyJ` + trois segments) perd toute
+    # borne. Un préfixe qui termine aussi un mot courant (`sk-` dans « risk- »,
+    # `AKIA`, `github_pat_` dans un nom de test) ne se reconnaît collé que si la
+    # composition est celle d'une vraie valeur.
+    #
+    # Chaque quantificateur y est borné, possessif, ou ne peut pas contenir un autre
+    # début de motif : la valeur collée est cherchée à chaque occurrence du préfixe
+    # et l'entrée est hostile (`py/polynomial-redos`).
+    ("github-token", re.compile(r"gh[pousr]_[A-Za-z0-9]{30,}")),
+    ("slack-token", re.compile(r"xox[abprs]-[A-Za-z0-9-]{12,}")),
+    # `github_pat_` collé à un mot (`test_github_pat_…` est un nom de test) : seule
+    # la forme réelle, 22 alphanumériques, un souligné, puis 20 au moins.
+    ("github-pat", re.compile(r"github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{20,}")),
+    # `sk-` termine des mots ordinaires (« risk-management-… ») : collé, il faut la
+    # forme des clés réelles, `sk-ant-api03-…`, `sk-ant-admin01-…`.
+    ("anthropic-key", re.compile(r"(?<!\w)sk-ant-[A-Za-z0-9_-]{20,}")),
+    ("anthropic-key", re.compile(r"sk-ant-[A-Za-z]{2,8}[0-9]{2}-[A-Za-z0-9_-]{20,}")),
+    # Clé OpenAI collée : une suite de 16 alphanumériques d'un seul tenant dans les
+    # 24 premiers caractères, et minuscule, majuscule et chiffre dans les 40
+    # premiers. Une clé aléatoire a tout cela ; un mot composé ou un identifiant
+    # de tâche à tirets (`task-GAO-kanban-agent-001`) n'a pas la suite.
+    ("openai-key", re.compile(r"(?<!\w)sk-(?!ant-)[A-Za-z0-9_-]{20,}")),
+    ("openai-key", re.compile(
+        r"sk-(?!ant-)(?=[A-Za-z0-9_-]{0,24}[A-Za-z0-9]{16})"
+        r"(?=[A-Za-z0-9_-]{0,40}[0-9])(?=[A-Za-z0-9_-]{0,40}[A-Z])(?=[A-Za-z0-9_-]{0,40}[a-z])"
+        r"[A-Za-z0-9_-]{20,}")),
+    # L'en-tête est borné et possessif : sans borne, chaque « eyJ » d'un long texte
+    # rescannerait toute la suite (quadratique). Les segments suivants ne sont
+    # atteints qu'après un point, et un point borne la course de l'en-tête.
+    ("jwt", re.compile(r"eyJ[A-Za-z0-9_-]{10,300}+\.[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}")),
+    # Identifiant AWS : exactement 16 caractères après le préfixe. Voisin
+    # minuscule, accentué, souligné ou ponctuation : la valeur est reconnue ; voisin
+    # majuscule ou chiffre (la valeur serait plus longue) : un chiffre dans les 16.
+    ("aws-access-key-id", re.compile(r"(?<![0-9A-Z])(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])")),
+    ("aws-access-key-id", re.compile(r"(?:AKIA|ASIA)(?=[A-Z]{0,15}[0-9])[0-9A-Z]{16}")),
+    # « Bearer » collé à un mot (« HTTPBearer … ») : 16 caractères au moins dont un chiffre.
+    ("bearer-token", re.compile(
+        r"(?i)(?<=\w)Bearer:?\s+(?=[A-Za-z0-9._~+/=-]{0,60}\d)[A-Za-z0-9._~+/=-]{16,}")),
+    # Le nom d'une affectation n'a pas de frontière avant lui : il termine le plus
+    # souvent un identifiant plus long (`db_password`, `access_token`,
+    # `GITHUB_TOKEN`), que `\b` laissait passer parce que le souligné est un
+    # caractère de mot. La frontière après le nom reste (`tokenizer`, `token_count`
+    # ne sont pas des affectations de valeur). Le nom peut être entre guillemets
+    # (JSON, YAML).
+    ("credential-assignment", re.compile(
+        r"(?i)(?:api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token|"
+        r"password|passwd|secret|token)\b[\"']?\s*[:=]\s*[\"']?(?=[^\s\"']{0,256}\d)"
         r"[A-Za-z0-9_\-+/=.~]{12,}[\"']?"
     )),
 )
@@ -379,7 +443,7 @@ def redact_metadata(metadata: Any, *, _path: str = "metadata") -> tuple[Any, tup
     return metadata, ()
 
 
-_PEM_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+_PEM_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
 
 
 def _redact_pem_blocks(text: str, begin: re.Pattern[str], label: str) -> tuple[str, int]:
@@ -421,7 +485,7 @@ def redact_secrets(text: str) -> tuple[str, tuple[str, ...]]:
             redacted, count = _redact_pem_blocks(redacted, pattern, label)
         else:
             redacted, count = pattern.subn(f"[redacted:{label}]", redacted)
-        if count:
+        if count and label not in hits:
             hits.append(label)
     return redacted, tuple(hits)
 
@@ -447,7 +511,9 @@ def redaction_audit(text: str) -> tuple[str, ...]:
     transite par aucun journal en clair.
     """
     normalized, _ = normalize_for_storage(text)
-    return tuple(label for label, pattern in _REDACTION_RULES if pattern.search(normalized))
+    labels = (label for label, pattern in _REDACTION_RULES if pattern.search(normalized))
+    # Une famille peut porter plusieurs règles (même étiquette) : une seule mention.
+    return tuple(dict.fromkeys(labels))
 
 def instruction_like(text: str) -> str:
     """L'étiquette du premier motif de consigne rencontré, ou une chaîne vide.
