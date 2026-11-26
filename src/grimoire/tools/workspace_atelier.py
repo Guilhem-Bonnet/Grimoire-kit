@@ -17,6 +17,8 @@ Routes (préfixe ``/api/workspace/``) :
   ``expected`` est l'empreinte du fichier de phase lue avec ``GET`` ; un fichier changé depuis = 409.
 - ``GET|POST atelier/chantiers/<slug>/suggestions``, ``POST …/suggestions/<id>`` : lot 2, voir
   :mod:`grimoire.tools.workspace_atelier_suggestions` (``POST`` rend ses refus par :func:`post_http`).
+- ``GET atelier/chantiers/<slug>/trace``, ``GET|POST …/decoupage`` : lot 4, le document vivant, voir
+  :mod:`grimoire.tools.workspace_atelier_trace`. Aucune route ne valide une exigence : c'est un geste de la MOA, au terminal.
 """
 
 from __future__ import annotations
@@ -327,6 +329,10 @@ def get(root: Path, path: str, _query: dict[str, list[str]]) -> Any:
         from grimoire.tools import workspace_atelier_suggestions as sugg
 
         return sugg.listing(root, rest[1])
+    if len(rest) == 3 and rest[0] == "chantiers" and rest[2] in ("trace", "decoupage"):
+        from grimoire.tools import workspace_atelier_trace as live
+
+        return live.trace_view(root, rest[1]) if rest[2] == "trace" else live.decoupage_preview(root, rest[1])
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
@@ -344,6 +350,10 @@ def post(root: Path, path: str, body: dict[str, Any]) -> Any:
             return sugg.deposit(root, rest[1], body)
         if len(rest) == 4:
             return sugg.decide(root, rest[1], rest[3], body)
+    if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "decoupage":
+        from grimoire.tools import workspace_atelier_trace as live
+
+        return live.decoupage_apply(root, rest[1], body)  # lot 4 ; aucune route de validation : voir ce module
     raise FileNotFoundError(f"route inconnue : {path}")
 
 

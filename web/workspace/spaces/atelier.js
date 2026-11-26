@@ -6,12 +6,14 @@
 //
 // Lot 2 : un bloc qui porte une suggestion de l'agent l'affiche dessous (avant / après, motif, posture) avec
 // « Accepter » et « Refuser » ; l'agent ne modifie jamais un bloc, l'humain tranche ici. Compteur en bibliothèque.
-// Hors de ces lots : l'assistant flottant, les commentaires, « Valider et découper », la voix.
+// Lot 4 : sous chaque exigence, sa ligne d'état réel et « Valider et découper » (voir `atelier-live.js`).
+// Hors de ces lots : l'assistant flottant, les commentaires, la recette depuis le document, la voix.
 // Données : `GET atelier/chantiers`, `POST atelier/chantiers`, `GET atelier/chantiers/<slug>`,
 // `PUT atelier/chantiers/<slug>/blocs/<id>`, `POST atelier/chantiers/<slug>/suggestions/<id>` (voir `src/grimoire/tools/workspace_atelier.py`).
 
 import { renderMarkdown } from '../markdown.js';
 import { badge, icon } from '../shell.js';
+import { createLiveDoc } from './atelier-live.js';
 
 
 /** Ordre des groupes de la bibliothèque ; `archive` vit dans une ligne repliable. */
@@ -357,6 +359,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const sheet = el('article', 'at-sheet', null, { 'aria-label': 'Document du chantier' });
   const nav = el('nav', 'at-phases', null, { 'aria-label': 'Étapes du cadrage' });
   const status = el('p', 'at-muted at-status', '', { role: 'status', 'aria-live': 'polite', 'data-role': 'atelier-status' });
+  const liveDoc = createLiveDoc(ctx, slug, { sheet, status });
   let focusId = phaseFocus || state.doc.phases[0].id;
   const pendingNote = el('span', 'at-pending', null, { 'data-role': 'doc-sugg-count' });
   const countNote = () => {
@@ -391,6 +394,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     if (ctx.signal.aborted) return;
     drawAll();
     status.textContent = message || '';
+    liveDoc.refresh();
   };
 
   const decide = async (sug, decision, motif) => {
@@ -450,6 +454,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         phaseNav();
         drawSection(result.phase);
         status.textContent = 'Bloc enregistré.';
+        liveDoc.refresh(); // une exigence réécrite peut être « modifiée depuis la validation »
         const written = result.phase.blocks.find((b) => b.text === area.value.trimEnd());
         sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`)?.focus();
       } catch (cause) {
@@ -505,6 +510,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       }
       intro = false;
       section.append(blockNode(phase, block));
+      if (block.kind === 'exigence' && block.req) section.append(liveDoc.line(block.req)); // état réel, sous l'exigence
       for (const sug of (phase.suggestions || []).filter((x) => x.block_id === block.id)) section.append(suggestionNode(sug, decide));
     }
     if (old) old.replaceWith(section); else sheet.append(section);
@@ -533,7 +539,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   left.append(back, title, meta);
   head.append(left);
   drawAll();
-  root.replaceChildren(page(ctx, head, nav, status, sheet));
+  root.replaceChildren(page(ctx, head, liveDoc.toolbar, nav, status, sheet));
+  liveDoc.refresh();
   if (phaseFocus) sheet.querySelector(`[data-section="${phaseFocus}"] h2`)?.scrollIntoView({ block: 'start' });
 }
 

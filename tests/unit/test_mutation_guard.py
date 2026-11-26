@@ -437,3 +437,33 @@ def test_atelier_writes_leave_their_governed_trace(atelier: Host) -> None:
     assert any(r.startswith("atelier/chantiers/un/suggestions/sug-") for r in routes), routes
     assert "atelier/chantiers" in routes
     assert phase.read_bytes()
+
+
+@pytest.mark.no_session_token
+def test_the_atelier_split_is_guarded_and_leaves_its_governed_trace(atelier: Host) -> None:
+    """« Valider et découper » : refusé sans le jeton de la page, journalisé avec lui, et aucune route ne valide."""
+    from grimoire.core.cadrage import CADRAGE_DIR
+    from grimoire.core.chantiers import new_chantier
+    from grimoire.tools import workspace_atelier as wa
+    from grimoire.tools import workspace_atelier_trace as live
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    (atelier.root / "project-context.yaml").write_text("project:\n  name: demo\n", encoding="utf-8")
+    wa.set_atelier(atelier.root, True)
+    made = new_chantier(atelier.root, "Deux")
+    (atelier.root / CADRAGE_DIR / made.slug / "04-exigences.md").write_text(
+        "- REQ-001 (Could) : une idée\n  - `pytest tests/x.py`\n", encoding="utf-8"
+    )
+    route = f"/api/workspace/atelier/chantiers/{made.slug}/decoupage?project={atelier.slug}"
+    digest = live.decoupage_preview(atelier.root, made.slug)["digest"]
+    body = json.dumps({"confirm": True, "digest": digest}).encode()
+    before = atelier.snapshot()
+    assert atelier.request("POST", route, body, JSON) in (400, 403, 404)  # sans jeton
+    assert atelier.snapshot() == before
+    headers = {**JSON, SESSION_HEADER: session_token()}
+    assert atelier.request("POST", route, body, headers) == 200
+    valider = route.replace("/decoupage", "/exigences/REQ-001/valider")
+    assert atelier.request("POST", valider, json.dumps({}).encode(), headers) in (400, 403, 404)
+    journal = atelier.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+    entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    assert f"atelier/chantiers/{made.slug}/decoupage" in [e["route"] for e in entries if e["action"] == "workspace.post"]
