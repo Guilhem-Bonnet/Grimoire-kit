@@ -214,13 +214,24 @@ def _capture(page: Page, name: str, viewport: tuple[int, int]) -> None:
     page.screenshot(path=str(folder / f"{name}-{viewport[0]}x{viewport[1]}.png"), full_page=False)
 
 
-def test_chat_without_voice_has_no_conversation_and_loads_nothing(browser: Browser, project: tuple[str, Path]) -> None:
+def test_chat_without_voice_shows_the_disabled_button_with_the_reason_and_never_opens_the_mic(
+    browser: Browser, project: tuple[str, Path]
+) -> None:
     url, _root = project
-    page, context, requests, errors = _open_chat(browser, url, VOICE_NONE)
+    page, context, _requests, errors = _open_chat(browser, url, VOICE_NONE)
     try:
-        page.wait_for_timeout(800)
-        assert page.locator(f".chat {TOGGLE}").is_hidden() or page.locator(f".chat {TOGGLE}").count() == 0
-        assert not [r for r in requests if r.endswith("/conversation.js")], "sans vocal, le module n'est pas demandé"
+        toggle = page.locator(f".chat {TOGGLE}")
+        toggle.wait_for(state="visible", timeout=READY_MS)
+        assert toggle.get_attribute("aria-disabled") == "true"
+        note = page.locator(".chat [data-role='conversation-note']")
+        note.wait_for(state="visible")
+        text = note.inner_text()
+        assert "moteur vocal absent" in text, "la raison donnée par le serveur"
+        assert "interaction.mode: voice" in text and "grimoire-kit[voice]" in text, "le geste pour l'activer"
+        assert toggle.get_attribute("aria-describedby") == note.get_attribute("id")
+        toggle.click(force=True)  # `aria-disabled` : Playwright n'attend pas un bouton « activé », le clic ne fait rien
+        page.keyboard.press("Alt+Shift+V")  # le raccourci ne fait rien non plus
+        page.wait_for_timeout(500)
         assert _mic_calls(page) == 0
         assert not errors, errors
     finally:
@@ -454,11 +465,15 @@ def test_atelier_without_voice_no_conversation(browser: Browser, project: tuple[
     page, context, _requests, errors = _open_atelier(browser, url, slug, [_entretien(question=Q1)], VOICE_NONE)
     try:
         page.locator("[data-role='assistant-mascotte']").wait_for(timeout=READY_MS)
-        page.wait_for_timeout(800)
-        assert (
-            page.locator(f"[data-role='assistant-mascotte'] {TOGGLE}").is_hidden() or page.locator(TOGGLE).count() == 0
-        )
-        assert _mic_calls(page) == 0
+        toggle = page.locator(f"[data-role='assistant-mascotte'] {TOGGLE}")
+        toggle.wait_for(state="visible", timeout=READY_MS)  # le bouton reste, désactivé, avec la raison et le geste
+        assert toggle.get_attribute("aria-disabled") == "true"
+        note = page.locator("[data-role='assistant-mascotte'] [data-role='conversation-note']")
+        note.wait_for(state="visible")
+        assert "moteur vocal absent" in note.inner_text() and "interaction.mode: voice" in note.inner_text()
+        toggle.click(force=True)
+        page.wait_for_timeout(500)
+        assert _mic_calls(page) == 0, "désactivé : aucun micro"
         assert not errors, errors
     finally:
         context.close()

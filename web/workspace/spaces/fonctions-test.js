@@ -1,8 +1,9 @@
-// Configuration › Fonctions en test : les drapeaux de projet `cockpit.test_features.*`.
+// Configuration › Fonctions en test.
 //
-// Deux fonctions : l'Atelier de spec et la mascotte vocale du chat. L'interrupteur écrit le drapeau dans
-// `project-context.yaml` (`POST features`). L'Atelier est un onglet : la page se recharge pour qu'il apparaisse ou
-// disparaisse. La mascotte se lit à l'ouverture du chat : pas de rechargement.
+// Deux fonctions : l'Atelier de spec (drapeau du PROJET, `cockpit.test_features.atelier` de `project-context.yaml`) et la
+// mascotte (préférence de COCKPIT de la machine : tous les projets et la vue globale), toutes deux par `POST features`.
+// L'Atelier est un onglet : la page se recharge pour qu'il apparaisse ou disparaisse. La mascotte se pose ou se retire
+// tout de suite (événement `grimoire:features`, lu par la coque) ; la portée de chaque carte est dite à l'écran.
 // Ce module ne charge jamais `spaces/atelier*.js` ni `mascotte*.js` : il ne parle qu'à `GET/POST features`.
 
 import { badge, spaceHead } from '../shell.js';
@@ -20,16 +21,21 @@ function el(tag, className, text, attrs) {
 const FEATURES = [
   {
     name: 'atelier', title: 'Atelier de spec', action: 'Activer l’Atelier', reload: true,
+    scope: 'Portée : ce projet seulement (réglage du projet).',
     note: 'L’Atelier sert à cadrer un projet avant de le construire : brief, brainstorm, compréhension, '
       + 'exigences et cahier des charges, en chantiers que tu relis et corriges bloc par bloc. '
       + 'Il est en test : aucune tâche n’est lancée, et tu peux l’éteindre à tout moment.',
   },
   {
     name: 'mascotte', title: 'Mascotte', action: 'Activer la mascotte', reload: false,
-    where: 'Où : dans le fil de l’orchestrateur, en bas du cockpit.',
-    note: 'Une petite mascotte, le slime d’encre, est la présence de l’assistant dans le chat, avec ou sans voix : '
+    scope: 'Portée : toute cette machine, tous les projets et la vue « Tous les projets ». L’éteindre l’éteint partout ; '
+      + 'tu la règles d’ici, quel que soit le projet ouvert (un ancien réglage posé dans un seul projet est repris).',
+    where: 'Où : un petit bouton en bas à droite du cockpit, sur toutes les pages, qui ouvre le chat ; la mascotte '
+      + 'elle-même se dessine dans le fil de l’orchestrateur et dans l’assistant de l’Atelier.',
+    note: 'Une petite mascotte, le slime d’encre, est la présence de l’assistant dans le cockpit, avec ou sans voix : '
       + 'elle réfléchit pendant un tour de l’orchestrateur, écrit quand il produit du texte ou modifie des fichiers, '
       + 'attend ta réponse quand une question ou une permission est en suspens, et un libellé dit ce qu’elle fait. '
+      + 'Un clic l’ouvre sur le chat de l’orchestrateur, ou sur l’Atelier quand c’est son assistant qui attend. '
       + 'Avec le vocal, elle écoute pendant la dictée et parle pendant la lecture d’un message vocal ; elle ne lit que '
       + 'des niveaux sonores : rien n’est enregistré ni envoyé, et le micro reste celui de la dictée.',
   },
@@ -64,6 +70,8 @@ function featureCard(feature, state, ctx, extra) {
       if (feature.reload) { location.reload(); return; }
       toggle.setAttribute('aria-checked', String(next));
       toggle.disabled = false;
+      // La coque pose ou retire la mascotte permanente tout de suite, sans recharger.
+      if (feature.name === 'mascotte') document.dispatchEvent(new CustomEvent('grimoire:features', { detail: { mascotte: next } }));
     } catch (cause) {
       toggle.disabled = false;
       error.textContent = `Réglage impossible : ${cause.message || cause}`;
@@ -72,7 +80,7 @@ function featureCard(feature, state, ctx, extra) {
   });
 
   const card = el('section', 'ft-card', null, { 'aria-label': feature.title });
-  const facts = [feature.where, extra].filter(Boolean);
+  const facts = [feature.scope, feature.where, extra].filter(Boolean);
   card.append(el('div', 'ft-line'), el('p', 'ft-note', feature.note),
     ...facts.map((text) => el('p', 'ft-note ft-fact', text)), toggle, error);
   card.firstChild.append(el('h3', null, feature.title), badge('Test', 'warn', 'Fonction en test'));

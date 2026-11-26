@@ -53,7 +53,10 @@ function bindShortcut() {
  * rapportée par `event({ type: 'play-ended' })`) ; `stopReading()` la coupe. `firstRead()` : vrai si le mode doit d'abord
  * lire quelque chose (la question de l'assistant de l'Atelier). `onMode(mode, action)` : l'état, et l'action de la mascotte.
  */
-export function createConversation({ recorder, read, stopReading = () => {}, firstRead = () => false, onMode = () => {}, onClose = () => {} }) {
+export function createConversation({
+  recorder, read, stopReading = () => {}, firstRead = () => false, onMode = () => {}, onClose = () => {},
+  unavailableReason = () => '',
+}) {
   const element = document.createElement('div');
   element.className = 'conv';
   element.setAttribute('data-role', 'conversation');
@@ -74,8 +77,13 @@ export function createConversation({ recorder, read, stopReading = () => {}, fir
   status.className = 'conv-status';
   status.setAttribute('aria-live', 'polite');
   status.setAttribute('data-role', 'conversation-status');
-  element.append(toggleButton, mic, status);
-  element.hidden = true;
+  // Vocal indisponible : le bouton reste, désactivé (`aria-disabled`, donc atteignable au clavier), avec la raison et le geste.
+  const note = document.createElement('span');
+  note.className = 'conv-note';
+  note.id = `conv-note-${Math.random().toString(36).slice(2, 8)}`;
+  note.setAttribute('data-role', 'conversation-note');
+  note.hidden = true;
+  element.append(toggleButton, mic, status, note);
 
   let model = initial();
   let analyser = null;
@@ -174,8 +182,15 @@ export function createConversation({ recorder, read, stopReading = () => {}, fir
   };
   /** Montre ou cache le bouton selon que le vocal est actif. */
   api.sync = () => {
-    element.hidden = !api.available();
-    if (element.hidden && api.active()) api.stop('unavailable');
+    const ok = api.available();
+    toggleButton.setAttribute('aria-disabled', String(!ok));
+    if (ok) toggleButton.removeAttribute('aria-describedby');
+    else toggleButton.setAttribute('aria-describedby', note.id);
+    note.hidden = ok;
+    note.textContent = ok ? '' : `Vocal indisponible : ${unavailableReason() || 'raison inconnue'}. `
+      + 'Pour l’activer : interaction.mode: voice dans project-context.yaml, puis installer le moteur '
+      + '(pip install \'grimoire-kit[voice]\').';
+    if (!ok && api.active()) api.stop('unavailable');
   };
   api.destroy = () => {
     api.stop('stop');
@@ -185,7 +200,7 @@ export function createConversation({ recorder, read, stopReading = () => {}, fir
   };
   api.modes = MODES;
 
-  toggleButton.addEventListener('click', () => api.toggle());
+  toggleButton.addEventListener('click', () => { if (api.available() || api.active()) api.toggle(); });
   registry.add(api);
   bindShortcut();
   return api;

@@ -129,9 +129,47 @@ const ATELIER_SPACE = {
   sections: [{ id: 'atelier', module: 'atelier', label: 'Atelier', skeleton: 'table' }],
 };
 
+// La mascotte permanente (fonction en test, préférence de cockpit de la machine) : un point d'ancrage fixe, sur toutes les
+// pages. Le module n'est chargé que si la fonction est allumée. La réponse de `GET features` est celle que la coque lit
+// déjà au démarrage : aucune requête de plus au premier rendu.
+let mascotteAnchor = null;
+let mascotteMounting = false;
+
+async function applyMascotteAnchor(on) {
+  if (!on) {
+    if (mascotteAnchor) { mascotteAnchor.destroy(); mascotteAnchor = null; }
+    return;
+  }
+  if (mascotteAnchor || mascotteMounting) return;
+  mascotteMounting = true;
+  try {
+    const { mountMascotteAnchor } = await import('./mascotte_anchor.js');
+    mascotteAnchor = await mountMascotteAnchor({
+      openChat: () => {
+        if (root.dataset.atelier !== 'on') setAtelier(true); // hors atelier, le dock n'existe pas à l'écran : on l'y amène
+        if ($('dock').dataset.state === 'collapsed') setDock('pinned');
+        selectDockTab('orchestrateur');
+        const input = document.querySelector('.chat-input');
+        if (input) input.focus({ preventScroll: true });
+      },
+      openAtelier: (slug) => goto('atelier', slug ? { chantier: slug } : undefined),
+      watchChat: () => chatInstance().watch(),
+    });
+  } catch { /* sans mascotte, le cockpit reste tel quel */ } finally { mascotteMounting = false; }
+}
+
+// La fonction peut être allumée ou éteinte depuis « Fonctions en test » sans recharger la page.
+document.addEventListener('grimoire:features', (event) => {
+  if (event.detail && typeof event.detail.mascotte === 'boolean') applyMascotteAnchor(event.detail.mascotte);
+});
+
 async function applyFeatures() {
   let on = false;
-  try { on = (await api.testFeatures()).atelier === true; } catch { /* hôte sans la route : fonction éteinte */ }
+  try {
+    const features = await api.testFeatures();
+    on = features.atelier === true;
+    applyMascotteAnchor(features.mascotte === true);
+  } catch { /* hôte sans la route : fonction éteinte */ }
   const present = SPACES.includes(ATELIER_SPACE);
   if (on === present) return;
   if (on) SPACES.splice(SPACES.findIndex((sp) => sp.id === 'configuration'), 0, ATELIER_SPACE);
@@ -1557,12 +1595,17 @@ function selectDockTab(id) {
 // Le chat de l'orchestrateur (ACP2) : monté une fois, son DOM et son flux survivent aux changements d'onglet.
 let orchestratorChat = null;
 
+function chatInstance() {
+  orchestratorChat ||= createChat({ readOnly: () => host.readOnly });
+  return orchestratorChat;
+}
+
 function renderDock() {
   const body = $('dock-body');
   body.replaceChildren();
   body.classList.toggle('is-chat', dockTab === 'orchestrateur');
   if (dockTab === 'orchestrateur') {
-    orchestratorChat ||= createChat({ readOnly: () => host.readOnly });
+    chatInstance();
     body.append(orchestratorChat.element);
     orchestratorChat.open();
     return;

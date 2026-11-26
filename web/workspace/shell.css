@@ -3271,6 +3271,87 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   padding: 6px 12px 0;
 }
 
+/* `display: flex` l'emportait sur l'attribut `hidden` : le sélecteur « Parler au projet », réservé à la vue globale,
+   s'affichait vide dans la vue d'un seul projet. */
+.chat-hostbar[hidden],
+.chat-targetbar[hidden] {
+  display: none;
+}
+
+/* Le lanceur de la mascotte (fonction en test) : un petit bouton discret, en bas à droite au-dessus de la barre d'état, sur
+   toutes les pages ; il porte le libellé d'état et ouvre le chat. Pas de cadre travaillé, pas de canevas : la présence de la
+   mascotte sur l'interface est en cours de refonte. */
+.mascotte-launcher {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: calc(var(--h-status) + var(--sp-3));
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: min(280px, calc(100vw - 2 * var(--sp-4)));
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-s);
+  cursor: pointer;
+}
+
+.mascotte-launcher[hidden] {
+  display: none;
+}
+
+.mascotte-launcher:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.mascotte-launcher-pip {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--mascotte-night-1);
+  box-shadow: 0 0 0 2px var(--line);
+}
+
+.mascotte-launcher[data-tone='wait'] .mascotte-launcher-pip {
+  background: var(--acc);
+}
+
+.mascotte-launcher[data-tone='error'] .mascotte-launcher-pip {
+  background: var(--bad);
+}
+
+.mascotte-launcher-count {
+  min-width: 20px;
+  padding: 0 var(--sp-1);
+  box-sizing: border-box;
+  border-radius: 10px;
+  background: var(--acc);
+  color: var(--on-acc);
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+
+.mascotte-launcher-count[hidden] {
+  display: none;
+}
+
+.mascotte-launcher[data-tone='wait'] {
+  border-color: var(--acc);
+}
+
+.mascotte-launcher[data-tone='error'] {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
 .chat-host-label {
   color: var(--ink3, inherit);
   font-size: 12px;
@@ -3582,6 +3663,20 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
 
 .conv-status {
   font-size: var(--t-s);
+}
+
+.conv-note {
+  flex-basis: 100%;
+  font-size: var(--t-s);
+}
+
+.conv-note[hidden] {
+  display: none;
+}
+
+.conv-toggle[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .chat-voice-out {
