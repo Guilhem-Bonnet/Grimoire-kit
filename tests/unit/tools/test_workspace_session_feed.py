@@ -214,3 +214,16 @@ def test_les_routes_feed_rendent_les_deux_fils(projet: Path, service: TaskServic
     by_session = workspace_get(projet, f"{PREFIX}sessions/{SESSION}/feed", {})
     assert by_session["session_id"] == SESSION and by_session["tasks"] == [tid]
     assert by_session["logs_command"] == f"claude logs {SESSION}"
+
+
+def test_un_lancement_porte_sa_ligne_de_routage_sans_appel_de_plus(projet: Path, service: TaskService, mission: str) -> None:
+    tid = _held(service, mission, "routage")
+    service.ledger.append_event(
+        "task.session_launched", tid, "task", "worker",
+        {"session": "ab12cd34", "model": "haiku",
+         "routing": {"class": "V0", "tier": "cheap", "model": "haiku", "reason": "default_class"}},
+    )
+    service.ledger.append_event("task.session_launched", tid, "task", "worker", {"session": "ef56ab78", "model": "opus"})
+    launches = [e for e in task_feed(projet, tid)["entries"] if e["kind"] == "task.session_launched"]
+    assert launches[0]["routing"] == "haiku (palier cheap, classe V0) — défaut du kit pour cette classe"
+    assert "routing" not in launches[1]  # un lancement d'avant la trace n'en invente pas

@@ -8,6 +8,7 @@
 
 import { actionStatus, copyText, icon, setActionStatus } from './shell.js';
 import { agoText } from './live.js';
+import { routingLine } from './activity_routing.js';
 
 let injected = false;
 
@@ -60,6 +61,14 @@ export function activityBlock(feed, { heading = 'Activité' } = {}) {
       what.className = 'wa-what';
       what.textContent = entry.label || entry.kind || '';
       li.append(when(entry.at), what);
+      const routing = routingLine(entry);
+      if (routing) {
+        const line = document.createElement('span');
+        line.className = 'wa-routing lbl';
+        line.dataset.role = 'routing-line';
+        line.textContent = routing;
+        li.append(line);
+      }
       list.append(li);
     }
     block.append(list);

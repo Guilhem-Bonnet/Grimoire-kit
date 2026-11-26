@@ -796,7 +796,9 @@ def launched_today(service: TaskService, now: datetime | None = None) -> int:
     )
 
 
-def _step_up_allowed(service: TaskService, task_id: str, launch: Mapping[str, Any]) -> StepUp | None:
+def _step_up_allowed(
+    service: TaskService, task_id: str, launch: Mapping[str, Any], now: datetime | None = None
+) -> StepUp | None:
     """La montée en gamme décidée pour la reprise de *launch*, ou ``None`` : relue sur la politique du moment.
 
     Il faut que la politique n'ait aucun réglage de modèle (``default_routing``, ``model`` vide), que l'ancienne session
@@ -804,21 +806,24 @@ def _step_up_allowed(service: TaskService, task_id: str, launch: Mapping[str, An
     une session neuve, puis que le modèle *réel* du lancement soit un palier connu de la table (:func:`step_up`).
     """
     from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+    from grimoire.missions.pause import read_pause
 
     policy = load_orchestrator_policy(service.home_root).policy
     if policy is None or not policy.worker.default_routing:
         return None
+    if read_pause(service.home_root).blocks_admission(task_id):
+        return None  # une pause en vigueur (tâche, projet ou machine, même illisible) : reprise ordinaire, jamais de session neuve
     _short, started, halted = _session_marks(service, task_id)
     if started < 0 or halted < started or read_breaker(service.home_root).open:
         return None
-    if launched_today(service) >= policy.worker.sessions_per_day or mandate_precheck(service, WORKER_ACTOR):
+    if launched_today(service, now) >= policy.worker.sessions_per_day or mandate_precheck(service, WORKER_ACTOR):
         return None
     return step_up(policy.worker, launch, lambda tier: tier_model(service.home_root, tier))
 
 
 def _step_up_session(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
-    permission_mode: str = "", cause: str = "",
+    permission_mode: str = "", cause: str = "", now: datetime | None = None,
 ) -> ExecResult | None:
     """Reprise d'un refus de relecture sur le palier au-dessus : une session neuve, même worktree, ou ``None``.
 
@@ -828,7 +833,7 @@ def _step_up_session(
     non résolue ou une inscription refusée (la session lancée est alors arrêtée). Jamais d'échec qui armerait le
     disjoncteur : la reprise ordinaire en décide.
     """
-    if (up := _step_up_allowed(service, task_id, launch)) is None:
+    if (up := _step_up_allowed(service, task_id, launch, now)) is None:
         return None
     cwd = Path(str(launch.get("cwd") or "."))
     spec = SessionSpec(
@@ -839,6 +844,12 @@ def _step_up_session(
     result = exec_(list(plan.argv), cwd, plan.environ())
     match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
     if match is None:
+        if result.returncode == 0:
+            # Sortie sans identifiant : la session a pu partir quand même. Aucune session non attestée ne reste vivante.
+            keep = _session_marks(service, task_id)[0]
+            for agent in _read_agents(exec_, cwd, claude_bin) or []:
+                if agent.get("name") == f"grimoire-{task_id}" and agent.get("id") and str(agent["id"]) != keep:
+                    _halt(exec_, cwd, str(agent["id"]), claude_bin)
         return None
     short = match.group(1)
     session_id = resolve_background_session(exec_, cwd, short, claude_bin, name=f"grimoire-{task_id}", session_cwd=cwd)
@@ -867,7 +878,7 @@ def _step_up_session(
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
     permission_mode: str = "", cause: str = "", opencode: OpencodeWorkerHost | None = None,
-    gemini: GeminiWorkerHost | None = None, escalate: bool = False,
+    gemini: GeminiWorkerHost | None = None, escalate: bool = False, now: datetime | None = None,
 ) -> ExecResult:
     """Rend la tâche à son worker : reprend la session arrêtée par ``claude --bg --resume``, à défaut en lance une neuve.
 
@@ -902,7 +913,7 @@ def resume_worker(
         return ExecResult(1, "", refused)  # le worktree d'un worker opencode n'a pas encore les hooks de Claude Code
     host = ClaudeCodeWorkerHost(claude_bin)
     if escalate and not fresh_only and (stepped := _step_up_session(service, exec_, claude_bin, task_id, launch, message,
-                                                                    permission_mode=permission_mode, cause=cause)):
+                                                                    permission_mode=permission_mode, cause=cause, now=now)):
         return stepped
     # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
     spec = SessionSpec(

@@ -1003,7 +1003,7 @@ class ReviewStage:
             self._service, self._exec, self._claude, tid, launch,
             f"La relecture de {tid} rend NOT-READY : {notes} Corrige, revérifie avec les checks de la tâche, "
             f"puis remets-la en revue (`grimoire task move {tid} --to needs_verification`).",
-            permission_mode=self._policy.worker.permission_mode, escalate=True,
+            permission_mode=self._policy.worker.permission_mode, escalate=True, now=self._now,
         )
         if result.returncode != 0:
             # Personne ne reprend la tâche : elle revient en revue, la reprise sera retentée au tick suivant.

@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.standard_generation import TRACES_DIR
+from grimoire.missions.model_routing import describe_routing
 from grimoire.missions.service import TaskService
 from grimoire.missions.session_link import logs_command, session_fields
 from grimoire.missions.trace import _trace_entries
@@ -117,10 +118,14 @@ def _ledger_entries(service: TaskService, task_id: str) -> list[dict[str, Any]]:
         if event.event_type not in FEED_KINDS:
             continue
         label, failure = _label(event)
-        out.append({
+        entry: dict[str, Any] = {
             "at": event.created_at, "kind": event.event_type, "actor": event.actor_id,
             "label": label, "failure": failure, "task_id": task_id,
-        })
+        }
+        routing = event.payload.get("routing") if event.event_type == "task.session_launched" else None
+        if isinstance(routing, dict):
+            entry["routing"] = describe_routing(routing)  # la ligne que `grimoire task show` affiche, sans appel de plus
+        out.append(entry)
     return out
 
 
