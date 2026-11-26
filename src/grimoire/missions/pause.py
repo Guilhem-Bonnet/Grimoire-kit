@@ -298,6 +298,8 @@ def write_pause(
     names = tuple(dict.fromkeys(t.strip() for t in tasks if t and t.strip()))
     path = _target(project_root, scope, control_home)
     existing = read_flag(path, scope)
+    if existing is not None and (refusal := _replace_refusal(existing, origin=origin, session=session)):
+        raise PauseError(refusal)
     if existing is not None and not existing.unreadable:
         if names and not existing.tasks:
             if existing.mode == mode or existing.mode == HOLD:
@@ -323,6 +325,26 @@ def write_pause(
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     return flag
+
+
+def _replace_refusal(existing: PauseFlag, *, origin: str, session: str) -> str:
+    """Pourquoi une pause d'origine ``agent`` ne peut pas remplacer *existing* ; ``""`` : elle peut.
+
+    Une session d'agent ne remplace que sa propre pause (même origine, même identifiant de session, tous deux non
+    vides). Sans cela, elle pourrait écraser la pause d'un humain, d'une règle d'usage ou d'une autre session par la
+    sienne, puis la lever : le contrôle de :func:`_lift_refusal` ne servirait à rien. Les autres origines (humain,
+    orchestrateur sous mandat, appel de code) remplacent comme avant.
+    """
+    from grimoire.missions.schemas import ORIGIN_AGENT
+
+    if origin != ORIGIN_AGENT:
+        return ""
+    if existing.origin == ORIGIN_AGENT and existing.session and session and existing.session == session:
+        return ""
+    who = "un humain" if existing.origin == "human" else "une autre session" if existing.origin == ORIGIN_AGENT else (
+        "une règle d'usage ou un autre canal"
+    )
+    return f"une pause posée par {who} tient déjà : une session d'agent ne la remplace pas, elle ne pose que la sienne"
 
 
 def _lift_refusal(existing: PauseFlag, *, origin: str, session: str) -> str:
@@ -385,7 +407,7 @@ def clear_pause(
         if left:
             payload = {
                 "schema": SCHEMA, "mode": existing.mode, "tasks": list(left), "since": existing.since,
-                "actor": existing.actor, "reason": existing.reason,
+                "actor": existing.actor, "reason": existing.reason, "origin": existing.origin, "session": existing.session,
             }
             atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
             return existing

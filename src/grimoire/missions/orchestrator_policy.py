@@ -36,6 +36,7 @@ janitor :
           model: ""               # vide : le palier, sinon un autre modèle que celui du worker
           tier: ""
           wip: 1                  # relectures en même temps
+          # sessions_per_day: 20  # plafond de lancements par jour (UTC) ; absent : aucune limite
           max_cycles: 2           # désaccords relecteur/checks avant l'escalade à l'humain
           permission_mode: ""     # OBLIGATOIRE quand enabled: true
           host: claude-code       # seule valeur admise dans ce lot : le relecteur reste sur Claude Code
@@ -45,6 +46,7 @@ janitor :
           ignored_checks:         # checks hors du verdict quand la protection de branche ne dit pas lesquels sont requis
             - "codecov/*"
           max_cycles: 2           # retours au worker (CI rouge, conflit) avant l'escalade à l'humain
+          # sessions_per_day: 20  # plafond de sessions lancées par jour (UTC) ; absent : aucune limite
           protected_paths: []     # chemins qui reviennent à l'humain, en plus des défauts (code des gardes, politique,
                                   # workflows et hooks, pyproject, fichiers compilés) ; comparaison en casefold()
           protected_gate: human   # human (défaut) : tout chemin réservé escalade ; dual_review : une seconde relecture
@@ -134,13 +136,15 @@ _WORKER_KEYS = frozenset(
     {"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode", "lean", "model_by_class",
      "sensitive_route", "sensitive_paths", "host"}
 )
-_REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean", "host"})
+_REVIEWER_KEYS = frozenset(
+    {"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean", "host", "sessions_per_day"}
+)
 #: Les hôtes du relecteur dans ce lot : Claude Code seul (la relecture opencode n'est pas encore outillée).
 REVIEWER_HOSTS: tuple[str, ...] = (CLAUDE_CODE_HOST,)
 DEFAULT_MAX_CYCLES = 2
 _MERGER_KEYS = frozenset(
     {"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths", "protected_gate", "human_only_paths",
-     "second_reviewer_min_tier"}
+     "second_reviewer_min_tier", "sessions_per_day"}
 )
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
 _ARBITER_KEYS = frozenset({"enabled", "tier", "provider", "sessions_per_day", "permission_mode"})
@@ -196,13 +200,18 @@ class ReviewerRole:
     permission_mode: str = ""
     lean: bool = False
     host: str = CLAUDE_CODE_HOST
+    #: Plafond de lancements par jour (UTC) ; ``None`` (défaut) : aucune limite, comme avant ce réglage.
+    sessions_per_day: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "enabled": self.enabled, "model": self.model, "tier": self.tier, "wip": self.wip,
             "max_cycles": self.max_cycles, "permission_mode": self.permission_mode, "lean": self.lean,
             "host": self.host,
         }
+        if self.sessions_per_day is not None:
+            out["sessions_per_day"] = self.sessions_per_day
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,12 +226,19 @@ class MergerRole:
     protected_gate: str = PROTECTED_GATE_HUMAN
     human_only_paths: tuple[str, ...] = ()
     second_reviewer_min_tier: str = DEFAULT_SECOND_REVIEWER_MIN_TIER
+    #: Plafond de sessions lancées par jour (UTC) ; ``None`` (défaut) : aucune limite, comme avant ce réglage.
+    sessions_per_day: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"enabled": self.enabled, "realign_max": self.realign_max, "ignored_checks": list(self.ignored_checks),
-                "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths),
-                "protected_gate": self.protected_gate, "human_only_paths": list(self.human_only_paths),
-                "second_reviewer_min_tier": self.second_reviewer_min_tier}
+        out: dict[str, Any] = {
+            "enabled": self.enabled, "realign_max": self.realign_max, "ignored_checks": list(self.ignored_checks),
+            "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths),
+            "protected_gate": self.protected_gate, "human_only_paths": list(self.human_only_paths),
+            "second_reviewer_min_tier": self.second_reviewer_min_tier,
+        }
+        if self.sessions_per_day is not None:
+            out["sessions_per_day"] = self.sessions_per_day
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,6 +346,13 @@ def _positive(value: Any, where: str) -> int:
     return value
 
 
+def _optional_positive(data: dict[str, Any], where: str) -> int | None:
+    """``sessions_per_day`` sans défaut : absent = ``None`` (aucune limite) ; présent = entier strictement positif."""
+    if "sessions_per_day" not in data:
+        return None
+    return _positive(data["sessions_per_day"], where)
+
+
 def _text(value: Any, where: str) -> str:
     if not isinstance(value, str):
         raise _InvalidPolicyError(f"{where} doit être du texte, pas {value!r}")
@@ -433,6 +456,7 @@ def _parse_reviewer(raw: Any) -> ReviewerRole:
         permission_mode=mode,
         lean=_flag(data, "lean", "orchestrator.roles.reviewer"),
         host=_host(data, "reviewer", REVIEWER_HOSTS),
+        sessions_per_day=_optional_positive(data, "orchestrator.roles.reviewer.sessions_per_day"),
     )
 
 
@@ -467,6 +491,7 @@ def _parse_merger(raw: Any) -> MergerRole:
         protected_gate=gate,
         human_only_paths=globs["human_only_paths"],
         second_reviewer_min_tier=min_tier,
+        sessions_per_day=_optional_positive(data, f"{where}.sessions_per_day"),
     )
 
 

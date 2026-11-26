@@ -62,7 +62,7 @@ import shutil
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -185,10 +185,20 @@ def run_tick(
     *exec_* lance les processus externes du lanceur et du janitor (``claude``, ``gh``) ; défaut : le vrai binaire.
     Un *dispatcher* qui rend des :class:`~grimoire.missions.launcher.LaunchOutcome` les voit dans le rapport.
     """
+    lift_note = ""
+    if apply:  # une pause posée par une règle de portée « jour » ne survit pas au changement de jour
+        from datetime import UTC
+
+        from grimoire.missions.usage_rules import lift_day_pauses
+
+        try:
+            lift_day_pauses(project_root, now or datetime.now(UTC))
+        except Exception as exc:  # une erreur d'entrée-sortie ne casse pas le tick : elle remonte dans la liste d'attention
+            lift_note = f"pause de règle (portée jour) : levée en erreur, retentée au tick suivant ({type(exc).__name__}: {exc})"
     state = read_pause(home_root(project_root), control_home=control_home)
     if state.global_stop:
         return TickReport(
-            "paused", state, state.attention(),
+            "paused", state, (*([lift_note] if lift_note else []), *state.attention()),
             notes=("les échéances waiting continuent de courir ; elles ne sont pas rendues tant que la pause dure",),
         )
 
@@ -198,7 +208,7 @@ def run_tick(
         service_factory = TaskService
     service = service_factory(project_root) if ledger_root is None else service_factory(project_root, ledger_root)
     if not service.has_ledger:
-        return TickReport("idle", state, state.attention(), notes=("aucun ledger : rien à faire",))
+        return TickReport("idle", state, (*([lift_note] if lift_note else []), *state.attention()), notes=("aucun ledger : rien à faire",))
     from grimoire.core.safe_git import tick_scope
 
     autonomous = _autonomous(service)
@@ -211,7 +221,7 @@ def run_tick(
             stack.enter_context(locked(service.home_root / TICK_LOCK_RELPATH, timeout=0, keepalive=True))
         except TimeoutError:
             return TickReport(
-                "busy", state, state.attention(),
+                "busy", state, (*([lift_note] if lift_note else []), *state.attention()),
                 notes=("un autre tick tient le verrou du tick : celui-ci saute sans rien écrire ; le suivant reprendra",),
             )
         except OSError as exc:
@@ -221,7 +231,8 @@ def run_tick(
             ) from exc
         _sweep_stale_plans(service.home_root / TICK_LOCK_RELPATH.parent)
         stack.enter_context(tick_scope(service.home_root, active=autonomous))  # lot 4 : git du tick neutralisé
-        return _one_pass(service, state, now, dispatcher, effect_probe, ci_probe, mode="apply", exec_=exec_)
+        report = _one_pass(service, state, now, dispatcher, effect_probe, ci_probe, mode="apply", exec_=exec_)
+        return replace(report, attention=(lift_note, *report.attention)) if lift_note else report
 
 
 def _one_pass(
@@ -299,7 +310,15 @@ def _one_pass(
     ci = (*reconcile_ci(service, probe=shared, now=now), *migrate_orphan_slots(service, probe=shared, now=now))
     attention = [*state.attention(), *provider_notes, *([heartbeat] if heartbeat else [])]
     policy, cleanup = _orchestrator_stage(service, mode, exec_, attention)
+    _consumption_stage(service, mode, attention)
     plan = service.queue_plan(now=now, pause=state)
+    _usage_rules_stage(service, plan, mode, now, attention)
+    try:
+        from grimoire.missions.quota_usage import note_deferral
+
+        note_deferral(service, plan, apply=mode == "apply", attention=attention)
+    except Exception as exc:  # un message manquant ne casse pas le tick
+        attention.append(f"quota : message de report non écrit ({type(exc).__name__}: {exc})")
     dispatched: tuple[str, ...] = ()
     launches: tuple[LaunchOutcome, ...] = ()
     if dispatcher is None and mode == "apply" and policy is not None and policy.worker.enabled:
@@ -343,6 +362,9 @@ def _one_pass(
     for merge in merges:
         if merge.status in ("failed", "refused") or merge.action == "escalate":
             attention.append(f"merger : {merge.task_id} {merge.action} {merge.status} ({merge.detail})")
+    from grimoire.missions.session_cap import cap_attention
+
+    attention.extend(cap_attention(service, now))  # relecteur, merger : le plafond du jour a refusé un lancement
     for external in external_merges:
         if external.status == "failed":
             attention.append(f"fusion externe : {external.task_id} {external.status} ({external.detail})")
@@ -372,6 +394,28 @@ def _one_pass(
     )
 
 
+def _usage_rules_stage(service: TaskService, plan: QueuePlan, mode: str, now: datetime | None, attention: list[str]) -> None:
+    """Les règles d'usage franchies (``capacity.yaml``) : attention, ``hold``, pause ``drain`` ; jamais une session tuée.
+
+    Le plan a déjà différé les lancements qu'une règle ``hold`` ou ``pause`` retient ; ici seuls les effets s'écrivent
+    (événement, pause), en apply. Une règle invalide est dite, jamais fatale.
+    """
+    from datetime import UTC
+
+    from grimoire.missions.usage_rules import apply_effects
+
+    attention.extend(f"capacity.yaml : {issue}" for issue in plan.capacity.rule_issues)
+    if not plan.rules:
+        return
+    try:
+        apply_effects(
+            service, plan.rules, apply=mode == "apply", now=now or datetime.now(UTC), attention=attention,
+            task_ids=[tid for tid, _base, _eff in plan.order],
+        )
+    except Exception as exc:  # une règle en erreur ne casse pas le tick : les lancements qu'elle retient sont déjà différés
+        attention.append(f"règles d'usage : étape en erreur ({type(exc).__name__}: {exc})")
+
+
 def _planned_routes(
     service: TaskService, policy: OrchestratorPolicy | None, admitted: tuple[Admit, ...],
 ) -> tuple[tuple[str, SensitiveRoute], ...]:
@@ -386,6 +430,24 @@ def _planned_routes(
         if task is not None:
             routes.append((admit.task_id, sensitive_route_for(task, policy)))
     return tuple(routes)
+
+
+def _consumption_stage(service: TaskService, mode: str, attention: list[str]) -> None:
+    """La consommation des sessions lancées, écrite au ledger (``quota.consumed``) AVANT le plan d'admission.
+
+    Le plafond du jour lit ce que ce pas vient d'écrire : écrite après le plan, la consommation aurait un tick de
+    retard. Appliqué seulement ; une erreur ne casse pas le tick et se dit dans la liste d'attention.
+    """
+    if mode != "apply":
+        return
+    from grimoire.missions.quota_usage import record_consumption
+
+    try:
+        for consumed in record_consumption(service):
+            if consumed.status == "unknown":
+                attention.append(f"quota : consommation de la session {consumed.role} {consumed.session} inconnue ({consumed.detail})")
+    except Exception as exc:
+        attention.append(f"quota : consommation non enregistrée à ce tick ({type(exc).__name__}: {exc})")
 
 
 def _usage_stage(service: TaskService, mode: str, attention: list[str]) -> tuple[Any, ...]:

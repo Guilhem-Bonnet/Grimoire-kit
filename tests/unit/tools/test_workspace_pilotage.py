@@ -28,6 +28,8 @@ from grimoire.missions.pause import (
     DRAIN,
     HOLD,
     SCOPE_GLOBAL,
+    PauseError,
+    clear_pause,
     global_pause_path,
     project_pause_path,
     read_flag,
@@ -338,6 +340,7 @@ def test_les_autres_auteurs_se_nomment(duo: tuple[int, Path, Path]) -> None:
     port, alpha, _beta = duo
     write_pause(alpha, mode=DRAIN, actor="session-7", origin="agent")
     assert _state(port, "alpha")["pause"]["project"]["author"] == "une session d'agent (session-7)"
+    clear_pause(alpha)  # une session d'agent ne remplace pas la pause d'une autre : la mise en place la lève entre deux poses
     write_pause(alpha, mode=DRAIN, actor="", origin="agent")
     assert _state(port, "alpha")["pause"]["project"]["author"] == "une session d'agent"
     write_pause(alpha, mode=DRAIN, actor="guilhem", origin="human")
@@ -528,6 +531,15 @@ def test_sans_journal_lisible_poser_ou_durcir_ou_ouvrir_passent(duo: tuple[int, 
     assert read_flag(project_pause_path(alpha), "project").mode == HOLD  # type: ignore[union-attr]
     assert _post(port, TRIP, "beta", {"reason": "r"})[0] == 200
     assert read_breaker(beta).open is True
+
+
+def test_un_agent_ne_remplace_jamais_la_pause_d_un_humain_posee_depuis_le_cockpit(duo: tuple[int, Path, Path]) -> None:
+    port, alpha, _beta = duo
+    assert _post(port, PAUSE, "alpha", {"mode": DRAIN, "reason": "je tiens la main"})[0] == 200
+    with pytest.raises(PauseError, match="ne la remplace pas"):
+        write_pause(alpha, mode=DRAIN, actor="session-9", origin="agent", session="S-9")
+    flag = read_flag(project_pause_path(alpha), "project")
+    assert flag is not None and (flag.origin, flag.reason) == ("human", "je tiens la main")
 
 
 def test_le_remplacement_trace_l_auteur_d_avant_et_n_herite_d_aucune_session(duo: tuple[int, Path, Path]) -> None:

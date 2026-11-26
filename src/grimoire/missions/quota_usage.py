@@ -51,9 +51,11 @@ from grimoire.missions.lease import parse_instant
 from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT, SESSION_EVENTS
 
 if TYPE_CHECKING:
+    from grimoire.missions.admission import QueuePlan
     from grimoire.missions.service import TaskService
 
 __all__ = [
+    "DEFERRAL_EVENT",
     "GIVE_UP_AFTER",
     "GRACE",
     "MAX_BYTES",
@@ -67,6 +69,7 @@ __all__ = [
     "STATE_RELPATH",
     "TIME_BUDGET_S",
     "ConsumedOutcome",
+    "note_deferral",
     "record_consumption",
     "tracking",
 ]
@@ -91,6 +94,7 @@ SETTLE_AFTER = timedelta(hours=48)
 GIVE_UP_AFTER = timedelta(hours=24)
 MISSING_PREFIX = "journal de session introuvable"
 SETTLED_REASON = "journal trop gros et immobile : la consommation au-delà du dernier total connu n'est pas mesurée"
+DEFERRAL_EVENT = "quota.deferral_noted"
 PENDING_REASON ="relecture en attente : le journal a changé et le budget de lecture du pas était épuisé"
 OVERSIZE_REASON = "journal au-dessus du plafond de lecture : la consommation au-delà du dernier total connu n'est plus suivie"
 NO_ID_REASON = "lancement sans identifiant ni condensé de session : consommation non attribuable"
@@ -401,6 +405,30 @@ def record_consumption(
     if json.dumps(state, sort_keys=True) != before_state:
         _save_state(root, state)
     return outcomes
+
+
+def note_deferral(service: TaskService, plan: QueuePlan, *, apply: bool, attention: list[str]) -> None:
+    """Dit, une fois par jour et par cause, que la consommation inconnue ou partielle diffère les lancements autonomes."""
+    cause = ""
+    for deferred in plan.deferred:
+        if deferred.reason == "unknown" and deferred.detail.startswith("consommation du jour"):
+            cause = "partial" if "partiellement" in deferred.detail else "unknown"
+            break
+    if not cause:
+        return
+    day = plan.now.astimezone(UTC).date().isoformat()
+    for event in service.ledger.list_events():
+        if event.event_type == DEFERRAL_EVENT and event.payload.get("day") == day and event.payload.get("cause") == cause:
+            return
+    waiting = max(plan.view.tokens.unknown_sessions, 1)
+    what = "partiellement inconnue" if cause == "partial" else "inconnue"
+    attention.append(
+        f"quota : lancements différés, consommation {what}, {waiting} session(s) à relire. Pour en sortir : les prochains "
+        "ticks relisent les journaux ; sinon un humain règle `quota.on_unknown: count_known` dans capacity.yaml "
+        "(le connu seul compte), ou relève le plafond."
+    )
+    if apply:
+        service.ledger.append_event(DEFERRAL_EVENT, "project", "task", _ACTOR, {"day": day, "cause": cause})
 
 
 def _record(service: TaskService, session: _Session, measure: dict[str, Any], mine: _Seen, total: int, day_start: datetime) -> None:

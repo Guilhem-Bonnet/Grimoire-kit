@@ -108,13 +108,12 @@ def queue_rules(
 
     from grimoire.missions.admission import load_capacity
     from grimoire.missions.service import TaskService
-    from grimoire.missions.usage_rules import read_rules, rules_report
+    from grimoire.missions.usage_rules import rules_report
 
     service = TaskService(project_root.resolve(), ledger_root)
     capacity = load_capacity(service.home_root)
-    rules, issues = read_rules(service.home_root)
-    report = rules_report(rules, issues, service.ledger.list_events() if service.has_ledger else [], datetime.now(UTC))
-    report["quota"] = {"tokens_per_day": capacity.tokens_per_day}
+    report = rules_report(capacity.usage_rules, capacity.rule_issues, service.ledger.list_events() if service.has_ledger else [], datetime.now(UTC))
+    report["quota"] = {"tokens_per_day": capacity.tokens_per_day, "on_unknown": capacity.on_unknown}
     report["capacity_errors"] = dict(capacity.errors)
     if _as_json(ctx, json_output):
         typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
@@ -138,7 +137,7 @@ def _render_rules(report: dict[str, Any]) -> None:
     console.print(
         f"[bold]Aujourd'hui ({today['day']} UTC)[/bold] : {today['tokens']} tokens{_bound(today, 'tokens')}, "
         f"{today['usd']:.4f} USD{_bound(today, 'usd')}, {today['sessions']} session(s) — "
-        f"plafond {quota['tokens_per_day']} tokens/jour"
+        f"plafond {quota['tokens_per_day']} tokens/jour, consommation inconnue : {quota['on_unknown']}"
     )
     follow = report["tracking"]
     console.print(
