@@ -244,15 +244,26 @@ class Conversation:
             if self._subscribers or self._busy or self._starting:
                 return
             self._closing_timer = None
-        self.close()
+            # Constat « personne, aucun tour » et détachement de l'agent dans la MÊME section : sinon un abonné
+            # (ou un message) arrivé entre les deux trouvait l'agent en marche, puis le voyait disparaître.
+            client = self._detach_locked()
+        self._release(client)
 
     def close(self) -> None:
         with self._cond:
-            client, self._client = self._client, None
-            self._log.clear()
-            self.session_id = None
-            self.resumed = False
-            self._cond.notify_all()
+            client = self._detach_locked()
+        self._release(client)
+
+    def _detach_locked(self) -> AcpClient | None:
+        """Sous `_cond` : retire l'agent et remet la conversation à zéro ; rend le client à arrêter."""
+        client, self._client = self._client, None
+        self._log.clear()
+        self.session_id = None
+        self.resumed = False
+        self._cond.notify_all()
+        return client
+
+    def _release(self, client: AcpClient | None) -> None:
         for ready in list(self._decision_ready.values()):
             ready.set()
         if client is not None:
@@ -474,8 +485,8 @@ class Conversation:
         try:
             self.ensure_started()
             client = self._client
-            if client is None:
-                return
+            if client is None:  # l'agent s'est arrêté entre son démarrage et le tour : le dire, jamais un tour muet
+                raise AcpError("l'agent s'est arrêté avant le tour : renvoyez le message")
             prompt = self._with_spoken_brief(text)  # avant turn_started : un arrêt annoncé trouve le tour envoyé
             started: dict[str, Any] = {"type": "turn_started"}
             if self._spoken_token:  # le navigateur masque cette balise-là, et elle seule
