@@ -158,6 +158,10 @@ def orchestrate_resume(
     except PauseError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
+    if lifted is not None:
+        from grimoire.missions.tick_wake import wake_after
+
+        wake_after(project_root.resolve(), "reprise")  # le tick qui rend les waiting(paused) peut venir plus tôt
     if _as_json(ctx, json_output):
         typer.echo(json.dumps({"lifted": lifted.to_dict() if lifted else None}, indent=2, ensure_ascii=False))
         return
@@ -200,16 +204,19 @@ def orchestrate_status(
 ) -> None:
     """Les drapeaux de pause en vigueur (projet et machine), leur périmètre, et l'effet d'un hold par tâche tenue."""
     from grimoire.missions.pause import home_root, read_pause
+    from grimoire.missions.tick_wake import describe_last_wake, read_last_wake
     from grimoire.missions.timer import timer_status
 
     root = project_root.resolve()
     state = read_pause(home_root(root))
     lines = _hold_lines(root, ledger_root, state) if state.active else []
     timer = timer_status(home_root(root))
+    wake = read_last_wake(root)
     if _as_json(ctx, json_output):
-        typer.echo(json.dumps({**state.to_dict(), "held_tasks": lines, "timer": timer}, indent=2, ensure_ascii=False))
+        typer.echo(json.dumps({**state.to_dict(), "held_tasks": lines, "timer": timer, "last_wake": wake}, indent=2, ensure_ascii=False))
         return
     console.print(f"[dim]{timer}[/dim]")
+    console.print(f"[dim]{describe_last_wake(root)}[/dim]")
     if not state.active:
         console.print("Pas de pause : le tick admet normalement.")
         return
@@ -294,11 +301,21 @@ def orchestrate_tick(
         typer.echo("--apply et --plan s'excluent.", err=True)
         raise typer.Exit(2)
 
+    tick_gap = None
+    if apply:
+        from grimoire.missions.tick_wake import note_tick
+
+        tick_gap = note_tick(project_root.resolve())  # écart avec le tick précédent, pour la borne anti-chaîne des réveils
     try:
         report = run_tick(project_root.resolve(), ledger_root=ledger_root, apply=apply)
     except GrimoireError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
+    if apply:
+        from grimoire.missions.tick_wake import tick_wake_reason, wake_after
+
+        if (wake_reason := tick_wake_reason(report)) is not None:  # un tick qui a fait quelque chose : au plus un tick de plus
+            wake_after(project_root.resolve(), wake_reason, tick_gap=tick_gap)
     if _as_json(ctx, json_output):
         typer.echo(json.dumps({**report.to_dict(), "applied": apply}, indent=2, ensure_ascii=False))
     else:
