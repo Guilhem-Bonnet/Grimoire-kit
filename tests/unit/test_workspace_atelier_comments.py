@@ -309,6 +309,60 @@ def test_a_block_inserted_or_deleted_before_the_commented_block_neither_detaches
     assert row.id == made["id"] and row.orphelin is False and row.rank > made["rank"]
 
 
+def test_a_copy_inserted_by_an_accepted_suggestion_does_not_take_the_thread_over(project: Path) -> None:
+    """Sonde R1 : une copie du bloc commenté s'insère avant l'original et prend son rang ; le rang ne départage jamais."""
+    assert _post(project, "", {"block_id": _block(project, PARA_B), "texte": "Trop vague", "quote": "second"})[0] == 200
+    filed = sugg.suggest(str(project), "un", _block(project, PARA_A), f"{PARA_A}\n\n{PARA_B}")["suggestion"]
+    assert wa.post_http(project, f"{P}atelier/chantiers/un/suggestions/{filed['id']}", {"decision": "accept"})[0] == 200
+    assert [b["text"] for b in _phase(project)["blocks"]].count(PARA_B) == 2  # la copie est là, avant l'original
+    assert _anchor(project)["state"] == "orphelin" and _anchor(project)["block_id"] == ""
+    assert store.load(project / "_grimoire/cadrage/un")[0].orphelin is True  # et le fil ne bouge plus ensuite
+    _cockpit_edit(project, [b["id"] for b in _phase(project)["blocks"] if b["text"] == PARA_B][-1], "Réécrit.")
+    assert _anchor(project)["state"] == "orphelin"
+
+
+def _anchored(text: str, at: int, quote: str) -> tuple[list[atelier_blocs.Block], store.Comment]:
+    blocks = atelier_blocs.split("brainstorm", text)
+    rank, prev, after_fp = atelier_anchor.around(blocks, at)
+    start = blocks[at].text.index(quote)
+    before, after = atelier_anchor.context(blocks[at].text, start, start + len(quote))
+    item = store.Comment(
+        id="c", phase="brainstorm", block_id=blocks[at].id, block_fingerprint=atelier_blocs.fingerprint(blocks[at].text),
+        quote=quote, start=start, before=before, after=after, auteur="humain", date="d", texte="t",
+        rank=rank, prev=prev, next=after_fp,
+    )
+    return blocks, item
+
+
+@pytest.mark.parametrize(
+    ("base", "at", "after"),
+    [
+        ("Un\n\nDeux\n\nLivrer vite\n\nTrois\n", 2, "Un\n\nDeux\n\nLivrer vite\n\nLivrer vite\n\nTrois\n"),  # copie avant ou après
+        ("Livrer vite\n\nTrois\n", 0, "Livrer vite\n\nLivrer vite\n\nTrois\n"),  # en début de phase
+        ("Un\n\nLivrer vite\n", 1, "Un\n\nLivrer vite\n\nLivrer vite\n"),  # en fin de phase
+        ("Un\n\nLivrer vite\n\nTrois\n", 1, "Un\n\nLivrer vite\n\nLivrer vite\n\nLivrer vite\n\nTrois\n"),  # trois exemplaires
+        ("Livrer vite\n", 0, "Livrer vite\n\nLivrer vite\n"),  # phase d'un seul bloc
+    ],
+)
+def test_a_homonym_never_takes_a_thread_over_whatever_its_place(base: str, at: int, after: str) -> None:
+    _blocks, item = _anchored(base, at, "vite")
+    moved = atelier_anchor.locate(atelier_blocs.split("brainstorm", after), item)
+    assert moved.state == "orphelin" and moved.block_id == ""
+
+
+def test_a_homonym_with_both_neighbours_intact_is_still_the_block() -> None:
+    blocks, item = _anchored("Un\n\nLivrer vite\n\nTrois\n", 1, "vite")
+    kept = atelier_anchor.locate(atelier_blocs.split("brainstorm", "Un\n\nLivrer vite\n\nTrois\n\nQuatre\n\nLivrer vite\n"), item)
+    assert kept.state == "ancre" and kept.block_id == blocks[1].id  # l'autre exemplaire est ailleurs : l'original n'a pas bougé
+
+
+def test_a_single_block_phase_and_its_copy_is_an_orphan() -> None:
+    _blocks, item = _anchored("Livrer vite\n", 0, "vite")
+    assert atelier_anchor.locate(atelier_blocs.split("brainstorm", "Livrer vite\n\nLivrer vite\n"), item).state == "orphelin"
+    alone = atelier_anchor.locate(atelier_blocs.split("brainstorm", "Livrer vite\n"), item)
+    assert alone.state == "ancre"  # sans homonyme, la règle ordinaire s'applique
+
+
 def test_a_block_deleted_whose_neighbour_takes_its_place_is_an_orphan_not_a_transfer(project: Path) -> None:
     made = _comment(project, quote="touche")
     path = _file(project)

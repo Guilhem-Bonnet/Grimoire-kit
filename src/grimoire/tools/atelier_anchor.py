@@ -9,9 +9,10 @@ n'est pas ce bloc ; au moindre doute, le fil est orphelin. Règle, la première 
 
 0. **Un orphelin le reste.** Un fil marqué orphelin au magasin (:attr:`Comment.orphelin`) ne se réancre plus de lui-même.
 1. **Le bloc visé n'a pas changé** : un bloc de la phase a son empreinte *et* c'est bien sa place (même rang, ou au moins
-   un voisin identique : un bloc inséré ou supprimé avant lui ne le détache pas). Il doit être le seul dans ce cas, ou
-   le seul au même rang. Les blocs voisins peuvent changer sans que le fil bouge. Un bloc de même texte mais d'une
-   autre place (rang et voisins différents) ne compte pas.
+   un voisin identique : un bloc inséré ou supprimé avant lui ne le détache pas). Les blocs voisins peuvent changer
+   sans que le fil bouge. Un bloc de même texte mais d'une autre place (rang et voisins différents) ne compte pas.
+   **Dès qu'un homonyme existe** (plusieurs blocs de la phase portent cette empreinte), seul celui dont les DEUX voisins
+   sont ceux de l'ancrage convient, et il doit être unique : jamais de départage par le rang, sinon orphelin.
 2. **Le bloc visé a été modifié sur place** : c'est le bloc compris entre les deux mêmes voisins (empreintes des deux
    identiques, et un seul bloc dans ce cas). L'extrait n'y est cherché que **dans ce bloc**, mot pour mot : retrouvé
    (``retrouve``) s'il y figure une seule fois, ou, s'il y figure plusieurs fois, si une seule occurrence a exactement le
@@ -98,11 +99,14 @@ def locate(blocks: Sequence[atelier_blocs.Block], item: Anchored) -> Anchor:
         return Anchor("orphelin")
     held = "retrouve" if item.deplace else "ancre"
     same = [i for i, b in enumerate(blocks) if _fp(b) == item.block_fingerprint]
-    placed = [i for i in same if _in_place(blocks, i, item)]
-    if len(placed) > 1:
-        placed = [i for i in placed if i == item.rank]
+    if len(same) > 1:
+        # Des homonymes : seul celui dont les DEUX voisins sont ceux de l'ancrage convient, et il doit être unique.
+        # Jamais de départage par le rang (une copie insérée avant l'original prend son rang).
+        placed = [i for i in same if around(blocks, i)[1:] == (item.prev, item.next)]
         if len(placed) != 1:
             return Anchor("orphelin", near=blocks[same[0]].id)  # le doute entre des blocs identiques
+    else:
+        placed = [i for i in same if _in_place(blocks, i, item)]
     if len(placed) == 1:
         block = blocks[placed[0]]
         if block.text[item.start : item.start + len(item.quote)] == item.quote:
