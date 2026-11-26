@@ -49,8 +49,8 @@ from grimoire.missions.ledger_rules import unclosed_blockers
 from grimoire.missions.liveness import Attention
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState
 from grimoire.missions.schemas import MissionTask, TaskState
-from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT as _QUOTA_CONSUMED
 from grimoire.missions.usage_rules import (
+    KIT_KEY_PREFIX,
     RuleStatus,
     UsageRule,
     describe,
@@ -60,6 +60,7 @@ from grimoire.missions.usage_rules import (
     parse_rules,
     unknown_counts_today,
 )
+from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT as _QUOTA_CONSUMED
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import MissionLedger
@@ -421,6 +422,7 @@ def _today(now: datetime) -> str:
 def _consumed_today(events: list[Any], now: datetime) -> TokenUse:
     today = _today(now)
     summed, dispatched = 0, 0
+    kit, kit_seen = 0, set[str]()  # les appels de modèle du kit : ils s'ajoutent, sans jamais être la mesure d'une session
     measured = False
     latest: dict[str, bool] = {}  # session -> son dernier état connu pèse-t-il « inconnu » sur aujourd'hui ?
     for event in events:
@@ -432,6 +434,11 @@ def _consumed_today(events: list[Any], now: datetime) -> TokenUse:
             key = str(event.payload.get("session") or event.id)
             if event.payload.get("status") == "unknown":
                 latest[key] = unknown_counts_today(event.payload, stamp, now)
+            elif isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0 and key.startswith(KIT_KEY_PREFIX):
+                if key not in kit_seen:  # un doublon d'une clé du kit ne compte jamais deux fois
+                    kit_seen.add(key)
+                    if event_day(event.payload, _today(stamp)) == today:
+                        kit += tokens
             elif isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
                 latest[key] = False  # un état connu défait l'inconnu qui le précède
                 if event_day(event.payload, _today(stamp)) == today:
@@ -440,9 +447,11 @@ def _consumed_today(events: list[Any], now: datetime) -> TokenUse:
             dispatched += 1
     unknown = {key for key, weighs in latest.items() if weighs}
     if measured:
-        return TokenUse(summed, "partial" if unknown else "lower_bound", len(unknown))
+        return TokenUse(summed + kit, "partial" if unknown else "lower_bound", len(unknown))
     # Des appels ont eu lieu aujourd'hui sans qu'aucun chiffre de tokens n'existe : on ne sait pas.
-    return TokenUse(None, "unknown", len(unknown)) if (dispatched or unknown) else TokenUse(0, "lower_bound")
+    if dispatched or unknown:  # le statut d'avant est conservé ; les jetons du kit s'ajoutent à ce qui est connu
+        return TokenUse(kit or None, "unknown", len(unknown))
+    return TokenUse(kit, "lower_bound")
 
 
 def derive_view(ledger: MissionLedger, capacity: Capacity, *, now: datetime, host: HostReading | None = None) -> LedgerView:
@@ -680,10 +689,10 @@ def _quota_refusal(
     used = view.tokens
     if used.tokens is not None and used.tokens >= limit:  # atteint sur le connu seul : l'inconnu ne l'infirme pas
         return defer("quota", f"quota du jour atteint (>= {used.tokens}/{limit} tokens)", _next_midnight(view.now))
-    if used.tokens is None or used.status == "partial":
+    if used.tokens is None or used.status in ("unknown", "partial"):
         if capacity.on_unknown == ON_UNKNOWN_COUNT_KNOWN or not autonomous:
             return None  # ``count_known`` : le connu seul compte, réglage explicite du projet
-        what = "inconnue" if used.tokens is None else f"partiellement inconnue ({used.unknown_sessions} session(s) sans chiffre)"
+        what = "inconnue" if used.tokens is None or used.status == "unknown" else f"partiellement inconnue ({used.unknown_sessions} session(s) sans chiffre)"
         return defer("unknown", f"consommation du jour {what} sous un quota fini")
     return None
 

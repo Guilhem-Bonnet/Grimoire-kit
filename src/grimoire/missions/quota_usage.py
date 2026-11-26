@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.fsio import atomic_write
 from grimoire.core.regular_file import open_regular
 from grimoire.missions.lease import parse_instant
-from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT, SESSION_EVENTS
+from grimoire.missions.usage_rules import KIT_KEY_PREFIX, QUOTA_CONSUMED_EVENT, SESSION_EVENTS, launch_session_key
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import QueuePlan
@@ -58,6 +58,7 @@ __all__ = [
     "DEFERRAL_EVENT",
     "GIVE_UP_AFTER",
     "GRACE",
+    "KIT_ORIGINS",
     "MAX_BYTES",
     "MAX_SESSIONS",
     "NO_ID_REASON",
@@ -69,8 +70,10 @@ __all__ = [
     "STATE_RELPATH",
     "TIME_BUDGET_S",
     "ConsumedOutcome",
+    "kit_call_refusal",
     "note_deferral",
     "record_consumption",
+    "record_kit_call",
     "tracking",
 ]
 
@@ -135,9 +138,7 @@ def _sessions(events: list[Any]) -> dict[str, _Session]:
             continue
         payload = event.payload
         session_id = str(payload.get("session_id") or "")
-        key = session_id or str(payload.get("session_sha256") or "")
-        no_id = not key
-        key = key or f"event:{event.id}"  # un lancement sans identité n'est pas compté zéro en silence
+        key, no_id = launch_session_key(event)  # un lancement sans identité n'est pas compté zéro en silence
         if key in found:
             continue
         task = "" if role == "orchestrator" else event.entity_id
@@ -395,7 +396,7 @@ def record_consumption(
             continue
         total = int(measure["total"])
         state[key] = {"size": stamp[0], "mtime_ns": stamp[1], "read_at": moment.isoformat(), "total": max(total, mine.total)}
-        if total <= mine.total and mine.status != "unknown":
+        if total <= mine.total and mine.status == "known":  # jamais mesurée (ou inconnue) : un état connu est écrit, même à zéro
             outcomes.append(ConsumedOutcome(key[:12], session.role, session.task_id, "unchanged"))
             continue
         _record(service, session, measure, mine, total, day_start)
@@ -454,3 +455,108 @@ def _record(service: TaskService, session: _Session, measure: dict[str, Any], mi
              "calls": measure["calls"], "cost_usd": share, "session_cost_usd": measure["cost"] if cost_known else None,
              "cost_status": measure["cost_status"], **({"day": day} if day else {})},
         )
+
+
+# ── Les appels de modèle du kit lui-même (hors sessions) ───────────────────────
+
+#: Les origines que le kit peut inscrire : une liste fermée, choisie ici (jamais une valeur venue d'un appelant externe).
+KIT_ORIGINS = ("atelier",)
+_KIT_CALL_ID = re.compile(r"(?!.*\.\.)[A-Za-z0-9._:-]{1,128}")
+_KIT_SLUG = re.compile(r"[A-Za-z0-9._-]{1,64}")
+#: Lettres, chiffres, ``-``, ``_``, ``.`` isolé, ``:`` ; ni ``/`` ni suite ``..`` ; 64 caractères au plus.
+_KIT_MODEL = re.compile(r"(?!.*\.\.)[A-Za-z0-9._:-]{1,64}")
+#: Au-delà, un total de jetons déclaré pour un seul appel n'est pas plausible : refusé, jamais borné en silence.
+MAX_KIT_TOKENS = 10_000_000
+
+
+def _kit_count(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= MAX_KIT_TOKENS else None
+
+
+def record_kit_call(
+    root: Path, *, origin: str, call_id: str, model: str, input_tokens: int, output_tokens: int, chantier: str = "",
+) -> str:
+    """Inscrit la consommation CONNUE d'un appel de modèle que le kit a lui-même facturé (``quota.consumed``).
+
+    Appelée par le code du kit après une réponse facturée, jamais par un outil MCP ni une commande : ``origin`` est
+    l'une de :data:`KIT_ORIGINS`, les jetons sont ceux que la réponse déclare. Idempotente : la clé est
+    ``kit:<origine>:<call_id>``, rejouer le même appel (même ``call_id``) n'écrit rien ; le contrôle d'existence et
+    l'écriture se font sous le verrou du ledger, et la lecture ne compte une clé du kit qu'une fois. Le
+    ``call_id`` est celui de l'APPEL local (jamais le seul identifiant d'une réponse distante).
+
+    Rend l'issue : ``recorded``, ``duplicate`` (déjà inscrit), ``refused`` (valeur hors forme), ``no_ledger`` (projet
+    sans ledger de missions) ou ``error`` (l'écriture a échoué : l'appelant le dit). Rien d'autre n'est écrit.
+    La consommation entre dans la fiche Capacité et les règles d'usage sans jamais rendre « connue » une journée dont
+    des sessions sont sans mesure ; le compteur local du client reste distinct et en vigueur.
+    """
+    from grimoire.missions.ledger_files import ledger_file_lock
+    from grimoire.missions.service import TaskService
+
+    tokens_in, tokens_out = _kit_count(input_tokens), _kit_count(output_tokens)
+    if (
+        origin not in KIT_ORIGINS or tokens_in is None or tokens_out is None
+        or not isinstance(call_id, str) or not _KIT_CALL_ID.fullmatch(call_id)
+        or not isinstance(model, str) or not _KIT_MODEL.fullmatch(model)
+    ):
+        return "refused"
+    slug = chantier if isinstance(chantier, str) and _KIT_SLUG.fullmatch(chantier) else ""
+    try:
+        service = TaskService(root)
+        if not service.has_ledger:
+            return "no_ledger"
+        key = f"{KIT_KEY_PREFIX}{origin}:{call_id}"
+        from grimoire.providers.registry import read_model_pricing
+        from grimoire.traces.transcript_usage import UsageCall, call_cost_usd
+
+        cost = call_cost_usd(
+            UsageCall(call_id, model, tokens_in, tokens_out, 0, 0, 0, 0, "", "", ""), read_model_pricing(root).get(model)
+        )
+        ledger = service.ledger
+        payload = {
+            "session": key, "role": origin, "task_id": "", "chantier": slug, "model": model, "status": "lower_bound",
+            "tokens": tokens_in + tokens_out, "session_total_tokens": tokens_in + tokens_out,
+            "input_tokens": tokens_in, "output_tokens": tokens_out, "calls": 1, "cost_usd": cost,
+            "session_cost_usd": cost, "cost_status": "exact" if cost is not None else "unknown",
+        }
+        with ledger_file_lock(ledger._events_path):  # le contrôle et l'écriture sous le même verrou que `append_event`
+            ledger._refresh()  # ne rejoue que si l'empreinte du journal a bougé
+            ledger._load()
+            if any(e.event_type == QUOTA_CONSUMED_EVENT and e.payload.get("session") == key for e in ledger.list_events()):
+                return "duplicate"
+            ledger._append_event(QUOTA_CONSUMED_EVENT, f"kit-{origin}", "task", _ACTOR, payload, lock_held=True)
+    except Exception:  # inscrire ne doit jamais faire échouer le geste déjà facturé : l'appelant le dit (``error``)
+        return "error"
+    return "recorded"
+
+
+def kit_call_refusal(root: Path, *, now: datetime | None = None) -> str:
+    """Le motif pour lequel un geste modèle du kit est refusé (``""`` : il peut partir). Lecture seule, échec fermé.
+
+    Lit ce que l'admission lit (:func:`~grimoire.missions.admission.load_capacity` et le ledger) : une règle d'usage de
+    portée ``project`` ou ``day`` franchie dont l'action est ``hold`` ou ``pause`` refuse le geste. ``warn`` ne retient
+    rien ; une règle de portée ``task`` ne vise que des tâches, pas un geste d'Atelier. ``capacity.yaml`` illisible, ou
+    le ledger illisible alors que des règles existent : refusé (échec fermé).
+    """
+    from grimoire.missions.admission import load_capacity
+    from grimoire.missions.service import TaskService
+    from grimoire.missions.usage_rules import describe, evaluate
+
+    try:
+        capacity = load_capacity(root)
+        if capacity.errors.get("*"):
+            return "capacity.yaml illisible : geste du modèle refusé (échec fermé), un humain le répare"
+        if not capacity.usage_rules:
+            return ""
+        service = TaskService(root)
+        events = service.ledger.list_events() if service.has_ledger else []
+        statuses = evaluate(capacity.usage_rules, events, now or datetime.now(UTC))
+    except Exception:
+        return "règles d'usage illisibles : geste du modèle refusé (échec fermé)"
+    for status in statuses:
+        rule = status.rule
+        if rule.enabled and status.crossed and rule.action in ("hold", "pause") and rule.scope != "task":
+            return (
+                f"{describe(status)} : geste du modèle refusé. Pour lever : un humain relève le seuil ou met "
+                "`enabled: false` sur cette règle dans capacity.yaml (la portée jour se lève à minuit UTC)."
+            )
+    return ""
