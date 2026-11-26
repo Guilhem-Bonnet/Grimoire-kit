@@ -113,6 +113,34 @@ function quotaChip(quota) {
   return chip;
 }
 
+/** La consommation du jour (borne basse) et les règles d'usage de `capacity.yaml` : lecture seule, rien ne s'y règle. */
+function usageBlock(usage) {
+  if (!usage) return null;
+  const today = usage.consumption_today || {};
+  const rules = usage.rules || [];
+  const issues = usage.issues || [];
+  if (!rules.length && !issues.length && !today.tokens && !today.sessions) return null;
+  const bound = (metric) => (today[`${metric}_complete`] === false ? '≥ ' : '');
+  const block = el('div', 'cp-usage');
+  block.append(el(
+    'span', 'cp-usage-day',
+    `aujourd’hui : ${bound('tokens')}${fmtInt(today.tokens || 0)} tokens · ${bound('usd')}${Number(today.usd || 0).toFixed(2)} USD · ${fmtInt(today.sessions || 0)} session(s)`,
+  ));
+  const follow = usage.tracking;
+  if (follow && (follow.unknown || follow.never_measured)) {
+    block.append(badge(
+      `${follow.unknown} session(s) inconnue(s)`, 'warn',
+      `${follow.sessions} suivie(s), dont ${follow.pending_reread} en attente de relecture et ${follow.never_measured} jamais mesurée(s)`,
+    ));
+  }
+  for (const r of rules) {
+    block.append(badge(`${r.id} : ${r.state}`, r.state === 'franchie' ? 'warn' : '',
+      `${r.scope}${r.scope_key ? ` ${r.scope_key}` : ''} · ${r.metric} ${r.value} / ${r.threshold} · action ${r.action}`));
+  }
+  for (const issue of issues) block.append(badge('règle ignorée', 'warn', issue));
+  return block;
+}
+
 function priorityCell(ligne) {
   const wrap = el('span', 'cp-prio');
   const bars = PRIORITY_BARS[ligne.priorite_effective]
@@ -202,6 +230,8 @@ function renderInto(node, data) {
   head.append(wipText, quotaChip(data.quota || { mode: 'inconnu' }));
   for (const label of data.pause || []) head.append(badge(`pause : ${label}`, 'warn'));
   node.append(head);
+  const usage = usageBlock(data.usage);
+  if (usage) node.append(usage);
 
   // ── Bandeau des réservoirs : saturés et inconnus en lignes, sains regroupés ─
   const band = el('div', 'cp-band');

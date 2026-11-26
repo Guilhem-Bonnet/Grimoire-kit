@@ -1,0 +1,204 @@
+"""La consommation des sessions est écrite au ledger (``quota.consumed``) et le plafond du jour devient utilisable.
+
+Avant : aucun code n'émettait ``quota.consumed`` ; sous un plafond fini la consommation était « inconnue » et
+l'admission refusait tout en autonome.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from grimoire.missions.quota_usage import SESSION_EVENTS, record_consumption, tracking
+from grimoire.missions.schemas import TaskState
+from grimoire.missions.service import TaskService
+from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT, consumption_today
+
+ACC = "la consommation est comptée"
+STANDARD = Path("_grimoire/standard")
+SESSION_A = "5a1c0001-0000-0000-0000-000000000001"
+SESSION_B = "5a1c0002-0000-0000-0000-000000000002"
+LATER = timedelta(hours=1)  # au-delà du délai de grâce d'une session toute neuve
+
+
+@pytest.fixture(autouse=True)
+def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    from grimoire.missions import usage_fold
+    from grimoire.tools import workspace_work as ww
+
+    ww._TRANSCRIPT_CACHE.clear()
+    usage_fold._missing_cache.clear()
+
+
+@pytest.fixture
+def projet(tmp_path: Path) -> Path:
+    root = tmp_path / "projet"
+    (root / STANDARD).mkdir(parents=True)
+    return root
+
+
+@pytest.fixture
+def service(projet: Path) -> TaskService:
+    return TaskService(projet)
+
+
+def _task(service: TaskService, titre: str = "t") -> str:
+    mission = next(iter(service.ledger.list_missions()), None)
+    mission_id = mission.id if mission else service.ledger.create_mission(title="Quota", origin="test").id
+    task = service.ledger.create_task(mission_id, titre, acceptance=(ACC,), owner="amelia")
+    service.ledger.transition_task(task.id, TaskState.READY)
+    return task.id
+
+
+def _call(n: int, model: str = "claude-sonnet-5-5") -> str:
+    usage = {"input_tokens": 1000, "output_tokens": 500, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+    message = {"id": f"msg-{n}", "model": model, "content": [{"type": "text"}], "usage": usage}
+    return json.dumps({"type": "assistant", "timestamp": datetime.now(UTC).isoformat(), "message": message})
+
+
+def _journal(tmp_path: Path, folder: str, name: str, calls: int, model: str = "claude-sonnet-5-5") -> Path:
+    path = tmp_path / "claude" / "projects" / folder / f"{name}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(_call(i, model) for i in range(calls)) + "\n", encoding="utf-8")
+    return path
+
+
+def _launch(service: TaskService, tid: str, session: str, **extra: object) -> None:
+    service.ledger.append_event(
+        "task.session_launched", tid, "task", "worker", {"session": "abcd1234", "session_id": session, "model": "sonnet", **extra}
+    )
+
+
+def _consumed(service: TaskService) -> list[dict[str, object]]:
+    return [dict(e.payload) for e in service.ledger.list_events() if e.event_type == QUOTA_CONSUMED_EVENT]
+
+
+def _now() -> datetime:
+    return datetime.now(UTC) + LATER
+
+
+def test_session_events_match_the_modules_that_write_them() -> None:
+    from grimoire.missions.arbiter import ARBITRATION_LAUNCHED_EVENT
+    from grimoire.missions.launcher import LAUNCHED_EVENT
+    from grimoire.missions.orchestrator_session import ORCH_LAUNCHED_EVENT
+    from grimoire.missions.reviewer import REVIEW_LAUNCHED_EVENT
+
+    assert set(SESSION_EVENTS) == {LAUNCHED_EVENT, REVIEW_LAUNCHED_EVENT, ARBITRATION_LAUNCHED_EVENT, ORCH_LAUNCHED_EVENT}
+
+
+def test_a_session_is_counted_once_and_a_replayed_tick_writes_nothing(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    _launch(service, tid, SESSION_A)
+    _journal(tmp_path, "x", SESSION_A, 3)
+    first = record_consumption(service, now=_now())
+    assert [o.status for o in first] == ["recorded"]
+    (event,) = _consumed(service)
+    assert event["tokens"] == 4500 and event["session_total_tokens"] == 4500
+    assert event["status"] == "lower_bound" and event["role"] == "worker" and event["task_id"] == tid
+    assert event["session"] == SESSION_A and event["model"] == "claude-sonnet-5-5"
+    assert isinstance(event["cost_usd"], float) and event["cost_status"] == "exact"
+    again = record_consumption(service, now=_now())
+    assert [o.status for o in again] == ["unchanged"] and len(_consumed(service)) == 1
+
+
+def test_a_session_that_grows_adds_only_the_difference(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    _launch(service, tid, SESSION_A)
+    _journal(tmp_path, "x", SESSION_A, 2)
+    record_consumption(service, now=_now())
+    _journal(tmp_path, "x", SESSION_A, 5)
+    record_consumption(service, now=_now())
+    assert [e["tokens"] for e in _consumed(service)] == [3000, 4500]
+    assert consumption_today(service.ledger.list_events(), datetime.now(UTC))["tokens"] == 7500
+
+
+def test_an_unreadable_session_says_unknown_with_its_reason_once_then_heals(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    _launch(service, tid, SESSION_A, provider="ailleurs")
+    record_consumption(service, now=_now())
+    record_consumption(service, now=_now())
+    (event,) = _consumed(service)
+    assert event["status"] == "unknown" and event["tokens"] is None and "introuvable" in str(event["reason"])
+    assert "ailleurs" in str(event["reason"])
+    assert tracking(service.ledger.list_events())["unknown"] == 1
+    _journal(tmp_path, "x", SESSION_A, 1)
+    record_consumption(service, now=_now())
+    today = consumption_today(service.ledger.list_events(), datetime.now(UTC))
+    assert today["tokens"] == 1500 and today["tokens_complete"] is True
+
+
+def test_a_brand_new_session_is_not_declared_unknown(service: TaskService) -> None:
+    _launch(service, _task(service), SESSION_A)
+    (outcome,) = record_consumption(service)
+    assert outcome.status == "unchanged" and not _consumed(service)
+
+
+def test_an_unknown_model_cost_is_never_counted_as_zero(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    _launch(service, tid, SESSION_A)
+    _journal(tmp_path, "x", SESSION_A, 2, model="modele-inconnu-du-kit")
+    record_consumption(service, now=_now())
+    (event,) = _consumed(service)
+    assert event["tokens"] == 3000 and event["cost_usd"] is None and event["cost_status"] == "unknown"
+
+
+def test_a_role_that_keeps_only_a_digest_is_found_by_its_working_directory(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    cwd = tmp_path / "wt" / "relecteur"
+    cwd.mkdir(parents=True)
+    digest = hashlib.sha256(SESSION_B.encode()).hexdigest()
+    service.ledger.append_event(
+        "task.review_launched", tid, "task", "reviewer", {"session": "zz", "session_sha256": digest, "model": "opus", "cwd": str(cwd)}
+    )
+    _journal(tmp_path, re.sub(r"[^A-Za-z0-9]", "-", str(cwd.resolve())), SESSION_B, 2)
+    record_consumption(service, now=_now())
+    (event,) = _consumed(service)
+    assert event["role"] == "reviewer" and event["session"] == digest and event["tokens"] == 3000
+
+
+def test_the_step_is_bounded(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    for n, session in enumerate((SESSION_A, SESSION_B)):
+        _launch(service, tid, session)
+        _journal(tmp_path, "x", session, n + 1)
+    outcomes = record_consumption(service, now=_now(), max_sessions=1)
+    assert sorted(o.status for o in outcomes) == ["recorded", "skipped"]
+    record_consumption(service, now=_now(), max_sessions=1)
+    events = _consumed(service)
+    assert sorted(str(e["status"]) for e in events) == ["lower_bound", "lower_bound", "unknown"]  # l'attente, puis les deux
+
+
+def test_an_oversized_journal_is_unknown_not_guessed(tmp_path: Path, service: TaskService) -> None:
+    _launch(service, _task(service), SESSION_A)
+    _journal(tmp_path, "x", SESSION_A, 3)
+    record_consumption(service, now=_now(), max_bytes=10)
+    (event,) = _consumed(service)
+    assert event["status"] == "unknown" and "plafond" in str(event["reason"])
+
+
+def test_a_known_session_that_is_old_and_unchanged_is_no_longer_examined(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    _launch(service, tid, SESSION_A)
+    _journal(tmp_path, "x", SESSION_A, 1)
+    record_consumption(service, now=_now())
+    assert record_consumption(service, now=datetime.now(UTC) + timedelta(days=40)) == []
+
+
+# ── Ce que les règles et la fiche Capacité lisent ─────────────────────────────
+
+
+def test_the_recorded_consumption_is_what_the_usage_rules_read(tmp_path: Path, service: TaskService) -> None:
+    other = _task(service, "autre")
+    _launch(service, other, SESSION_A)
+    _launch(service, other, SESSION_B)
+    _journal(tmp_path, "x", SESSION_A, 3)  # 4500 jetons ; SESSION_B n'a pas de journal
+    record_consumption(service, now=_now())
+    today = consumption_today(service.ledger.list_events(), datetime.now(UTC))
+    assert today["tokens"] == 4500 and today["tokens_complete"] is False  # une session sans chiffre : borne basse
+    assert today["usd"] > 0 and today["sessions"] == 2
