@@ -17,6 +17,7 @@
 import { api, currentChatTarget, host, projectName, setChatTarget } from './api.js';
 import { renderMarkdown } from './markdown.js';
 import { getAtelierContext } from './atelier-context.js';
+import { publish } from './mascotte_bus.js';
 import { createMascotteLink } from './mascotte_lazy.js';
 import { createVoiceInput } from './voice.js';
 import { createVoiceOutbox, liveTarget, withoutSpokenTag } from './voice_outbox.js';
@@ -143,8 +144,15 @@ export function createChat({ readOnly = () => false } = {}) {
   };
   const scrollDown = () => { log.scrollTop = log.scrollHeight; };
 
+  // Ce que la mascotte permanente du cockpit sait de l'orchestrateur (aucune requête : des faits du fil déjà reçus).
+  let waitingCount = 0;
+  let failed = false;
+  function announce() { publish('orchestrator', { busy, waiting: waitingCount, error: failed }); }
+
   function setBusy(value) {
     busy = value;
+    if (value) failed = false;
+    announce();
     mascotte.setBusy(value);
     stop.hidden = !value;
     send.disabled = value || readOnly();
@@ -251,6 +259,8 @@ export function createChat({ readOnly = () => false } = {}) {
     let count = 0;
     for (const entry of [...permissions.values(), ...questions.values()]) if (!entry.box.classList.contains('is-done')) count += 1;
     mascotte.setWaiting(count);
+    waitingCount = count;
+    announce();
   }
 
   // ── Permissions ─────────────────────────────────────────────────────────
@@ -530,6 +540,7 @@ export function createChat({ readOnly = () => false } = {}) {
         current = null;
         planBox = null;
         if (!(event.seq && event.seq <= replayUntil)) setBusy(false);
+        if (event.stop_reason === 'error' && !(event.seq && event.seq <= replayUntil)) { failed = true; announce(); }
         mascotte.turnEnded(event.stop_reason, Boolean(event.seq && event.seq <= replayUntil));
         if (conversation && !(event.seq && event.seq <= replayUntil)) {
           conversation.event(event.stop_reason === 'end_turn' ? { type: 'turn-ended' } : { type: 'stop', reason: 'stop' });
@@ -542,6 +553,8 @@ export function createChat({ readOnly = () => false } = {}) {
       }
       case 'error':
         note(event.message || 'Erreur de l’agent.', 'error');
+        failed = true;
+        announce();
         break;
       default:
         break;
@@ -549,6 +562,7 @@ export function createChat({ readOnly = () => false } = {}) {
   }
 
   function connect() {
+    if (stream) return; // déjà branché (la veille de la mascotte permanente, puis l'ouverture de l'onglet)
     if (typeof EventSource !== 'function') {
       setStatus('Ce navigateur ne sait pas lire le flux : le chat est indisponible.');
       return;
@@ -600,7 +614,7 @@ export function createChat({ readOnly = () => false } = {}) {
 
   /** Le mode conversation, seulement si le vocal est actif ; sinon le module n'est même pas demandé. */
   async function setupConversation() {
-    if (conversation || !opened || !voice.available()) return;
+    if (conversation || !opened || !voice.known()) return; // vocal inconnu (vue globale, lecture seule) : rien à montrer
     const { createConversation } = await import('./conversation.js');
     if (conversation || !opened) return;
     conversation = createConversation({
@@ -614,6 +628,7 @@ export function createChat({ readOnly = () => false } = {}) {
         return started;
       },
       stopReading: () => voiceOut.abort(),
+      unavailableReason: () => voice.unavailableReason(),
     });
     element.insertBefore(conversation.element, form);
     conversation.sync();
@@ -680,6 +695,15 @@ export function createChat({ readOnly = () => false } = {}) {
   return {
     element,
     /** À l'affichage de l'onglet : ouvre le flux la première fois, remet le focus dans la saisie. */
+    /**
+     * La veille de la mascotte permanente : branche le flux du fil (une seule fois, sans rien afficher ni prendre le focus)
+     * pour que la mascotte sache si l'orchestrateur réfléchit ou attend la personne, même chat jamais ouvert.
+     * Pas en lecture seule ni en vue « Tous les projets » (le projet visé s'y choisit dans le chat).
+     */
+    watch() {
+      if (opened || stream || readOnly() || host.scopeAll) return;
+      connect();
+    },
     open() {
       if (!opened && host.scopeAll && !readOnly()) {
         opened = true;
@@ -694,8 +718,10 @@ export function createChat({ readOnly = () => false } = {}) {
           send.disabled = true;
           setStatus('Lecture seule : ce projet n’est que consulté. Ouvrez le cockpit depuis lui pour parler à son orchestrateur.');
         } else {
-          setBusy(false);
-          setStatus('Connexion à l’orchestrateur…');
+          if (!stream) { // déjà branché par la veille : l'état reçu (tour en cours) n'est pas remis à zéro
+            setBusy(false);
+            setStatus('Connexion à l’orchestrateur…');
+          }
           loadHosts();
           voice.refresh().then(setupConversation);
           voiceOut.refresh();

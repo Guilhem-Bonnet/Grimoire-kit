@@ -236,12 +236,14 @@ export function glowTargetAt(action, elapsed) {
  * L'erreur garde la forme du repos : le shader n'a pas de forme d'erreur, le ton et le libellé la disent.
  */
 export function assistantState({
-  error = '', unavailable = false, question = false, permission = false, suggestions = 0, busy = false,
+  error = '', unavailable = false, question = false, permission = false, suggestions = 0, busy = false, waiting = 0,
 } = {}) {
-  const count = (question ? 1 : 0) + (permission ? 1 : 0) + Math.max(0, Number(suggestions) || 0);
+  // `waiting` : le nombre de questions et de permissions que le chat de l'orchestrateur tient en attente.
+  const wait = Math.max(0, Math.floor(Number(waiting) || 0));
+  const count = (question ? 1 : 0) + (permission ? 1 : 0) + wait + Math.max(0, Number(suggestions) || 0);
   if (error) return { action: 'repos', count: 0, tone: 'error', caption: 'erreur de l’assistant' };
   if (unavailable && !(suggestions > 0)) return { action: 'repos', count: 0, tone: 'off', caption: 'assistant indisponible' };
-  if (question || permission) {
+  if (question || permission || wait > 0) {
     const plural = count > 1;
     return { action: 'question', count, tone: 'wait', caption: plural ? `${count} choses attendent ta réponse` : 'attend ta réponse' };
   }
@@ -251,6 +253,32 @@ export function assistantState({
   }
   if (busy) return { action: 'reflechit', count: 0, tone: 'busy', caption: 'réfléchit' };
   return { action: 'repos', count: 0, tone: 'idle', caption: 'au repos' };
+}
+
+/**
+ * Les faits de la mascotte permanente du cockpit : ceux de l'orchestrateur (le chat : un tour en cours, des questions et
+ * permissions en attente, une erreur) et ceux de l'assistant de l'Atelier (s'il est ouvert). Rend de quoi appeler
+ * `assistantState`. L'erreur de l'orchestrateur prime ; sans l'Atelier ouvert, seul l'orchestrateur parle.
+ */
+export function mergeFacts({ orchestrator = null, assistant = null } = {}) {
+  const o = orchestrator || {};
+  const a = assistant || {};
+  return {
+    error: o.error ? 'orchestrateur' : (a.error || ''),
+    question: Boolean(a.question),
+    permission: Boolean(a.permission),
+    suggestions: Math.max(0, Number(a.suggestions) || 0),
+    busy: Boolean(o.busy || a.busy),
+    waiting: Math.max(0, Math.floor(Number(o.waiting) || 0)),
+  };
+}
+
+/** Où mène un clic sur la mascotte permanente : l'Atelier quand c'est son assistant qui attend (et rien côté chat), sinon le chat. */
+export function anchorDestination({ orchestrator = null, assistant = null } = {}) {
+  const waitingChat = Number((orchestrator || {}).waiting) > 0;
+  const a = assistant || {};
+  if (!waitingChat && (a.question || Number(a.suggestions) > 0) && a.slug) return 'atelier';
+  return 'chat';
 }
 
 /** Ce qu'un clic sur la mascotte de l'assistant vise : la question (ou la permission), sinon la suggestion, sinon la barre. */

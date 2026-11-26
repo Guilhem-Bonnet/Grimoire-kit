@@ -139,6 +139,7 @@ export function createAtelierMascotte(ctx, hooks) {
       stopReading: () => { if (speaking) { stopSpeaking(); paint(); } },
       onMode: (_mode, action) => { talk = action; caption.setAttribute('aria-live', 'off'); paint(); },
       onClose: () => { talk = null; caption.setAttribute('aria-live', 'polite'); paint(); },
+      unavailableReason: () => recorder.unavailableReason(),
     });
     element.append(conversation.element);
     conversation.sync();
@@ -158,7 +159,7 @@ export function createAtelierMascotte(ctx, hooks) {
   recorder.refresh().then(() => {
     if (destroyed) return;
     voice = recorder.available();
-    if (voice) mountConversation();
+    if (recorder.known()) mountConversation(); // vocal indisponible : le bouton reste, désactivé, avec la raison
     paint();
   });
   ctx.signal.addEventListener('abort', () => {

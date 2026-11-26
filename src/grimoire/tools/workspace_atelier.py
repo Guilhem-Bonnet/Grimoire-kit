@@ -10,7 +10,9 @@ permet de l'allumer.
 
 Routes (préfixe ``/api/workspace/``) :
 
-- ``GET features`` ; ``POST features`` ``{"atelier": bool}`` ou ``{"mascotte": bool}`` (mascotte vocale du chat)
+- ``GET features`` ; ``POST features`` ``{"atelier": bool}`` (drapeau du PROJET) ou ``{"mascotte": bool}`` (préférence
+  de cockpit de la MACHINE : tous les projets, la vue globale ; elle reprend l'ancien drapeau par projet tant
+  qu'elle n'est pas posée)
 - ``GET atelier/chantiers`` ; ``POST atelier/chantiers`` ``{"titre", "slug"?}``
 - ``GET atelier/chantiers/<slug>`` : cinq phases en blocs typés
 - ``PUT atelier/chantiers/<slug>/blocs/<id>`` ``{"text", "expected"}`` : réécrit la seule plage du bloc ;
@@ -83,15 +85,85 @@ def enabled(root: Path, flag: tuple[str, ...] = FLAG) -> bool:
     return node is True
 
 
+#: Les fonctions en test qui valent pour TOUT le cockpit de la machine (préférence de cockpit, ``cockpit.json``), pas pour
+#: un projet : la mascotte suit la personne d'un projet à l'autre et dans la vue « Tous les projets ».
+MACHINE_FEATURES_KEY = "test_features"
+
+
+def machine_pref(name: str) -> bool | None:
+    """La préférence de cockpit de la machine pour ``name`` : ``True`` ou ``False`` si elle a été posée, sinon ``None``."""
+    from grimoire.tools.project_registry import read_state
+
+    node = read_state().get(MACHINE_FEATURES_KEY)
+    value = node.get(name) if isinstance(node, dict) else None
+    return value if isinstance(value, bool) else None
+
+
+_LEGACY_SEEN: dict[str, tuple[float, bool]] = {}
+
+
+def _legacy_project_flag(path: str) -> bool:
+    """Le drapeau par projet d'avant (``cockpit.test_features.mascotte``), mis en cache par date du fichier."""
+    file = Path(path) / CONTEXT_FILE
+    try:
+        stamp = file.stat().st_mtime
+    except OSError:
+        return False
+    seen = _LEGACY_SEEN.get(path)
+    if seen is not None and seen[0] == stamp:
+        return seen[1]
+    value = enabled(Path(path), MASCOTTE_FLAG)
+    _LEGACY_SEEN[path] = (stamp, value)
+    return value
+
+
+def mascotte_on(root: Path) -> bool:
+    """La mascotte est-elle allumée pour ce cockpit ?
+
+    La préférence de la machine, si elle a été posée, décide pour tous les projets. Sinon on reprend l'ancien drapeau
+    par projet : celui du projet servi, ou de n'importe quel projet du registre. Qui l'avait allumé dans un projet ne
+    perd donc pas son choix en regardant un autre projet, ni dans la vue « Tous les projets ». Lecture seule.
+    """
+    pref = machine_pref("mascotte")
+    if pref is not None:
+        return pref
+    if enabled(root, MASCOTTE_FLAG):
+        return True
+    from grimoire.tools.project_registry import load_registry
+
+    for entry in load_registry():
+        path = entry.get("path") if isinstance(entry, dict) else None
+        if isinstance(path, str) and path and _legacy_project_flag(path):
+            return True
+    return False
+
+
 def features(root: Path) -> dict[str, Any]:
-    return {"atelier": enabled(root), "mascotte": enabled(root, MASCOTTE_FLAG)}
+    return {"atelier": enabled(root), "mascotte": mascotte_on(root), "mascotte_scope": "machine"}
 
 
 def set_mascotte(root: Path, on: Any) -> dict[str, Any]:
-    """Écrit ``cockpit.test_features.mascotte`` (même écriture que l'Atelier)."""
+    """Écrit ``cockpit.test_features.mascotte`` DU PROJET (l'ancien réglage ; le cockpit n'écrit plus que :func:`set_mascotte_machine`)."""
     if not isinstance(on, bool):
         raise ValueError("`mascotte` (booléen) requis : true active, false éteint")
     return set_atelier(root, on, MASCOTTE_FLAG)
+
+
+def set_mascotte_machine(root: Path, on: Any) -> dict[str, Any]:
+    """Pose la préférence de cockpit « mascotte » : allumée ou éteinte pour tous les projets de cette machine.
+
+    Elle prime sur l'ancien drapeau par projet, qu'on ne réécrit pas : éteindre ici éteint partout, sans toucher
+    aux ``project-context.yaml``.
+    """
+    if not isinstance(on, bool):
+        raise ValueError("`mascotte` (booléen) requis : true active, false éteint")
+    from grimoire.tools.project_registry import read_state, write_state
+
+    state = read_state()
+    node = state.get(MACHINE_FEATURES_KEY)
+    state[MACHINE_FEATURES_KEY] = {**(node if isinstance(node, dict) else {}), "mascotte": on}
+    write_state(state)
+    return features(root)
 
 
 def set_atelier(root: Path, on: Any, flag: tuple[str, ...] = FLAG) -> dict[str, Any]:
@@ -330,7 +402,9 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
             atomic_write(path, updated.encode("utf-8"))
     from grimoire.tools import workspace_atelier_comments as comments
 
-    comments.resync_after_edit(root, slug)  # lot 3 : les fils retrouvés suivent leur passage (sans effet sur l'écriture)
+    comments.resync_after_edit(
+        root, slug
+    )  # lot 3 : les fils retrouvés suivent leur passage (sans effet sur l'écriture)
     return {"ok": True, "phase": _phase_view(root, None if slug == "principal" else slug, phase)}
 
 
@@ -361,14 +435,18 @@ def get(root: Path, path: str, query: dict[str, list[str]]) -> Any:
     if len(rest) == 3 and rest[0] == "chantiers" and rest[2] in ("trace", "decoupage"):
         from grimoire.tools import workspace_atelier_trace as live
 
-        return live.trace_view(root, rest[1], (query.get("req") or [""])[0]) if rest[2] == "trace" else live.decoupage_preview(root, rest[1])
+        return (
+            live.trace_view(root, rest[1], (query.get("req") or [""])[0])
+            if rest[2] == "trace"
+            else live.decoupage_preview(root, rest[1])
+        )
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
 def post(root: Path, path: str, body: dict[str, Any]) -> Any:
     if path == FEATURES:
         if "mascotte" in body and "atelier" not in body:
-            return set_mascotte(root, body.get("mascotte"))
+            return set_mascotte_machine(root, body.get("mascotte"))
         return set_atelier(root, body.get("atelier"))
     _need_flag(root)
     if path.rstrip("/") == f"{ATELIER}chantiers":
@@ -385,7 +463,11 @@ def post(root: Path, path: str, body: dict[str, Any]) -> Any:
         from grimoire.tools import workspace_atelier_comments as comments
 
         # Lot 3 : l'auteur est celui du canal (cette route = l'humain), jamais un champ du corps.
-        return comments.create(root, rest[1], body, "humain") if len(rest) == 3 else comments.act(root, rest[1], rest[3], body)
+        return (
+            comments.create(root, rest[1], body, "humain")
+            if len(rest) == 3
+            else comments.act(root, rest[1], rest[3], body)
+        )
     if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "assistant":
         from grimoire.tools import workspace_atelier_assistant as assistant
 
