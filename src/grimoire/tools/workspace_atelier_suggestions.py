@@ -66,12 +66,13 @@ def _live(blocks: list[atelier_blocs.Block], item: Suggestion) -> bool:
 
     L'identifiant d'un bloc ne compte que les homonymes qui le précèdent : quand le premier de deux blocs
     identiques est réécrit, le second hérite de son identifiant. Un doublon au dépôt exige donc le même nombre
-    d'homonymes et les mêmes voisins ; au moindre doute la suggestion est périmée.
+    d'homonymes (toujours) et les mêmes voisins (pour un doublon) ; au moindre doute la suggestion est périmée.
     """
     index = next((i for i, b in enumerate(blocks) if b.id == item.block_id), None)
     if index is None or atelier_blocs.fingerprint(blocks[index].text) != item.block_fingerprint:
         return False
-    return item.homonymes <= 1 or _context(blocks, index) == (item.homonymes, item.voisins)
+    same, around = _context(blocks, index)
+    return same == item.homonymes and (item.homonymes <= 1 or around == item.voisins)
 
 
 def _blocks(root: Path, slug: str, phase: Any) -> list[atelier_blocs.Block] | None:
@@ -156,12 +157,27 @@ def _clean(value: Any, name: str, limit: int, *, required: bool = False) -> str:
     return clean
 
 
+#: Caractères qui n'affichent rien sans être de catégorie Cf : sélecteurs de variante (U+FE00-FE0F et
+#: U+E0100-E01EF), remplissages Hangul et braille vide. Les marques combinantes ordinaires (U+0300-036F)
+#: restent permises : elles s'affichent et servent à écrire en français.
+INVISIBLE_RANGES: tuple[tuple[int, int], ...] = (
+    (0xFE00, 0xFE0F),
+    (0xE0100, 0xE01EF),
+    (0x115F, 0x1160),
+    (0x3164, 0x3164),
+    (0xFFA0, 0xFFA0),
+    (0x2800, 0x2800),
+)
+
+
 def _refuse_invisible(value: str, name: str) -> None:
-    """Refuse les caractères de catégorie Cf (bidi, espace sans chasse, « tags »…) : l'humain valide ce qu'il voit."""
+    """Refuse ce que l'humain ne verrait pas : catégorie Unicode Cf (bidi, espace sans chasse, « tags »…) et
+    :data:`INVISIBLE_RANGES`."""
     for char in value:
-        if unicodedata.category(char) == "Cf":
+        code = ord(char)
+        if unicodedata.category(char) == "Cf" or any(low <= code <= high for low, high in INVISIBLE_RANGES):
             raise ValueError(
-                f"`{name}` : caractère invisible refusé (U+{ord(char):04X}) ; une suggestion reste lisible tel quel"
+                f"`{name}` : caractère invisible refusé (U+{code:04X}) ; une suggestion reste lisible tel quel"
             )
 
 
@@ -225,8 +241,13 @@ def deposit(root: Path, slug: str, body: dict[str, Any]) -> dict[str, Any]:
             if stale or ignored or damaged is not None:
                 _persist(chantier, items, ignored, damaged)
             raise ValueError(f"{store.MAX_PENDING} suggestions en attente : l'humain en tranche avant d'en déposer")
-        while len(items) >= store.MAX_ENTRIES:  # les plus anciennes déjà tranchées ou périmées partent d'abord
-            old = next(i for i, x in enumerate(items) if x.etat != "proposee")
+        while len(items) >= store.MAX_ENTRIES:  # d'abord les périmées les plus anciennes, puis les tranchées
+            order = ("perimee", "acceptee", "refusee")
+            old = next((i for etat in order for i, x in enumerate(items) if x.etat == etat), None)
+            if old is None:  # que de l'attendu valide : rien à purger, refus net
+                if stale or ignored or damaged is not None:
+                    _persist(chantier, items, ignored, damaged)
+                raise ValueError(f"{store.MAX_ENTRIES} entrées en attente : l'humain en tranche avant d'en déposer")
             del items[old]
         made = store.new_suggestion(
             phase=phase.id,

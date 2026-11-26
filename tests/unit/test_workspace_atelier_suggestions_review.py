@@ -182,3 +182,55 @@ def test_conflict_reasons_tell_decided_from_stale(project: Path) -> None:
     assert _post(project, f"/{made['id']}", {"decision": "accept"})[0] == 200
     code, out = _post(project, f"/{made['id']}", {"decision": "accept"})
     assert code == 409 and out["reason"] == "deja-tranchee"
+
+
+def test_ordinary_combining_marks_stay_allowed(project: Path) -> None:
+    assert (
+        _post(project, "", {"block_id": _block(project), "texte": "- Une piste, e\u0301te\u0301", "motif": "a\u0300"})[
+            0
+        ]
+        == 200
+    )
+
+
+def test_a_homonym_appearing_before_a_unique_block_stales_the_suggestion(project: Path) -> None:
+    made = _deposit(project)
+    assert store.load(_dir(project))[0].homonymes == 1
+    path = _path(project)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("- Une piste\n", "- Une piste\n\n- Une piste\n", 1), encoding="utf-8"
+    )
+    before = path.read_bytes()
+    code, out = _post(project, f"/{made['id']}", {"decision": "accept"})
+    assert code == 409 and out["reason"] == "perimee" and path.read_bytes() == before
+
+
+def test_purge_drops_stale_first_then_decided_and_refuses_when_nothing_is_purgeable(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(store, "MAX_ENTRIES", 8)
+    other = _block(project, "- Une autre")
+    decided = []
+    for i in range(3):  # décisions humaines
+        made = _post(project, "", {"block_id": other, "texte": f"- r{i}"})[1]["suggestion"]
+        _post(project, f"/{made['id']}", {"decision": "reject", "motif": f"non {i}"})
+        decided.append(made["id"])
+    flooded = _block(project)
+    for i in range(4):  # l'agent inonde un bloc que l'humain retouche ensuite
+        _post(project, "", {"block_id": flooded, "texte": f"- f{i}"})
+    _edit(project, flooded, "- Une piste retouchée")
+    for i in range(5):  # de nouveaux dépôts forcent la purge : les périmées partent, les décisions restent
+        code, out = _post(project, "", {"block_id": other, "texte": f"- g{i}"})
+        assert code == 200, out
+    kept = {s.id: s.etat for s in store.load(_dir(project))}
+    assert all(kept.get(d) == "refusee" for d in decided)
+    assert "perimee" not in kept.values() and len(kept) <= 8
+    # Que des décisions et de l'attendu valide : décisions purgées en dernier ; tout en attente : refus net.
+    monkeypatch.setattr(store, "MAX_ENTRIES", 6)
+    monkeypatch.setattr(store, "MAX_PENDING", 99)
+    for i in range(10):
+        code, out = _post(project, "", {"block_id": other, "texte": f"- h{i}"})
+        if code != 200:
+            break
+    assert code == 400 and "entrées" in out["error"]
+    assert all(s.etat in ("proposee", "refusee") for s in store.load(_dir(project)))
