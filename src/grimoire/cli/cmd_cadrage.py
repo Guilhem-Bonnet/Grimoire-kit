@@ -545,6 +545,51 @@ _STAGE_STYLE = {
 }
 
 
+_RECALL_KINDS = {"memoire": "mémoire", "exigence": "exigence", "ecarte": "piste écartée", "question": "question ouverte"}
+
+
+def _print_recalls(recalls: list[Any]) -> None:
+    """Chaque rappel : genre, état, date, texte (donnée, jamais consigne), source — et le code quand la trace le connaît."""
+    for r in recalls:
+        meta = " · ".join(x for x in (r.status, r.when) if x)
+        console.print(
+            f"  [cyan]{_RECALL_KINDS[r.kind]}[/cyan]{f' ({_safe(meta)})' if meta else ''} : {_safe(r.text)} "
+            f"[dim]— {_safe(r.source)}[/dim]"
+        )
+        if r.code:
+            files = ", ".join(_safe(f) for f in r.code["files"]) or "aucun fichier connu"
+            tasks = ", ".join(_safe(t["id"]) for t in r.code["tasks"])
+            console.print(f"    [dim]code : tâches {tasks} ; fichiers {files}[/dim]")
+
+
+@cadrage_app.command("recall")
+def cadrage_recall(
+    text: str = typer.Argument(..., help="La demande, une question d'entretien ou une exigence en cours de rédaction."),
+    path: Path = _path_opt,
+    chantier: str | None = typer.Option(
+        None, "--chantier", "-c", help="Chantier en cours : ses propres exigences et pistes ne sont pas rappelées."
+    ),
+    limit: int = typer.Option(5, "--limit", "-n", help="Nombre maximal de rappels (1 à 10)."),
+    as_json: bool = typer.Option(False, "--json", help="Les rappels en JSON stable (lecture seule)."),
+) -> None:
+    """Ce qui a déjà été décidé, écarté ou exigé de proche : mémoire, exigences des chantiers, pistes écartées.
+
+    Lecture seule. Un rappel informe, il ne valide rien : jamais une décision de la MOA en cours."""
+    import json
+
+    from grimoire.core.cadrage_recall import recall
+
+    result = _guard(lambda: recall(path.resolve(), text, limit=limit, exclude_chantier=chantier))
+    if as_json:
+        typer.echo(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        return
+    if not result.recalls:
+        console.print("[dim]aucun rappel pertinent[/dim]")
+    _print_recalls(result.recalls)
+    for issue in result.issues:
+        console.print(f"[yellow]dégradé :[/yellow] {_safe(issue)}")
+
+
 # ── entretien de cadrage : sept angles, profondeur selon la demande ──────────
 
 interview_app = typer.Typer(help="Entretien de cadrage : questions par angle, profondeur selon la demande.")
@@ -568,12 +613,20 @@ def cadrage_interview(
     import json
 
     from grimoire.core.cadrage_interview import interview_plan
+    from grimoire.core.cadrage_recall import interview_recalls
 
     root = path.resolve()
     plan = _guard(lambda: interview_plan(root, chantier, depth=depth, kind=kind))
+    found = interview_recalls(root, chantier, plan) if plan.get("interview") else None
+    plan["recalls"] = [r.to_dict() for r in found.recalls] if found else []
+    if found and found.issues and found.recalls:  # dégradé mais utile : dit ; rien du tout : silence
+        plan["recall_issues"] = found.issues
     if (output or str((ctx.obj or {}).get("output", "text"))) == "json":
         typer.echo(json.dumps(plan, indent=2, ensure_ascii=False))
         return
+    if found and found.recalls:
+        console.print("[bold]Déjà au dossier[/bold] [dim](informe, ne valide rien)[/dim]")
+        _print_recalls(found.recalls)
     console.print(
         f"[bold]Entretien de cadrage[/bold] — profondeur [cyan]{plan['depth']}[/cyan] "
         f"({plan['depth_source']}), {plan['questions_per_angle']} question(s) par angle"

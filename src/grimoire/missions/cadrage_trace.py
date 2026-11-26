@@ -548,8 +548,11 @@ def build_trace(
     *,
     git: GitReader | None = None,
     journal: AuthorityJournal | None = None,
+    only: frozenset[str] | None = None,
 ) -> CadrageTrace:
-    """La trace de chaque exigence planifiée du chantier. Lecture seule : ledger, journal d'autorité, cadrage et git."""
+    """La trace de chaque exigence planifiée du chantier. Lecture seule : ledger, journal d'autorité, cadrage et git.
+
+    ``only`` borne le coût : seules les exigences de ces clés (``REQ-001`` ou ``<chantier>/REQ-001``) sont tracées."""
     from grimoire.missions.mandate import AuthorityJournal, JournalError
 
     chantier = None if chantier == DEFAULT_CHANTIER else chantier
@@ -571,6 +574,8 @@ def build_trace(
         if not req.planned:
             continue
         key = rg.normalize_key(req.id, chantier)
+        if only is not None and key not in only:
+            continue
         view = moa.requirement_view(project, key, service=service, journal=journal)
         entry = rg.validation_in(entries, str(project), key, view.fingerprint, moa_name)[0] if view.validated else None
         trace = RequirementTrace(
