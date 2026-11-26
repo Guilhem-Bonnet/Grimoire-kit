@@ -1,0 +1,1 @@
+- perf(cockpit): le journal des traces n'est plus relu en entier à chaque lecture, seulement depuis ce qui s'y est ajouté ; la fiche Piloter à froid passe de ~17 s à ~4 s sur un poste réel (98 000 traces, 97 Mo) (Refs #1243)
