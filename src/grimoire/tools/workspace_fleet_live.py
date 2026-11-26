@@ -95,6 +95,9 @@ EXCERPT_CHARS = 240
 #: Au-delà, les marqueurs et changements de modèle les plus anciens sont oubliés.
 _MAX_MARKERS = 200
 _MAX_CHANGES = 200
+#: Les lanes (suites d'appels de même modèle et même effort) les plus anciennes sont oubliées au-delà ; le nombre
+#: oublié est rendu (``lanes_dropped``) pour que la liste tronquée se dise.
+_MAX_LANES = 200
 
 #: Bloc lu au plus en une passe : un journal de session de 195 Mo ne se charge jamais d'un coup. Seuls les
 #: octets complets (terminés par un saut de ligne) sont consommés ; le reliquat attend la passe suivante.
@@ -362,6 +365,7 @@ class _FileState:
     usage_by_model: dict[str, _UsageGroup] = field(default_factory=dict)
     lanes: list[dict[str, Any]] = field(default_factory=list)
     lane: dict[str, Any] | None = None
+    lanes_dropped: int = 0
     changes: list[dict[str, Any]] = field(default_factory=list)
     markers: list[dict[str, Any]] = field(default_factory=list)
     tools: deque[_Tool] = field(default_factory=lambda: deque(maxlen=TAIL_CALLS))
@@ -476,6 +480,7 @@ def _reset_state(state: _FileState) -> None:
     state.usage_by_model.clear()
     state.lanes.clear()
     state.lane = None
+    state.lanes_dropped = 0
     state.changes.clear()
     state.markers.clear()
     state.tools.clear()
@@ -494,9 +499,15 @@ def _add_usage(state: _FileState, model: str, counters: tuple[int, int, int, int
 
 def _note_lane(state: _FileState, call: _Call) -> None:
     lane = state.lane
-    if lane is None or lane["model"] != call.model or lane["effort"] != call.effort:
+    # La lane garde ``None`` pour un modèle ou un effort absent : comparer à la valeur normalisée, pas à ``""``
+    # (sinon un journal sans champ ``effort`` ouvrait une lane par appel, sans borne).
+    if lane is None or lane["model"] != (call.model or None) or lane["effort"] != (call.effort or None):
         if lane is not None:
             state.lanes.append(lane)
+            if len(state.lanes) > _MAX_LANES:
+                excess = len(state.lanes) - _MAX_LANES
+                del state.lanes[:excess]
+                state.lanes_dropped += excess
         state.lane = {
             "from": call.at or None,
             "to": call.at or None,
@@ -1101,7 +1112,7 @@ def _assemble(
     lanes = [dict(lane) for lane in state.lanes]
     if state.lane is not None:
         lanes.append(dict(state.lane))
-    return {
+    payload: dict[str, Any] = {
         "id": session_id,
         "project": root.slug,
         "host": HostId.CLAUDE_CODE_CLI.value,
@@ -1149,6 +1160,9 @@ def _assemble(
             "transcript": str(path),
         },
     }
+    if state.lanes_dropped:
+        payload["lanes_dropped"] = state.lanes_dropped  # les plus anciennes lanes ont été oubliées (borne)
+    return payload
 
 
 # ── Découverte des journaux ─────────────────────────────────────────────────
