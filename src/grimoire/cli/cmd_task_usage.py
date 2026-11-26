@@ -37,7 +37,41 @@ def _usage_of(task: Any, root: Path) -> dict[str, Any]:
     traces = TraceLedger(traces_path).list_traces(task_id=task.id) if (traces_path / "traces.jsonl").is_file() else []
     host = resolve_host(task.claim.host_id) if task.claim else None
     available = None if host is None else recorded_contract(host).verified("local_token_usage")
-    return task_usage(traces, host_usage_available=available, pricing_for=read_model_pricing(root).get)
+    usage = task_usage(traces, host_usage_available=available, pricing_for=read_model_pricing(root).get)
+    if usage["usage_source"] in ("unavailable", "none") and task.claim and task.claim.session_id:
+        copilot = _copilot_usage(root, task)
+        if copilot is not None:
+            return copilot
+    return usage
+
+
+def _copilot_usage(root: Path, task: Any) -> dict[str, Any] | None:
+    """L'usage lu dans le journal Copilot lisible de la session de la tâche, ``None`` sinon (non configuré, absent…).
+
+    Lecture seule, rien n'est replié : c'est ce qui remplace « unavailable » tant que ``task usage`` n'a pas
+    replié le journal. Non vérifié sur un vrai Copilot.
+    """
+    from grimoire.missions.usage_fold import _is_copilot_claim
+    from grimoire.traces.copilot_usage import (
+        copilot_logs_location,
+        locate_session_journal,
+        read_copilot_journal,
+        session_task_usage,
+    )
+
+    if not _is_copilot_claim(task):
+        return None
+    location = copilot_logs_location(root)
+    if not location.usable or location.path is None:
+        return None
+    journal = locate_session_journal(location.path, task.claim.session_id)
+    if journal is None:
+        return None
+    try:
+        session = read_copilot_journal(journal, base=location.path)
+    except (OSError, ValueError):
+        return None
+    return session_task_usage(session) if session.recognized else None
 
 
 def _usage_line(usage: dict[str, Any]) -> str:
@@ -49,10 +83,16 @@ def _usage_line(usage: dict[str, Any]) -> str:
     if source == "reported":
         return f"rapporté par l'ouvrier seulement ({usage['reported']['calls']} appel(s))"
     cout = format_usd(usage["cost_usd"], usage["cost_status"], usage["unpriced_calls"])
+
+    def shown(value: Any) -> Any:
+        return "inconnu" if value is None else value
+
     ligne = (
-        f"{usage['calls']} appel(s), {usage['input_tokens']} in / {usage['output_tokens']} out, "
-        f"cache {usage['cache_read_tokens']} lu / {usage['cache_creation_tokens']} écrit, coût {cout} [{source}]"
+        f"{usage['calls']} appel(s), {shown(usage['input_tokens'])} in / {shown(usage['output_tokens'])} out, "
+        f"cache {shown(usage['cache_read_tokens'])} lu / {shown(usage['cache_creation_tokens'])} écrit, coût {cout} [{source}]"
     )
+    if usage.get("verified") is False:
+        ligne += f" — {usage.get('note', 'non vérifié')}"
     if usage["discrepancy"] is not None:
         ligne += f" — écart avec le coût rapporté : {usage['discrepancy']['relative_gap']:.0%}"
     return ligne

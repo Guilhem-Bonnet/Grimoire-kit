@@ -232,9 +232,27 @@ def check_copilot_mcp(target: Path) -> list[EnvCheck]:
     return [EnvCheck("copilot_mcp", passed=True, level="ok", detail=f"{rel} declares the `grimoire` MCP server")]
 
 
+def check_copilot_logs(target: Path) -> list[EnvCheck]:
+    """Où lire les journaux de session Copilot (jetons, flotte) : configuré ou non, jamais deviné.
+
+    Information seule : ``journaux Copilot : emplacement non configuré`` quand ni la variable
+    ``GRIMOIRE_COPILOT_LOGS_DIR`` ni ``hosts.copilot_session_logs`` ne sont posées (aucun défaut : le dépôt
+    n'établit pas où Copilot les écrit) ; un chemin refusé ou introuvable est un WARN.
+    """
+    from grimoire.hosts.detection import resolve_enabled_hosts
+    from grimoire.traces.copilot_usage import copilot_logs_location
+
+    if "copilot" not in resolve_enabled_hosts(target):
+        return []
+    location = copilot_logs_location(target)
+    level = "warn" if location.problem else "info"
+    return [EnvCheck("copilot_logs", passed=True, level=level, detail=location.message)]
+
+
 def check_copilot_hooks(target: Path) -> list[EnvCheck]:
     return [
         *check_copilot_mcp(target),
+        *check_copilot_logs(target),
         *check_copilot_hook_format(target),
         *check_copilot_hooks_doubled(target),
         *check_copilot_claude_hooks_only(target),

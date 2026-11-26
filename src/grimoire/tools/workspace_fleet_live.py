@@ -57,6 +57,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from grimoire.bridges.schemas import HostId
 from grimoire.core.ansi import strip_ansi
 from grimoire.core.regular_file import open_regular
 from grimoire.memory.validation import redact_secrets
@@ -64,7 +65,9 @@ from grimoire.missions.lease import parse_instant
 from grimoire.missions.liveness import DEFAULT_ACTIVE_WINDOW, TERMINE, VIVANT, liveness
 from grimoire.missions.session_link import resume_command
 from grimoire.tools.project_registry import load_registry
+from grimoire.tools.workspace_fleet_copilot import assemble_copilot, journals_by_root
 from grimoire.tools.workspace_work import claude_projects_dir, model_tier
+from grimoire.traces.copilot_usage import copilot_logs_location
 
 __all__ = [
     "DEFAULT_WINDOW_MINUTES",
@@ -997,6 +1000,7 @@ def _assemble(
     return {
         "id": session_id,
         "project": root.slug,
+        "host": HostId.CLAUDE_CODE_CLI.value,
         "role": role,
         "parent_id": parent_id,
         "task_id": getattr(task, "id", None),
@@ -1227,6 +1231,27 @@ def fleet_live_view(
                         probe=probes,
                     )
 
+        # Sessions GitHub Copilot (non vérifié) : lues seulement si l'emplacement des journaux est configuré.
+        copilot_location = copilot_logs_location(project_root)
+        copilot_found, copilot_ignored = journals_by_root(copilot_location, [r.path for r in roots], cutoff=cutoff)
+        ignored[0] += copilot_ignored
+        for index, found in copilot_found.items():
+            copilot_root = roots[index]
+            copilot_ledger = _Ledger(copilot_root.path)
+            copilot_registry = _registry_for(copilot_root.path)
+            for copilot_session, modified in found:
+                rows = assemble_copilot(
+                    copilot_session,
+                    modified,
+                    project=copilot_root.slug,
+                    now=moment,
+                    ledger=copilot_ledger,
+                    lookup=copilot_registry.lookup,
+                    probe=probes,
+                )
+                sessions.extend(rows)
+                edges.extend({"from": row["parent_id"], "to": row["id"], "kind": "spawned"} for row in rows[1:])
+
         # Les vivantes d'abord, puis les silencieuses et les terminées ; à état égal,
         # le dernier signe le plus récent d'abord (tri stable en deux passes).
         sessions.sort(key=lambda row: row["last_at"] or "", reverse=True)
@@ -1241,6 +1266,7 @@ def fleet_live_view(
             "sessions": sessions,
             "edges": edges,
             "totals": totals,
+            "copilot_logs": copilot_location.to_dict(),
         }
 
 
