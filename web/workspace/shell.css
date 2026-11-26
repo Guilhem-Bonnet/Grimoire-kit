@@ -3273,6 +3273,18 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
 
 /* `display: flex` l'emportait sur l'attribut `hidden` : le sélecteur « Parler au projet », réservé à la vue globale,
    s'affichait vide dans la vue d'un seul projet. */
+.chat-banner {
+  margin: 6px 12px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn, var(--line));
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chat-banner[hidden],
 .chat-hostbar[hidden],
 .chat-targetbar[hidden] {
   display: none;

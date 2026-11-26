@@ -177,22 +177,22 @@ def test_un_hote_mort_choisi_explicitement_echoue_dans_le_fil_avec_la_cause_et_l
         context.close()  # type: ignore[attr-defined]
 
 
-def test_aucun_hote_utilisable_le_chat_le_dit_avec_la_commande_et_ferme_la_saisie(browser: Browser, serve: Serve) -> None:
+def test_aucun_hote_utilisable_le_chat_se_replie_sur_le_kanban_saisie_ouverte_et_le_dit_dans_un_bandeau(browser: Browser, serve: Serve) -> None:
     page, context = _open_chat(browser, serve(False))
     try:
-        status = page.locator(".chat-status")
-        expect(status).to_contain_text("Aucun hôte d'agent n'est utilisable", timeout=60_000)
-        expect(status).to_contain_text("npm install -g")
-        expect(page.locator(".chat-input")).to_be_disabled()
-        expect(page.locator("button.chat-send")).to_be_disabled()
+        banner = page.locator("[data-role='chat-no-agent']")
+        expect(banner).to_be_visible(timeout=60_000)
+        expect(banner).to_contain_text("Aucun agent n’est disponible : le chat est en mode Kanban")
+        expect(banner).to_contain_text("consigne sur une tâche")
+        expect(banner).to_contain_text("npm install -g")
+        # Le repli est automatique : la saisie reste ouverte, le sélecteur montre « Kanban » et les hôtes morts grisés.
+        expect(page.locator(".chat-input")).to_be_enabled()
+        expect(page.locator("button.chat-send")).to_be_enabled()
         options = _options(page)
-        assert not any(o["selected"] and o["disabled"] for o in options.values())
-        assert "Aucun hôte utilisable" in str(options[""]["text"])
-        assert not options["kanban"]["disabled"], "le mode différé reste choisissable"
+        assert options["kanban"]["selected"] and not options["kanban"]["disabled"]
+        assert options["copilot"]["disabled"] and "ne répond pas" in str(options["copilot"]["text"])
+        assert options["claude"]["disabled"] and "introuvable" in str(options["claude"]["text"])
         _capture(page, "chat-hote-03-aucun-hote")
-
-        page.locator("#chat-host").select_option("kanban")
-        expect(page.locator(".chat-input")).to_be_enabled(timeout=30_000)
         # Un seul projet : le sélecteur « Parler au projet » n'existe pas à l'écran.
         expect(page.locator("[data-role='chat-target-bar']")).to_be_hidden()
     finally:

@@ -93,7 +93,6 @@ def test_aucun_hote_utilisable_le_defaut_est_vide_et_la_raison_donne_la_commande
     reason = acp_hosts.no_host_reason(project)
     assert "Aucun hôte d'agent n'est utilisable" in reason
     assert acp_hosts.INSTALL_HINTS["claude-agent-acp"] in reason
-    assert "Kanban" in reason
 
 
 def test_la_raison_nomme_les_hotes_installes_mais_muets(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,7 +115,9 @@ def test_un_choix_explicite_est_respecte_meme_s_il_est_mort(project: Path, monke
 def test_sans_aucun_choix_explicite_le_defaut_n_est_pas_un_hote_mort(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _installed(monkeypatch)
     assert acp_hosts.chosen_alias(project) == ""
-    assert workspace_chat.chat_mode(project)[0] == "unavailable"
+    mode, command, reason = workspace_chat.chat_mode(project)
+    assert (mode, command) == ("kanban", ()), "aucun agent : repli Kanban, jamais un hôte mort"
+    assert "Aucun hôte d'agent n'est utilisable" in reason
 
 
 # ── Les commandes d'installation : seulement celles dont le paquet est vérifié ─
@@ -212,28 +213,43 @@ def test_le_selecteur_montre_les_hotes_inutilisables_grises_avec_leur_raison(pro
     assert by_alias["kanban"].available
 
 
-def test_aucun_hote_utilisable_aucun_n_est_selectionne(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_aucun_hote_utilisable_le_kanban_est_selectionne_et_le_repli_est_publie(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _installed(monkeypatch)
     state = workspace_chat.chat_hosts(project, {})
-    assert state["mode"] == "unavailable" and state["chosen"] == ""
-    assert not any(h["selected"] for h in state["hosts"])
+    assert state["mode"] == "kanban" and state["chosen"] == "" and state["fallback"] is True
+    selected = [h["alias"] for h in state["hosts"] if h["selected"]]
+    assert selected == ["kanban"]
+    assert all(not h["available"] and h["reason"] for h in state["hosts"] if h["alias"] != "kanban")
     assert "npm install" in state["reason"]
-    assert state["hosts"][-1]["alias"] == "kanban" and state["hosts"][-1]["available"]
+
+
+def test_un_choix_explicite_du_kanban_n_est_pas_un_repli(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _installed(monkeypatch)
+    acp_hosts.set_chosen_alias(project, "kanban")
+    state = workspace_chat.chat_hosts(project, {})
+    assert state["mode"] == "kanban" and state["fallback"] is False
 
 
 # ── Le chat et l'assistant le disent, au lieu d'échouer après coup ──────────
 
 
-def test_envoyer_sans_hote_utilisable_est_refuse_d_avance_avec_la_commande(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sans_hote_utilisable_le_chat_ecrit_dans_le_kanban_au_lieu_d_echouer(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions.service import TaskService
+
     _installed(monkeypatch)
-    with pytest.raises(ValueError, match="Aucun hôte d'agent n'est utilisable"):
-        workspace_chat.chat_send(project, {"text": "bonjour"})
+    service = TaskService(project)
+    added = service.add("Tâche vivante", ("un critère",), ready=True)
+    service.claim(added.task.id, "session-x")
+    assert workspace_chat.chat_send(project, {"text": "bonjour"})["ok"] is True
+    assert TaskService(project).require(added.task.id).directives[0].text == "bonjour"
 
 
-def test_l_assistant_de_l_atelier_dit_qu_aucun_agent_n_est_joignable(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_l_assistant_de_l_atelier_dit_qu_aucun_agent_n_est_joignable_car_demarrer_le_cadrage_en_a_besoin(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _installed(monkeypatch)
     status = workspace_atelier_assistant.agent_status(project)
-    assert status["available"] is False and status["mode"] == "unavailable"
+    assert status["available"] is False and status["mode"] == "kanban"
     assert "npm install" in status["reason"]
 
 

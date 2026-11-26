@@ -100,12 +100,17 @@ test('assistantState : les questions et permissions du chat (waiting) comptent e
 });
 
 test('mergeFacts : les faits de l’orchestrateur et de l’assistant de l’Atelier, une erreur de l’orchestrateur prime', () => {
-  assert.deepEqual(mergeFacts(), { error: '', question: false, permission: false, suggestions: 0, busy: false, waiting: 0 });
+  assert.deepEqual(mergeFacts(), { error: '', question: false, permission: false, suggestions: 0, busy: false, waiting: 0, noAgent: false });
   const merged = mergeFacts({
     orchestrator: { busy: true, waiting: 1, error: false },
     assistant: { question: true, suggestions: 2, busy: false, error: '' },
   });
-  assert.deepEqual(merged, { error: '', question: true, permission: false, suggestions: 2, busy: true, waiting: 1 });
+  assert.deepEqual(merged, { error: '', question: true, permission: false, suggestions: 2, busy: true, waiting: 1, noAgent: false });
+  // Aucun agent d'hôte utilisable : « sans agent », un état — jamais « erreur » ni « réfléchit ».
+  const none = assistantState(mergeFacts({ orchestrator: { noAgent: true } }));
+  assert.deepEqual([none.caption, none.tone, none.action], ['sans agent', 'off', 'repos']);
+  assert.equal(assistantState(mergeFacts({ orchestrator: { noAgent: true, error: true } })).caption, 'erreur de l’assistant');
+  assert.equal(assistantState(mergeFacts({ orchestrator: { noAgent: true, waiting: 1 } })).caption, 'attend ta réponse');
   assert.equal(mergeFacts({ orchestrator: { error: true }, assistant: { error: 'entretien' } }).error, 'orchestrateur');
   assert.equal(mergeFacts({ assistant: { error: 'entretien' } }).error, 'entretien');
   assert.equal(assistantState(mergeFacts({ orchestrator: { busy: true } })).caption, 'réfléchit');

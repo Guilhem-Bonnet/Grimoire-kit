@@ -268,7 +268,7 @@ def no_host_reason(root: Path) -> str:
         parts.append(" (" + " ; ".join(broken) + ")")
     first = next((p for p in all_profiles() if p.acp_command and install_hint(p)), None)
     hint = f" Pour en installer un : `{install_hint(first)}` ({first.display_name})." if first else ""
-    return "".join(parts) + "." + hint + " Le mode « Kanban (en différé) » reste choisissable dans le sélecteur."
+    return "".join(parts) + "." + hint
 
 
 def start_failure_remedy(root: Path) -> str:
@@ -351,7 +351,7 @@ def host_choices(root: Path) -> list[AcpHostChoice]:
             preview=False,
             note="Sans interface externe (Copilot dans VS Code) : le chat dépose une consigne sur une tâche "
             "et affiche les réponses que ses sessions y déposent.",
-            selected=current == KANBAN,
+            selected=current in (KANBAN, ""),  # aucun hôte utilisable : le chat se replie sur le Kanban, et le montre
             detected=detected == KANBAN,
         )
     )

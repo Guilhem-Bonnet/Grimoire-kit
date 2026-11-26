@@ -113,10 +113,10 @@ def chat_mode(root: Path | None = None) -> tuple[str, tuple[str, ...], str]:
     alias = chosen_alias(root) if root is not None else (os.environ.get(HOST_ENV, "").strip() or "claude")
     if alias == KANBAN:
         return "kanban", (), "repli choisi : le chat écrit dans le kanban"
-    if not alias:  # aucun choix explicite et aucun hôte utilisable : le dire, ne pas démarrer sur un hôte mort
+    if not alias:  # aucun choix explicite et aucun hôte utilisable : repli Kanban, DIT (bandeau), jamais un hôte mort
         from grimoire.hosts.acp_hosts import no_host_reason
 
-        return "unavailable", (), no_host_reason(root)  # type: ignore[arg-type]
+        return "kanban", (), no_host_reason(root)  # type: ignore[arg-type]
     host_id = resolve_host(alias)
     if host_id is None:
         raise AcpError(f"hôte inconnu pour l'orchestrateur : {alias!r}")
@@ -372,8 +372,6 @@ class Conversation:
         mode, _command, reason = chat_mode(self.root)
         if mode == "kanban":
             return self._send_kanban(text, task_id, reason)
-        if mode == "unavailable":
-            raise ValueError(reason)  # dit avant tout démarrage : aucun hôte utilisable, et quoi installer
         shown: dict[str, Any] = {"type": "user", "text": text}
         if context:
             shown["chantier"] = {"slug": context["slug"], "titre": context["titre"], "phase": context.get("phase", "")}
@@ -829,10 +827,13 @@ def chat_hosts(root: Path, _query: dict[str, list[str]]) -> dict[str, Any]:
     from grimoire.hosts.acp_hosts import chosen_alias, host_choices
 
     mode, _command, reason = chat_mode(root)
+    chosen = chosen_alias(root)
     return {
-        "chosen": chosen_alias(root),
+        "chosen": chosen,
         "mode": mode,
         "reason": reason,
+        # Aucun choix et aucun agent utilisable : le chat s'est replié sur le Kanban, le cockpit doit le dire.
+        "fallback": mode == "kanban" and not chosen and not os.environ.get(AGENT_COMMAND_ENV, "").strip(),
         "hosts": [c.to_dict() for c in host_choices(root)],
     }
 

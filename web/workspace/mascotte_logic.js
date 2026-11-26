@@ -237,11 +237,14 @@ export function glowTargetAt(action, elapsed) {
  */
 export function assistantState({
   error = '', unavailable = false, question = false, permission = false, suggestions = 0, busy = false, waiting = 0,
+  noAgent = false,
 } = {}) {
   // `waiting` : le nombre de questions et de permissions que le chat de l'orchestrateur tient en attente.
   const wait = Math.max(0, Math.floor(Number(waiting) || 0));
   const count = (question ? 1 : 0) + (permission ? 1 : 0) + wait + Math.max(0, Number(suggestions) || 0);
   if (error) return { action: 'repos', count: 0, tone: 'error', caption: 'erreur de l’assistant' };
+  // `noAgent` : aucun agent d'hôte utilisable, le chat est en repli Kanban — un état, pas une erreur.
+  if (noAgent && !(suggestions > 0) && !(count > 0)) return { action: 'repos', count: 0, tone: 'off', caption: 'sans agent' };
   if (unavailable && !(suggestions > 0)) return { action: 'repos', count: 0, tone: 'off', caption: 'assistant indisponible' };
   if (question || permission || wait > 0) {
     const plural = count > 1;
@@ -270,6 +273,7 @@ export function mergeFacts({ orchestrator = null, assistant = null } = {}) {
     suggestions: Math.max(0, Number(a.suggestions) || 0),
     busy: Boolean(o.busy || a.busy),
     waiting: Math.max(0, Math.floor(Number(o.waiting) || 0)),
+    noAgent: Boolean(o.noAgent),
   };
 }
 
