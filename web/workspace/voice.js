@@ -94,7 +94,7 @@ export const MIC_CONSTRAINTS = {
  * refusé rend le texte à la saisie avec sa mention. La dictée tombe si le texte est entièrement réécrit.
  * Rien de ceci n'approuve quoi que ce soit : une permission se confirme par un clic (lot V5).
  */
-export function createVoiceInput({ api, input, slot, note, setStatus, readOnly = () => false, onMic = {} }) {
+export function createVoiceInput({ api, input, slot, note, setStatus, readOnly = () => false, onMic = {}, onText = null }) {
   let config = null;
   let recording = null;
   let dictated = [];
@@ -107,6 +107,11 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
   button.hidden = true;
   slot.append(button);
 
+  /** Le résultat d'une dictée, pour qui la pilote (le mode conversation) : le texte, `''` si rien, `null` en cas d'échec. */
+  function told(text) {
+    try { if (onText) onText(text); } catch { /* un observateur n'interrompt jamais la dictée */ }
+  }
+
   function release(session) {
     // Le micro se referme ici, quoi qu'il arrive.
     try { if (onMic.close) onMic.close(); } catch { /* un observateur n'empêche jamais de couper le micro */ }
@@ -118,17 +123,19 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
     clearInterval(session.ticker);
   }
 
+  /** Rend vrai si le micro s'est ouvert. */
   async function start() {
+    if (recording) return true;
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
       note('Ce navigateur ne donne pas accès au micro.', 'error');
-      return;
+      return false;
     }
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
     } catch (error) {
       note(`Micro refusé ou absent : ${error.message}`, 'error');
-      return;
+      return false;
     }
     const Context = window.AudioContext || window.webkitAudioContext;
     const context = new Context({ sampleRate: SAMPLE_RATE });
@@ -151,6 +158,7 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
     button.textContent = `Arrêter (${Math.ceil(config.max_seconds)} s)`;
     button.setAttribute('aria-pressed', 'true');
     setStatus('Enregistrement en cours — le micro est ouvert.');
+    return true;
   }
 
   async function stop() {
@@ -161,7 +169,7 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
     button.setAttribute('aria-pressed', 'false');
     button.textContent = 'Dicter';
     const total = session.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    if (total === 0) { setStatus('Micro fermé : rien enregistré.'); return; }
+    if (total === 0) { setStatus('Micro fermé : rien enregistré.'); told(''); return; }
     const merged = new Float32Array(total);
     let offset = 0;
     for (const chunk of session.chunks) { merged.set(chunk, offset); offset += chunk.length; }
@@ -173,15 +181,17 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
     try {
       const result = await api.voiceTranscribe(toBase64(encodeWav(samples)));
       const text = (result.text || '').trim();
-      if (!text) { setStatus('Rien de reconnu : réessayez, ou tapez le message.'); return; }
+      if (!text) { setStatus('Rien de reconnu : réessayez, ou tapez le message.'); told(''); return; }
       input.value = input.value.trim() ? `${input.value.trim()} ${text}` : text;
       dictated.push(text);
       tokens.push(result.dictation_token);
       setStatus('Dictée transcrite : relisez et corrigez avant d’envoyer.');
       input.focus({ preventScroll: true });
+      told(text);
     } catch (error) {
       setStatus('');
       note(`Transcription impossible : ${error.message}`, 'error');
+      told(null);
     } finally {
       button.disabled = readOnly();
     }
@@ -204,6 +214,12 @@ export function createVoiceInput({ api, input, slot, note, setStatus, readOnly =
       button.hidden = !on;
       if (!on) button.remove(); else if (!button.isConnected) slot.append(button);
     },
+    /** Vrai si le vocal est disponible (config lue) : le mode conversation n'existe que là. */
+    available: () => Boolean(config && config.available && config.mode === 'voice') && !readOnly(),
+    isRecording: () => Boolean(recording),
+    /** Ouvre / ferme le micro comme le bouton « Dicter » (à la fermeture : transcription, puis `onText`). */
+    start,
+    stop,
     dictationPending(text = input.value) {
       return dictated.length > 0 && stillDictated(text, dictated);
     },

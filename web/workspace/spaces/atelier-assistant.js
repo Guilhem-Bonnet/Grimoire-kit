@@ -92,12 +92,25 @@ export function createAssistant(ctx, slug, hooks) {
     if (aim) aim.focus();
   };
 
+  /**
+   * La dictée du mode conversation arrive dans le champ de réponse. Rien n'est envoyé : l'envoi reste un clic ou Entrée,
+   * car un geste de l'assistant ne se déclenche pas par une dictée (garde du serveur).
+   */
+  const fill = (text) => {
+    const area = bar.querySelector('.at-asst-area');
+    if (!area) return false;
+    area.value = area.value.trim() ? `${area.value.trim()} ${text}` : text;
+    area.dispatchEvent(new Event('input', { bubbles: true })); // le brouillon suit
+    area.focus({ preventScroll: true });
+    return true;
+  };
+
   // La mascotte : seulement si la fonction en test « Mascotte » est allumée (sinon ce module n'est jamais demandé).
   ctx.api.testFeatures().then(async (features) => {
     if (!features || features.mascotte !== true || ctx.signal.aborted) return;
     const { createAtelierMascotte } = await import('./atelier-mascotte.js');
     if (ctx.signal.aborted) return;
-    mascotte = createAtelierMascotte(ctx, { activate });
+    mascotte = createAtelierMascotte(ctx, { activate, fill, say: hooks.say });
     bar.prepend(mascotte.element);
     syncMascotte();
   }).catch(() => { /* sans mascotte, la barre reste telle quelle */ });

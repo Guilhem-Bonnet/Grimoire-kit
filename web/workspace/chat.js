@@ -91,13 +91,20 @@ export function createChat({ readOnly = () => false } = {}) {
     input, mk('div', { class: 'chat-actions' }, send, stop));
   // La mascotte vocale (en test, éteinte par défaut) : elle observe la dictée, les tours et la lecture, sans rien ouvrir.
   const mascotte = createMascotteLink({ api, place: (node) => element.insertBefore(node, form) });
+  // Le mode conversation (vocal actif seulement, chargé à la demande) : il pilote la dictée et la lecture existantes.
+  let conversation = null;
   const voice = createVoiceInput({
     api, input, slot: form.querySelector('.chat-actions'), readOnly,
     note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text),
-    onMic: { open: (session) => mascotte.micOpened(session), close: () => mascotte.micClosed() },
+    onMic: {
+      open: (session) => { mascotte.micOpened(session); if (conversation) conversation.micOpened(session); },
+      close: () => { mascotte.micClosed(); if (conversation) conversation.micClosed(); },
+    },
+    onText: (text) => { if (conversation) conversation.text(text); },
   });
   const voiceOut = createVoiceOutbox({
-    onPlay: (audio) => mascotte.playing(audio), onStop: () => mascotte.stopped(),
+    onPlay: (audio) => mascotte.playing(audio),
+    onStop: () => { mascotte.stopped(); if (conversation) conversation.event({ type: 'play-ended' }); },
     note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text), api,
     onReply: (message) => replyToVoiceQuestion(message),
     onOption: (message, option) => answerVoiceQuestion(message, option),
@@ -507,12 +514,14 @@ export function createChat({ readOnly = () => false } = {}) {
         break;
       case 'voice_message':
         voiceOut.receive(event.message);
+        if (conversation && !(event.seq && event.seq <= replayUntil)) conversation.event({ type: 'voice', id: event.message.id });
         break;
       case 'pilot_gesture':
         gesture(event);
         break;
       case 'permission':
         permission(event);
+        if (conversation) conversation.event({ type: 'permission' }); // seul un clic tranche : le micro se ferme
         break;
       case 'permission_resolved':
         permissionResolved(event);
@@ -522,6 +531,9 @@ export function createChat({ readOnly = () => false } = {}) {
         planBox = null;
         if (!(event.seq && event.seq <= replayUntil)) setBusy(false);
         mascotte.turnEnded(event.stop_reason, Boolean(event.seq && event.seq <= replayUntil));
+        if (conversation && !(event.seq && event.seq <= replayUntil)) {
+          conversation.event(event.stop_reason === 'end_turn' ? { type: 'turn-ended' } : { type: 'stop', reason: 'stop' });
+        }
         voiceOut.refreshInterview();
         const label = STOP_LABEL[event.stop_reason];
         if (label) note(label, event.stop_reason === 'error' ? 'error' : 'info');
@@ -567,6 +579,7 @@ export function createChat({ readOnly = () => false } = {}) {
         voice.commitDictation();
         answering.state.textContent = 'Réponse transmise : tranchée par vous.';
         setTarget(null);
+        if (conversation) { conversation.event({ type: 'sent' }); conversation.event({ type: 'turn-ended' }); } // répondre à une question n'ouvre pas de tour
       } catch (error) {
         input.value = text;
         note(`Réponse non transmise : ${error.message}`, 'error');
@@ -577,11 +590,33 @@ export function createChat({ readOnly = () => false } = {}) {
     try {
       await api.chatSend(text, null, { dictation, tokens, chantier: getAtelierContext() });
       voice.commitDictation();
+      if (conversation) conversation.event({ type: 'sent' });
     } catch (error) {
       setBusy(false);
       input.value = text;
       note(`Message non transmis : ${error.message}`, 'error');
     }
+  }
+
+  /** Le mode conversation, seulement si le vocal est actif ; sinon le module n'est même pas demandé. */
+  async function setupConversation() {
+    if (conversation || !opened || !voice.available()) return;
+    const { createConversation } = await import('./conversation.js');
+    if (conversation || !opened) return;
+    conversation = createConversation({
+      recorder: voice,
+      // La réponse lue : le message parlé de l'orchestrateur, par la synthèse de la boîte vocale. Une question se cible
+      // comme avec « Répondre » : la dictée la vise, mais l'envoi reste un geste de la personne.
+      read: async (id) => {
+        const started = await voiceOut.play(id);
+        const message = voiceOut.message(id);
+        if (started && message && message.kind === 'question' && !message.answered) replyToVoiceQuestion(message);
+        return started;
+      },
+      stopReading: () => voiceOut.abort(),
+    });
+    element.insertBefore(conversation.element, form);
+    conversation.sync();
   }
 
   form.addEventListener('submit', (event) => { event.preventDefault(); submit(); });
@@ -662,7 +697,7 @@ export function createChat({ readOnly = () => false } = {}) {
           setBusy(false);
           setStatus('Connexion à l’orchestrateur…');
           loadHosts();
-          voice.refresh();
+          voice.refresh().then(setupConversation);
           voiceOut.refresh();
           mascotte.refresh();
           connect();
@@ -672,6 +707,7 @@ export function createChat({ readOnly = () => false } = {}) {
       scrollDown();
     },
     close() {
+      if (conversation) { conversation.destroy(); conversation = null; }
       voice.abort();
       voiceOut.abort();
       mascotte.destroy();

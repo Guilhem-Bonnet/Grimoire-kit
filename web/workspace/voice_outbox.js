@@ -282,6 +282,14 @@ export function createVoiceOutbox({ api, note, setStatus, onReply = () => {}, on
     },
     /** Un événement `voice_message` du flux : texte à jour, ou nouveau message. */
     receive(message) { paint(message); },
+    /** Le message `id` tel que la boîte le connaît, ou `null`. */
+    message: (id) => messages.get(id) || null,
+    /** Lit le message `id` (le mode conversation) ; une lecture déjà en cours sur lui n'est pas coupée. Rend vrai si la lecture a démarré. */
+    async play(id) {
+      if (!rows.has(id) || (playing && playing.id === id)) return Boolean(playing && playing.id === id);
+      await toggle(id);
+      return Boolean(playing && playing.id === id);
+    },
     /** À l'ouverture : l'état du serveur (la page a pu manquer des messages). */
     async refresh() {
       try {
