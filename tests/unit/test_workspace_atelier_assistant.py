@@ -150,7 +150,8 @@ def test_chat_send_valide_le_chantier_et_le_drapeau(project: Path, fake: _Fake) 
 def test_la_liste_des_gestes_est_fermee(project: Path) -> None:
     ids = asst.geste_ids()
     assert ids == ["demarrer", "reprendre", "ne-sais-pas", "sans-objet", "repondre",
-                   "challenger-explorer", "challenger-sceptique", "challenger-simplificateur"]
+                   "challenger-explorer", "challenger-sceptique", "challenger-simplificateur",
+                   "modele-reformuler", "modele-suggerer", "modele-challenger", "modele-relance"]
     assert wa.get(project, f"{P}atelier/chantiers/un/entretien", {})["geste"] == ids
 
 

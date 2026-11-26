@@ -1,0 +1,77 @@
+---
+audience: utilisateur
+---
+
+# Atelier de spec : le modèle optionnel du kit
+
+Par défaut, l'assistant de l'Atelier n'appelle aucun modèle : son moteur est l'agent de l'hôte, piloté par le chat du
+cockpit. Cette option, **éteinte par défaut**, laisse le kit appeler lui-même un petit modèle avec ta clé d'API, pour
+quatre gestes sur un bloc du document. Sans clé ou option éteinte, rien ne change.
+
+## Activer
+
+Dans `project-context.yaml` (le drapeau `cockpit.test_features.atelier` doit déjà être allumé) :
+
+```yaml
+cockpit:
+  atelier_model:
+    enabled: true          # vrai seulement s'il vaut exactement true
+    daily_tokens: 50000    # plafond dur par jour (défaut 50000)
+    chantier_tokens: 20000 # plafond dur par chantier et par jour (défaut 20000)
+    timeout_s: 20          # délai de l'appel, 1 à 60 (défaut 20), aucun nouvel essai
+    max_output_tokens: 1024
+    models:                # facultatif : surcharge par alias (haiku, sonnet) ou par geste
+      haiku: claude-haiku-5-5
+      sonnet: claude-sonnet-5-5
+      modele-suggerer: claude-sonnet-5-5
+```
+
+La clé se lit dans la variable d'environnement `ANTHROPIC_API_KEY`, sinon dans le magasin de clés du kit
+(`grimoire providers set-key anthropic`). Elle n'est jamais écrite dans un fichier du projet, jamais journalisée,
+jamais renvoyée au navigateur. Sans clé, la fonction est indisponible et la page le dit.
+
+## Qui peut déclencher un geste payant
+
+Une fois l'option allumée et la clé présente, **tout processus local qui peut lire la page du cockpit** (donc aussi un
+agent qui dispose d'un shell sur ta machine) peut déclencher un geste, donc une dépense, sans que tu cliques. Seuls le
+plafond par jour et par chantier la bornent. **Fixe un plafond bas** (`daily_tokens`, `chantier_tokens`), adapté à ce que
+tu acceptes de payer sans regarder ; laisse l'option éteinte sur un poste où tu ne fais pas confiance aux processus locaux.
+
+## Les gestes
+
+Sur un bloc, « Challenger ce bloc » ouvre un menu. Les trois postures existantes passent par l'agent de l'hôte (marquées
+« sans modèle »). Quand l'option est active et la clé présente, le menu ajoute un sélecteur (modèle par défaut du geste,
+haiku ou sonnet) et quatre gestes :
+
+| Geste | Modèle par défaut | Résultat |
+| --- | --- | --- |
+| `modele-reformuler` | haiku | suggestion (posture simplificateur) |
+| `modele-suggerer` | sonnet | suggestion (posture explorer) |
+| `modele-challenger` | sonnet | suggestion (posture sceptique) |
+| `modele-relance` | haiku | commentaire de l'agent : une question de relance |
+
+La sortie du modèle est une **proposition** : une suggestion que tu acceptes ou refuses, ou un commentaire. Elle n'écrit
+jamais le document. Elle est traitée comme un texte non fiable (caviardée, bornée, affichée en texte brut).
+
+## Ce qui part, ce qui est compté
+
+- Part au modèle : le texte du bloc visé (4000 caractères au plus) et un contexte minimal (titre, phase, type de bloc),
+  après le caviardage des secrets du kit.
+- Le plafond est réservé **avant** l'appel (une estimation prudente : un jeton par caractère d'entrée, plus la sortie
+  permise et une marge de 64) ; un compteur illisible, verrouillé, non inscriptible ou en lien symbolique refuse l'appel.
+  La consommation réelle remplace ensuite l'estimation. La réservation est **rendue** quand le service répond autre chose
+  que 200 ou que la connexion échoue ; elle est **gardée** sur un délai dépassé (la requête a pu être facturée) et sur une
+  réponse 200 inutilisable.
+- Si l'usage déclaré par la réponse dépasse ce qui a été réservé, la réponse est ignorée avec le refus distinct
+  « usage déclaré incohérent » (la réservation reste comptée, jamais le chiffre déclaré).
+- Le transport n'utilise aucun proxy d'environnement (`HTTPS_PROXY`, etc.) et ne suit aucune redirection : la clé ne part
+  que vers `api.anthropic.com`, en HTTPS.
+- Le compteur vit dans `_grimoire-runtime-output/atelier/modele-usage.json`. La consommation de ces appels n'est **pas**
+  écrite au ledger : seul `missions/quota_usage.py` écrit l'événement `quota.consumed`, d'après les journaux de sessions,
+  et n'a pas de point d'entrée pour un appel du kit. Le quota de la file ne la voit donc pas ; ce compteur local seul la
+  borne.
+
+## Route
+
+`POST /api/workspace/atelier/chantiers/<slug>/assistant` avec `{"geste": "modele-…", "block_id": "…", "modele": "haiku"|"sonnet"|""}`.
+`GET …/entretien` rend `modele` : `enabled`, `available`, la raison, les modèles, les défauts et le budget, jamais la clé.
