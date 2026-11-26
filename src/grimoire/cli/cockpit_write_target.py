@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from grimoire.tools import workspace_pilotage
 from grimoire.tools.project_registry import registered_root, selected_slug
 from grimoire.tools.workspace_routes import PREFIX
 
@@ -38,6 +39,8 @@ AUTHORITY_WRITES = frozenset(
         f"{PREFIX}autonomy/mandate/revoke",
         f"{PREFIX}providers",
         f"{PREFIX}providers/set-key",
+        # Pilotage (pause, reprise, disjoncteur) : des gestes d'humain derrière la clé de contrôle, projet nommé.
+        *workspace_pilotage.POST_ROUTES,
     }
 )
 

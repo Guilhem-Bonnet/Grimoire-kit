@@ -538,6 +538,14 @@ export const api = {
   // seule. `project` cible un AUTRE projet que celui déjà résolu par l'hôte —
   // même convention que `sheet()` juste au-dessus.
   capacity: (project) => get(WS + 'capacity', project ? { project } : undefined),
+  // Pilotage de l'orchestrateur (pause, reprise, disjoncteur) : l'état d'un projet, ou de tous (`portfolio`). Les
+  // gestes sont des gestes d'humain : clé de contrôle, projet nommé dans l'URL ET dans le corps (jamais le projet
+  // ambiant, même en portée « Tous les projets »), rien n'est exposé à un agent.
+  pilotage: (project) => get(WS + 'pilotage', project ? { project } : undefined),
+  pilotagePortfolio: () => get(WS + 'pilotage', { scope: 'portfolio' }),
+  pilotageGesture: (route, project, body, controlKey) =>
+    post(WS + 'pilotage/' + route + (project ? '?project=' + encodeURIComponent(project) : ''),
+      { ...body, ...(project ? { project } : {}), control_key: controlKey }),
   // Agrégation mémoire multi-projets (#172, dernier volet de « du générateur
   // statique au portefeuille actif ») : `projects` vaut 'all', une liste
   // 'slug1,slug2', ou est omis pour « ce projet » seul — jamais toute la

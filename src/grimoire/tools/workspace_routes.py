@@ -18,17 +18,14 @@ ENRÔLÉ, nommé par ``?project=`` et résolu par le registre seul : un seul
 cockpit écrit donc sur toute sa flotte, pas seulement sur le projet qu'il a
 ouvert (lot 1 de l'écriture multi-projets, 2026-11-07).
 
-Écrire un fichier, créer un override, lancer une commande et muter la mémoire
-acceptent n'importe quel projet ENRÔLÉ (lot 5, 2026-11-12) : tout projet enrôlé
-se pilote comme le projet d'ouverture, sans confirmation nommée. La garde
-d'écriture du cockpit (Origin, ``Sec-Fetch-Site``, jeton, hôte loopback) et le
-journal ``write-guard.jsonl`` — qui note le projet visé — restent inchangés.
+Écrire un fichier, créer un override, lancer une commande et muter la mémoire acceptent n'importe quel projet ENRÔLÉ
+(lot 5, 2026-11-12) : tout projet enrôlé se pilote comme le projet d'ouverture, sans confirmation nommée. La garde
+d'écriture du cockpit (Origin, ``Sec-Fetch-Site``, jeton, hôte loopback) et le journal ``write-guard.jsonl`` — qui note
+le projet visé — restent inchangés.
 
-Les anciennes dérogations nommées (décider une proposition, #490 ; migrer un
-board, #559/#560 ; agir depuis le portefeuille, #638) gardent leur sens comme
-CONTRAT de corps : le ``project`` du corps, quand il est présent, doit
-confirmer le slug de l'URL. Elles ne dérogent plus à rien — la porte générale
-est déjà ouverte à tout projet enrôlé.
+Les anciennes dérogations nommées (décider une proposition, #490 ; migrer un board, #559/#560 ; agir depuis le
+portefeuille, #638) gardent leur sens comme CONTRAT de corps : le ``project`` du corps, quand il est présent, doit
+confirmer le slug de l'URL. Elles ne dérogent plus à rien — la porte générale est déjà ouverte à tout projet enrôlé.
 
 Le flux du pouls (``GET /api/workspace/stream``, P10) n'est pas une entrée de
 :data:`GET_ROUTES` (charge utile) mais un flux sans fin : :func:`workspace_stream`
@@ -70,6 +67,7 @@ from grimoire.tools import (
     workspace_machine,
     workspace_memory,
     workspace_notify,
+    workspace_pilotage,
     workspace_portfolio,
     workspace_providers_write,
     workspace_pulse,
@@ -612,6 +610,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}options": _options,
     **workspace_notify.GET_ROUTES,
     **workspace_ideas.GET_ROUTES,
+    **workspace_pilotage.GET_ROUTES,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -1037,6 +1036,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/intake/create": workspace_ideas.task_intake_create,
     f"{PREFIX}options": _options_write,
     **workspace_providers_write.POST_ROUTES,
+    **workspace_pilotage.POST_ROUTES,
     f"{PREFIX}setup/launch": workspace_first_launch.launch_verb,
     **workspace_notify.POST_ROUTES,
     **workspace_ideas.POST_ROUTES,
