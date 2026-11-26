@@ -1,6 +1,7 @@
 """L'assistant qui guide le cadrage dans l'Atelier de spec (épique #1197, #1342).
 
-Le kit n'appelle aucun modèle : le moteur est l'agent de l'hôte, piloté par le chat du cockpit (ACP). Ce
+Par défaut le kit n'appelle aucun modèle : le moteur est l'agent de l'hôte, piloté par le chat du cockpit (ACP) ; un
+modèle optionnel du kit, éteint par défaut, vit dans :mod:`grimoire.tools.atelier_model`. Ce
 module ne fait que trois choses, toutes déterministes :
 
 - **le contexte du tour** (:func:`brief`) : un message envoyé depuis l'Atelier porte, ajouté côté serveur à la
@@ -23,6 +24,7 @@ from typing import Any
 
 from grimoire.core.cadrage import PHASES
 from grimoire.core.chantiers import MAX_SLUG
+from grimoire.tools import atelier_model
 
 __all__ = ["GESTES", "POSTURES", "act", "brief", "clean_title", "entretien_view", "question_of", "resolve_context", "split_reply"]
 
@@ -74,7 +76,7 @@ _CHALLENGE_PREFIX = "challenger-"
 
 #: Ce que l'interface peut demander : la liste fermée, publiée telle quelle par la route de lecture.
 def geste_ids() -> list[str]:
-    return [*GESTES, _ANSWER, *(f"{_CHALLENGE_PREFIX}{p}" for p in POSTURES)]
+    return [*GESTES, _ANSWER, *(f"{_CHALLENGE_PREFIX}{p}" for p in POSTURES), *atelier_model.GESTES]
 
 
 _BRIEF = (
@@ -168,6 +170,10 @@ def act(root: Path, slug: str, body: dict[str, Any]) -> dict[str, Any]:
     recognized = transcriptions.recognize(root, body)
     if recognized.dictated and geste != _ANSWER:
         raise ValueError("un geste de l'assistant ne se déclenche pas par une dictée : cliquez")
+    if geste in atelier_model.GESTES:
+        # Le modèle optionnel du kit (éteint par défaut) : une PROPOSITION déposée dans le circuit des suggestions.
+        choice = body.get("modele", "")
+        return atelier_model.run(root, slug, geste, str(body.get("block_id", "")), choice if isinstance(choice, str) else "")
     if not agent_status(root)["available"]:
         raise ValueError(f"aucun agent d'hôte disponible : {agent_status(root)['reason'] or 'mode kanban'}")
     if geste in ANGLE_GESTES:
@@ -289,4 +295,5 @@ def entretien_view(root: Path, slug: str) -> dict[str, Any]:
         if pending is not None:
             out["current"] = {"angle": pending["id"], "title": pending["title"], "phase": phase_of[pending["id"]]}
     out["turn"], out["question"] = _conversation(root).atelier_facts(slug)
+    out["modele"] = atelier_model.status(root, slug)  # option du kit : jamais la clé, seulement sa présence
     return out

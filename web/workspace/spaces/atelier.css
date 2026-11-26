@@ -181,7 +181,13 @@
 .at-blk:hover .at-ch-add, .at-blk:focus-within .at-ch-add, .at-ch-add:focus-visible, .at-ch-add[aria-expanded="true"] { opacity: 1; }
 .at-ch-add:hover { background: var(--hover); color: var(--ink); }
 .at-ch-add:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-.at-ch-menu { position: absolute; top: 30px; right: 0; display: flex; gap: var(--sp-1); padding: var(--sp-2); background: var(--overlay, var(--card)); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
+.at-ch-tag { font-weight: 400; color: var(--ink2); white-space: pre; }
+.at-asst-engine { margin: 0; font-size: var(--t-s); }
+.at-ch-model { display: flex; flex-direction: column; gap: var(--sp-1); align-items: flex-start; flex-basis: 100%; }
+.at-ch-model:empty { display: none; }
+.at-ch-model p { margin: 0; font-size: var(--t-s); }
+.at-ch-engine { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); color: var(--ink); font: inherit; }
+.at-ch-menu { position: absolute; top: 30px; right: 0; width: max-content; max-width: 420px; flex-wrap: wrap; display: flex; gap: var(--sp-1); padding: var(--sp-2); background: var(--overlay, var(--card)); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
 .at-ch-menu[hidden] { display: none; }
 @media (hover: none) { .at-ch-add { opacity: 1; } }
 .chat-chantier { margin-top: var(--sp-1, 4px); font-size: 12px; color: var(--ink2); }
