@@ -270,6 +270,60 @@ def _skill_file(skill: SkillSpec) -> EmittedFile:
     return EmittedFile(relpath=GH_DIR / "skills" / skill.slug / "SKILL.md", content=content)
 
 
+#: Gestes de la MOA (l'humain qui porte le besoin) : ils ne sont jamais proposés à un agent.
+_MOA_ONLY_CADRAGE = frozenset({"approve", "recette"})
+KIT_INSTRUCTIONS = GH_DIR / "instructions" / "grimoire-kit.instructions.md"
+
+
+def _cadrage_commands() -> list[str]:
+    """Les sous-commandes de ``grimoire cadrage`` qu'un agent peut lancer, lues dans l'application Typer elle-même."""
+    try:
+        from grimoire.cli.cmd_cadrage import cadrage_app
+    except Exception:  # pragma: no cover - une CLI qui ne s'importe pas n'empêche pas d'écrire les fichiers
+        return []
+    names = [c.name for c in cadrage_app.registered_commands if c.name]
+    names += [g.name for g in cadrage_app.registered_groups if g.name]
+    return [n for n in dict.fromkeys(names) if n not in _MOA_ONLY_CADRAGE]
+
+
+def _atelier_tools() -> list[str]:
+    try:
+        from grimoire.mcp import atelier_tools
+    except Exception:  # pragma: no cover
+        return []
+    return [name for name in atelier_tools.__all__ if name.startswith("atelier_")]
+
+
+def _kit_instructions_file(surface: ProjectSurface) -> EmittedFile:
+    """``.github/instructions/grimoire-kit.instructions.md`` : ce que le kit livre à Copilot et où le trouver.
+
+    Court, car chargé à chaque tour : des noms, pas des corps (les skills portent leur description, les
+    commandes leur ``--help``). Dérivé de la surface (skills), de l'application ``grimoire cadrage`` et du
+    serveur MCP du kit : rien n'y est recopié à la main, donc rien ne dérive. Fichier géré, séparé de
+    ``copilot-instructions.md`` (graine du projet, jamais réécrite).
+    """
+    skills = ", ".join(f"`{s.slug}`" for s in surface.skills) or "aucune"
+    framing = " Une demande floue ou ambitieuse : `grimoire-cadrage`." if any(s.slug == "grimoire-cadrage" for s in surface.skills) else ""
+    cadrage = ", ".join(f"`{c}`" for c in _cadrage_commands())
+    atelier = ", ".join(f"`{t}`" for t in _atelier_tools())
+    header = Emitter.frontmatter(
+        {"description": "Surfaces du kit Grimoire disponibles dans Copilot : skills, cadrage, Atelier, rappel de tâche", "applyTo": "**"}
+    )
+    content = f"""{header}
+{managed_header(".md")}
+
+# Surfaces du kit Grimoire
+
+- **Skills** (chargés à la demande) : {skills}.{framing}
+- **Cadrage** (terminal) : `grimoire cadrage <commande>` avec {cadrage}. La validation et la recette d'une exigence
+  (`approve`, `recette`) sont à la MOA, jamais à toi.
+- **Atelier** (outils MCP du serveur `grimoire`) : {atelier}. Tu proposes et commentes ; l'humain tranche à l'écran du cockpit.
+- **Rappel de tâche** : le hook de début de session nomme la tâche en cours ; `grimoire task` pour le reste.
+- Les outils MCP du kit ne sont lus que si `.vscode/mcp.json` (VS Code) ou `.mcp.json` (CLI) déclare le serveur `grimoire`.
+"""
+    return EmittedFile(relpath=KIT_INSTRUCTIONS, content=content)
+
+
 def _prompt_file(command: CommandSpec) -> EmittedFile:
     header = Emitter.frontmatter(
         {
@@ -658,6 +712,7 @@ class CopilotEmitter(Emitter):
         # make two writers for one path, and every sync would report a
         # conflict on a file nobody actually edited.
         files.extend(_prompt_file(c) for c in surface.commands if c.source != "workflow")
+        files.append(_kit_instructions_file(surface))
         files.append(_subagent_start_file(launcher))
         files.extend(_observation_file(h, launcher) for h in (ERROR_OCCURRED_HOOK, USER_PROMPT_TRANSFORMED_HOOK))
         files.extend(_hook_file(hook, launcher, dispatch=True, project_root=project_root) for hook in surface.hooks)

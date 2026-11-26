@@ -264,6 +264,26 @@ def _skills_agents(ctx: _Ctx, surface: Surface) -> Cell:
     return Cell(CellState.DEGRADED, f"pas de chargement natif : {', '.join(missing)}", fallback=gap_text or "décrits dans l'entrypoint")
 
 
+def _cadrage_atelier(ctx: _Ctx, surface: Surface) -> Cell:
+    """Skill de cadrage, commandes ``grimoire cadrage`` et outils MCP ``atelier_*`` : ce que livrent skills et MCP.
+
+    Le pire des deux chemins l'emporte (skills et agents, outils MCP) ; sinon « émis, non vérifié », avec les
+    noms lus dans le serveur MCP du kit (:mod:`grimoire.mcp.atelier_tools`).
+    """
+    from grimoire.mcp import atelier_tools
+
+    skills, mcp = _skills_agents(ctx, surface), _mcp(ctx, surface)
+    for weaker in (skills, mcp):
+        if weaker.state in (CellState.DEGRADED, CellState.UNSUPPORTED):
+            return weaker
+    tools = ", ".join(name for name in atelier_tools.__all__ if name.startswith("atelier_"))
+    return Cell(
+        CellState.UNVERIFIED,
+        f"skill `grimoire-cadrage` et commandes `grimoire cadrage` (terminal) émis ; outils MCP {tools} par le serveur du kit ; "
+        "rappel de tâche par le hook de début de session ; aucune session réelle",
+    )
+
+
 def _dispatch_model(ctx: _Ctx, surface: Surface) -> Cell:
     contract = recorded_contract(ctx.host_id)
     evidence = contract.evidence.get("subagent_model")
@@ -383,6 +403,7 @@ _SYSTEMS: tuple[_System, ...] = (
     _System("memory", "Mémoire", _memory),
     _System("mcp", "Outils MCP", _mcp),
     _System("skills_agents", "Skills et agents", _skills_agents),
+    _System("cadrage_atelier", "Cadrage et Atelier", _cadrage_atelier),
     _System("dispatch_model", "Dispatch et modèle des sous-agents", _dispatch_model),
     _role_system("orchestrator_worker", "Orchestrateur autonome : worker", "worker"),
     _role_system("orchestrator_reviewer", "Orchestrateur autonome : relecteur", "relecteur"),
