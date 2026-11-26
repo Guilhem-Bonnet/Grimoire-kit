@@ -291,20 +291,21 @@ def reattach(root: Path, slug: str, comment_id: str, body: dict[str, Any]) -> di
     réel du bloc comme à la création ; l'ancien et le nouvel ancrage restent dans ``historique`` du fil."""
     block_id = sugg._clean(body.get("block_id"), "block_id", 200, required=True)
     phase = sugg._phase_of(block_id)
-    blocks = sugg._blocks(root, slug, phase)
-    if blocks is None:
-        raise FileNotFoundError(f"phase illisible ou absente : {phase.filename}")
-    try:
-        block = atelier_blocs.find_block(blocks, block_id)
-    except atelier_blocs.BlockNotFoundError as exc:
-        raise wa.ConflictError(f"le bloc {block_id!r} n'existe plus dans {phase.filename} : relire le document") from exc
-    if not block.editable:
-        raise PermissionError(f"le bloc {block.kind} ne reçoit pas de commentaire : il structure le fichier")
-    quote, start = _anchor_fields(block, body.get("quote"), body.get("start"))
-    before, after = atelier_anchor.context(block.text, start, start + len(quote))
-    rank, prev, after_fp = atelier_anchor.around(blocks, blocks.index(block))
     chantier = _dir(root, slug)
     with store.locked_store(chantier):
+        # Le bloc et l'ancre se lisent sous le verrou du magasin : rien ne s'intercale entre la lecture et l'écriture.
+        blocks = sugg._blocks(root, slug, phase)
+        if blocks is None:
+            raise FileNotFoundError(f"phase illisible ou absente : {phase.filename}")
+        try:
+            block = atelier_blocs.find_block(blocks, block_id)
+        except atelier_blocs.BlockNotFoundError as exc:
+            raise wa.ConflictError(f"le bloc {block_id!r} n'existe plus dans {phase.filename} : relire le document") from exc
+        if not block.editable:
+            raise PermissionError(f"le bloc {block.kind} ne reçoit pas de commentaire : il structure le fichier")
+        quote, start = _anchor_fields(block, body.get("quote"), body.get("start"))
+        before, after = atelier_anchor.context(block.text, start, start + len(quote))
+        rank, prev, after_fp = atelier_anchor.around(blocks, blocks.index(block))
         items, ignored, damaged = store.read(chantier)
         found = next((i for i in items if i.id == comment_id), None)
         if found is None:

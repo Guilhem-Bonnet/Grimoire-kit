@@ -20,7 +20,8 @@ TEXT_MAX = 2000
 #: Lignes de diff montrées au plus ; le reste se compte.
 DIFF_MAX_LINES = 12
 NO_TEXT_NOTE = "validée avant la conservation du texte validé : la dérive est signalée sans détail"
-SAME_TEXT_NOTE = "aucune différence dans le texte affiché (périmètre ou identifiant modifié)"
+TRUNCATED_NOTE = f"texte validé tronqué : la différence peut se trouver au-delà de {TEXT_MAX} caractères"
+SAME_TEXT_NOTE ="aucune différence dans le texte affiché (périmètre ou identifiant modifié)"
 
 
 def validated_text(title: str, priority: str, criteria: Iterable[str]) -> str:

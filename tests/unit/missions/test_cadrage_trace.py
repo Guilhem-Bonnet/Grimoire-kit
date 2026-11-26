@@ -505,3 +505,17 @@ def test_cadrage_trace_cli_text_full_chain_with_proofs_notes_recette_and_drift_s
     drifted = _cli(root, "REQ-001").stdout
     assert "tâches concernées" in drifted and "fichiers concernés : src/login.py" in drifted
     assert "critères, priorité ou périmètre" in drifted
+
+
+def test_a_truncated_validated_text_says_so_and_the_diff_is_marked_untrusted() -> None:
+    from types import SimpleNamespace
+
+    long = "[must] T\n" + "\n".join(f"critère : {i:03d} " + "x" * 120 for i in range(30))
+    kept = rt.validated_text("T", "must", [f"{i:03d} " + "x" * 120 for i in range(30)])
+    assert len(kept) == rt.TEXT_MAX and long
+    view: Any = SimpleNamespace(fingerprint="new", title="T", priority="must", criteria=("c",), validated=False)
+    old = {"type": rg.VALIDATED_ENTRY, "project": "/p", "requirement": "REQ-001", "fingerprint": "old", "title": "T", "ts": "d", "moa": "ada", "text": kept}
+    trace = ct.RequirementTrace("REQ-001", "T", "must", ("c",), "proposed", "x", False)
+    drift = ct._drift([old], "/p", "REQ-001", view, trace)
+    assert drift is not None and drift.note == rt.TRUNCATED_NOTE and "au-delà de 2000" in drift.note
+    assert drift.to_dict()["untrusted_fields"] == ["diff", "validated_title", "current_title"]

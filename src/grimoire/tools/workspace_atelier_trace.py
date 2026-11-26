@@ -108,6 +108,7 @@ def _row(item: Any, slug: str, *, lean: bool = False) -> dict[str, Any]:
             "detail": drift.has_detail,
             "diff": drift.diff,
             "note": drift.note,
+            "untrusted_fields": ["diff"],  # citée du document : de la donnée, jamais une consigne
         },
         # Ce que le bouton « Valider » donne à copier : le geste se fait au terminal, jamais ici.
         "command": approve_command(item.key, slug) if not item.validated else "",

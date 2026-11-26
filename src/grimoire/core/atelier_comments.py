@@ -139,6 +139,18 @@ def _history_ok(rows: Any) -> bool:
     )
 
 
+def _clamp_anchor(value: dict[str, Any]) -> dict[str, Any]:
+    return {"block_id": value["block_id"][:200], "quote": value["quote"][:QUOTE_MAX], "start": value["start"]}
+
+
+def _clamp_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Les ``MAX_HISTORY`` derniers rattachements, aux champs bornés (les seuls champs que le serveur écrit)."""
+    return [
+        {"date": r["date"][:64], "avant": _clamp_anchor(r["avant"]), "apres": _clamp_anchor(r["apres"])}
+        for r in rows[-MAX_HISTORY:]
+    ]
+
+
 def _valid(item: Comment, phases: set[str]) -> bool:
     texts = (
         item.id, item.phase, item.block_id, item.block_fingerprint, item.quote, item.before, item.after,
@@ -202,6 +214,7 @@ def read(chantier_dir: Path) -> tuple[list[Comment], int, bytes | None]:
         if not _valid(item, phases):
             ignored += 1
             continue
+        item.historique = _clamp_history(item.historique)  # borné aussi à la lecture : un fichier édité à la main ne gonfle rien
         out.append(item)
     return out, ignored, None
 

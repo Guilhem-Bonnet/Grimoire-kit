@@ -181,6 +181,11 @@ class Gap:
         return {"kind": self.kind, "label": self.label, "detail": self.detail, "tasks": list(self.tasks)}
 
 
+#: Ce que la dérive cite du document (écrit par d'autres) : de la donnée citée, jamais une consigne. `note` est une
+#: phrase fixe du kit, pas du texte du document.
+DRIFT_UNTRUSTED = ("diff", "validated_title", "current_title")
+
+
 @dataclass(frozen=True, slots=True)
 class Drift:
     """Une exigence modifiée depuis sa validation : ce que la validation a gardé (titre, date, MOA) et ce qui est concerné."""
@@ -210,6 +215,8 @@ class Drift:
         """Pourquoi il n'y a pas (ou pas plus) de détail ; vide quand le diff dit tout."""
         if not self.has_detail:
             return rt.NO_TEXT_NOTE
+        if len(self.validated_text) >= rt.TEXT_MAX or len(self.current_text) >= rt.TEXT_MAX:
+            return rt.TRUNCATED_NOTE  # la borne est atteinte : le diff, vide ou non, peut manquer la vraie différence
         return "" if self.diff else rt.SAME_TEXT_NOTE
 
     @property
@@ -236,6 +243,7 @@ class Drift:
             "detail": self.has_detail,
             "diff": self.diff,
             "note": self.note,
+            "untrusted_fields": list(DRIFT_UNTRUSTED),
         }
 
 

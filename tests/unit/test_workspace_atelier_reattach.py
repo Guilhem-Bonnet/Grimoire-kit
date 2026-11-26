@@ -192,3 +192,15 @@ def test_a_malformed_history_makes_the_line_ignored_not_the_store(project: Path)
     (folder / store.FILENAME).write_text(json.dumps(data), encoding="utf-8")
     items, ignored, damaged = store.read(folder)
     assert [i.id for i in items] == [cid] and ignored == 1 and damaged is None
+
+
+def test_an_oversized_history_is_bounded_when_read(project: Path) -> None:
+    cid = _orphan(project)
+    folder = project / "_grimoire/cadrage/un"
+    data = json.loads((folder / store.FILENAME).read_text(encoding="utf-8"))
+    anchor = {"block_id": "b" * 900, "quote": "q" * 5000, "start": 0}
+    data["comments"][0]["historique"] = [{"date": "d" * 500, "avant": anchor, "apres": anchor}] * 500
+    (folder / store.FILENAME).write_text(json.dumps(data), encoding="utf-8")
+    (item,) = store.read(folder)[0]
+    assert item.id == cid and len(item.historique) == store.MAX_HISTORY
+    assert all(len(h["avant"]["quote"]) <= store.QUOTE_MAX and len(h["avant"]["block_id"]) <= 200 and len(h["date"]) <= 64 for h in item.historique)
