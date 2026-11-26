@@ -67,6 +67,14 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.hosts.model_table import CLAUDE_CODE, TIERS, kit_model, load_model_table, resolve_model
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.liveness import probe_status
+from grimoire.missions.model_routing import (
+    REASON_PROVIDER_ROUTE,
+    REASON_ROUTER,
+    RoutingTrace,
+    StepUp,
+    step_up,
+    tier_for,
+)
 from grimoire.missions.provider_failure import transient_api_error
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.sensitive_route import SensitiveRoute, sensitive_route_for
@@ -779,10 +787,87 @@ def _sensitive_now(service: TaskService, task_id: str) -> str:
     return f"route sensible à la reprise : Claude Code au palier fort ({route.reason})" if route.strong else ""
 
 
+def launched_today(service: TaskService, now: datetime | None = None) -> int:
+    """Les lancements du jour (UTC) : réussis ou échoués, ils comptent tous au plafond ``sessions_per_day``."""
+    today = _day((now or datetime.now(UTC)).isoformat())
+    return sum(
+        1 for e in service.ledger.list_events()
+        if e.event_type in (LAUNCHED_EVENT, LAUNCH_FAILED_EVENT) and _day(e.created_at) == today
+    )
+
+
+def _step_up_allowed(service: TaskService, task_id: str, launch: Mapping[str, Any]) -> StepUp | None:
+    """La montée en gamme décidée pour la reprise de *launch*, ou ``None`` : relue sur la politique du moment.
+
+    Il faut que la politique n'ait aucun réglage de modèle (``default_routing``, ``model`` vide), que l'ancienne session
+    soit arrêtée de façon prouvée, que le disjoncteur soit fermé, que le plafond du jour et le mandat laissent partir
+    une session neuve, puis que le modèle *réel* du lancement soit un palier connu de la table (:func:`step_up`).
+    """
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+
+    policy = load_orchestrator_policy(service.home_root).policy
+    if policy is None or not policy.worker.default_routing:
+        return None
+    _short, started, halted = _session_marks(service, task_id)
+    if started < 0 or halted < started or read_breaker(service.home_root).open:
+        return None
+    if launched_today(service) >= policy.worker.sessions_per_day or mandate_precheck(service, WORKER_ACTOR):
+        return None
+    return step_up(policy.worker, launch, lambda tier: tier_model(service.home_root, tier))
+
+
+def _step_up_session(
+    service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
+    permission_mode: str = "", cause: str = "",
+) -> ExecResult | None:
+    """Reprise d'un refus de relecture sur le palier au-dessus : une session neuve, même worktree, ou ``None``.
+
+    ``claude --resume`` ne reçoit pas de modèle : la montée est une session neuve, avec la consigne du worker et
+    *message*. ``None`` rend la main à la reprise ordinaire de la conversation : une condition de
+    :func:`_step_up_allowed` manquante, un échec du lancement, une sortie sans identifiant de session, une identité
+    non résolue ou une inscription refusée (la session lancée est alors arrêtée). Jamais d'échec qui armerait le
+    disjoncteur : la reprise ordinaire en décide.
+    """
+    if (up := _step_up_allowed(service, task_id, launch)) is None:
+        return None
+    cwd = Path(str(launch.get("cwd") or "."))
+    spec = SessionSpec(
+        name=f"grimoire-{task_id}", prompt=f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}",
+        model=up.model, permission_mode=permission_mode, lean=bool(launch.get("lean")),
+    )
+    plan = ClaudeCodeWorkerHost(claude_bin).plan(spec)
+    result = exec_(list(plan.argv), cwd, plan.environ())
+    match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
+    if match is None:
+        return None
+    short = match.group(1)
+    session_id = resolve_background_session(exec_, cwd, short, claude_bin, name=f"grimoire-{task_id}", session_cwd=cwd)
+    refused, _code = attest_session(service, session_id, WORKER_ACTOR, task_id) if session_id else ("session non résolue", "")
+    if refused:
+        _halt(exec_, cwd, short, claude_bin)
+        return None
+    routing = up.trace.to_dict()
+    _seal_worker_for_dual_review(service, task_id, session_id, up.model, "")
+    current = service.require(task_id).claim
+    service.ledger.append_event(
+        LAUNCHED_EVENT, task_id, "task", WORKER_ACTOR,
+        {**launch, "model": up.model, "routing": routing, "session": short, "session_id": session_id, "relaunch": True,
+         "lease_epoch": current.lease_epoch if current is not None else launch.get("lease_epoch", 0)},
+    )
+    payload: dict[str, Any] = {
+        "session": short, "fresh": True, "name": f"grimoire-{task_id}", "session_id": session_id,
+        "model": up.model, "routing": routing,
+    }
+    if cause:
+        payload["cause"] = cause
+    service.ledger.append_event(WORKER_RESUMED_EVENT, task_id, "task", WORKER_ACTOR, payload)
+    return result
+
+
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
     permission_mode: str = "", cause: str = "", opencode: OpencodeWorkerHost | None = None,
-    gemini: GeminiWorkerHost | None = None,
+    gemini: GeminiWorkerHost | None = None, escalate: bool = False,
 ) -> ExecResult:
     """Rend la tâche à son worker : reprend la session arrêtée par ``claude --bg --resume``, à défaut en lance une neuve.
 
@@ -791,6 +876,8 @@ def resume_worker(
     la reprise si les deux échouent. La session obtenue est notée (``task.worker_session_resumed``) : elle compte
     de nouveau dans le WIP et c'est elle que le prochain arrêt vise. *cause* nomme l'origine de la reprise
     (``provider_error`` pour le tick, #1158) ; elle est notée au ledger et plafonne les reprises automatiques.
+    *escalate* (un refus de relecture) : sous les défauts du kit, la reprise tente d'abord un palier plus haut
+    (:func:`_step_up_session`) ; toute condition non remplie ou tout échec rend la reprise ordinaire, sans montée.
     """
     fresh_only = ""
     if launch.get("host") == GEMINI_HOST:
@@ -814,6 +901,9 @@ def resume_worker(
     if fresh_only and (refused := _worktree_hooks(cwd)):
         return ExecResult(1, "", refused)  # le worktree d'un worker opencode n'a pas encore les hooks de Claude Code
     host = ClaudeCodeWorkerHost(claude_bin)
+    if escalate and not fresh_only and (stepped := _step_up_session(service, exec_, claude_bin, task_id, launch, message,
+                                                                    permission_mode=permission_mode, cause=cause)):
+        return stepped
     # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
     spec = SessionSpec(
         name=f"grimoire-{task_id}", prompt=message, model=str(launch.get("model") or ""), permission_mode=permission_mode,
@@ -901,16 +991,18 @@ class WorkerLauncher:
         return frozenset(busy)
 
     def _launched_today(self) -> int:
-        today = _day((self._now or datetime.now(UTC)).isoformat())
-        return sum(
-            1 for e in self._service.ledger.list_events()
-            if e.event_type in (LAUNCHED_EVENT, LAUNCH_FAILED_EVENT) and _day(e.created_at) == today
-        )
+        return launched_today(self._service, self._now)
 
     def _tier_for(self, task: MissionTask) -> str:
-        """Le palier de cette tâche : ``cheap`` pour une V0 sous ``model_by_class``, sinon celui du rôle."""
-        role = self._policy.worker
-        return "cheap" if role.model_by_class and classify(task) is Verifiability.V0 else role.tier
+        """Le palier de cette tâche : ``cheap`` pour une V0 sous ``model_by_class``, sinon celui du rôle ; sans réglage
+        de modèle, celui de sa classe (:func:`~.model_routing.tier_for`)."""
+        return tier_for(self._policy.worker, classify(task))[0]
+
+    def routing_trace(self, task: MissionTask, model: str, *, sensitive: bool = False, reason: str = "") -> dict[str, Any]:
+        """Le bloc ``routing`` du lancement de *task* sur *model* quand l'hôte, pas ``claude --model``, le choisit."""
+        klass = classify(task)
+        tier, why = tier_for(self._policy.worker, klass, sensitive=sensitive)
+        return RoutingTrace(klass.value, tier, model, reason or why).to_dict()
 
     def routing_for(self, task: MissionTask) -> SensitiveRoute:
         """La décision ``sensitive_route`` pour *task* : ce que le lancement fera, lisible sans rien lancer."""
@@ -920,7 +1012,7 @@ class WorkerLauncher:
         role = self._policy.worker
         if role.model:
             return role.model
-        if role.model_by_class and tier == "cheap":
+        if (role.model_by_class or role.default_routing) and tier == "cheap":
             # Un verdict mécanique juge seul : la route du routeur ne remonte pas ce palier.
             return tier_model(self._service.home_root, "cheap")
         route = admit.route
@@ -1009,7 +1101,8 @@ class WorkerLauncher:
             from grimoire.missions.worker_lifecycle import launch_opencode
 
             return launch_opencode(self, task, wt)
-        tier = "strong" if sensitive.strong else self._tier_for(task)
+        klass = classify(task)
+        tier, why_tier = tier_for(self._policy.worker, klass, sensitive=sensitive.strong)
         # Une tâche qui vise un chemin sensible ne prend pas la route du fournisseur bon marché : elle part sur
         # l'hôte, au palier fort, plutôt que de voir sa PR rejetée puis réécrite (``sensitive_route``).
         provider_id = "" if sensitive.strong else self._policy.worker.provider
@@ -1053,6 +1146,10 @@ class WorkerLauncher:
             # Un refus de plafond révoque déjà le mandat ; un rôle en conflit ou un journal en erreur est une panne.
             return self._abandon(tid, session, wt.path, refused, count=code != CAP_EXCEEDED)
         _seal_worker_for_dual_review(service, tid, session_id, model, route.provider if route is not None else "", self._policy)
+        reason = REASON_PROVIDER_ROUTE if route is not None else why_tier
+        if route is None and not self._policy.worker.model and not sensitive.strong and model != tier_model(service.home_root, tier):
+            reason = REASON_ROUTER
+        trace = RoutingTrace(klass.value, tier, model, reason, sensitive.reason if sensitive.strong else "")
         version = self._host_version()
         if version:
             # P86 : la session est nommée au claim avec la version de l'hôte ; sans elle le frein n'est jamais prouvé.
@@ -1067,6 +1164,7 @@ class WorkerLauncher:
                 "provider_refused": denial,
                 "lean": self._policy.worker.lean,
                 "permission_mode": self._policy.worker.permission_mode,
+                "routing": trace.to_dict(),
                 "cwd": str(wt.path), "branch": wt.branch,
                 "lease_epoch": current.lease_epoch if current is not None else 0,
                 **({"sensitive_route": sensitive.to_dict()} if sensitive.strong else {}),

@@ -279,6 +279,7 @@ def task_show(
     from grimoire.missions.dispatch_advice import dispatch_advice, model_hint
     from grimoire.missions.gates import GatesFileError, declared_transitions
     from grimoire.missions.launcher import LAUNCHED_EVENT, WORKER_DEFERRED_EVENT
+    from grimoire.missions.model_routing import describe_routing
     from grimoire.providers.data_policy import declared_data_class
 
     service = _service(project_root, ledger_root)
@@ -356,7 +357,11 @@ def task_show(
             out.print(f"  différée : {escape(str(last_launch.payload.get('reason', '')))}")
         elif last_launch.payload.get("provider_refused"):
             out.print(f"  repli sur l'hôte : {escape(str(last_launch.payload['provider_refused']))}")
+        routing = last_launch.payload.get("routing")
         routed = last_launch.payload.get("sensitive_route")
+        sensitive = isinstance(routed, dict) and bool(routed.get("route"))
+        if isinstance(routing, dict) and not sensitive:
+            out.print(f"  routage : {escape(describe_routing(routing))}")
         if isinstance(routed, dict) and routed.get("route"):
             out.print(
                 f"  routage fort : {escape(str(last_launch.payload.get('model') or ''))} — "
