@@ -2674,6 +2674,9 @@ function acceptBlock(ctx, detail, trace, { taskId, project, portfolio, onWritten
 async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false, guard = {}) {
   const taskId = task.id;
   const project = portfolio ? task.project?.slug : undefined;
+  // La cible des gestes d'écriture de l'inspecteur : le projet de la ligne (slug + nom à
+  // afficher) en portée « Tous les projets », `null` sinon — le projet ouvert.
+  const target = project ? { slug: project, name: task.project?.name || project } : null;
   const [detail, trace, recall, receipts] = await Promise.all([
     ctx.api.task(taskId, project).catch(() => null),
     ctx.api.taskTrace(taskId, project).catch(() => null),
@@ -2711,7 +2714,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     refNode.title = `identifiant interne du titre : ${detail.title}`;
     headRow.insertBefore(refNode, headRow.children[1]);
   }
-  appendIf(headRow, moreMenu(ctx, detail, onWritten));
+  appendIf(headRow, moreMenu(ctx, detail, onWritten, target));
   head.append(headRow);
   head.append(text('h3', null, shownTitle));
   // P74 : les deux temps, nommés — l'âge dans la colonne et l'âge total.
@@ -3008,7 +3011,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   ctx.inspector.append(receiptBlock(ctx, taskId, receipts, project));
 
   // ── Consigne à la session, priorité (gestes existants) ──────────────────
-  renderSteering(ctx, detail, onWritten);
+  renderSteering(ctx, detail, onWritten, target);
 
   // ── Activité (P69v2, artboard Travail « Derniers événements ») ──────────
   // Le fil de l'agent dérivé du ledger (claim, transitions, portes,
@@ -3102,7 +3105,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
 // `moreMenu`). Chaque geste est un `api.taskAction` ; le refus revient en 200
 // `blocked: true`.
 
-function renderSteering(ctx, detail, onWritten) {
+function renderSteering(ctx, detail, onWritten, target = null) {
   // Conteneur dédié (issue #638, lot B, correctif de course résiduelle) :
   // priorité, consignes et annulation vivent dans LEUR PROPRE bloc, que
   // `send()` réécrit en place avec la réponse déjà en main plutôt que
@@ -3116,18 +3119,18 @@ function renderSteering(ctx, detail, onWritten) {
   // course reproduite en CI sur `cancel` puis sur `comment`).
   const container = document.createElement('div');
   container.className = 'ex-steering-root';
-  renderSteeringInto(container, ctx, detail, onWritten);
+  renderSteeringInto(container, ctx, detail, onWritten, target);
   ctx.inspector.append(container);
 }
 
-function renderSteeringInto(container, ctx, detail, onWritten) {
+function renderSteeringInto(container, ctx, detail, onWritten, target = null) {
   const readOnly = ctx.host.readOnly;
   const feedback = document.createElement('div');
   const send = async (action, body, command) => {
     ctx.dock.echo(command);
     feedback.replaceChildren();
     try {
-      const result = await ctx.api.taskAction(detail.id, action, body);
+      const result = await ctx.api.taskAction(detail.id, action, body, target?.slug);
       if (result && result.blocked) {
         const refusals = (result.refusals || []).map((r) => `${r.evidence} — ${r.reason} (${r.remedy})`);
         feedback.append(text('div', 'ex-refusal', 'refusé : ' + refusals.join(' ; ')));
@@ -3139,7 +3142,7 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
       // board), mais en mode « board seul » : il ne touche plus jamais ce
       // conteneur, donc ne peut plus le vider sous un geste qui suit.
       container.replaceChildren();
-      renderSteeringInto(container, ctx, result, onWritten);
+      renderSteeringInto(container, ctx, result, onWritten, target);
       onWritten({ skipInspector: true });
       return result;
     } catch (error) {
@@ -3231,7 +3234,7 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
 // ailleurs. Aucun menu en lecture seule ni en colonne terminale : le cockpit ne
 // montre pas un geste qu'il ne laisserait pas partir.
 const CANCEL_TERMINAL = new Set(['archived', 'accepted', 'released']);
-function moreMenu(ctx, detail, onWritten) {
+function moreMenu(ctx, detail, onWritten, target = null) {
   if (ctx.host.readOnly || CANCEL_TERMINAL.has(detail.board)) return null;
   const reason = document.createElement('input');
   // Le composant de la coque (P56 le partage avec les lignes, P55 le pose sur
@@ -3262,7 +3265,8 @@ function moreMenu(ctx, detail, onWritten) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn';
-  btn.textContent = 'Annuler la tâche';
+  // Lot 2 : en portée « Tous les projets », le bouton dit dans quel projet il agit.
+  btn.textContent = target ? `Annuler la tâche dans ${target.name}` : 'Annuler la tâche';
   btn.dataset.role = 'cancel-submit';
   btn.disabled = true;
   const feedback = document.createElement('div');
@@ -3274,7 +3278,7 @@ function moreMenu(ctx, detail, onWritten) {
     ctx.dock.echo(`grimoire task cancel ${detail.id} --reason "${body.reason}"${force.checked ? ' --force' : ''}`);
     feedback.replaceChildren();
     try {
-      const result = await ctx.api.taskAction(detail.id, 'cancel', body);
+      const result = await ctx.api.taskAction(detail.id, 'cancel', body, target?.slug);
       if (result && result.blocked) {
         feedback.append(refusalNode(result.refusals || []));
         // Le refus « claim » (tenue par une autre session) ouvre l'option de

@@ -1,0 +1,1 @@
+- fix(cockpit): en portée « Tous les projets », aucune écriture ne part sans projet cible explicite : le client refuse avec un message au lieu de deviner, les gestes du panneau de détail (priorité, consigne, annulation) visent le projet de la ligne et le bouton d'annulation le nomme, et l'hôte refuse toute écriture sans projet venue d'une page qui se déclare en portée globale
