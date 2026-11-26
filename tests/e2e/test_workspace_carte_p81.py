@@ -32,7 +32,7 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 from playwright.sync_api import Browser, Page
 
 from ._codegraph import write_codegraph
-from .conftest import _alive, _free_port, _wait_ready
+from .conftest import _alive, _free_port, _wait_ready, throttle_cpu
 
 NODES, EDGES = 22_000, 92_000
 #: Seuil d'images/s en rotation sous WebGL logiciel (SwiftShader) : 30 est l'exigence
@@ -106,6 +106,7 @@ def _open(browser: Browser, base: str, init_script: str = _LONGTASK, scheme: str
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme=scheme)
     context.add_init_script(init_script)
     page = context.new_page()
+    throttle_cpu(page)
     requests: list[str] = []
     page.on("request", lambda r: requests.append(r.url))
     page.goto(f"{base}/workspace/index.html#savoir/carte", wait_until="domcontentloaded")

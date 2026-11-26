@@ -35,6 +35,8 @@ import time
 
 from playwright.sync_api import Browser, Page, Route
 
+from .conftest import throttle_cpu
+
 
 def _instrument_api(page: Page) -> list[tuple[str, float]]:
     """Liste live ``(url, départ monotonic)`` de chaque requête ``/api/…``."""
@@ -57,6 +59,7 @@ def _open_sheet(browser: Browser, served: str, slug: str) -> tuple[list[str], fl
     """Ouvre la fiche depuis la Flotte ; rend (URL d'API, démarrage en ms, montage en ms, coquilles restantes)."""
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
+    throttle_cpu(page)
     try:
         # Depuis P31, choisir B dans la Flotte change la portée (rechargement) ;
         # ce qui se mesure ici est le montage de la fiche dans la portée B.
@@ -144,6 +147,7 @@ def _load_flotte(browser: Browser, served: str) -> tuple[list[str], int, float, 
     """
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
+    throttle_cpu(page)
     try:
         fleet_calls: list[str] = []
         started: list[float] = []
@@ -202,6 +206,7 @@ def test_la_flotte_ne_retient_jamais_sa_table_pour_la_lecture_d_attention(
     served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
+    throttle_cpu(page)
     held: list[Route] = []
     released = {"now": False}
 
@@ -241,6 +246,7 @@ def test_aucune_lecture_d_attention_ne_dispute_le_serveur_a_la_flotte(
     served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
+    throttle_cpu(page)
     events: list[tuple[str, float]] = []
     page.on("request", lambda req: events.append(("attention", time.monotonic())) if "/api/workspace/attention" in req.url else None)
     page.on("response", lambda resp: events.append(("fleet", time.monotonic())) if "/api/fleet" in resp.url else None)
@@ -281,6 +287,7 @@ def test_refresh_de_la_flotte_ne_double_jamais_les_appels_en_vol(
     served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
+    throttle_cpu(page)
     try:
         page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)

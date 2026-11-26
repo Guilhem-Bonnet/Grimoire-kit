@@ -21,6 +21,8 @@ import pytest
 import yaml
 from playwright.sync_api import Browser, Page, expect
 
+from .conftest import throttle_cpu
+
 
 def _free_port() -> int:
     with socket.socket() as sock:
@@ -89,6 +91,7 @@ def url(project: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str
 def _open_panel(browser: Browser, url: str, width: int, height: int, scheme: str) -> tuple[object, Page, float]:
     context = browser.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce", color_scheme=scheme)  # type: ignore[arg-type]
     page = context.new_page()
+    throttle_cpu(page)
     page.goto(f"{url}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     # Hors atelier : l'espace de départ masque les panneaux (cf. coque P62).
