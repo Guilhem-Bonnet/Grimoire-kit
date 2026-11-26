@@ -1,1 +1,0 @@
-- perf(cockpit): la chauffe au démarrage prépare aussi la Flotte (projet courant, puis vue globale), à basse priorité, annulable, bornée à 60 s et jamais deux à la fois : sur un banc simulé (8 sessions, 513 Mo de journaux), la première ouverture de la Flotte passe de 3,6-3,9 s à 0-1 ms (Refs #1243)
