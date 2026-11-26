@@ -260,3 +260,31 @@ def test_the_tick_step_records_and_reports_unknown_sessions(tmp_path: Path, serv
     finally:
         quota.GRACE = original
     assert any("inconnue" in line for line in attention)
+
+
+def test_a_launch_without_identity_is_measured_under_the_very_key_the_rules_read(service: TaskService) -> None:
+    from grimoire.missions.usage_rules import evaluate, launch_session_key, parse_rules
+
+    tid = _task(service)
+    service.ledger.append_event("task.session_launched", tid, "task", "worker", {"session": "abcd", "model": "sonnet"})
+    launch = next(e for e in service.ledger.list_events() if e.event_type == "task.session_launched")
+    key, no_id = launch_session_key(launch)
+    assert no_id and key == f"event:{launch.id}"
+    record_consumption(service, now=_now())
+    (event,) = _consumed(service)
+    assert event["session"] == key and event["status"] == "unknown"  # la même clé : ni « non mesuré » ni doublon
+    rules, _ = parse_rules([{"id": "d", "scope": "day", "metric": "tokens", "threshold": 9, "action": "warn"}])
+    (status,) = evaluate(rules, service.ledger.list_events(), datetime.now(UTC))
+    assert not status.complete  # sans identité, sa consommation est réellement inconnue
+
+
+def test_a_launched_session_always_ends_up_with_a_measurement_even_an_empty_journal(tmp_path: Path, service: TaskService) -> None:
+    tid = _task(service)
+    _launch(service, tid, SESSION_A)
+    path = tmp_path / "claude" / "projects" / "x" / f"{SESSION_A}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n", encoding="utf-8")  # un journal sans aucun appel
+    record_consumption(service, now=_now())
+    record_consumption(service, now=_now())
+    (event,) = _consumed(service)
+    assert event["status"] == "lower_bound" and event["tokens"] == 0  # connu à zéro, écrit une seule fois

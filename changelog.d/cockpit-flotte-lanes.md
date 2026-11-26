@@ -1,1 +1,0 @@
-- fix(cockpit): la Flotte ne crée plus une lane par appel pour un journal de session sans champ `effort` (les suites de même modèle fusionnent) et borne les lanes à 200, en disant combien ont été oubliées (`lanes_dropped`) ; sur un banc simulé sans effort, 150 sessions passent de 11,4 Mo à 1,5 Mo de réponse (Refs #1243)

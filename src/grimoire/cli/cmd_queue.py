@@ -66,7 +66,14 @@ def _render(plan: QueuePlan) -> None:
     capacity = plan.capacity
     quota = "illimité" if capacity.unlimited else f"{capacity.tokens_per_day} tokens/jour"
     used = plan.view.tokens
-    consumed = "inconnue" if used.tokens is None else f">= {used.tokens}"
+    if used.tokens is None:
+        consumed = "inconnue"
+    elif used.status == "unknown":  # des sessions sans mesure : seuls les jetons du kit sont connus
+        consumed = f"inconnue (au moins {used.tokens} connus)"
+    elif used.status == "partial":
+        consumed = f"partielle (>= {used.tokens})"
+    else:
+        consumed = f">= {used.tokens}"
     console.print(
         f"[bold]File[/bold] : {len(plan.order)} prête(s), {len(plan.admitted)} admise(s), {len(plan.deferred)} différée(s) — "
         f"tenues {len(plan.view.held)}, CI {len(plan.view.ci_occupants)}/{capacity.ci_runners}, "

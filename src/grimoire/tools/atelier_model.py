@@ -16,8 +16,10 @@ Garanties :
   jamais renvoyée à la page ; aucune clé = fonction indisponible, dite telle quelle.
 - **Budget** : plafond dur de jetons par jour et par chantier, réservé AVANT l'appel (estimation prudente), refus si le
   compteur est illisible ; délai court, aucun nouvel essai ; la consommation réelle est tenue dans le compteur local
-  du projet. Elle n'est PAS écrite au ledger : seul ``missions/quota_usage.py`` écrit ``quota.consumed`` (journaux de
-  sessions) et aucune de ses fonctions publiques ne convient à un appel du kit.
+  du projet ; ce compteur et ses plafonds restent en vigueur. L'usage déclaré d'une réponse valide est AUSSI inscrit au
+  quota du kit par :func:`grimoire.missions.quota_usage.record_kit_call` (seul écrivain de la consommation : ce module
+  n'écrit aucun événement lui-même), et une règle d'usage ``hold`` ou ``pause`` franchie refuse le geste avant tout appel
+  (:func:`~grimoire.missions.quota_usage.kit_call_refusal`, lecture seule, échec fermé).
 - **Ce qui part** : le texte du bloc visé et un contexte minimal (titre, phase, type), passés par
   :func:`grimoire.memory.validation.redact_secrets`.
 - **Ce qui revient** : une PROPOSITION, déposée dans le circuit existant (suggestion que l'humain accepte ou refuse,
@@ -30,10 +32,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
 import urllib.error
 import urllib.request
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -326,6 +330,37 @@ def _answer(raw: bytes, limit: int) -> tuple[str, int]:
     return text, counts[0] + counts[1]
 
 
+def _record_billed(root: Path, slug: str, model: str, raw: bytes, local_id: str) -> str:
+    """Inscrit au quota du kit l'usage déclaré d'une réponse 200 jugée valide ; rend l'avertissement (``""`` : rien à dire).
+
+    La clé est dérivée d'un condensé de l'identifiant distant (absent, vide ou hors motif compris : jamais perdu, jamais
+    pris tel quel) ET de ``local_id``, l'identifiant de CET appel local : deux appels distincts ne se confondent jamais,
+    même si le service renvoie deux fois le même identifiant, et seul le rejeu du même appel local est sans effet. Un
+    échec d'inscription ne fait pas échouer le geste (le compteur local tient) : il est journalisé et rendu en clair.
+    """
+    import hashlib
+
+    from grimoire.missions.quota_usage import record_kit_call
+
+    try:
+        data = json.loads(raw)
+        ident, used = data.get("id"), data["usage"]
+        digest = hashlib.sha256((ident if isinstance(ident, str) else "").encode("utf-8", "replace")).hexdigest()[:16]
+        outcome = record_kit_call(
+            root, origin="atelier", call_id=f"{digest}.{local_id}", model=model, input_tokens=used["input_tokens"],
+            output_tokens=used["output_tokens"], chantier=slug,
+        )
+    except Exception:
+        outcome = "error"
+    if outcome in ("recorded", "duplicate", "no_ledger"):  # sans ledger de missions : le compteur local seul tient, sans bruit
+        return ""
+    message = "consommation non inscrite au quota du kit (le compteur local tient) : " + (
+        "valeur refusée" if outcome == "refused" else "écriture échouée"
+    )
+    logging.getLogger(__name__).warning("atelier_model : %s", message)
+    return message
+
+
 def status(root: Path, slug: str) -> dict[str, Any]:
     """Ce que la page sait de l'option : jamais la clé, seulement si elle existe."""
     cfg = settings(root)
@@ -365,6 +400,10 @@ def run(
     key = api_key()
     if not key:
         raise ModelError(f"aucune clé : {KEY_VAR} dans l'environnement ou le magasin de clés du kit")
+    from grimoire.missions.quota_usage import kit_call_refusal
+
+    if refusal := kit_call_refusal(root):  # la même source que l'admission, en lecture : une règle d'usage retient le geste
+        raise ModelError(refusal)
     alias, model = resolve_model(cfg, geste, choice)
     block_id = assistant._known_block(root, slug, block_id)  # le bloc est l'un des blocs du document
     found = next(b for p in wa.document(root, slug)["phases"] for b in p["blocks"] if b["id"] == block_id)
@@ -378,6 +417,7 @@ def run(
         "model": model, "max_tokens": cfg.max_output, "system": spec.instruction,
         "messages": [{"role": "user", "content": content}],
     }).encode("utf-8")
+    local_id = uuid.uuid4().hex  # l'identifiant de CET appel local : la clé d'idempotence de son inscription au quota
     reserved = _estimate(content + spec.instruction, cfg.max_output)
     _adjust(root, slug, reserved, cfg=cfg, now=now)  # le plafond se juge AVANT l'appel ; illisible = refus
     headers = {"content-type": "application/json", "x-api-key": key, "anthropic-version": API_VERSION}
@@ -396,6 +436,7 @@ def run(
         _give_back(root, slug, reserved, now)  # une réponse d'erreur ne consomme rien
         raise ModelError(f"le service a répondu {code} : appel sans effet")
     text, tokens = _answer(raw, reserved)  # malformée : la requête a abouti, la réservation reste comptée
+    warning = _record_billed(root, slug, model, raw, local_id)  # entre au quota du kit (règles d'usage, fiche Capacité)
     with contextlib.suppress(ModelError):  # sinon l'estimation prudente reste comptée
         _adjust(root, slug, tokens - reserved, cfg=None, now=now)  # la consommation réelle remplace l'estimation
     proposal = " ".join(redact_secrets(text)[0].split()) if spec.kind == "commentaire" else redact_secrets(text)[0].strip()
@@ -410,5 +451,8 @@ def run(
             done = comments.agent_comment(str(root), slug, proposal, block_id)
     except (ValueError, PermissionError, FileNotFoundError, TimeoutError, wa.ConflictError) as exc:
         raise ModelError(f"proposition refusée par le circuit de l'Atelier : {exc}") from exc
-    return {"ok": True, "accepted": True, "modele": model, "alias": alias, "jetons": tokens, "depose": spec.kind,
-            "id": str((done.get("suggestion") or done.get("comment") or {}).get("id", ""))}
+    result = {"ok": True, "accepted": True, "modele": model, "alias": alias, "jetons": tokens, "depose": spec.kind,
+              "id": str((done.get("suggestion") or done.get("comment") or {}).get("id", ""))}
+    if warning:  # une inscription échouée se dit : pas d'exception avalée en silence
+        result["avertissement"] = warning
+    return result
