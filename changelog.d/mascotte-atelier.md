@@ -1,1 +1,0 @@
-- feat(cockpit): la mascotte incarne l'assistant dans l'Atelier de spec (même composant que celle du chat, fonction en test « Mascotte », sans dépendre du vocal) : au repos, réfléchit, question ou suggestion en attente avec compteur, erreur ; un clic amène à la question ou à la suggestion ; vocal actif, la question peut être lue (#1197, #1409, #1408)
