@@ -1,1 +1,0 @@
-- fix(cockpit): chat, l'arrêt de l'agent inactif décide et détache l'agent dans une seule section verrouillée (un message ou une page arrivant à cet instant ne trouve plus l'agent disparaître), et un tour dont l'agent s'est arrêté le dit au lieu de rester muet.

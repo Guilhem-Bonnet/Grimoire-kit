@@ -7,6 +7,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.114.0] - 2026-11-25
+
+- feat(cadrage): `grimoire cadrage trace [REQ-id] [--file <chemin>] [--json]` rend la traçabilité de bout en bout d'une exigence (validation MOA, tâches, commits et PR, fichiers touchés, preuves, recette) et ses trous (exigence validée sans tâche, tâche livrée sans preuve, exigence sans critère), dans le sens inverse (fichier vers exigences) et signale une exigence modifiée depuis sa validation, le tout en lecture seule, dérivé du cadrage, du journal d'autorité, du ledger et de git (#1342, #1197) (#1396)
+- fix(cockpit): chat, l'arrêt de l'agent inactif décide et détache l'agent dans une seule section verrouillée (un message ou une page arrivant à cet instant ne trouve plus l'agent disparaître), et un tour dont l'agent s'est arrêté le dit au lieu de rester muet. (#1395)
+- fix(cockpit): chat, rouvrir un fil qui a déjà des tours ne fait plus clignoter « Stop » ni ignorer le message tapé pendant le rejeu de l’historique (un `turn_started` rejoué allumait l’état occupé ; seul l’état annoncé par `hello` et les tours vécus comptent) (#1386) (#1395)
+- fix(autopilot): « Revenir » sur une décision du pilote inscrite sans que sa réponse l'ait jamais été (arrêt entre les deux) clôt l'entrée de « Décisions à revoir » et laisse la question à l'humain, sans rien appliquer ni annuler — au lieu d'un refus « la tâche a déjà repris sa réponse » qui laissait l'entrée en place ; et une erreur inattendue pendant la lecture de la liste des sessions côté session devient un refus journalisé (rien n'est décidé) au lieu d'un plantage (#1255) (#1392)
+- fix(autopilot): une erreur de lecture de la liste des sessions pendant l'étape orchestrateur du tick n'applique plus rien sur un état inconnu (workers considérés au travail) et reste visible : la liste d'attention du tick porte « lecture des sessions impossible (<type de l'exception>) » (type seulement, jamais le message), y compris quand l'hôte ne rend rien d'exploitable (binaire absent : « illisible ») ; ce n'est pas écrit au ledger, seulement dans le rapport du tick (#1255) (#1394)
+
 ## [3.113.0] - 2026-11-25
 
 - perf(cockpit): le premier appel de « Flotte en direct » passe de ~5,8 s à ~4,2 s sur un poste réel (26 sessions, 73 000 lignes de journaux, machine chargée) — la normalisation des textes (NFKC, caractères de format, espaces exotiques) ne parcourt plus chaque caractère de 7 millions de caractères d'extraits d'outils : un texte ASCII est rendu tel quel, les autres ne sont traités que si un de leurs caractères distincts est réellement un caractère de format ou une espace exotique ; même résultat à l'octet près, vérifié contre l'ancien parcours (#1243) (#1390)
