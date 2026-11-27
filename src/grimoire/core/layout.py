@@ -205,15 +205,24 @@ def agent_identity(path: Path) -> tuple[str, str] | None:
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, ValueError):  # ValueError : un fichier qui n'est pas de l'UTF-8 n'est pas un agent
         return None
+    return agent_identity_of_text(text, path.stem)
+
+
+def agent_identity_of_text(text: str, stem: str) -> tuple[str, str] | None:
+    """:func:`agent_identity` sur un texte déjà lu (*stem* : le nom du fichier sans suffixe).
+
+    Permet à un collecteur qui a lu le fichier par la lecture sûre
+    (:mod:`grimoire.core.safe_sources`) de ne pas le relire par un chemin qui suit les liens.
+    """
     tag_match = _AGENT_TAG_RE.search(text)
     if tag_match:
         tag = tag_match.group(1)
     elif _AGENT_NAME_KEY_RE.search(text):
         return None
     else:
-        tag = path.stem
+        tag = stem
     persona = _AGENT_PERSONA_RE.search(text)
     return tag, (persona.group(1) if persona else tag)
 
@@ -226,14 +235,22 @@ def installed_agents(project_root: Path, *, include_legacy: bool = True) -> dict
     agent present in both counts once. Neither a manifest nor a scaffolder's
     in-flight copy plan is a *fact about this install*; the files on disk are.
     """
+    from grimoire.core.safe_sources import Refused, SourceBudget, list_sources, read_source_text, source_dir_issue
+
     found: dict[str, tuple[str, Path]] = {}
+    budget = SourceBudget()
     for directory in agent_dirs(project_root, include_legacy=include_legacy):
-        if not directory.is_dir():
+        # Même énumération bornée et même lecture sûre que les collecteurs de ``hosts.collect`` : aucun lien
+        # suivi, rien hors du projet, taille et nombre bornés ; un fichier refusé n'est pas un agent installé.
+        if source_dir_issue(directory, project_root) is not None:
             continue
-        for path in sorted(directory.iterdir()):
-            if not (path.is_file() and path.suffix == ".md"):
+        names, _issues = list_sources(directory, directory.name)
+        for stem, path in names.items():
+            try:
+                text = read_source_text(path, root=project_root, budget=budget, frontmatter=False)
+            except Refused:
                 continue
-            identity = agent_identity(path)
+            identity = agent_identity_of_text(text, stem)
             if identity is None:
                 continue
             tag, persona = identity

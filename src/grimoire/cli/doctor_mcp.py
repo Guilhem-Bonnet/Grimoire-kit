@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from grimoire.cli.env_checks import EnvCheck
+from grimoire.core.safe_sources import Exclusion, describe_exclusions, exclusion_lines
 
 
 def check_mcp_spec_http(server_name: str, spec: dict[str, Any]) -> EnvCheck | None:
@@ -84,9 +85,33 @@ def check_mcp_skills(target: Path) -> EnvCheck:
         kit = sum(1 for s in catalogue.served if s.origin == "kit")
         detail += f" ; origine : kit {kit}, projet {len(catalogue.served) - kit}"
     if catalogue.excluded:
-        skipped = ", ".join(f"{e.slug} ({e.reason})" for e in catalogue.excluded)
+        # Borné : un projet hostile peut produire des centaines d'exclusions (10 lignes, puis « … et N autres »).
+        skipped = ", ".join(exclusion_lines((e.slug, e.reason) for e in catalogue.excluded))
         detail += f" ; non servis : {skipped}"
     return EnvCheck("mcp_skills", passed=True, level="info", detail=detail)
+
+
+def check_project_sources(target: Path) -> list[EnvCheck]:
+    """Les skills, commandes et agents du projet que la collecte a ignorés, et pourquoi.
+
+    Même lecture que ``grimoire host sync`` (:mod:`grimoire.hosts.collect`) : un fichier illisible
+    (lien, tube, trop gros, pas de l'UTF-8…) est exclu *seul* et dit ici, nom et raison assainis, au plus
+    10 lignes. Rien à dire, rien d'affiché. Jamais bloquant, jamais une exception.
+    """
+    from grimoire.hosts import collect
+
+    excluded: list[Exclusion] = []
+    try:
+        skills = collect.collect_skills(target, excluded=excluded)
+        collect.collect_commands(target, excluded=excluded)
+        collect.collect_agents(target, known_skills=frozenset(s.slug for s in skills), excluded=excluded)
+    except Exception:  # noqa: S110 - un agent invalide est le sujet des autres contrôles ; les exclusions déjà vues restent dites
+        pass
+    header, lines = describe_exclusions(excluded)
+    if not header:
+        return []
+    detail = f"{header} {', '.join(lines)}"
+    return [EnvCheck("project_sources", passed=True, level="warn", detail=detail)]
 
 
 def check_mcp_processes() -> EnvCheck:
