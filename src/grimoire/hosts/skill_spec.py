@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from grimoire.core.safe_sources import Refused, read_source_text, source_dir_issue
+from grimoire.core.safe_sources import Refused, read_source_text, safe_text, source_dir_issue
 from grimoire.hosts.collect import parse_frontmatter
 
 NAME_MAX = 64
@@ -96,23 +96,34 @@ def _reference_violations(body: str) -> list[SkillViolation]:
     return found
 
 
-def _chain_violations(skill_file: Path, body: str) -> list[SkillViolation]:
+def _chain_violations(skill_file: Path, body: str, project_root: Path | None = None) -> list[SkillViolation]:
     """« Un seul niveau depuis SKILL.md » : un fichier référencé n'en référence pas un autre.
 
     La spec vise les chaînes de références, pas le nombre de segments du chemin
     (``scripts/x/y.py`` est un seul niveau). Seuls les ``.md`` présents sont lus, par la lecture
     sûre de :mod:`grimoire.core.safe_sources` : un lien symbolique, ou un chemin qui sort du dossier du
-    skill, n'est pas suivi et devient une violation (jamais lu).
+    skill (ou du projet, quand *project_root* est connue), n'est pas suivi et devient une violation
+    (jamais lu). Une cible absolue ou remontante est déjà signalée par :func:`_reference_violations` :
+    elle n'est ni testée ni lue ici.
     """
+    skill_dir = skill_file.parent
+    if project_root is not None and source_dir_issue(skill_dir, project_root, what="skills") is not None:
+        return [
+            SkillViolation(
+                "references.unsafe", skill_dir.name, "références : dossier du skill hors du projet ou en lien symbolique (non lu)"
+            )
+        ]
     found: list[SkillViolation] = []
     for target in _local_targets(body):
-        referenced = skill_file.parent / target
+        if target.startswith("/") or ".." in target.split("/"):
+            continue
+        referenced = skill_dir / target
         if referenced.suffix != ".md" or not os.path.lexists(referenced):
             continue
         try:
-            nested = _local_targets(read_source_text(referenced, root=skill_file.parent, frontmatter=False))
+            nested = _local_targets(read_source_text(referenced, root=skill_dir, frontmatter=False))
         except Refused as exc:
-            if referenced.is_symlink() or source_dir_issue(referenced.parent, skill_file.parent) is not None:
+            if referenced.is_symlink() or source_dir_issue(referenced.parent, skill_dir) is not None:
                 found.append(
                     SkillViolation("references.unsafe", target, f"références : « {target} » non lu ({exc})")
                 )
@@ -122,7 +133,7 @@ def _chain_violations(skill_file: Path, body: str) -> list[SkillViolation]:
                 SkillViolation(
                     "references.depth",
                     target,
-                    f"références : « {target} » renvoie à son tour vers « {nested[0]} » "
+                    f"références : « {target} » renvoie à son tour vers « {safe_text(nested[0], 120)} » "
                     "(un seul niveau depuis SKILL.md)",
                 )
             )
@@ -144,7 +155,7 @@ def validate_skill_text(text: str, *, slug: str) -> tuple[SkillViolation, ...]:
             SkillViolation(
                 "name.dir",
                 str(declared),
-                f"name : doit être identique au dossier « {slug} » (valeur reçue « {declared} »)",
+                f"name : doit être identique au dossier « {slug} » (valeur reçue « {safe_text(declared, 120)} »)",
             )
         )
 
@@ -183,14 +194,19 @@ def validate_skill_text(text: str, *, slug: str) -> tuple[SkillViolation, ...]:
     return tuple(found)
 
 
-def validate_skill_file(path: Path) -> tuple[SkillViolation, ...]:
-    """Contrôle un fichier de skill ; le slug est le nom du fichier, ou du dossier pour ``<slug>/SKILL.md``."""
+def validate_skill_file(path: Path, project_root: Path | None = None) -> tuple[SkillViolation, ...]:
+    """Contrôle un fichier de skill ; le slug est le nom du fichier, ou du dossier pour ``<slug>/SKILL.md``.
+
+    Le fichier est lu par la lecture sûre de :mod:`grimoire.core.safe_sources` (ordinaire, sans lien, taille
+    bornée, UTF-8), confiné à *project_root* quand l'appelant la connaît, sinon à son dossier parent. Un
+    fichier refusé est une violation ``file.unreadable``, sans lecture ni extrait.
+    """
     slug = path.parent.name if path.name == "SKILL.md" else path.stem
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return (SkillViolation("file.unreadable", path.name, f"fichier illisible en UTF-8 ({exc.__class__.__name__})"),)
+        text = read_source_text(path, root=project_root or path.parent, what="fichier de skill")
+    except Refused as exc:
+        return (SkillViolation("file.unreadable", safe_text(path.name), f"fichier non lu ({exc})"),)
     found = validate_skill_text(text, slug=slug)
     if path.name != "SKILL.md":
         return found
-    return found + tuple(_chain_violations(path, parse_frontmatter(text)[1]))
+    return found + tuple(_chain_violations(path, parse_frontmatter(text)[1], project_root))

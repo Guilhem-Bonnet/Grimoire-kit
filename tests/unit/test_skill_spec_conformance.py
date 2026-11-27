@@ -216,6 +216,74 @@ class TestFileEntry:
         assert "lien symbolique" in str(violations[0])
         assert "ailleurs.md" not in str(violations[0]) and str(tmp_path) not in str(violations[0])
 
+    def test_absolute_or_escaping_reference_is_one_violation_and_not_probed(self, tmp_path: Path) -> None:
+        (tmp_path / "dehors.md").write_text("[n](x.md)\n", encoding="utf-8")
+        skill = tmp_path / "bon-skill" / "SKILL.md"
+        skill.parent.mkdir()
+        body = f"Voir [a]({tmp_path / 'dehors.md'}) et [b](../dehors.md) et [c](/inexistant.md).\n"
+        skill.write_text(_skill(body=body), encoding="utf-8")
+        rules = [v.rule for v in validate_skill_file(skill)]
+        assert sorted(rules) == ["references.escape", "references.relative", "references.relative"]
+
+    def test_skill_file_by_link_is_not_read(self, tmp_path: Path) -> None:
+        outside = tmp_path / "dehors.md"
+        outside.write_text("---\nname: SECRET-NOM\ndescription: d\n---\ncorps\n", encoding="utf-8")
+        link = tmp_path / "skills" / "x.md"
+        link.parent.mkdir()
+        link.symlink_to(outside)
+        violations = validate_skill_file(link, tmp_path)
+        assert [v.rule for v in violations] == ["file.unreadable"]
+        assert "SECRET-NOM" not in str(violations[0])
+
+    def test_skill_file_too_big_or_not_regular_is_not_read(self, tmp_path: Path) -> None:
+        import os
+
+        big = tmp_path / "gros.md"
+        big.write_bytes(b"x" * (1_048_576 + 1))
+        fifo = tmp_path / "tube.md"
+        os.mkfifo(fifo)
+        assert [v.rule for v in validate_skill_file(big)] == ["file.unreadable"]
+        assert [v.rule for v in validate_skill_file(fifo)] == ["file.unreadable"]
+
+    def test_linked_skill_directory_is_not_read(self, tmp_path: Path) -> None:
+        outside = tmp_path / "dehors" / "sk"
+        outside.mkdir(parents=True)
+        (outside / "SKILL.md").write_text(_skill(body="Voir [r](ref.md).\n"), encoding="utf-8")
+        (outside / "ref.md").write_text("[n](OUTSIDE)\n", encoding="utf-8")
+        project = tmp_path / "projet"
+        (project / "skills").mkdir(parents=True)
+        (project / "skills" / "bon-skill").symlink_to(outside)
+        skill = project / "skills" / "bon-skill" / "SKILL.md"
+        assert [v.rule for v in validate_skill_file(skill, project)] == ["file.unreadable"]
+        from grimoire.hosts.skill_spec import _chain_violations
+
+        assert [v.rule for v in _chain_violations(skill, "Voir [r](ref.md).\n", project)] == ["references.unsafe"]
+
+    def test_doctor_does_not_read_skill_files_by_link(self, tmp_path: Path) -> None:
+        from grimoire.cli.doctor_skills import apply_skill_spec_check
+
+        outside = tmp_path / "dehors.md"
+        outside.write_text("---\nname: SECRET-NOM\ndescription: d\n---\ncorps\n", encoding="utf-8")
+        directory = tmp_path / "projet" / "_grimoire" / "overrides" / "skills"
+        directory.mkdir(parents=True)
+        (directory / "x.md").symlink_to(outside)
+        results: list[dict[str, object]] = []
+        apply_skill_spec_check(tmp_path / "projet", results, fmt="json", console=None)
+        assert "SECRET-NOM" not in str(results) and "lien symbolique" in str(results)
+
+    def test_doctor_reports_a_linked_skills_directory(self, tmp_path: Path) -> None:
+        from grimoire.cli.doctor_skills import apply_skill_spec_check
+
+        outside = tmp_path / "dehors"
+        outside.mkdir()
+        (outside / "x.md").write_text(_skill(), encoding="utf-8")
+        parent = tmp_path / "projet" / "_grimoire" / "overrides"
+        parent.mkdir(parents=True)
+        (parent / "skills").symlink_to(outside)
+        results: list[dict[str, object]] = []
+        apply_skill_spec_check(tmp_path / "projet", results, fmt="json", console=None)
+        assert results and "lien symbolique" in str(results)
+
     def test_reference_not_utf8_is_skipped_without_violation(self, tmp_path: Path) -> None:
         skill = tmp_path / "bon-skill" / "SKILL.md"
         skill.parent.mkdir()

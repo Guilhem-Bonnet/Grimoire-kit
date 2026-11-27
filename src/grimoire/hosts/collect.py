@@ -14,7 +14,7 @@ import io
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -332,14 +332,6 @@ def _say_fallback(excluded: list[Exclusion], start: int, served: Path, root: Pat
             excluded[i] = Exclusion.of(item.name, f"{item.reason} ; {suffix}")
 
 
-def _refusal_of(excluded: list[Exclusion], slug: str) -> str | None:
-    """La raison pour laquelle le fichier de source nommé *slug* a été refusé à la collecte, si elle l'a été."""
-    for item in excluded:
-        if Path(item.name).stem == slug and not item.name.startswith("contexte"):
-            return item.reason
-    return None
-
-
 def _checked_context(project_root: Path, context: tuple[str, ...], agent: str, excluded: list[Exclusion]) -> tuple[str, ...]:
     """Les chemins de ``context:`` qui restent dans le projet ; les autres sont retirés et dits.
 
@@ -599,8 +591,13 @@ def collect_agents(
     inline_persona: bool = True,
     excluded: list[Exclusion] | None = None,
     tolerate_refused_skills: bool = False,
+    refused_skills: Mapping[str, str] | None = None,
 ) -> tuple[AgentSpec, ...]:
     """Read the project's personas into host-neutral specs.
+
+    *refused_skills* is ``slug -> reason`` for the skills :func:`collect_skills` refused (its *refused*
+    out-parameter); only these are tolerated, and named as refused in the build error. Collected on its own
+    when *known_skills* is left ``None``.
 
     With *tolerate_refused_skills* (a read-only view, never a host sync), a declared skill that the safe
     reading refused is left off the agent and stays reported in *excluded* instead of failing every agent;
@@ -648,8 +645,9 @@ def collect_agents(
     sink = _sink(excluded)
     if entry_point is None:
         entry_point = entry_agent_name(project_root)
+    refused_skills = dict(refused_skills or {})
     if known_skills is None:
-        known_skills = frozenset(spec.slug for spec in collect_skills(project_root, excluded=sink))
+        known_skills = frozenset(spec.slug for spec in collect_skills(project_root, excluded=sink, refused=refused_skills))
     specs: list[AgentSpec] = []
     budget = SourceBudget()
     for candidates in _agent_candidates(project_root, sink):
@@ -711,14 +709,13 @@ def collect_agents(
         skills = _str_tuple(meta.get("skills"))
         unknown = [slug for slug in skills if slug not in known_skills]
         if unknown and tolerate_refused_skills:
-            refused_slugs = {slug for slug in unknown if _refusal_of(sink, slug) is not None}
-            skills = tuple(slug for slug in skills if slug not in refused_slugs)
-            unknown = [slug for slug in unknown if slug not in refused_slugs]
+            skills = tuple(slug for slug in skills if slug not in refused_skills)
+            unknown = [slug for slug in unknown if slug not in refused_skills]
         if unknown:
             refused = "".join(
-                f" Le skill « {slug} » a été refusé à la collecte : {why}."
+                f" Le skill « {slug} » a été refusé à la collecte : {refused_skills[slug]}."
                 for slug in unknown
-                if (why := _refusal_of(sink, slug)) is not None
+                if slug in refused_skills
             )
             raise GrimoireAgentError(
                 f"L'agent « {name} » ({definition_ref}) déclare des skills introuvables : "
@@ -918,9 +915,16 @@ def _skill_spec(
 
 
 def collect_skills(
-    project_root: Path, *, governed: bool | None = None, excluded: list[Exclusion] | None = None
+    project_root: Path,
+    *,
+    governed: bool | None = None,
+    excluded: list[Exclusion] | None = None,
+    refused: dict[str, str] | None = None,
 ) -> tuple[SkillSpec, ...]:
     """Bundled, host-wide skills plus the skills this project's archetypes ship.
+
+    *refused* is an optional out-parameter: ``slug -> reason`` for each project skill whose every copy the
+    safe reading refused (and that no other copy serves). Only skill folders feed it.
 
     Bundled skills (``grimoire-agent-dispatch``, ``grimoire-memory``, …) are
     always in scope; project skills come from the archetype(s) the project
@@ -962,6 +966,9 @@ def collect_skills(
                 break
         if served is not None:
             _say_fallback(sink, start, served, project_root)
+        elif slug not in by_slug:
+            if refused is not None and len(sink) > start:
+                refused[slug] = sink[start].reason
         elif slug in by_slug:  # toutes les copies du projet refusées : celle du kit livré reste servie
             for i in range(start, len(sink)):
                 if sink[i].reason != "budget de collecte atteint":
@@ -1178,11 +1185,13 @@ def build_surface(
     root = project_root.resolve()
     governed = is_standard_enrolled(root)
     excluded: list[Exclusion] = []
-    skills = collect_skills(root, governed=governed, excluded=excluded)
+    refused_skills: dict[str, str] = {}
+    skills = collect_skills(root, governed=governed, excluded=excluded, refused=refused_skills)
     tool_notes: list[str] = []
     try:
         agents = collect_agents(
             root,
+            refused_skills=refused_skills,
             known_skills=frozenset(s.slug for s in skills),
             notes=tool_notes,
             inline_persona=_inline_persona_enabled(root),

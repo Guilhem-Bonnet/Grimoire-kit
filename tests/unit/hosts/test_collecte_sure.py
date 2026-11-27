@@ -978,6 +978,27 @@ class TestVueDesAgentsRobuste:
         with pytest.raises(GrimoireAgentError, match="introuvables"):
             wa.agents_view(project)
 
+    @pytest.mark.parametrize("declarant", ["a", "z"])
+    def test_un_agent_refuse_homonyme_ne_rend_pas_le_skill_tolere(self, project: Path, declarant: str) -> None:
+        from grimoire.core.exceptions import GrimoireAgentError
+        from grimoire.tools import workspace_api as wa
+
+        (_agents_dir(project)).mkdir(parents=True)
+        (_agents_dir(project) / "fantome.md").write_bytes(b"\xff")
+        _put(_agents_dir(project), f"{declarant}.md", _agent_text(declarant, extra="skills: [fantome]\n"))
+        with pytest.raises(GrimoireAgentError, match="introuvables") as err:
+            wa.agents_view(project)
+        assert "refusé à la collecte" not in str(err.value)
+
+    def test_le_nom_d_un_skill_refuse_est_neutralise(self, project: Path) -> None:
+        from grimoire.tools import workspace_api as wa
+
+        (_skills_dir(project)).mkdir(parents=True)
+        (_skills_dir(project) / "<img src=x onerror=alert(1)>.md").write_bytes(b"\xff")
+        payload = wa.agents_view(project)
+        names = [e["name"] for e in payload["excluded"]]
+        assert names and all("<" not in n and ">" not in n and "=" not in n for n in names)
+
     def test_la_synchronisation_des_hotes_garde_l_erreur(self, project: Path, temoin: Path) -> None:
         from grimoire.core.exceptions import GrimoireAgentError
 

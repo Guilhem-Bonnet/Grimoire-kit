@@ -16,7 +16,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from grimoire.core.config import AgentsConfig, GrimoireConfig
-from grimoire.core.safe_sources import Exclusion
 from grimoire.core.standard_generation import TRACES_DIR
 from grimoire.traces.ledger import FreshnessReport, TraceLedger
 
@@ -52,10 +51,10 @@ def known_agent_names(project_root: Path) -> list[str]:
     from grimoire.hosts import collect
 
     root = project_root.resolve()
-    refused: list[Exclusion] = []
-    skills = collect.collect_skills(root, excluded=refused)
+    refused: dict[str, str] = {}
+    skills = collect.collect_skills(root, refused=refused)
     agents = collect.collect_agents(
-        root, known_skills=frozenset(s.slug for s in skills), excluded=refused, tolerate_refused_skills=True
+        root, known_skills=frozenset(s.slug for s in skills), tolerate_refused_skills=True, refused_skills=refused
     )
     return [a.name for a in agents]
 
@@ -87,10 +86,10 @@ def known_agent_ages(project_root: Path, *, now: datetime | None = None) -> dict
 
     now = now or datetime.now(tz=UTC)
     root = project_root.resolve()
-    refused: list[Exclusion] = []
-    skills = collect.collect_skills(root, excluded=refused)
+    refused: dict[str, str] = {}
+    skills = collect.collect_skills(root, refused=refused)
     agents = collect.collect_agents(
-        root, known_skills=frozenset(s.slug for s in skills), excluded=refused, tolerate_refused_skills=True
+        root, known_skills=frozenset(s.slug for s in skills), tolerate_refused_skills=True, refused_skills=refused
     )
     ages: dict[str, int] = {}
     for agent in agents:
