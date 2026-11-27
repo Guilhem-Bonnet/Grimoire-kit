@@ -23,8 +23,11 @@ from ruamel.yaml import YAML
 from grimoire.core import layout
 from grimoire.core.exceptions import GrimoireAgentError
 from grimoire.core.safe_sources import (
+    FRONTMATTER_RE,
     Exclusion,
     Refused,
+    SourceBudget,
+    context_path_issue,
     describe_exclusions,
     list_sources,
     read_source_text,
@@ -85,7 +88,7 @@ def _use_rust_backend() -> bool:
     return _rust_core is not None
 
 
-_FRONTMATTER_RE = re.compile(r"\A(?:﻿)?(?:<!--.*?-->\s*)?---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.DOTALL)
+_FRONTMATTER_RE = FRONTMATTER_RE  # une seule forme, partagée avec le contrôle borné du front matter
 
 #: Body markers that justify widening an agent's tool boundary beyond reading.
 #: Deliberately conservative: an over-granted boundary is a governance hole,
@@ -260,8 +263,16 @@ def _sink(excluded: list[Exclusion] | None) -> list[Exclusion]:
     return excluded if excluded is not None else []
 
 
-def _label(path: Path) -> str:
-    """``dossier/fichier`` : de quoi reconnaître un fichier sans dire où il est sur la machine."""
+def _label(path: Path, root: Path | None = None) -> str:
+    """Le chemin relatif à la racine du projet (la copie refusée), ou ``dossier/fichier`` hors projet.
+
+    Jamais un chemin de la machine ; le texte est assaini et borné à l'exclusion (:meth:`Exclusion.of`).
+    """
+    if root is not None:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            pass
     return f"{path.parent.name}/{path.name}"
 
 
@@ -269,7 +280,7 @@ def _project_listing(
     directory: Path, project_root: Path, excluded: list[Exclusion], *, skip: Callable[[str], bool] | None = None
 ) -> dict[str, Path]:
     """``nom -> chemin`` des ``*.md`` d'un dossier de sources du projet, sans lien en chemin, borné, sans lecture."""
-    label = f"{directory.parent.name}/{directory.name}"
+    label = _label(directory, project_root)
     issue = source_dir_issue(directory, project_root)
     if issue is not None:
         excluded.append(Exclusion.of(label, issue))
@@ -279,24 +290,80 @@ def _project_listing(
     return found
 
 
-def _read_candidate(path: Path, root: Path | None, excluded: list[Exclusion]) -> str | None:
-    """Le texte d'un fichier de source par la lecture sûre, ou ``None`` et l'exclusion de CE fichier."""
+def _read_candidate(
+    path: Path, root: Path | None, excluded: list[Exclusion], budget: SourceBudget | None = None
+) -> str | None:
+    """Le texte d'un fichier de source par la lecture sûre, ou ``None`` et l'exclusion de CE fichier.
+
+    La lecture sûre borne aussi le front matter (ni ancre ni alias, bloc borné) : le texte rendu peut être
+    analysé, par n'importe quel backend, sans développement imprévu.
+    """
     try:
-        return read_source_text(path, root=root)
+        return read_source_text(path, root=root, budget=budget)
     except Refused as exc:
-        excluded.append(Exclusion.of(_label(path), exc))
+        excluded.append(Exclusion.of(_label(path, root), exc))
     except Exception as exc:  # une erreur sur UN fichier est l'exclusion de CE fichier
-        excluded.append(Exclusion.of(_label(path), f"fichier illisible ({exc.__class__.__name__})"))
+        excluded.append(Exclusion.of(_label(path, root), f"fichier illisible ({exc.__class__.__name__})"))
     return None
 
 
-def _first_readable(candidates: list[Path], root: Path | None, excluded: list[Exclusion]) -> tuple[Path, str] | None:
+def _first_readable(
+    candidates: list[Path], root: Path | None, excluded: list[Exclusion], budget: SourceBudget | None = None
+) -> tuple[Path, str] | None:
     """Le premier fichier lisible parmi les copies d'un même nom (l'override d'abord), les refus étant consignés."""
+    start = len(excluded)
     for path in candidates:
-        text = _read_candidate(path, root, excluded)
+        text = _read_candidate(path, root, excluded, budget)
         if text is not None:
+            _say_fallback(excluded, start, path, root)
             return path, text
     return None
+
+
+def _say_fallback(excluded: list[Exclusion], start: int, served: Path, root: Path | None) -> None:
+    """Complète les refus faits depuis *start* : une autre copie du même nom est servie à leur place."""
+    if len(excluded) == start:
+        return
+    kit_tier = root is not None and _is_kit_copy(served, root)
+    suffix = "copie du kit servie" if kit_tier else "copie suivante servie"
+    for i in range(start, len(excluded)):
+        item = excluded[i]
+        if item.reason != "budget de collecte atteint":
+            excluded[i] = Exclusion.of(item.name, f"{item.reason} ; {suffix}")
+
+
+def _refusal_of(excluded: list[Exclusion], slug: str) -> str | None:
+    """La raison pour laquelle le fichier de source nommé *slug* a été refusé à la collecte, si elle l'a été."""
+    for item in excluded:
+        if Path(item.name).stem == slug and not item.name.startswith("contexte"):
+            return item.reason
+    return None
+
+
+def _checked_context(project_root: Path, context: tuple[str, ...], agent: str, excluded: list[Exclusion]) -> tuple[str, ...]:
+    """Les chemins de ``context:`` qui restent dans le projet ; les autres sont retirés et dits.
+
+    Un chemin déclaré doit être relatif, rester sous la racine, ne passer par aucun lien symbolique et
+    désigner un fichier ordinaire. L'agent reste collecté, sans ce contexte. Un chemin simplement absent
+    du projet n'est pas traité ici : il reste l'erreur de build de :func:`collect_agents`.
+    """
+    kept: list[str] = []
+    for rel in context:
+        issue = context_path_issue(project_root, rel)
+        if issue is None:
+            kept.append(rel)
+        else:
+            excluded.append(Exclusion.of(f"contexte de l'agent {agent} : {rel}", issue))
+    return tuple(kept)
+
+
+def _is_kit_copy(path: Path, root: Path) -> bool:
+    """La copie servie est-elle du kit (son tier sous ``_grimoire/kit``) et non une surcharge du projet ?"""
+    try:
+        path.relative_to(layout.kit_dir(root))
+    except ValueError:
+        return False
+    return True
 
 
 def _agent_candidates(project_root: Path, excluded: list[Exclusion]) -> list[list[Path]]:
@@ -579,10 +646,11 @@ def collect_agents(
     if known_skills is None:
         known_skills = frozenset(spec.slug for spec in collect_skills(project_root, excluded=sink))
     specs: list[AgentSpec] = []
+    budget = SourceBudget()
     for candidates in _agent_candidates(project_root, sink):
         # Lecture sûre : fichier régulier, sans lien, borné, UTF-8. Un fichier refusé est exclu (et dit),
         # la copie suivante du même nom sert, les autres agents restent collectés.
-        loaded = _first_readable(candidates, project_root, sink)
+        loaded = _first_readable(candidates, project_root, sink, budget)
         if loaded is None:
             continue
         path, text = loaded
@@ -609,7 +677,7 @@ def collect_agents(
                 try:
                     meta, body, body_ref = resolve_extends_kit(project_root, path, meta)
                 except UnreadableSourceError as exc:
-                    sink.append(Exclusion.of(_label(path), exc))
+                    sink.append(Exclusion.of(_label(path, project_root), exc))
                     continue
                 override_kind = "partial"
             else:
@@ -638,12 +706,17 @@ def collect_agents(
         skills = _str_tuple(meta.get("skills"))
         unknown = [slug for slug in skills if slug not in known_skills]
         if unknown:
+            refused = "".join(
+                f" Le skill « {slug} » a été refusé à la collecte : {why}."
+                for slug in unknown
+                if (why := _refusal_of(sink, slug)) is not None
+            )
             raise GrimoireAgentError(
                 f"L'agent « {name} » ({definition_ref}) déclare des skills introuvables : "
                 f"{', '.join(unknown)}. Un identifiant de skill doit résoudre contre "
-                "l'inventaire collecté par collect_skills(), comme un import cassé."
+                f"l'inventaire collecté par collect_skills(), comme un import cassé.{refused}"
             )
-        context = _str_tuple(meta.get("context"))
+        context = _checked_context(project_root, _str_tuple(meta.get("context")), name, sink)
         missing_context = [c for c in context if not (project_root / c).exists()]
         if missing_context:
             raise GrimoireAgentError(
@@ -788,13 +861,16 @@ def _skill_candidates(project_root: Path, excluded: list[Exclusion]) -> list[tup
     return list(seen.items())
 
 
-def _read_markdown(path: Path, root: Path | None, excluded: list[Exclusion]) -> tuple[dict[str, Any], str] | None:
+def _read_markdown(
+    path: Path, root: Path | None, excluded: list[Exclusion], budget: SourceBudget | None = None
+) -> tuple[dict[str, Any], str] | None:
     """Frontmatter et corps d'un fichier de source, ou ``None`` et l'exclusion de CE fichier.
 
-    La lecture sûre passe AVANT l'analyse, quel que soit le backend (Python ou Rust) de cette dernière.
-    Seule la configuration invalide du backend (:class:`GrimoireAgentError`) remonte.
+    La lecture sûre (et le contrôle borné du front matter) passe AVANT l'analyse, quel que soit le backend
+    (Python ou Rust) de cette dernière. Seule la configuration invalide du backend
+    (:class:`GrimoireAgentError`) remonte.
     """
-    text = _read_candidate(path, root, excluded)
+    text = _read_candidate(path, root, excluded, budget)
     if text is None:
         return None
     try:
@@ -802,13 +878,15 @@ def _read_markdown(path: Path, root: Path | None, excluded: list[Exclusion]) -> 
     except GrimoireAgentError:
         raise
     except Exception as exc:
-        excluded.append(Exclusion.of(_label(path), f"fichier illisible ({exc.__class__.__name__})"))
+        excluded.append(Exclusion.of(_label(path, root), f"fichier illisible ({exc.__class__.__name__})"))
         return None
 
 
-def _skill_spec(slug: str, path: Path, root: Path | None, excluded: list[Exclusion]) -> SkillSpec | None:
+def _skill_spec(
+    slug: str, path: Path, root: Path | None, excluded: list[Exclusion], budget: SourceBudget | None = None
+) -> SkillSpec | None:
     """Le skill de ce fichier, ou ``None`` (et l'exclusion de CE fichier)."""
-    parsed = _read_markdown(path, root, excluded)
+    parsed = _read_markdown(path, root, excluded, budget)
     if parsed is None:
         return None
     meta, body = parsed
@@ -826,7 +904,7 @@ def _skill_spec(slug: str, path: Path, root: Path | None, excluded: list[Exclusi
             argument_hint=str(meta.get("argument-hint") or meta.get("argument_hint") or ""),
         )
     except Exception as exc:  # un champ de frontmatter inattendu exclut CE skill, pas la surface
-        excluded.append(Exclusion.of(_label(path), f"fichier illisible ({exc.__class__.__name__})"))
+        excluded.append(Exclusion.of(_label(path, root), f"fichier illisible ({exc.__class__.__name__})"))
         return None
 
 
@@ -861,14 +939,24 @@ def collect_skills(
         spec = _skill_spec(slug, path, None, sink)
         if spec is not None:
             by_slug[slug] = spec
+    budget = SourceBudget()  # plafond global de la collecte : au-delà, les sources restantes sont exclues
     for slug, candidates in _skill_candidates(project_root, sink):
         if slug == "grimoire-evidence" and not enrolled:
             continue
+        start = len(sink)
+        served: Path | None = None
         for path in candidates:
-            spec = _skill_spec(slug, path, project_root, sink)
+            spec = _skill_spec(slug, path, project_root, sink, budget)
             if spec is not None:
                 by_slug[slug] = spec
+                served = path
                 break
+        if served is not None:
+            _say_fallback(sink, start, served, project_root)
+        elif slug in by_slug:  # toutes les copies du projet refusées : celle du kit livré reste servie
+            for i in range(start, len(sink)):
+                if sink[i].reason != "budget de collecte atteint":
+                    sink[i] = Exclusion.of(sink[i].name, f"{sink[i].reason} ; copie du kit servie")
     return tuple(by_slug.values())
 
 
@@ -1083,13 +1171,20 @@ def build_surface(
     excluded: list[Exclusion] = []
     skills = collect_skills(root, governed=governed, excluded=excluded)
     tool_notes: list[str] = []
-    agents = collect_agents(
-        root,
-        known_skills=frozenset(s.slug for s in skills),
-        notes=tool_notes,
-        inline_persona=_inline_persona_enabled(root),
-        excluded=excluded,
-    )
+    try:
+        agents = collect_agents(
+            root,
+            known_skills=frozenset(s.slug for s in skills),
+            notes=tool_notes,
+            inline_persona=_inline_persona_enabled(root),
+            excluded=excluded,
+        )
+    except GrimoireAgentError as exc:
+        # L'erreur de build garde sa nature ; les fichiers ignorés qui l'expliquent peut-être lui sont joints.
+        header, lines = describe_exclusions(excluded)
+        if header:
+            raise type(exc)(f"{exc} Fichiers ignorés à la collecte — {header} {', '.join(lines)}") from exc
+        raise
     commands = collect_commands(root, governed=governed, excluded=excluded)
     # Deux régimes, parce que deux responsabilités. Un agent créé dans les
     # overrides du projet qui partage le faisceau *et* la fiche d'un autre est

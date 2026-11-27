@@ -153,7 +153,7 @@ class TestSkills:
         skills = collect_skills(project, excluded=excluded)
         assert time.monotonic() - start < 5
         assert [s.slug for s in skills] == ["sain"]
-        assert [e.name for e in excluded] == [f"skills/{bad}.md"]
+        assert [e.name for e in excluded] == [f"_grimoire/overrides/skills/{bad}.md"]
         assert TEMOIN not in repr(skills) and str(temoin.parent) not in repr(excluded)
 
     def test_sur_un_projet_sain_rien_n_est_exclu_et_le_resultat_est_le_meme(self, project: Path, kit: Path) -> None:
@@ -197,7 +197,8 @@ class TestSkills:
         excluded: list[Exclusion] = []
         (skill,) = collect_skills(project, excluded=excluded)
         assert skill.slug == "commun" and skill.body == "Version du kit.\n"
-        assert [e.name for e in excluded] == ["skills/commun.md"]
+        assert [e.name for e in excluded] == ["_grimoire/overrides/skills/commun.md"]
+        assert excluded[0].reason.endswith("; copie du kit servie")
 
     def test_la_copie_refusee_de_l_override_laisse_servir_celle_du_tier_kit(self, project: Path, temoin: Path) -> None:
         _skills_dir(project).mkdir(parents=True)
@@ -368,7 +369,7 @@ class TestAgents:
         agents = collect_agents(project, known_skills=frozenset(), excluded=excluded)
         assert time.monotonic() - start < 5
         assert [a.name for a in agents] == ["sain"]
-        assert [e.name for e in excluded] == [f"agents/{bad}.md"]
+        assert [e.name for e in excluded] == [f"_grimoire/overrides/agents/{bad}.md"]
         assert TEMOIN not in repr(agents)
 
     def test_sur_un_projet_sain_rien_n_est_exclu(self, project: Path) -> None:
@@ -386,7 +387,8 @@ class TestAgents:
         excluded: list[Exclusion] = []
         (agent,) = collect_agents(project, known_skills=frozenset(), excluded=excluded)
         assert agent.name == "x" and agent.override_ref is None and "Version du kit." in agent.definition_body
-        assert [e.name for e in excluded] == ["agents/x.md"]
+        assert [e.name for e in excluded] == ["_grimoire/overrides/agents/x.md"]
+        assert excluded[0].reason.endswith("; copie du kit servie")
 
     def test_le_kit_refuse_d_un_override_partiel_n_exclut_que_cet_agent(self, project: Path, temoin: Path) -> None:
         _put(_agents_dir(project), "sain.md", _agent_text("sain"))
@@ -397,7 +399,7 @@ class TestAgents:
         excluded: list[Exclusion] = []
         agents = collect_agents(project, known_skills=frozenset(), excluded=excluded)
         assert [a.name for a in agents] == ["sain"]
-        assert [e.name for e in excluded] == ["agents/part.md"]
+        assert [e.name for e in excluded] == ["_grimoire/overrides/agents/part.md"]
         assert TEMOIN not in repr(agents)
 
     def test_un_kit_absent_reste_une_erreur_de_build(self, project: Path) -> None:
@@ -425,14 +427,73 @@ class TestAgents:
         override.write_bytes(b"\xff\xfe")
         assert effective_agent_frontmatter(project, agent) == {}
 
-    def test_un_contexte_hors_du_projet_n_est_pas_mesure(self, project: Path, temoin: Path) -> None:
+    def test_un_contexte_sain_est_inchange(self, project: Path) -> None:
         (project / "docs").mkdir()
         (project / "docs" / "in.md").write_text("x" * 10, encoding="utf-8")
-        out = project / "docs" / "out.md"
-        out.symlink_to(temoin)
-        _put(_agents_dir(project), "c.md", _agent_text("c", extra="context: [docs/in.md, docs/out.md]\n"))
-        (agent,) = collect_agents(project, known_skills=frozenset())
-        assert dict(agent.context_sizes) == {"docs/in.md": 10, "docs/out.md": 0}
+        _put(_agents_dir(project), "c.md", _agent_text("c", extra="context: [docs/in.md]\n"))
+        excluded: list[Exclusion] = []
+        (agent,) = collect_agents(project, known_skills=frozenset(), excluded=excluded)
+        assert agent.context == ("docs/in.md",) and dict(agent.context_sizes) == {"docs/in.md": 10}
+        assert excluded == []
+
+    @pytest.mark.parametrize("variante", ["absolu", "sortant", "lien", "lien-dossier", "dossier-contexte"])
+    def test_un_contexte_declare_hors_du_projet_est_retire_et_dit(
+        self, project: Path, temoin: Path, variante: str
+    ) -> None:
+        (project / "docs").mkdir()
+        (project / "docs" / "in.md").write_text("sain", encoding="utf-8")
+        (project / "docs" / "dir").mkdir()
+        (project / "docs" / "lien.md").symlink_to(temoin)
+        (project / "ld").symlink_to(temoin.parent, target_is_directory=True)
+        declared = {
+            "absolu": str(temoin),
+            "sortant": "../dehors/temoin.md",
+            "lien": "docs/lien.md",
+            "lien-dossier": "ld/temoin.md",
+            "dossier-contexte": "docs/dir",
+        }[variante]
+        _put(_agents_dir(project), "c.md", _agent_text("c", extra=f'context: ["docs/in.md", "{declared}"]\n'))
+        excluded: list[Exclusion] = []
+        (agent,) = collect_agents(project, known_skills=frozenset(), excluded=excluded)
+        assert agent.name == "c" and agent.context == ("docs/in.md",)
+        assert [p for p, _ in agent.context_sizes] == ["docs/in.md"]
+        assert len(excluded) == 1 and excluded[0].name.startswith("contexte de l'agent c")
+        assert TEMOIN not in repr(agent)
+        emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+        assert emitter is not None
+        plan = emitter.plan(build_surface(project), project)
+        assert all(TEMOIN not in f.content and str(temoin.parent) not in f.content for f in plan.files)
+
+    def test_un_contexte_reellement_manquant_reste_une_erreur_de_build(self, project: Path) -> None:
+        from grimoire.core.exceptions import GrimoireAgentError
+
+        _put(_agents_dir(project), "c.md", _agent_text("c", extra="context: [docs/absent.md]\n"))
+        with pytest.raises(GrimoireAgentError, match="contexte inexistant"):
+            collect_agents(project, known_skills=frozenset())
+
+    def test_le_dispatch_ne_lit_jamais_hors_de_la_racine_meme_si_la_collecte_est_contournee(
+        self, project: Path, temoin: Path
+    ) -> None:
+        from grimoire.missions import dispatch
+
+        (project / "docs").mkdir()
+        (project / "docs" / "in.md").write_text("SAIN", encoding="utf-8")
+        (project / "docs" / "lien.md").symlink_to(temoin)
+        gros = project / "docs" / "gros.md"
+        gros.write_text("x" * (SOURCE_MAX_BYTES + 1), encoding="utf-8")
+        paths = ("docs/in.md", str(temoin), "../dehors/temoin.md", "docs/lien.md", "docs/gros.md")
+        text = dispatch._read_declared_context(project, paths)
+        assert text == "### docs/in.md\n\nSAIN"
+
+    def test_le_dispatch_borne_le_contexte_total(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.missions import dispatch
+
+        monkeypatch.setattr(dispatch, "_CONTEXT_TOTAL_BYTES", 100)
+        (project / "docs").mkdir()
+        for name in ("a", "b", "c"):
+            (project / "docs" / f"{name}.md").write_text(name * 60, encoding="utf-8")
+        text = dispatch._read_declared_context(project, ("docs/a.md", "docs/b.md", "docs/c.md"))
+        assert "### docs/a.md" in text and "docs/b.md" not in text and "docs/c.md" not in text
 
     def test_dix_mille_agents_temps_borne(self, project: Path) -> None:
         directory = _agents_dir(project)
@@ -630,3 +691,174 @@ class TestModulePartage:
         assert safe_sources.list_sources(tmp_path / "absent", "x") == ({}, [])
         (tmp_path / "f").write_text("x", encoding="utf-8")
         assert safe_sources.list_sources(tmp_path / "f", "x") == ({}, [])
+
+
+# ── Front matter sous bornes, budget global, agents installés, visibilité ────────────────────────────
+
+
+def _bombe(niveaux: int) -> str:
+    lignes = ["a0: &a0 [x, x, x, x, x, x, x, x, x, x]"]
+    lignes += [f"a{i}: &a{i} [" + ", ".join([f"*a{i - 1}"] * 10) + "]" for i in range(1, niveaux)]
+    return "---\n" + "\n".join(lignes) + f"\nname: *a{niveaux - 1}\ndescription: d\n---\ncorps\n"
+
+
+class TestFrontMatterBorne:
+    @pytest.mark.parametrize("niveaux", [7, 9])
+    @pytest.mark.parametrize("backend", ["python", "auto"])
+    def test_une_bombe_d_alias_est_exclue_vite(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch, niveaux: int, backend: str
+    ) -> None:
+        import resource
+
+        monkeypatch.setenv("GRIMOIRE_HOSTS_BACKEND", backend)
+        _put(_skills_dir(project), "sain.md", SAIN)
+        _put(_skills_dir(project), "bombe.md", _bombe(niveaux))
+        _put(_agents_dir(project), "bombe.md", _bombe(niveaux).replace("description: d", 'description: "d"'))
+        excluded: list[Exclusion] = []
+        before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        start = time.monotonic()
+        skills = collect_skills(project, excluded=excluded)
+        agents = collect_agents(project, known_skills=frozenset(), excluded=excluded)
+        assert time.monotonic() - start < 1
+        assert [s.slug for s in skills] == ["sain"] and agents == ()
+        assert len(excluded) == 2 and all("ancre ou alias" in e.reason for e in excluded)
+        assert resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before < 100_000  # ko : pas de développement
+
+    def test_un_bloc_de_front_matter_trop_gros_est_refuse(self, project: Path) -> None:
+        gros = "---\ndescription: d\n" + "".join(f"k{i}: v\n" for i in range(6000)) + "---\nc\n"
+        _put(_skills_dir(project), "gros.md", gros)
+        excluded: list[Exclusion] = []
+        assert collect_skills(project, excluded=excluded) == ()
+        assert "front matter au-delà" in excluded[0].reason
+
+    def test_trop_d_elements_et_yaml_mal_forme(self, project: Path) -> None:
+        trop = "---\ndescription: d\nl: [" + ", ".join(["1"] * 6000) + "]\n---\nc\n"
+        _put(_skills_dir(project), "trop.md", trop)
+        _put(_skills_dir(project), "casse.md", "---\ndescription: [oups\n---\nc\n")
+        excluded: list[Exclusion] = []
+        skills = collect_skills(project, excluded=excluded)
+        assert [s.slug for s in skills] == ["casse"]  # un YAML mal formé reste toléré, comme avant
+        assert [e.reason for e in excluded] == ["front matter trop fourni"]
+
+    def test_un_front_matter_ordinaire_passe(self) -> None:
+        assert safe_sources.frontmatter_issue("---\nname: x\ntools: [read, edit]\nm:\n  a: 1\n---\nc\n") is None
+        assert safe_sources.frontmatter_issue("pas de front matter") is None
+
+    def test_le_catalogue_mcp_refuse_aussi_une_bombe(self, project: Path, kit: Path) -> None:
+        from grimoire.mcp.skills_catalogue import build_catalogue
+
+        _put(_skills_dir(project), "bombe.md", _bombe(8))
+        _put(_skills_dir(project), "sain.md", SAIN)
+        start = time.monotonic()
+        catalogue = build_catalogue(project)
+        assert time.monotonic() - start < 1
+        assert [s.name for s in catalogue.served] == ["sain"] and "ancre" in catalogue.excluded[0].reason
+
+
+class TestBudgetGlobal:
+    def test_le_budget_exclut_les_sources_restantes_dans_l_ordre_trie(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(safe_sources, "COLLECT_MAX_BYTES", 10**9)
+        real = safe_sources.SourceBudget
+
+        def petit(*_a: object, **_k: object) -> safe_sources.SourceBudget:
+            return real(max_bytes=3 * len(SAIN), max_files=1000)
+
+        monkeypatch.setattr(collect, "SourceBudget", petit)
+        for name in ("a", "b", "c", "d", "e"):
+            _put(_skills_dir(project), f"{name}.md", SAIN)
+        excluded: list[Exclusion] = []
+        skills = collect_skills(project, excluded=excluded)
+        assert [s.slug for s in skills] == ["a", "b", "c"]
+        assert [e.reason for e in excluded] == ["budget de collecte atteint"] * 2
+        assert [e.name.rsplit("/", 1)[1] for e in excluded] == ["d.md", "e.md"]
+
+    def test_le_budget_borne_le_nombre_de_sources(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(collect, "SourceBudget", lambda: safe_sources.SourceBudget(max_files=2))
+        for name in ("a", "b", "c"):
+            _put(_agents_dir(project), f"{name}.md", _agent_text(name, body=f"Rôle {name}."))
+        excluded: list[Exclusion] = []
+        assert [a.name for a in collect_agents(project, known_skills=frozenset(), excluded=excluded)] == ["a", "b"]
+        assert [e.reason for e in excluded] == ["budget de collecte atteint"]
+
+    def test_deux_cents_fichiers_d_un_mebi_restent_sous_le_plafond_par_defaut(self) -> None:
+        budget = safe_sources.SourceBudget()
+        admitted = sum(budget.admit(SOURCE_MAX_BYTES) for _ in range(1000))
+        assert admitted == 32 and budget.exhausted
+
+
+class TestAgentsInstalles:
+    def test_une_enumeration_sure(self, project: Path, temoin: Path) -> None:
+        from grimoire.core import layout
+
+        directory = _agents_dir(project)
+        _put(directory, "sain.md", _agent_text("sain"))
+        (directory / "lien.md").symlink_to(temoin)
+        (directory / "casse.md").write_bytes(b"\xff\xfe")
+        (directory / "gros.md").write_text("x" * (SOURCE_MAX_BYTES + 1), encoding="utf-8")
+        os.mkfifo(directory / "tuyau.md")
+        (directory / "dossier.md").mkdir()
+        found = layout.installed_agents(project)
+        assert list(found) == ["sain"] and TEMOIN not in repr(found) and "temoin" not in repr(found)
+
+    def test_dossier_lie_et_dix_mille_fichiers(self, project: Path, temoin: Path) -> None:
+        from grimoire.core import layout
+
+        _agents_dir(project).parent.mkdir(parents=True)
+        _agents_dir(project).symlink_to(temoin.parent, target_is_directory=True)
+        assert layout.installed_agents(project) == {}
+        _agents_dir(project).unlink()
+        directory = _agents_dir(project)
+        _put(directory, "a-sain.md", _agent_text("a-sain"))
+        for i in range(10_000):
+            (directory / f"z{i:05d}.md").write_text("x", encoding="utf-8")
+        start = time.monotonic()
+        assert "a-sain" in layout.installed_agents(project)
+        assert time.monotonic() - start < 10
+
+    def test_projet_sain_inchange(self, project: Path) -> None:
+        from grimoire.core import layout
+
+        _put(_agents_dir(project), "b.md", _agent_text("b"))
+        _put(project / "_grimoire" / "kit" / "agents", "a.md", _agent_text("a"))
+        found = layout.installed_agents(project)
+        assert list(found) == ["b", "a"] and found["b"][1] == _agents_dir(project) / "b.md"
+
+
+class TestVisibilite:
+    def test_l_erreur_de_skill_manquant_nomme_la_raison_du_refus(self, project: Path, temoin: Path) -> None:
+        from grimoire.core.exceptions import GrimoireAgentError
+
+        _skills_dir(project).mkdir(parents=True)
+        (_skills_dir(project) / "unique.md").symlink_to(temoin)
+        _put(_agents_dir(project), "a.md", _agent_text("a", extra="skills: [unique]\n"))
+        with pytest.raises(GrimoireAgentError, match="refusé à la collecte : fichier source en lien symbolique"):
+            build_surface(project)
+        with pytest.raises(GrimoireAgentError, match="Fichiers ignorés à la collecte"):
+            build_surface(project)
+
+    def test_doctor_garde_les_exclusions_deja_collectees_quand_une_erreur_survient(
+        self, project: Path, temoin: Path
+    ) -> None:
+        _skills_dir(project).mkdir(parents=True)
+        (_skills_dir(project) / "unique.md").symlink_to(temoin)
+        _put(_agents_dir(project), "a.md", _agent_text("a", extra="skills: [unique]\n"))
+        (check,) = check_project_sources(project)
+        assert "_grimoire/overrides/skills/unique.md" in check.detail
+
+    def test_le_cockpit_expose_les_exclusions(self, hostile_project: Path) -> None:
+        from grimoire.tools import workspace_api as wa
+
+        payload = wa.agents_view(hostile_project)
+        assert len(payload["excluded"]) == 10
+        assert all(set(e) == {"name", "reason"} for e in payload["excluded"])
+        assert TEMOIN not in repr(payload)
+
+    def test_la_copie_suivante_est_dite_quand_c_est_une_surcharge(self, project: Path, temoin: Path) -> None:
+        (_agents_dir(project)).mkdir(parents=True)
+        (_agents_dir(project) / "x.md").symlink_to(temoin)
+        _put(project / "_grimoire" / "_config" / "custom" / "agents", "x.md", _agent_text("x"))
+        excluded: list[Exclusion] = []
+        collect_agents(project, known_skills=frozenset(), excluded=excluded)
+        assert excluded[0].reason.endswith("; copie suivante servie")

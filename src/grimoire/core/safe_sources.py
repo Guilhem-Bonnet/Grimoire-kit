@@ -21,12 +21,14 @@ Module pur : ni le SDK ``mcp``, ni les émetteurs d'hôtes.
 
 from __future__ import annotations
 
+import io
 import itertools
 import os
+import re
 import stat
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 #: Entrées lues dans un dossier, et fichiers examinés : le reste est ignoré, et dit.
 MAX_DIR_ENTRIES = 5_000
@@ -91,6 +93,67 @@ class Refused(Exception):  # noqa: N818 - un refus motivé, pas une erreur
     """Un fichier source refusé ; le message est la raison, rédigée ici, jamais reprise d'un fichier."""
 
 
+#: Budget total d'une collecte : octets cumulés de corps et nombre de sources lues.
+COLLECT_MAX_BYTES = 32 * 1024 * 1024
+COLLECT_MAX_FILES = 1_000
+BUDGET_REASON = "budget de collecte atteint"
+
+
+class SourceBudget:
+    """Le budget d'UNE collecte : au-delà, toutes les sources restantes sont refusées (ordre trié, déterministe)."""
+
+    def __init__(self, max_bytes: int = COLLECT_MAX_BYTES, max_files: int = COLLECT_MAX_FILES) -> None:
+        self.max_bytes = max_bytes
+        self.max_files = max_files
+        self.used_bytes = 0
+        self.used_files = 0
+        self.exhausted = False
+
+    def admit(self, size: int) -> bool:
+        """Réserve *size* octets pour un fichier de plus ; ``False`` (et définitivement) si le budget est atteint."""
+        if self.exhausted or self.used_files + 1 > self.max_files or self.used_bytes + size > self.max_bytes:
+            self.exhausted = True
+            return False
+        self.used_files += 1
+        self.used_bytes += size
+        return True
+
+
+# ── Front matter : analysé sous bornes, avant tout usage de ses valeurs ──────────────────────────────
+
+#: Le bloc de front matter d'un fichier de source (même forme que celle de ``hosts.collect``).
+FRONTMATTER_RE = re.compile(r"\A(?:﻿)?(?:<!--.*?-->\s*)?---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.DOTALL)
+FRONTMATTER_MAX_BYTES = 32 * 1024
+FRONTMATTER_MAX_EVENTS = 5_000
+
+
+def frontmatter_issue(text: str) -> str | None:
+    """Raison de ne pas analyser le front matter de *text*, ou ``None``.
+
+    Le front matter d'un skill, d'une commande ou d'un agent est une déclaration à plat : ni ancre ni alias
+    (qui se développent à l'analyse), un bloc de quelques dizaines de Ko, un nombre borné d'éléments. Le
+    contrôle lit le flux d'événements, sans construire de valeur, donc en temps linéaire ; il précède
+    l'analyse quel que soit son backend. Un YAML mal formé n'est pas refusé ici : l'analyse le tolère.
+    """
+    match = FRONTMATTER_RE.match(text)
+    if match is None:
+        return None
+    block = match.group(1)
+    if len(block) > FRONTMATTER_MAX_BYTES:
+        return f"front matter au-delà de {FRONTMATTER_MAX_BYTES} octets"
+    from ruamel.yaml import YAML
+
+    try:
+        for count, event in enumerate(YAML(typ="safe").parse(io.StringIO(block)), 1):
+            if type(event).__name__ == "AliasEvent" or getattr(event, "anchor", None) is not None:
+                return "front matter avec ancre ou alias (refusé)"
+            if count > FRONTMATTER_MAX_EVENTS:
+                return "front matter trop fourni"
+    except Exception:  # un YAML mal formé est toléré par l'analyse, ce n'est pas une bombe
+        return None
+    return None
+
+
 def source_dir_issue(directory: Path, root: Path, *, what: str = "sources") -> str | None:
     """Raison de ne pas lire un dossier de sources du projet : il sort de *root* ou passe par un lien.
 
@@ -110,12 +173,60 @@ def source_dir_issue(directory: Path, root: Path, *, what: str = "sources") -> s
     return None
 
 
+def context_path_issue(root: Path, rel: str) -> str | None:
+    """Raison de refuser un chemin déclaré par un agent (``context:``), ou ``None``.
+
+    Le chemin doit être relatif, rester sous *root*, ne passer par aucun lien symbolique (fichier ni dossier)
+    et désigner un fichier ordinaire. Un chemin absent du projet n'est pas refusé ici (``None``) : c'est une
+    absence, que l'appelant traite à part.
+    """
+    if not rel or "\x00" in rel or Path(rel).is_absolute() or rel.startswith(("/", "\\")) or PureWindowsPath(rel).drive:
+        return "chemin de contexte absolu ou invalide (refusé)"
+    norm = os.path.normpath(rel)
+    if norm == "." or norm == ".." or norm.startswith(".." + os.sep):
+        return "chemin de contexte hors du projet (refusé)"
+    root_resolved = root.resolve()
+    expected = root_resolved / norm
+    try:
+        resolved = (root_resolved / rel).resolve(strict=True)
+    except OSError:
+        return None  # absent (ou illisible) : l'absence est une erreur de build, pas une exclusion
+    if resolved != expected or not resolved.is_relative_to(root_resolved):
+        return "chemin de contexte hors du projet ou en lien symbolique (refusé)"
+    try:
+        regular = stat.S_ISREG(expected.lstat().st_mode)
+    except OSError:
+        return None
+    return None if regular else "chemin de contexte qui n'est pas un fichier ordinaire (refusé)"
+
+
+def read_context_blocks(root: Path, paths: tuple[str, ...], max_total_bytes: int) -> str:
+    """``### chemin`` + contenu de chaque fichier déclaré, dans l'ordre ; un fichier refusé est sauté.
+
+    Lecture sûre sous *root* (relatif, ordinaire, sans lien, hors de rien d'autre que le projet), taille par
+    fichier bornée et budget cumulé *max_total_bytes* (les suivants sont sautés une fois atteint).
+    """
+    blocs: list[str] = []
+    budget = SourceBudget(max_bytes=max_total_bytes)
+    for rel in paths:
+        if context_path_issue(root, rel) is not None:
+            continue
+        try:
+            text = read_source_text(root / rel, root=root, budget=budget, frontmatter=False)
+        except Refused:
+            continue
+        blocs.append(f"### {rel}\n\n{text.strip()}")
+    return "\n\n".join(blocs)
+
+
 def read_source_text(
     path: Path,
     *,
     max_bytes: int = SOURCE_MAX_BYTES,
     root: Path | None = None,
     what: str = "fichier source",
+    budget: SourceBudget | None = None,
+    frontmatter: bool = True,
 ) -> str:
     """Le texte UTF-8 du fichier régulier *path* ; :class:`Refused` (la raison) sinon.
 
@@ -137,6 +248,8 @@ def read_source_text(
         raise Refused(f"{what} hors du projet ou sous un lien symbolique")
     if before.st_size > max_bytes:
         raise Refused(f"{what} de {before.st_size} octets, au-delà de {max_bytes}")
+    if budget is not None and not budget.admit(before.st_size):
+        raise Refused(BUDGET_REASON)
     try:
         with open_regular(path) as handle:
             data = handle.read(max_bytes + 1)
@@ -145,9 +258,14 @@ def read_source_text(
     if len(data) > max_bytes:
         raise Refused(f"{what} au-delà de {max_bytes} octets")
     try:
-        return data.decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise Refused(f"{what} qui n'est pas de l'UTF-8") from exc
+    if frontmatter:
+        issue = frontmatter_issue(text)
+        if issue is not None:
+            raise Refused(issue)
+    return text
 
 
 def list_sources(

@@ -318,6 +318,9 @@ def _tier_chain(start_tier: str, max_tier: str | None) -> tuple[str, ...]:
     return SUPPORTED_MODEL_TIERS[start_idx : end_idx + 1]
 
 
+_CONTEXT_TOTAL_BYTES = 4 * 1024 * 1024  # plafond cumulé du contexte déclaré embarqué dans un prompt
+
+
 def _read_declared_context(project_root: Path, paths: tuple[str, ...]) -> str:
     """Concatène le contenu des chemins déclarés par l'agent, dans l'ordre déclaré.
 
@@ -326,15 +329,10 @@ def _read_declared_context(project_root: Path, paths: tuple[str, ...]) -> str:
     déjà vérifiée à la construction de l'``AgentSpec`` (``collect.py``) — ce
     n'est un filet que pour la course, pas la garde principale.
     """
-    blocs: list[str] = []
-    for rel in paths:
-        fpath = project_root / rel
-        try:
-            text = fpath.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        blocs.append(f"### {rel}\n\n{text.strip()}")
-    return "\n\n".join(blocs)
+    from grimoire.core.safe_sources import read_context_blocks
+
+    # Lecture sûre (défense en profondeur, même si la collecte a été contournée) : fichiers ordinaires du projet.
+    return read_context_blocks(project_root, paths, _CONTEXT_TOTAL_BYTES)
 
 
 def agent_declared_context(project_root: Path, agent_name: str) -> tuple[str, ...]:

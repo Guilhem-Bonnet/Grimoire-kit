@@ -1302,9 +1302,10 @@ def _agents_view_uncached(root: Path) -> dict[str, Any]:
     from grimoire.core.exceptions import GrimoireConfigError
     from grimoire.hosts import collect
 
-    skills = collect.collect_skills(root)
+    excluded: list[Any] = []
+    skills = collect.collect_skills(root, excluded=excluded)
     known_skills = frozenset(s.slug for s in skills)
-    agents = collect.collect_agents(root, known_skills=known_skills)
+    agents = collect.collect_agents(root, known_skills=known_skills, excluded=excluded)
     usage = _agent_usage(root)
     default_usage = {"choices": 0, "last_chosen_at": None}
 
@@ -1329,6 +1330,8 @@ def _agents_view_uncached(root: Path) -> dict[str, Any]:
     return {
         "agents": records,
         "skills": [s.to_dict() for s in skills],
+        # Fichiers de skills et d'agents que la collecte a ignorés (nom et raison assainis, 50 au plus).
+        "excluded": [{"name": e.name, "reason": e.reason} for e in list(dict.fromkeys(excluded))[:50]],
         "entry_point": next((a.name for a in agents if a.entry_point), None),
         "freshness_threshold_days": freshness.threshold_days,
         "freshness_judged": freshness.judged,

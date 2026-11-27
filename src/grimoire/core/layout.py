@@ -235,14 +235,22 @@ def installed_agents(project_root: Path, *, include_legacy: bool = True) -> dict
     agent present in both counts once. Neither a manifest nor a scaffolder's
     in-flight copy plan is a *fact about this install*; the files on disk are.
     """
+    from grimoire.core.safe_sources import Refused, SourceBudget, list_sources, read_source_text, source_dir_issue
+
     found: dict[str, tuple[str, Path]] = {}
+    budget = SourceBudget()
     for directory in agent_dirs(project_root, include_legacy=include_legacy):
-        if not directory.is_dir():
+        # Même énumération bornée et même lecture sûre que les collecteurs de ``hosts.collect`` : aucun lien
+        # suivi, rien hors du projet, taille et nombre bornés ; un fichier refusé n'est pas un agent installé.
+        if source_dir_issue(directory, project_root) is not None:
             continue
-        for path in sorted(directory.iterdir()):
-            if not (path.is_file() and path.suffix == ".md"):
+        names, _issues = list_sources(directory, directory.name)
+        for stem, path in names.items():
+            try:
+                text = read_source_text(path, root=project_root, budget=budget, frontmatter=False)
+            except Refused:
                 continue
-            identity = agent_identity(path)
+            identity = agent_identity_of_text(text, stem)
             if identity is None:
                 continue
             tag, persona = identity
