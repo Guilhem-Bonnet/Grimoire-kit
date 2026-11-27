@@ -41,7 +41,7 @@ from grimoire.cli.doctor_hooks import (
     check_hook_path,
 )
 from grimoire.cli.doctor_instructions import check_instruction_files
-from grimoire.cli.doctor_mcp import check_mcp_processes, check_mcp_skills, check_mcp_spec_http
+from grimoire.cli.doctor_mcp import check_mcp_processes, check_mcp_skills, check_mcp_spec_http, check_project_sources
 from grimoire.cli.env_checks import EnvCheck
 from grimoire.cli.up_report import render_report
 from grimoire.core import layout
@@ -513,6 +513,7 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         *check_mcp_json(target),
         check_mcp_processes(),
         check_mcp_skills(target),
+        *check_project_sources(target),
         *check_hook_commands(target),
         *check_guard_timeout(target),
         *check_copilot_guard_timeout(target),
