@@ -169,7 +169,10 @@ def _written_ok(entry: Any, angle: Angle, *, skip: bool = False) -> bool:
     ligne, ``À préciser`` ou la mention « Sans objet »). Une trace éditée à la main ne peut pas viser une exigence."""
     if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) for k in ("phase", "section", "line")):
         return False
-    if not isinstance(entry.get("text", ""), str) or set(entry) - {"phase", "section", "line", "text"}:
+    if not isinstance(entry.get("text", ""), str) or set(entry) - {"phase", "section", "line", "text", "origin"}:
+        return False
+    origin = entry.get("origin", "")  # d'où vient la ligne (conversation de cadrage) ; absent pour l'entretien guidé
+    if not isinstance(origin, str) or len(origin) > 120 or not all(c.isalnum() or c in ":_.+-" for c in origin):
         return False
     line = entry["line"]
     if "\n" in line or "\r" in line or len(line) > 5000:
@@ -390,11 +393,14 @@ def _append_to_section(path: Path, section: str, line: str) -> None:
 def answer(
     root: Path, chantier: str | None, angle_id: str, text: str,
     *, unknown: bool = False, skip: bool = False, question: str | None = None,
+    rubrique: tuple[str, str] | None = None, origine: str | None = None,
 ) -> dict[str, Any]:
     """Consigne une réponse, un « je ne sais pas » (question ouverte) ou l'écart motivé d'un angle (rubrique « Sans objet »).
 
     ``question`` : la question posée, si elle diffère de l'amorce de l'angle (sinon l'amorce de rang égal au nombre de
-    réponses déjà données). Elle donne la rubrique visée, et reste lisible devant la réponse.
+    réponses déjà données). Elle reste lisible devant la réponse.
+    ``rubrique`` : la rubrique (phase, section) qui reçoit la réponse, si ce n'est pas celle que vise la question d'amorce ;
+    elle doit être l'une de celles que l'angle porte (``ValueError`` sinon). Sans elle, la rubrique visée par la question.
     """
     angle = _BY_ID.get(angle_id)
     if angle is None:
@@ -420,6 +426,11 @@ def answer(
     index = len(rec["answers"])  # la question d'amorce à laquelle on répond : autant de réponses déjà données
     asked = _label(question) if question else (_label(angle.seeds[index]) if index < len(angle.seeds) else "")
     phase_id, section = question_target(angle, index)
+    mark = {"origin": origine} if origine else {}  # la trace dit qui a écrit la ligne : seul son auteur peut la retirer
+    if rubrique is not None:
+        if rubrique not in {(angle.phase, angle.section), *angle.targets}:
+            raise ValueError(f"rubrique {rubrique[0]}/{rubrique[1]} : l'angle {angle.id!r} ne la porte pas")
+        phase_id, section = rubrique
     if skip:
         # La rubrique de l'angle est marquée « Sans objet » à sa place (le gabarit s'efface), le brainstorm reste net.
         rec.update(state="ecarte", reason=text)
@@ -430,7 +441,7 @@ def answer(
         free = not _section_has_content(target / filename, section)
         if free:
             _append_to_section(target / filename, section, marker)
-        rec["skip"] = {"phase": phase_id, "section": section, "line": marker if free else ""}
+        rec["skip"] = {"phase": phase_id, "section": section, "line": marker if free else "", **mark}
     elif unknown:
         # Une question ouverte exploitable : la question posée, pas le titre de l'angle.
         phase_id, section = "brainstorm", "Questions ouvertes"
@@ -439,7 +450,7 @@ def answer(
             _pad(rec)
             rec["answers"].append(note)
             line = f"- À préciser : {asked or angle.title}" + (f" — {text}" if text else "")
-            rec["lines"].append({"phase": phase_id, "section": section, "line": line, "text": text})
+            rec["lines"].append({"phase": phase_id, "section": section, "line": line, "text": text, **mark})
             filename = next(p.filename for p in PHASES if p.id == phase_id)
             _append_to_section(target / filename, section, line)
         rec["state"] = "couvert"
@@ -451,7 +462,7 @@ def answer(
         rec["state"] = "couvert"
         # La réponse va dans la rubrique que vise sa question, qui reste lisible en italique devant elle.
         line = f"- *{asked}* {text}" if asked else f"- {text}"
-        rec["lines"].append({"phase": phase_id, "section": section, "line": line})
+        rec["lines"].append({"phase": phase_id, "section": section, "line": line, **mark})
         filename = next(p.filename for p in PHASES if p.id == phase_id)
         _append_to_section(target / filename, section, line)
     _save(root, chantier, state)
