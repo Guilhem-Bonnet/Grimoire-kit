@@ -9,12 +9,19 @@ Routes (préfixe ``/api/workspace/``, branchées par :mod:`grimoire.tools.worksp
 - ``GET atelier/chantiers/<slug>/history/<id>`` : :func:`detail`, le diff par lignes de chaque phase touchée.
   ``<id>`` est ``working`` (modifications non commitées) ou un identifiant de commit (7 à 40 hexadécimaux).
 
-Garde-fous :
+Garde-fous. Modèle de menace : la configuration du dépôt ouvert est hostile. Par construction, git ne peut pas lancer
+de programme déclaré par la configuration ou les attributs du dépôt :
 
-- git est lancé SANS shell (liste d'arguments), avec ``--literal-pathspecs``, ``-c core.quotepath=off``,
-  ``-c core.fsmonitor=false`` (un dépôt ne fait exécuter aucun programme), sans paginateur, sans diff externe ni
-  conversion de texte ; un délai maximal et une sortie bornée (le processus est tué au-delà) ;
-- seules des commandes de lecture sont lancées (``rev-parse``, ``log``, ``ls-tree``, ``show``) ; aucun réseau ;
+- git est lancé SANS shell (liste d'arguments), dans un nouveau groupe de processus (tué en entier au délai), avec
+  ``--no-pager --literal-pathspecs`` et, en ``-c`` : ``core.quotepath=off``, ``core.fsmonitor=false``, ``core.hooksPath=/dev/null``,
+  ``core.pager=cat``, ``core.sshCommand=false``, ``log.showSignature=false``, ``gpg.program=false``, ``gpg.ssh.program=false``,
+  ``diff.external=``, ``protocol.allow=never`` ; ``--no-ext-diff --no-textconv`` sur ``log`` et ``show`` et
+  ``--no-show-signature`` sur ``log`` et ``show`` ;
+- l'environnement : les variables ``GIT_*`` héritées sont retirées, puis ``GIT_NO_LAZY_FETCH=1`` (aucun chargement paresseux
+  d'un clone partiel, honoré depuis git 2.44 : un git plus ancien est refusé, raison ``git-trop-ancien``),
+  ``GIT_TERMINAL_PROMPT=0``, ``GIT_OPTIONAL_LOCKS=0`` ;
+- un délai par appel et un budget global par requête (:data:`REQUEST_BUDGET`), une sortie bornée (le groupe de processus est
+  tué au-delà) ; le fil lecteur est un démon : il est abandonné, jamais attendu, si un descendant garde le tube ouvert ;
 - **aucun argument ne vient du client** hormis l'identifiant de version : il est validé par expression régulière, puis
   retrouvé *dans la liste des commits du chantier* ; c'est le condensat complet de cette liste qui est passé à git, jamais
   la chaîne reçue (une option injectée n'atteint donc jamais git) ;
@@ -25,11 +32,15 @@ Garde-fous :
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import difflib
 import os
 import re
+import signal
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,6 +54,10 @@ MAX_PAGE = 200
 #: Le nombre de commits parcourus pour retrouver un identifiant : au-delà, la version est inconnue.
 MAX_SCAN = 5000
 GIT_TIMEOUT = 8.0
+#: Le temps total que git peut prendre pour UNE requête ; au-delà la réponse est tronquée (raison ``delai``).
+REQUEST_BUDGET = 12.0
+#: Première version de git qui honore ``GIT_NO_LAZY_FETCH``.
+MIN_GIT = (2, 44)
 MAX_OUTPUT = 2_000_000
 MAX_BLOB = 400_000
 MAX_DIFF_LINES = 4000
@@ -58,6 +73,7 @@ REASONS = {
     "depot-sans-commit": "Le dépôt n'a encore aucun commit : l'historique commencera au premier.",
     "fichiers-non-suivis": "Les fichiers de ce chantier ne sont pas encore suivis par git : ajoute-les à un commit pour garder leur historique.",
     "aucune-version": "Aucun commit n'a encore touché ce chantier.",
+    "git-trop-ancien": "La version de git installée est trop ancienne pour lire l'historique sans risque (2.44 ou plus requis).",
     "git-illisible": "git n'a pas pu lire l'historique (délai dépassé ou dépôt illisible).",
 }
 
@@ -70,20 +86,60 @@ class _Out:
     failed: str = ""  # "absent" (git introuvable) ou "delai"
 
 
+_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("atelier_history_deadline", default=None)
+_SAFE_CONFIG = (
+    "core.quotepath=off", "core.fsmonitor=false", "core.hooksPath=/dev/null", "core.pager=cat", "core.sshCommand=false",
+    "log.showSignature=false", "gpg.program=false", "gpg.ssh.program=false", "diff.external=", "protocol.allow=never",
+)
+#: Posés sur chaque ``log`` et ``show`` (jamais d'affichage de signature, de diff externe ni de conversion de texte).
+SAFE_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-show-signature")
+
+
+class _BudgetError(Exception):
+    """Le budget de la requête est épuisé (ou git a dépassé son délai) : la réponse est tronquée."""
+
+
+class _UnreadableError(Exception):
+    """Le fichier existe à cette révision mais git ne peut pas le lire (objet absent d'un clone partiel : jamais chargé)."""
+
+
 def _env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["GIT_OPTIONAL_LOCKS"] = "0"
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_NO_LAZY_FETCH"] = "1"
     env["LC_ALL"] = "C"
     return env
 
 
+def _kill(proc: subprocess.Popen[bytes]) -> None:
+    """Tue git et ses descendants (groupe de processus) ; hors POSIX, git seul."""
+    with contextlib.suppress(OSError):
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+
+
+def _argv(args: list[str]) -> list[str]:
+    argv = ["git", "--no-pager", "--literal-pathspecs"]
+    for item in _SAFE_CONFIG:
+        argv += ["-c", item]
+    verb = args[0] if args else ""
+    return [*argv, verb, *(SAFE_FLAGS if verb in ("log", "show") else ()), *args[1:]]
+
+
 def _git(root: Path, args: list[str], *, limit: int = MAX_OUTPUT, timeout: float = GIT_TIMEOUT) -> _Out:
     """Lance ``git`` (lecture seule), sans shell, délai et sortie bornés. Ne lève jamais."""
-    argv = ["git", "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=off", "-c", "core.fsmonitor=false", *args]
+    deadline = _DEADLINE.get()
+    if deadline is not None:
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            return _Out(124, b"", failed="delai")
     try:
         proc = subprocess.Popen(  # liste d'arguments, aucun shell ; voir la docstring du module
-            argv, cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_env(),
+            _argv(args), cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_env(),
+            start_new_session=os.name == "posix",
         )
     except (FileNotFoundError, NotADirectoryError):
         return _Out(127, b"", failed="absent")
@@ -102,7 +158,7 @@ def _git(root: Path, args: list[str], *, limit: int = MAX_OUTPUT, timeout: float
             chunks.append(chunk)
             if state["size"] > limit:
                 state["cut"] = True
-                proc.kill()
+                _kill(proc)
                 return
 
     reader = threading.Thread(target=pump, daemon=True)
@@ -110,13 +166,16 @@ def _git(root: Path, args: list[str], *, limit: int = MAX_OUTPUT, timeout: float
     reader.join(timeout)
     timed_out = reader.is_alive()
     if timed_out:
-        proc.kill()
-        reader.join(2)
-    proc.wait()
-    if proc.stdout is not None:
+        _kill(proc)
+        reader.join(1)  # un descendant échappé au groupe peut garder le tube : le lecteur (démon) est abandonné
+    _kill(proc)  # fin normale ou non : plus aucun descendant ne survit à l'appel
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=2)
+    if not reader.is_alive() and proc.stdout is not None:
         proc.stdout.close()
     data = b"".join(chunks)[:limit]
-    return _Out(proc.returncode, data, truncated=bool(state["cut"]), failed="delai" if timed_out else "")
+    code = proc.returncode if proc.returncode is not None else -9
+    return _Out(code, data, truncated=bool(state["cut"]), failed="delai" if timed_out else "")
 
 
 # ── Le chantier : ses fichiers de phase, retrouvés dans la liste réelle ──────────────────────────────────────
@@ -176,6 +235,10 @@ def _repo_state(root: Path) -> str:
         return "git-illisible"
     if inside.code != 0 or inside.data.strip() != b"true":
         return "pas-de-depot"
+    version = _git(root, ["--version"])
+    found = re.match(rb"git version (\d+)\.(\d+)", version.data)
+    if version.failed or not found or (int(found.group(1)), int(found.group(2))) < MIN_GIT:
+        return "git-illisible" if version.failed else "git-trop-ancien"
     head = _git(root, ["rev-parse", "--verify", "-q", "HEAD"])
     if head.failed:
         return "git-illisible"
@@ -193,7 +256,14 @@ def _tracked(root: Path, phases: list[_Phase]) -> set[str]:
 def _blob(root: Path, rev: str, rel: str) -> tuple[str | None, bool]:
     """Le contenu d'un fichier à une révision : ``(texte, tronqué)`` ; ``("", False)`` s'il n'existe pas à cette révision."""
     done = _git(root, ["show", f"{rev}:./{rel}"], limit=MAX_BLOB)
+    if done.failed:
+        raise _BudgetError
     if done.code != 0 and not done.truncated:
+        listed = _git(root, ["ls-tree", "--name-only", rev, "--", rel])
+        if listed.failed:
+            raise _BudgetError
+        if listed.code == 0 and listed.data.strip():
+            raise _UnreadableError  # le fichier est là, son contenu non : rien n'est inventé
         return "", False
     return _text(done.data), done.truncated
 
@@ -303,7 +373,10 @@ def _working(root: Path, phases: list[_Phase], tracked: set[str]) -> tuple[dict[
             if phase.path.is_file():
                 untracked.append(phase.id)
             continue
-        old, old_cut = _blob(root, "HEAD", phase.rel)
+        try:
+            old, old_cut = _blob(root, "HEAD", phase.rel)
+        except (_BudgetError, _UnreadableError):
+            continue
         new, new_cut = _disk(phase.path)
         if old is None or new is None or old_cut or new_cut:
             continue
@@ -319,7 +392,7 @@ def _working(root: Path, phases: list[_Phase], tracked: set[str]) -> tuple[dict[
     return entry, untracked
 
 
-def listing(root: Path, slug: str, page: str = "1") -> dict[str, Any]:
+def _listing(root: Path, slug: str, page: str) -> dict[str, Any]:
     """Les versions d'un chantier, plus récente d'abord, par pages de :data:`PAGE_SIZE`. Lecture seule, ne lève pas (hors chantier inconnu)."""
     phases = _phases(root, slug)
     number = _page(page)
@@ -388,7 +461,7 @@ def _phase_diff(phase: _Phase, old: str | None, new: str | None, cut: bool, budg
     return {**base, **diff}
 
 
-def detail(root: Path, slug: str, version: str) -> dict[str, Any]:
+def _detail(root: Path, slug: str, version: str) -> dict[str, Any]:
     """Le diff, phase par phase, entre une version et la précédente (ou ``HEAD`` pour les modifications non commitées)."""
     phases = _phases(root, slug)
     reason = _repo_state(root)
@@ -405,14 +478,25 @@ def detail(root: Path, slug: str, version: str) -> dict[str, Any]:
         tracked = set()
     budget = MAX_ROWS
     for phase in phases:
-        if sha == WORKING:
-            if phase.rel not in tracked:
-                continue
-            old, old_cut = _blob(root, "HEAD", phase.rel)
-            new, new_cut = _disk(phase.path)
-        else:
-            old, old_cut = _blob(root, f"{sha}^", phase.rel)
-            new, new_cut = _blob(root, sha, phase.rel)
+        if sha == WORKING and phase.rel not in tracked:
+            continue
+        try:
+            if sha == WORKING:
+                old, old_cut = _blob(root, "HEAD", phase.rel)
+                new, new_cut = _disk(phase.path)
+            else:
+                old, old_cut = _blob(root, f"{sha}^", phase.rel)
+                new, new_cut = _blob(root, sha, phase.rel)
+        except _BudgetError:
+            out["truncated"] = True
+            out["reason"] = "delai"
+            out["reason_text"] = "git a pris trop de temps : la comparaison est incomplète."
+            break
+        except _UnreadableError:
+            out["phases"].append({"id": phase.id, "title": phase.title, "added": 0, "removed": 0, "rows": [], "truncated": True,
+                                  "note": "contenu indisponible dans ce dépôt (objet absent) : diff non calculé."})
+            out["truncated"] = True
+            continue
         shown = _phase_diff(phase, old, new, old_cut or new_cut, max(budget, 0))
         if shown is None:
             continue
@@ -422,3 +506,22 @@ def detail(root: Path, slug: str, version: str) -> dict[str, Any]:
     out["added"] = sum(p["added"] for p in out["phases"])
     out["removed"] = sum(p["removed"] for p in out["phases"])
     return out
+
+
+def _within_budget(run: Any, *args: Any) -> dict[str, Any]:
+    token = _DEADLINE.set(time.monotonic() + REQUEST_BUDGET)
+    try:
+        result: dict[str, Any] = run(*args)
+        return result
+    finally:
+        _DEADLINE.reset(token)
+
+
+def listing(root: Path, slug: str, page: str = "1") -> dict[str, Any]:
+    """Les versions d'un chantier, plus récente d'abord, par pages de :data:`PAGE_SIZE`. Lecture seule, ne lève pas (hors chantier inconnu)."""
+    return _within_budget(_listing, root, slug, page)
+
+
+def detail(root: Path, slug: str, version: str) -> dict[str, Any]:
+    """Le diff, phase par phase, entre une version et la précédente (ou ``HEAD`` pour les modifications non commitées)."""
+    return _within_budget(_detail, root, slug, version)

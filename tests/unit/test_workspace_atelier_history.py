@@ -454,8 +454,12 @@ def test_git_runner_flags_and_no_shell(project: Path, monkeypatch: pytest.Monkey
     h._git(project, ["--version"])
     argv, kw = captured["argv"], captured["kw"]
     assert isinstance(argv, list) and argv[0] == "git" and not kw.get("shell")
-    assert argv[:7] == ["git", "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=off", "-c", "core.fsmonitor=false"]
+    assert argv[:3] == ["git", "--no-pager", "--literal-pathspecs"]
+    pairs = [argv[i + 1] for i, a in enumerate(argv) if a == "-c"]
+    assert pairs == list(h._SAFE_CONFIG) and "log.showSignature=false" in pairs and "core.hooksPath=/dev/null" in pairs
     assert "GIT_DIR" not in kw["env"] and kw["env"]["GIT_OPTIONAL_LOCKS"] == "0"
+    assert kw["env"]["GIT_NO_LAZY_FETCH"] == "1" and kw["env"]["GIT_TERMINAL_PROMPT"] == "0"
+    assert kw["start_new_session"] is True
     assert kw["stdin"] == subprocess.DEVNULL
 
 
@@ -472,38 +476,41 @@ def test_git_runner_cuts_huge_output(project: Path) -> None:
 
 
 @needs_git
-def test_git_runner_times_out(project: Path) -> None:
-    class Slow:
-        def __init__(self, *_a: Any, **_k: Any) -> None:
-            self.stdout = _Pipe()
-            self.returncode = -9
+def test_git_runner_times_out(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un faux git dont un descendant garde stdout ouvert : le retour reste borné et le descendant est tué."""
+    import time
 
-        def kill(self) -> None:
-            self.stdout.release.set()
+    fake = project.parent / "fakebin"
+    fake.mkdir()
+    script = fake / "git"
+    pidfile = project.parent / "child.pid"
+    script.write_text(f"#!/bin/sh\nsleep 30 &\necho $! > {pidfile}\nsleep 30\n", encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ['PATH']}")
+    started = time.monotonic()
+    out = h._git(project, ["log"], timeout=1.0)
+    elapsed = time.monotonic() - started
+    assert out.failed == "delai" and elapsed < 2.5
+    child = int(pidfile.read_text().strip())
+    for _ in range(20):
+        try:
+            os.kill(child, 0)
+        except OSError:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("le descendant de git survit au délai")
 
-        def wait(self) -> int:
-            return self.returncode
 
-    import threading
-
-    class _Pipe:
-        def __init__(self) -> None:
-            self.release = threading.Event()
-
-        def read(self, _n: int) -> bytes:
-            self.release.wait(10)
-            return b""
-
-        def close(self) -> None:
-            return None
-
-    original = h.subprocess.Popen
-    h.subprocess.Popen = Slow  # type: ignore[misc,assignment]
+def test_request_budget_truncates(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    made = new_chantier(project, "Budget")
+    token = h._DEADLINE.set(h.time.monotonic() - 1)
     try:
-        out = h._git(project, ["log"], timeout=0.2)
+        assert h._git(project, ["--version"]).failed == "delai"
     finally:
-        h.subprocess.Popen = original  # type: ignore[misc]
-    assert out.failed == "delai"
+        h._DEADLINE.reset(token)
+    monkeypatch.setattr(h, "REQUEST_BUDGET", -1.0)
+    assert h.listing(project, made.slug)["reason"] == "git-illisible"
 
 
 @needs_git
