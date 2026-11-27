@@ -56,7 +56,10 @@ def set_moteur(factory: Callable[[Path, str], Any] | None) -> None:
 
 def moteur_pour(root: Path, slug: str) -> Garde:
     """Le moteur de ce chantier, enveloppé du gardien qui valide toutes ses sorties."""
-    return Garde(MoteurSansModele() if _FABRIQUE is None else _FABRIQUE(root, slug))
+    if _FABRIQUE is None:
+        return Garde(MoteurSansModele())
+    fabrique = _FABRIQUE
+    return Garde.construire(lambda: fabrique(root, slug))  # une fabrique qui lève ou tarde : repli sans modèle, avec une note
 
 
 def reglages(root: Path) -> hygiene.Reglages:
@@ -76,7 +79,7 @@ def _context(root: Path, slug: str) -> turn.Contexte:
 
 
 def _body(action: str, body: dict[str, Any]) -> dict[str, Any]:
-    extra = set(body) - _FIELDS[action]
+    extra = set(body) - _FIELDS[action] - {"project"}  # ``project`` : le projet visé, confirmé par l'hôte comme pour les autres écritures
     if extra:
         raise ValueError(f"champ(s) refusé(s) : {', '.join(sorted(extra))} — la conversation n'accepte pas de contenu de document")
     return body

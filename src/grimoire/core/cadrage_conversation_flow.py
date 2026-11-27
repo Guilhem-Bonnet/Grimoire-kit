@@ -33,6 +33,7 @@ __all__ = [
     "Etape",
     "cadre_from_view",
     "ce_qui_manque",
+    "groupe_a_confirmer",
     "prochaine_etape",
     "resume",
 ]
@@ -181,6 +182,19 @@ def _question(angle: AngleCadre, index: int, *, essentiel: bool, manque: tuple[s
                  preambule, manque)
 
 
+def groupe_a_confirmer(conv: Conversation) -> tuple[str, ...]:
+    """Les éléments qu'un seul « oui » confirme : ceux du même tour qui sont de l'humain et de la rubrique de la question.
+
+    Sans groupe, le premier élément à confirmer SEUL (autre rubrique, ou texte du moteur) : le « oui » ne porte alors que
+    sur lui, dont le texte exact est montré.
+    """
+    pending = conv.en_attente()
+    together = [e for e in pending if not e.individuel]
+    if together:
+        return tuple(e.id for e in together if e.source == together[0].source)
+    return (pending[0].id,)
+
+
 def prochaine_etape(conv: Conversation, cadre: Cadre) -> Etape:
     """L'étape suivante, décidée par le seul état de la conversation et l'avancement réel (voir le module)."""
     if conv.mode == "termine":
@@ -193,9 +207,11 @@ def prochaine_etape(conv: Conversation, cadre: Cadre) -> Etape:
         return Etape("reporte", "C'est une action à rétablir d'abord : le cadrage se fera après, au retour d'expérience.")
     pending = conv.en_attente()
     if pending:
-        group = tuple(e.id for e in pending if e.source == pending[0].source)
+        ids = groupe_a_confirmer(conv)
+        first = conv.element(ids[0])
+        assert first is not None  # ids vient des éléments de la conversation
         return Etape("confirmer", "Je te redis ce que j'ai compris avant de le ranger dans le document : rien n'y entre sans ton accord.",
-                     pending[0].angle, 0, pending[0].phase, pending[0].section, ids=group)
+                     first.angle, 0, first.phase, first.section, ids=ids)
     if conv.mode == "brainstorm":
         return Etape("brainstorm", "Tu as demandé à brainstormer : on cherche des pistes, sans les juger.",
                      "alternatives", 0, "brainstorm", "Pistes", obligatoire=False)

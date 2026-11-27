@@ -35,6 +35,13 @@ def make_ctx(root: Path, moteur: Any = None, now: datetime = T0, slug: str = "un
     return turn.Contexte(root, slug, directory, Garde(moteur or MoteurSansModele(), **garde), now, Reglages())
 
 
+@pytest.fixture(autouse=True)
+def _fils_libres() -> None:
+    from grimoire.core import cadrage_conversation_engine as engine
+
+    engine._VIVANTS.clear()
+
+
 @pytest.fixture
 def ctx(root: Path) -> turn.Contexte:
     return make_ctx(root)
@@ -45,9 +52,21 @@ def _doc(root: Path, name: str) -> str:
 
 
 def _all_docs(root: Path, base: str = "un") -> dict[str, str]:
+    """Les fichiers du chantier ; la trace de l'entretien sans la clé ``origin`` (seule différence avec un remplissage manuel)."""
     folder = root / "_grimoire" / "cadrage" / base
-    return {p.name: p.read_text(encoding="utf-8") for p in sorted(folder.iterdir()) if p.suffix in (".md", ".json")
-            and p.name != store.FILENAME}
+    out = {p.name: p.read_text(encoding="utf-8") for p in sorted(folder.iterdir()) if p.suffix in (".md", ".json")
+           and p.name != store.FILENAME}
+    if "entretien.json" in out:
+        out["entretien.json"] = json.dumps(_sans_origine(json.loads(out["entretien.json"])), sort_keys=True)
+    return out
+
+
+def _sans_origine(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {k: _sans_origine(v) for k, v in node.items() if k != "origin"}
+    if isinstance(node, list):
+        return [_sans_origine(v) for v in node]
+    return node
 
 
 def _say(ctx: turn.Contexte, rev: int, text: str) -> dict[str, Any]:
@@ -149,8 +168,14 @@ def test_une_reponse_hors_de_la_rubrique_de_la_question_va_dans_la_bonne(root: P
 
 def test_je_ne_sais_pas_range_une_question_ouverte_et_la_conversation_continue(root: Path, ctx: turn.Contexte) -> None:
     rev = turn.demarrer(ctx)["rev"]
+    before = _all_docs(root)
     react = _say(ctx, rev, "Je ne sais pas")
-    assert react["document_modifie"] is True and react["question"]["angle"] == "criteres"
+    # le classement ne fait que PROPOSER : rien d'écrit, aucun angle levé, tant que l'humain n'a pas dit oui
+    assert react["document_modifie"] is False and react["etape"]["kind"] == "confirmer" and _all_docs(root) == before
+    assert interview.view(root, "un")["angles"][0]["state"] == "ouvert"
+    assert react["a_confirmer"][0]["action"].startswith("noter comme question ouverte") and "ne sais pas encore" in react["message"]
+    done = _say(ctx, react["rev"], "oui")
+    assert done["document_modifie"] is True and done["question"]["angle"] == "criteres"
     assert "- À préciser : Dis-moi : qui va se servir" in _doc(root, "02-brainstorm.md")
     state = turn.vue(ctx)
     assert state["ouvertes"][0]["texte"].startswith("Dis-moi : qui va se servir")
@@ -158,22 +183,64 @@ def test_je_ne_sais_pas_range_une_question_ouverte_et_la_conversation_continue(r
     assert interview.view(root, "un")["angles"][0]["state"] == "couvert"  # comme « je ne sais pas » de l'entretien guidé
 
 
-def test_sans_objet_ecarte_l_angle_et_se_retire(root: Path, ctx: turn.Contexte) -> None:
+def test_sans_objet_ecarte_l_angle_apres_le_oui_et_se_retire(root: Path, ctx: turn.Contexte) -> None:
     rev = turn.demarrer(ctx)["rev"]
     react = _say(ctx, rev, "sans objet")
-    assert react["document_modifie"] is True and "sans objet" in react["accuse"]
+    assert react["document_modifie"] is False and interview.view(root, "un")["angles"][0]["state"] == "ouvert"
+    assert "sans objet" in react["message"]
+    react = _say(ctx, react["rev"], "oui")
+    assert react["document_modifie"] is True
     view = interview.view(root, "un")["angles"][0]
     assert view["state"] == "ecarte" and view["reason"] == "sans objet"
     turn.decider(ctx, react["rev"], turn.vue(ctx)["elements"][0]["id"], "ecarter")
     assert interview.view(root, "un")["angles"][0]["state"] == "ouvert"
 
 
+def test_refuser_la_proposition_ne_note_rien(root: Path, ctx: turn.Contexte) -> None:
+    rev = turn.demarrer(ctx)["rev"]
+    react = _say(ctx, rev, "je ne sais pas")
+    before = _all_docs(root)
+    no = _say(ctx, react["rev"], "non, je vais répondre : les mainteneurs")
+    assert _all_docs(root) == before and no["etape"]["kind"] == "confirmer"
+    assert [e["statut"] for e in turn.vue(ctx)["elements"]] == ["ecarte", "propose"]
+
+
+def test_je_ne_sais_pas_apres_une_reponse_garde_le_texte_de_l_humain_comme_note(root: Path, ctx: turn.Contexte) -> None:
+    rev = turn.demarrer(ctx)["rev"]
+    rev = _say(ctx, rev, "Les comptables, un peu")["rev"]
+    react = _say(ctx, rev, "je ne sais pas")
+    assert react["a_confirmer"][0]["note"] == "Les comptables, un peu"
+    assert [e["statut"] for e in turn.vue(ctx)["elements"]] == ["ecarte", "propose"]
+    _say(ctx, react["rev"], "oui")
+    assert "- À préciser : Dis-moi : qui va se servir de ça, et dans quelle situation ? — Les comptables, un peu" in _doc(root, "02-brainstorm.md")
+
+
+def test_une_reponse_qui_contient_ca_depend_est_une_reponse_et_ne_leve_aucun_angle(root: Path, ctx: turn.Contexte) -> None:
+    rev = turn.demarrer(ctx)["rev"]
+    before_gate = interview.check_interview(root, "un")
+    docs = _all_docs(root)
+    for phrase in ("Les comptables, ça dépend des mois", "Ça dépend du client, en gros un export CSV",
+                   "Rien à voir avec la compta, pas les paies", "Aucune idée vraiment, sauf la perte de données", "Ça dépend, un tableur ?"):
+        react = _say(ctx, rev, phrase)
+        rev = react["rev"]
+        assert react["etape"]["kind"] == "confirmer" and phrase in react["message"]
+    assert interview.check_interview(root, "un") == before_gate and _all_docs(root) == docs
+    assert all(a["state"] == "ouvert" for a in interview.view(root, "un")["angles"])
+    assert [e["texte"] for e in turn.vue(ctx)["elements"] if e["statut"] == "propose"] == ["Ça dépend, un tableur ?"]
+
+
 def test_ne_sait_pas_hors_question_d_amorce_ne_change_rien(root: Path, ctx: turn.Contexte) -> None:
     rev = turn.demarrer(ctx)["rev"]
-    rev = _say(ctx, rev, "Les mainteneurs")["rev"]  # en attente de confirmation
-    react = _say(ctx, rev, "je ne sais pas")
-    assert react["document_modifie"] is False and react["etape"]["kind"] == "confirmer"
-    assert react["accuse"] == "Pas de souci, on y reviendra."
+    rev = _say(ctx, rev, "Les mainteneurs")["rev"]
+    rev = _say(ctx, rev, "oui")["rev"]
+    paused = turn.pause(ctx, rev)
+    react = turn.demarrer(ctx)  # reprise
+    assert react["etape"]["kind"] != "confirmer" and paused["rev"] < react["rev"]
+    state = turn.vue(ctx)
+    assert state["question"]["kind"] == "amorce"
+    brain = _say(ctx, state["rev"], "on brainstorme")
+    out = _say(ctx, brain["rev"], "je ne sais pas")
+    assert out["document_modifie"] is False and out["accuse"] == "Pas de souci, on y reviendra."
 
 
 def test_le_hors_sujet_est_note_pour_plus_tard_et_la_question_reste(root: Path, ctx: turn.Contexte) -> None:
@@ -223,7 +290,7 @@ def test_corriger_un_element_deja_confirme_retire_puis_reecrit_en_gardant_l_ordr
 
     ctx = make_ctx(root, Deux())
     rev = turn.demarrer(ctx)["rev"]
-    for text in ("des avis", "oui"):
+    for text in ("Premier avis sur les utilisateurs ; Second avis sur les utilisateurs", "oui"):
         rev = _say(ctx, rev, text)["rev"]
     state = turn.vue(ctx)
     first = state["elements"][0]
@@ -460,9 +527,10 @@ def test_un_je_ne_sais_pas_dans_un_document_accepte_n_ecrit_rien(root: Path, ctx
     brain = root / "_grimoire/cadrage/un/02-brainstorm.md"
     brain.write_text(brain.read_text(encoding="utf-8").replace("status: draft", "status: accepted"), encoding="utf-8")
     before = _all_docs(root)
+    rev = _say(ctx, rev, "je ne sais pas")["rev"]  # une proposition n'écrit rien
     with pytest.raises(ConversationError, match="statut accepté"):
-        _say(ctx, rev, "je ne sais pas")
-    assert _all_docs(root) == before and turn.vue(ctx)["elements"] == []
+        _say(ctx, rev, "oui")
+    assert _all_docs(root) == before and [e["statut"] for e in turn.vue(ctx)["elements"]] == ["propose"]
 
 
 def test_un_lot_de_confirmations_est_tout_ou_rien_si_un_fichier_est_accepte(root: Path, ctx: turn.Contexte) -> None:
@@ -474,13 +542,15 @@ def test_un_lot_de_confirmations_est_tout_ou_rien_si_un_fichier_est_accepte(root
 
     ctx2 = make_ctx(root, Deux())
     rev = turn.demarrer(ctx2)["rev"]
-    rev = _say(ctx2, rev, "Les mainteneurs")["rev"]
+    rev = _say(ctx2, rev, "Un utilisateur ; Une contrainte")["rev"]
     comp = root / "_grimoire/cadrage/un/03-comprehension.md"
     comp.write_text(comp.read_text(encoding="utf-8").replace("status: draft", "status: accepted"), encoding="utf-8")
+    rev = _say(ctx2, rev, "oui")["rev"]  # le groupe (la rubrique de la question) est confirmé, l'autre rubrique reste à confirmer seule
+    assert "Un utilisateur" in _doc(root, "01-brief.md")
     before = _all_docs(root)
     with pytest.raises(ConversationError, match="statut accepté"):
         _say(ctx2, rev, "oui")
-    assert _all_docs(root) == before
+    assert _all_docs(root) == before and "Une contrainte" not in _doc(root, "03-comprehension.md")
 
 
 def test_ecrire_sur_une_conversation_qui_a_change_est_un_conflit(ctx: turn.Contexte) -> None:
@@ -621,9 +691,9 @@ class Hostile(MoteurSansModele):
 )
 def test_un_moteur_hostile_ne_sort_pas_du_cadre(root: Path, out: dict[str, Any]) -> None:
     ctx2 = make_ctx(root, Hostile(**out), delai_s=0.2)
-    rev = turn.demarrer(ctx2)["rev"]
-    react = _say(ctx2, rev, "Les mainteneurs")
-    assert react["moteur"]["degrade"] is True and react["moteur"]["notes"]
+    started = turn.demarrer(ctx2)
+    react = _say(ctx2, started["rev"], "Les mainteneurs")
+    assert (started["moteur"]["degrade"] or react["moteur"]["degrade"]) and (started["moteur"]["notes"] or react["moteur"]["notes"])
     state = turn.vue(ctx2)
     assert [e["texte"] for e in state["elements"]] == ["Les mainteneurs"]  # le texte de l'humain n'est pas perdu
     assert all(e["phase"] == "brief" for e in state["elements"])

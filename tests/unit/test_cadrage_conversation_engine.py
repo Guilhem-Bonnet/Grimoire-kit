@@ -20,10 +20,19 @@ from grimoire.core.cadrage_conversation_engine import (
     Garde,
     Moteur,
     MoteurSansModele,
+    est_un_oui,
 )
 from grimoire.core.cadrage_interview import ANGLES
 
 SANS = MoteurSansModele()
+
+
+@pytest.fixture(autouse=True)
+def _fils_libres() -> None:
+    """Les fils abandonnés par un test précédent ne comptent pas dans le plafond du suivant."""
+    from grimoire.core import cadrage_conversation_engine as engine
+
+    engine._VIVANTS.clear()
 JARGON = ("MOA", "MOE", "MoSCoW", "pré-mortem", "gate", "angle", "rubrique")
 
 
@@ -74,15 +83,17 @@ CLASSEMENT = [
     ("c'est quoi un angle ?", "amorce", "question"),
     ("En fait, c'est pour les équipes support", "amorce", "contredit"),
     ("Finalement non, plutôt les testeurs", "amorce", "contredit"),
-    ("oui", "confirmer", "confirme"),
-    ("Oui, c'est ça", "confirmer", "confirme"),
-    ("Exactement !", "confirmer", "confirme"),
+    ("oui", "confirmer", "reponse"),  # un moteur ne dit jamais « oui » : c'est le programme qui le reconnaît (est_un_oui)
+    ("Oui, c'est ça", "confirmer", "reponse"),
+    ("ça dépend des mois", "amorce", "reponse"),  # une réponse qui contient la formule n'est pas la formule
+    ("Les comptables, ça dépend", "amorce", "reponse"),
+    ("Rien à voir avec la compta", "amorce", "reponse"),
+    ("Aucune idée vraiment, sauf la perte de données", "amorce", "reponse"),
     ("oui mais pas pour tout le monde", "confirmer", "contredit"),
     ("Non", "confirmer", "contredit"),
     ("Non, plutôt les testeurs", "confirmer", "contredit"),
     ("pas vraiment, ce sont les relecteurs", "confirmer", "contredit"),
     ("oui tout à fait, c'est exactement ça, et en plus ça sert aux équipes", "confirmer", "reponse"),
-    ("oui", "document", "confirme"),
     ("non", "document", "contredit"),
     ("c'est tout", "brainstorm", "reprise"),
     ("on continue", "amorce", "reponse"),
@@ -94,6 +105,20 @@ def test_le_classement_par_regles_simples(texte: str, contexte: str, attendu: st
     mode = "brainstorm" if contexte == "brainstorm" else "cadrage"
     assert SANS.classer_reponse(EntreeClassement(texte, contexte, mode)) == attendu
     assert attendu in CLASSES
+
+
+@pytest.mark.parametrize("texte", ["oui", "Oui !", "ouais", "c'est ça", "exactement", "Oui, tout à fait", "d'accord", "ok", "parfait", "oui c'est ça ?"])
+def test_un_oui_est_reconnu_par_le_programme_sur_des_mots_d_accord_seuls(texte: str) -> None:
+    assert est_un_oui(texte)
+
+
+@pytest.mark.parametrize(
+    "texte",
+    ["", "   ", "non", "oui mais pas tout", "oui, et aussi les testeurs", "pas vraiment", "ça dépend", "oui je veux surtout les mainteneurs",
+     "oui oui oui oui oui oui", "peut-être", "oui non", "c'est pas ça", "ok sauf le premier", "ne dis pas oui"],
+)
+def test_ce_qui_contient_autre_chose_ou_une_negation_n_est_pas_un_oui(texte: str) -> None:
+    assert not est_un_oui(texte)
 
 
 def test_la_reprise_ne_se_reconnait_qu_en_brainstorm() -> None:

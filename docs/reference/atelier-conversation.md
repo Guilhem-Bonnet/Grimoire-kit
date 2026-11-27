@@ -65,7 +65,7 @@ petites et typées :
 | Geste | Entrée | Sortie |
 |---|---|---|
 | `formuler_question` | `EntreeQuestion` | un texte |
-| `classer_reponse` | `EntreeClassement` | une classe de la liste fermée `CLASSES` |
+| `classer_reponse` | `EntreeClassement` | une classe de la liste fermée `CLASSES` (jamais « oui », voir plus bas) |
 | `extraire_elements` | `EntreeExtraction` | des `ElementExtrait` (texte, rubrique) |
 | `reformuler` | `EntreeReformulation` | un texte |
 | `proposer_pistes` | `EntreePistes` | une liste de pistes |
@@ -86,17 +86,58 @@ reformulation par reprise fidèle (« Si je comprends bien : … ») ; aucune pi
 et le programme les range. Limites, dites à l'écran : pas de reformulation avec ses mots, pas de réponse à une question
 autre que « pourquoi », pas de détection fine d'une contradiction (seulement les tournures explicites).
 
+## Ce que le moteur ne décide jamais
+
+Rien n'entre dans le document, et aucun angle n'est marqué couvert ou écarté, sans un geste **explicite de l'humain,
+reconnu par le programme**, portant sur un texte qu'il a vu tel qu'il sera écrit. Un moteur (demain un modèle de langage)
+est traité comme un auteur hostile :
+
+- **« Oui » n'est pas une classe de moteur.** Le programme le reconnaît seul, par une règle lexicale stricte
+  (`est_un_oui` : seulement des mots d'accord, cinq mots au plus, aucune négation, aucun ajout), et seulement quand une
+  confirmation est en attente. « Oui mais… », « non », « oui, et aussi X » ne sont pas un oui. Une classe hors de la liste
+  fermée rendue par un moteur est refusée.
+- **Ce que l'humain confirme, c'est la liste exacte** des textes qui seront écrits, avec leur rubrique en mots simples,
+  construite par le programme à partir des éléments réels (`a_confirmer`). La reformulation du moteur l'accompagne, jamais
+  ne la remplace.
+- **« Je ne sais pas » et « sans objet » ne font que proposer.** Le classement sans modèle ne les retient que si la réponse
+  n'est QUE la formule (« ça dépend, en gros un export » est une réponse, dont le texte est conservé). Même retenus, ils
+  produisent une proposition (« Tu veux qu'on note que tu ne sais pas encore ? ») appliquée par le seul « oui » de l'humain,
+  avec les mêmes fichiers qu'un `answer(unknown=True)` ou `skip=True` fait à la main. Si l'humain dit « je ne sais pas »
+  après avoir dit autre chose, ce qu'il avait dit devient la note de la question ouverte.
+- **Un élément se confirme seul** (jamais par le « oui » du groupe) quand il vise une autre rubrique que celle de la
+  question, ou quand son texte n'est pas dans ce que l'humain a dit (`origine` = `moteur`, mesurée par le programme).
+  Cinq éléments au plus par tour, longueur bornée.
+
 ## Le rangement dans le document
 
 Un élément n'entre dans un fichier de phase qu'une fois **confirmé** (ou corrigé par l'humain), et il y entre par
 `cadrage_interview.answer` : même ligne (`- *question* réponse`), même trace dans `entretien.json`, même refus
 d'écrire dans un document au statut accepté. Retirer ou corriger un élément déjà rangé passe par `retract`, qui retire
 la dernière réponse d'un angle : le programme retire ce qui a été rangé après lui, puis lui, et réécrit ce qui reste.
-Avant de toucher à quoi que ce soit, il vérifie que les dernières réponses de l'angle sont bien celles de la
-conversation ; sinon il ne touche à rien et le dit. Le gate de `cadrage check` n'est jamais modifié.
+Le gate de `cadrage check` n'est jamais modifié.
 
-Un « je ne sais pas » ou un « sans objet » dit par l'humain vaut confirmation : il est rangé aussitôt, comme dans
-l'entretien guidé.
+- **La trace dit qui a écrit.** La trace de l'entretien porte, pour chaque ligne écrite par une conversation, une clé
+  `origin` (`conv:<création>:<élément>`), validée à la lecture ; l'entretien guidé n'en met pas. Le programme ne retire
+  que les lignes dont la trace porte l'origine de l'élément. Un `conversation.json` forgé qui annonce `ecrit: true` sur le
+  texte d'une réponse de l'humain n'y change rien : l'élément repasse « non écrit » et l'alerte est rendue
+  (`alertes`).
+- **Écrire dans le bon ordre.** Avant la première écriture, tout ce qui peut échouer est vérifié (document accepté,
+  place dans le fichier). L'intention est enregistrée dans la conversation (`intention: ecrire`), le document est écrit,
+  l'intention est levée. Après une panne, l'opération suivante termine (la trace porte l'origine) ou annule (elle ne
+  la porte pas) et le dit.
+- **Limite de tours.** Près de 500 tours, la conversation se termine d'elle-même en le disant, sans erreur ; corriger ou
+  écarter ce qui est compris reste possible.
+- **Identifiants.** Le compteur rattrape le plus grand numéro existant ; un fichier à identifiants en double reste
+  lisible (champ `reparer`) mais refuse toute écriture jusqu'à réparation à la main.
+
+## Le moteur travaille hors du verrou
+
+Chaque opération est jouée deux fois. D'abord à blanc, **hors du verrou** du fichier, sur une copie jetable des fichiers du
+chantier, avec le vrai moteur : ses sorties validées sont mémorisées. Puis sous le verrou, avec `rev` revalidé (409 s'il a
+changé), l'opération est rejouée avec ces sorties, sans rappeler le moteur. Un moteur qui bloque ne retient donc jamais le
+fichier. Les appels abandonnés au délai sont comptés : au-delà de quatre fils encore en vie, plus aucun appel n'est lancé
+(repli immédiat). La lecture d'état n'attend le moteur que le temps de lui demander ses limites (une fraction de seconde).
+Une fabrique de moteur qui lève, tarde ou ne rend rien donne le moteur sans modèle avec une note, jamais une erreur 500.
 
 ## Enregistrement, pause, reprise, hygiène
 
@@ -139,7 +180,13 @@ tranché ou une conversation en pause, terminée ou classée donne 409 ou 400 sa
   fabrique reçoit la racine et le slug et rend un objet qui respecte `Moteur`. Le gardien reste autour. Les choix
   d'autorisation et de repli vivent dans la fabrique, pas dans le programme.
 - **Lot C (scène d'appel)** : lit `GET …/conversation` (vue Conversation) et `…/compris` (vue Document) ; `rev` est à
-  renvoyer à chaque écriture.
+  renvoyer à chaque écriture. Pour que la confirmation porte sur le texte exact, l'interface affiche **`a_confirmer`**
+  (dans l'état et dans la réaction d'un tour), pas seulement le message de la mascotte : pour chaque entrée, `texte` (ce
+  qui sera écrit, mot pour mot), `rubrique.nom` (où), `action` (noter, noter comme question ouverte, écarter comme sans
+  objet), `note` (ce que l'humain avait dit avant un « je ne sais pas »), `origine` (`humain` ou `moteur` : à signaler,
+  « reformulé par le moteur ») et `individuel` (pas de « oui » de groupe : un bouton Confirmer par entrée, qui appelle
+  `elements/<id>`). Elle affiche aussi `alertes` (ce que le programme a refusé de croire ou repris après une panne) et
+  `reparer` (fichier à réparer), et grise les gestes quand `mode` n'est plus `cadrage`.
 - **Lot D (voix)** : la réaction d'un tour porte `accuse` (texte du programme, immédiat), `message` et `lourd` : une
   interface peut dire l'accusé tout de suite et attendre le message.
 - **Lot E (rédaction finale)** : lit `ranges()` et les sources (numéro de tour) pour relier chaque passage à l'échange ;

@@ -21,7 +21,7 @@ from grimoire.core.cadrage_conversation import MAX_FILE_BYTES, Conversation, Con
 from grimoire.core.fsio import atomic_write, locked
 from grimoire.core.regular_file import open_regular
 
-__all__ = ["FILENAME", "locked_store", "read", "save", "store_path"]
+__all__ = ["FILENAME", "check_room", "locked_store", "read", "save", "store_path"]
 
 FILENAME = "conversation.json"
 
@@ -59,6 +59,13 @@ def save(chantier_dir: Path, conv: Conversation) -> None:
     if len(payload.encode("utf-8")) > MAX_FILE_BYTES:
         raise ConversationError("conversation trop volumineuse : classe-la et reprends dans une nouvelle")
     atomic_write(store_path(chantier_dir), payload)
+
+
+def check_room(conv: Conversation, reserve: int = 16_384) -> None:
+    """Refuse AVANT toute écriture du document si l'état ne tiendrait plus dans le fichier (avec de la place pour la suite)."""
+    size = len(json.dumps(conv.to_dict(), ensure_ascii=False, indent=2).encode("utf-8"))
+    if size + reserve > MAX_FILE_BYTES:
+        raise ConversationError("conversation trop volumineuse pour ranger quoi que ce soit de plus : classe-la et reprends")
 
 
 def locked_store(chantier_dir: Path) -> AbstractContextManager[None]:

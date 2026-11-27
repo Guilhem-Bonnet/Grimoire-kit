@@ -22,11 +22,54 @@ from grimoire.core.cadrage import cadrage_dir
 from grimoire.core.cadrage_conversation import Conversation, ConversationError, Element
 from grimoire.core.fsio import locked
 
-__all__ = ["corriger", "ecrire", "retirer"]
+__all__ = ["FORMULE_INCONNU", "corriger", "ecrire", "origin", "reconcilier", "retirer", "traces", "verifier"]
+
+
+#: Le texte d'un « je ne sais pas » sans rien d'autre : l'entretien guidé n'écrit alors aucune note.
+FORMULE_INCONNU = "Je ne sais pas"
 
 
 def _name(slug: str) -> str | None:
     return None if slug == "principal" else slug
+
+
+def origin(conv: Conversation, el: Element) -> str:
+    """Ce que la trace de l'entretien porte pour une ligne écrite par cette conversation : elle seule peut la retirer."""
+    return f"conv:{conv.cree}:{el.id}"
+
+
+def traces(root: Path, slug: str) -> dict[str, list[str | None]]:
+    """Les origines portées par la trace de l'entretien, par angle, dans l'ordre des réponses (``None`` : ligne sans origine).
+
+    La clé ``"skip"`` de chaque angle écarté est rendue sous ``"<angle>#skip"``. Lecture seule.
+    """
+    try:
+        state = interview._load(root, _name(slug))
+    except ValueError as exc:
+        raise ConversationError(str(exc)) from exc
+    out: dict[str, list[str | None]] = {}
+    for angle, rec in ((state or {}).get("angles") or {}).items():
+        out[angle] = [None if line is None else line.get("origin") for line in rec.get("lines", [])]
+        if isinstance(rec.get("skip"), dict):
+            out[f"{angle}#skip"] = [rec["skip"].get("origin")]
+    return out
+
+
+def reconcilier(root: Path, slug: str, conv: Conversation) -> list[str]:
+    """Un élément « écrit » dont la trace de l'entretien ne porte pas son origine n'a pas été écrit par cette conversation
+    (fichier forgé, ligne de l'entretien guidé, trace perdue) : il repasse « non écrit », et on le dit. Rien n'est retiré."""
+    seen = {o for rows in traces(root, slug).values() for o in rows if o}
+    alertes = []
+    for el in conv.elements:
+        if el.ecrit and origin(conv, el) not in seen:
+            el.ecrit = False
+            alertes.append(f"« {el.texte[:60]} » n'est pas dans le document de cette conversation : je ne le retirerai pas")
+    return alertes
+
+
+def verifier(root: Path, slug: str, items: list[Element]) -> None:
+    """Refuse AVANT toute écriture si un fichier visé est au statut accepté."""
+    _refuse_accepted(root, _name(slug), items)
 
 
 def _answers(root: Path, name: str | None, angle: str) -> tuple[list[str], str, str]:
@@ -61,13 +104,16 @@ def _retract(root: Path, name: str | None, angle: str) -> None:
 def _write_one(root: Path, name: str | None, conv: Conversation, el: Element) -> None:
     """Range UN élément par ``answer`` ; ``ecrit`` dit s'il est vraiment entré (un doublon exact n'écrit rien)."""
     before, _state, _ = _answers(root, name, el.angle)
+    origine = origin(conv, el)
     try:
         if el.genre == "element":
-            interview.answer(root, name, el.angle, el.texte, question=el.question or None, rubrique=(el.phase, el.section))
-        elif el.genre == "inconnu":
-            interview.answer(root, name, el.angle, "", unknown=True, question=el.question or None)
+            interview.answer(root, name, el.angle, el.texte, question=el.question or None, rubrique=(el.phase, el.section),
+                             origine=origine)
+        elif el.genre == "inconnu":  # ce que l'humain a dit en plus est gardé comme note de la question ouverte
+            note = "" if el.texte == FORMULE_INCONNU else el.texte
+            interview.answer(root, name, el.angle, note, unknown=True, question=el.question or None, origine=origine)
         else:
-            interview.answer(root, name, el.angle, "sans objet", skip=True)
+            interview.answer(root, name, el.angle, "sans objet", skip=True, origine=origine)
     except ValueError as exc:  # document accepté, chantier inconnu, rubrique que l'angle ne porte pas…
         raise ConversationError(str(exc)) from exc
     after, state, reason = _answers(root, name, el.angle)
@@ -104,10 +150,13 @@ def ecrire(root: Path, slug: str, conv: Conversation, items: list[Element], *, r
 
 def _unwrite(root: Path, name: str | None, conv: Conversation, el: Element) -> list[Element]:
     """Retire du document ``el`` et ce qui a été rangé après lui sur son angle ; rend ces éléments, ``el`` en tête."""
+    seen = traces(root, name or "principal")
     if el.genre == "sansobjet":
         _, state, reason = _answers(root, name, el.angle)
         if state != "ecarte" or not reason.strip():
             raise ConversationError("l'angle n'est plus écarté dans l'entretien : je ne touche à rien")
+        if seen.get(f"{el.angle}#skip") != [origin(conv, el)]:
+            raise ConversationError("cet écart n'a pas été fait par cette conversation : je ne touche à rien")
         _refuse_accepted(root, name, [el])
         _retract(root, name, el.angle)
         el.ecrit = False
@@ -120,6 +169,8 @@ def _unwrite(root: Path, name: str | None, conv: Conversation, el: Element) -> l
     wanted = [_expected(e) for e in tail]
     if state == "ecarte" or answers[-len(wanted):] != wanted:
         raise ConversationError("le document ne correspond plus à la conversation (réponses modifiées ailleurs) : je ne touche à rien")
+    if seen.get(el.angle, [])[-len(wanted):] != [origin(conv, e) for e in tail]:
+        raise ConversationError("ces lignes n'ont pas été écrites par cette conversation : je ne touche à rien")
     _refuse_accepted(root, name, tail)
     for _ in tail:
         _retract(root, name, el.angle)

@@ -104,7 +104,9 @@ def test_angle_pour_prefere_l_angle_de_la_question_puis_le_premier_qui_porte_la_
         lambda d: d["elements"][0].update(id="e1x"),
         lambda d: d["elements"][0].update(remplace="e99"),
         lambda d: d["elements"][0].update(extra=1),
-        lambda d: d["elements"].append(copy.deepcopy(d["elements"][0])),
+        lambda d: d["elements"][0].update(origine="pirate"),
+        lambda d: d["elements"][0].update(individuel="oui"),
+        lambda d: d["elements"][0].update(intention="effacer"),
         lambda d: d["plus_tard"][0].update(tour=50),
         lambda d: d["plus_tard"][0].update(texte="z" * 500),
         lambda d: d["plus_tard"].extend([{"texte": "a", "tour": 1}] * 60),
@@ -123,6 +125,34 @@ def test_un_fichier_hors_cadre_est_refuse_sans_planter(mutate: Any) -> None:
     mutate(data)
     with pytest.raises(ConversationError):
         Conversation.from_dict(data, chantier="un")
+
+
+def test_le_compteur_d_identifiants_rattrape_le_plus_grand_numero_existant() -> None:
+    data = _raw()
+    data["seq"] = 0
+    data["elements"][0]["id"] = "e7"
+    conv = Conversation.from_dict(data, chantier="un")
+    assert conv.seq == 7
+    assert conv.new_element("element", "x", "brief", "L'utilisateur", "utilisateurs", 1).id == "e8"
+    fresh = Conversation("un", T0.isoformat(), T0.isoformat())
+    fresh.elements = conv.elements
+    assert fresh.new_element("element", "y", "brief", "L'utilisateur", "utilisateurs", 1).id == "e9"  # même sans compteur
+
+
+def test_des_identifiants_en_double_restent_lisibles_mais_a_reparer() -> None:
+    data = _raw()
+    data["elements"].append(copy.deepcopy(data["elements"][0]))
+    conv = Conversation.from_dict(data, chantier="un")
+    assert "doublons" in conv.reparer and len(conv.elements) == 2
+    assert "reparer" not in conv.to_dict()  # jamais enregistré : la réparation est à la main
+    assert Conversation.from_dict(_raw(), chantier="un").reparer == ""
+
+
+def test_la_place_est_verifiee_avant_d_ecrire(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store.check_room(_conv())
+    monkeypatch.setattr(store, "MAX_FILE_BYTES", 1000)
+    with pytest.raises(ConversationError, match="trop volumineuse"):
+        store.check_room(_conv())
 
 
 def test_un_fichier_qui_n_est_pas_un_objet_est_refuse() -> None:

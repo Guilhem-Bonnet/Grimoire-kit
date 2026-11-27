@@ -32,6 +32,7 @@ from grimoire.core.cadrage_conversation import (
 __all__ = [
     "CLASSES",
     "DELAI_MOTEUR_S",
+    "FILS_MAX",
     "MAX_ELEMENTS_PAR_TOUR",
     "MAX_PISTES",
     "RUBRIQUE_KEYS",
@@ -44,12 +45,14 @@ __all__ = [
     "Garde",
     "Moteur",
     "MoteurSansModele",
+    "est_un_oui",
 ]
 
-#: Ce qu'un moteur peut dire d'un tour de l'humain : liste FERMÉE.
+#: Ce qu'un moteur peut dire d'un tour de l'humain : liste FERMÉE. « Oui » n'y est PAS : une confirmation est reconnue par
+#: le programme seul (:func:`est_un_oui`), jamais décidée par un moteur. ``ne_sait_pas`` et ``sans_objet`` ne font que
+#: PROPOSER une note : rien n'est écrit, aucun angle n'est levé, sans le geste de l'humain.
 CLASSES: tuple[str, ...] = (
-    "reponse", "confirme", "hors_sujet", "ne_sait_pas", "sans_objet", "contredit", "brainstorm", "reprise", "pause",
-    "question",
+    "reponse", "hors_sujet", "ne_sait_pas", "sans_objet", "contredit", "brainstorm", "reprise", "pause", "question",
 )
 #: Les rubriques qu'une extraction peut viser : toutes sauf « Questions ouvertes », que seul « je ne sais pas » remplit.
 RUBRIQUE_KEYS: tuple[str, ...] = tuple(rubrique_key(p, s) for p, s in RUBRIQUES if (p, s) != ("brainstorm", "Questions ouvertes"))
@@ -187,10 +190,22 @@ _LIMITES = (
     "Je ne réponds pas à tes questions, sauf « pourquoi tu me demandes ça ? » ; je les garde pour plus tard.",
     "Je n'invente pas de pistes : en brainstorm, c'est toi qui listes et moi qui range.",
 )
-_AFFIRMATIONS = (
-    "oui", "ouais", "yes", "ok", "okay", "exact", "exactement", "parfait", "d accord", "dac", "c est ca", "c est bon",
-    "tout a fait", "bien sur", "carrement", "valide", "impeccable", "ca marche", "voila", "oui c est ca",
-)
+#: Le vocabulaire fermé d'un « oui » : une réponse qui n'est faite QUE de ces mots, avec au moins un mot d'accord.
+_OUI_ANCRES = frozenset({"oui", "ouais", "yes", "ok", "okay", "exact", "exactement", "parfait", "accord", "dac", "voila",
+                         "valide", "impeccable", "confirme"})
+_OUI_MOTS = _OUI_ANCRES | frozenset({"d", "c", "est", "ca", "bon", "tout", "a", "fait", "bien", "sur", "carrement", "marche",
+                                     "tres", "merci", "je", "le", "note"})
+_OUI_PHRASES = ("c est ca", "c est bon", "tout a fait", "bien sur", "ca marche")
+_FILLERS = frozenset({"euh", "bah", "ben", "hum", "hmm", "alors", "oh", "ah", "desole", "franchement", "oups"})
+#: Les formules qui, SEULES (après normalisation), valent « je ne sais pas » / « sans objet ».
+_FORMULES_NE_SAIT_PAS = frozenset({
+    "je ne sais pas", "je sais pas", "sais pas", "aucune idee", "pas d idee", "je ne sais plus", "ca depend",
+    "je n en sais rien", "je ne sais pas encore", "pas encore d idee", "aucune idee pour l instant",
+})
+_FORMULES_SANS_OBJET = frozenset({
+    "sans objet", "pas concerne", "ne s applique pas", "non applicable", "pas pertinent", "rien a voir",
+    "ca ne me concerne pas", "ca ne s applique pas",
+})
 _NEGATIONS = ("non", "pas vraiment", "pas exactement", "plutot", "faux", "nope", "pas du tout")
 _LEADS = ("en fait", "finalement", "je me corrige", "j ai mal dit", "je me suis trompe", "correction", "non", "plutot")
 
@@ -200,6 +215,25 @@ def _norm(texte: str) -> str:
     plain = unicodedata.normalize("NFKD", texte.lower().replace("’", "'"))
     plain = "".join(c for c in plain if not unicodedata.combining(c))
     return " ".join("".join(c if c.isalnum() or c == "?" else " " for c in plain).split())
+
+
+def est_un_oui(texte: str) -> bool:
+    """Le texte est-il UN OUI ? Règle stricte, courte, du programme : seulement des mots d'accord, aucune négation, aucun ajout.
+
+    « oui », « c'est ça », « exactement », « oui tout à fait » : oui. « oui mais… », « non », « oui, et aussi X »,
+    « pas vraiment » : non. Un moteur n'en décide jamais.
+    """
+    norm = _norm(texte).replace("?", " ")
+    norm = " ".join(norm.split())
+    words = norm.split()
+    anchored = any(w in _OUI_ANCRES for w in words) or _has(norm, _OUI_PHRASES)
+    return 0 < len(words) <= 5 and all(w in _OUI_MOTS for w in words) and anchored
+
+
+def _formule(norm: str, formules: frozenset[str]) -> bool:
+    """La réponse n'est QUE cette formule (aux interjections près) : toute autre parole en fait une réponse."""
+    core = " ".join(w for w in (t.strip("?") for t in norm.split()) if w and w not in _FILLERS)
+    return core in formules
 
 
 def _has(norm: str, phrases: tuple[str, ...]) -> bool:
@@ -260,9 +294,9 @@ class MoteurSansModele:
             norm, ("c est tout", "j ai fini", "on continue", "on reprend", "retour", "termine", "on arrete", "stop", "suite")
         ):
             return "reprise"
-        if len(words) <= 10 and _has(norm, ("je ne sais pas", "je sais pas", "sais pas", "aucune idee", "pas d idee", "je ne sais plus", "ca depend", "je n en sais rien")):
+        if _formule(norm, _FORMULES_NE_SAIT_PAS):  # SEULEMENT la formule : « ça dépend, en gros un export » est une réponse
             return "ne_sait_pas"
-        if len(words) <= 10 and _has(norm, ("sans objet", "pas concerne", "ne s applique pas", "non applicable", "pas pertinent", "rien a voir", "ca ne me concerne pas")):
+        if _formule(norm, _FORMULES_SANS_OBJET):
             return "sans_objet"
         if "?" in norm and len(words) <= 25 and _starts(
             norm, ("pourquoi", "c est quoi", "qu est ce", "ca veut dire", "ca sert a quoi", "a quoi ca sert", "tu peux", "peux tu", "comment ca")
@@ -271,8 +305,8 @@ class MoteurSansModele:
         if "plus tard" in norm or _has(norm, ("hors sujet", "au fait")):
             return "hors_sujet"
         if entree.contexte in ("confirmer", "document"):
-            if _starts(norm, _AFFIRMATIONS):
-                return "contredit" if "mais" in words else ("confirme" if len(words) <= 6 else "reponse")
+            if _starts(norm, tuple(_OUI_ANCRES)) and "mais" in words:
+                return "contredit"
             if _starts(norm, _NEGATIONS):
                 return "contredit"
         if _starts(norm, _LEADS[:6]):  # une tournure de correction explicite ; un simple « non » peut être une vraie réponse
@@ -323,6 +357,11 @@ class _RefusError(ValueError):
     """Une sortie de moteur hors cadre."""
 
 
+#: Les fils d'appels de moteur abandonnés au délai et encore en vie : au-delà de ``FILS_MAX``, plus aucun appel n'est lancé.
+_VIVANTS: list[threading.Thread] = []
+FILS_MAX = 4
+
+
 class Garde:
     """Enveloppe un moteur : sorties validées, appels bornés, repli sans modèle, notes pour l'interface.
 
@@ -330,11 +369,39 @@ class Garde:
     refusée. ``delai_s`` borne chaque geste ; un moteur qui bloque est laissé à son fil (abandonné) et remplacé.
     """
 
-    def __init__(self, moteur: Any, *, delai_s: float = DELAI_MOTEUR_S, repli: MoteurSansModele | None = None) -> None:
+    def __init__(self, moteur: Any, *, delai_s: float = DELAI_MOTEUR_S, repli: MoteurSansModele | None = None,
+                 rejeu: dict[tuple[str, str], Any] | None = None) -> None:
         self.moteur = moteur
         self.delai_s = delai_s
         self.repli = repli or MoteurSansModele()
         self.notes: list[str] = []
+        #: Ce que le moteur a rendu (déjà validé), par geste et entrée. En ``rejeu`` le moteur n'est PAS rappelé : on
+        #: rend ce qui a été calculé hors du verrou (voir :meth:`enregistreur` et :meth:`rejouer`).
+        self.memo: dict[tuple[str, str], Any] = {} if rejeu is None else rejeu
+        self.rejeu = rejeu is not None
+
+    @classmethod
+    def construire(cls, fabrique: Callable[[], Any], *, delai_s: float = 2.0) -> Garde:
+        """Un gardien autour de ce que rend ``fabrique`` ; une fabrique qui lève ou tarde donne le moteur sans modèle, avec une note."""
+        essai = cls(MoteurSansModele(), delai_s=delai_s)
+        made = essai._appel("fabrique", "", lambda _m: fabrique(), lambda out: out, lambda: None)
+        garde = cls(MoteurSansModele() if made is None else made)
+        garde.notes = list(essai.notes)
+        if made is None and not garde.notes:
+            garde.notes.append("fabrique : aucun moteur rendu, je reprends sans modèle")
+        return garde
+
+    def enregistreur(self) -> Garde:
+        """Une copie qui APPELLE le moteur et se souvient : le calcul à blanc, hors du verrou du fichier."""
+        copie = Garde(self.moteur, delai_s=self.delai_s, repli=self.repli)
+        copie.notes = list(self.notes)
+        return copie
+
+    def rejouer(self, enregistre: Garde) -> Garde:
+        """Un gardien qui rend ce que ``enregistre`` a calculé, sans rappeler le moteur (sous le verrou) ; hors mémo : repli."""
+        garde = Garde(self.moteur, delai_s=self.delai_s, repli=self.repli, rejeu=enregistre.memo)
+        garde.notes = list(enregistre.notes)
+        return garde
 
     @property
     def id(self) -> str:
@@ -345,7 +412,22 @@ class Garde:
     def degrade(self) -> bool:
         return bool(self.notes)
 
-    def _appel(self, nom: str, run: Callable[[Any], Any], check: Callable[[Any], T], repli: Callable[[], T]) -> T:
+    def _appel(self, nom: str, cle: str, run: Callable[[Any], Any], check: Callable[[Any], T], repli: Callable[[], T],
+               delai: float | None = None) -> T:
+        key = (nom, cle)
+        if key in self.memo:
+            return self.memo[key]  # type: ignore[no-any-return]
+        if self.rejeu:  # un geste que le calcul à blanc n'a pas fait : jamais d'appel sous le verrou
+            return repli()
+        result = self._appeler(nom, run, check, repli, self.delai_s if delai is None else min(delai, self.delai_s))
+        self.memo[key] = result
+        return result
+
+    def _appeler(self, nom: str, run: Callable[[Any], Any], check: Callable[[Any], T], repli: Callable[[], T], delai: float) -> T:
+        _VIVANTS[:] = [t for t in _VIVANTS if t.is_alive()]
+        if len(_VIVANTS) >= FILS_MAX:  # des appels abandonnés encombrent déjà : pas un de plus, repli immédiat
+            self.notes.append(f"{nom} : trop d'appels du moteur sont restés sans réponse, je reprends sans modèle")
+            return repli()
         box: dict[str, Any] = {}
 
         def work() -> None:
@@ -356,8 +438,9 @@ class Garde:
 
         thread = threading.Thread(target=work, daemon=True, name=f"moteur-{nom}")
         thread.start()
-        thread.join(self.delai_s)
+        thread.join(delai)
         if thread.is_alive():
+            _VIVANTS.append(thread)
             self.notes.append(f"{nom} : le moteur a mis trop de temps, je reprends sans modèle")
             return repli()
         if "err" in box:
@@ -373,7 +456,7 @@ class Garde:
 
     def formuler_question(self, entree: EntreeQuestion) -> str:
         return self._appel(
-            "formuler_question", lambda m: m.formuler_question(entree),
+            "formuler_question", repr(entree), lambda m: m.formuler_question(entree),
             lambda out: clean_text(out, MAX_QUESTION_CHARS, what="question"), lambda: self.repli.formuler_question(entree))
 
     def classer_reponse(self, entree: EntreeClassement) -> str:
@@ -382,7 +465,7 @@ class Garde:
                 raise _RefusError(f"classe inconnue {str(out)[:30]!r}")
             return str(out)
 
-        return self._appel("classer_reponse", lambda m: m.classer_reponse(entree), check, lambda: self.repli.classer_reponse(entree))
+        return self._appel("classer_reponse", repr(entree), lambda m: m.classer_reponse(entree), check, lambda: self.repli.classer_reponse(entree))
 
     def extraire_elements(self, entree: EntreeExtraction) -> list[ElementExtrait]:
         def check(out: Any) -> list[ElementExtrait]:
@@ -401,11 +484,11 @@ class Garde:
                 raise _RefusError("aucun élément valide")
             return kept
 
-        return self._appel("extraire_elements", lambda m: m.extraire_elements(entree), check, lambda: self.repli.extraire_elements(entree))
+        return self._appel("extraire_elements", repr(entree), lambda m: m.extraire_elements(entree), check, lambda: self.repli.extraire_elements(entree))
 
     def reformuler(self, entree: EntreeReformulation) -> str:
         return self._appel(
-            "reformuler", lambda m: m.reformuler(entree),
+            "reformuler", repr(entree), lambda m: m.reformuler(entree),
             lambda out: clean_text(out, MAX_REFORMULATION, what="reformulation"), lambda: self.repli.reformuler(entree))
 
     def proposer_pistes(self, entree: EntreePistes) -> list[str]:
@@ -414,11 +497,11 @@ class Garde:
                 raise _RefusError("une liste est attendue")
             return [clean_text(p, MAX_PISTE_CHARS, what="piste") for p in list(out)[:MAX_PISTES]]
 
-        return self._appel("proposer_pistes", lambda m: m.proposer_pistes(entree), check, lambda: self.repli.proposer_pistes(entree))
+        return self._appel("proposer_pistes", repr(entree), lambda m: m.proposer_pistes(entree), check, lambda: self.repli.proposer_pistes(entree))
 
     def repondre_question(self, texte: str, pourquoi: str) -> str:
         return self._appel(
-            "repondre_question", lambda m: m.repondre_question(texte, pourquoi),
+            "repondre_question", repr((texte, pourquoi)), lambda m: m.repondre_question(texte, pourquoi),
             lambda out: clean_text(out, MAX_REFORMULATION, what="réponse"), lambda: self.repli.repondre_question(texte, pourquoi))
 
     def est_tour_lourd(self, texte: str, etape: str) -> bool:
@@ -427,7 +510,7 @@ class Garde:
                 raise _RefusError("un booléen est attendu")
             return out
 
-        return self._appel("est_tour_lourd", lambda m: m.est_tour_lourd(texte, etape), check, lambda: False)
+        return self._appel("est_tour_lourd", repr((texte, etape)), lambda m: m.est_tour_lourd(texte, etape), check, lambda: False)
 
     def limites(self) -> tuple[str, ...]:
         def check(out: Any) -> tuple[str, ...]:
@@ -435,4 +518,4 @@ class Garde:
                 raise _RefusError("une liste est attendue")
             return tuple(clean_text(x, 300, what="limite") for x in list(out)[:8])
 
-        return self._appel("limites", lambda m: m.limites(), check, lambda: self.repli.limites())
+        return self._appel("limites", "", lambda m: m.limites(), check, lambda: self.repli.limites(), 0.3)

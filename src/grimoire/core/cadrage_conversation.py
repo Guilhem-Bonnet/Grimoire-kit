@@ -27,6 +27,8 @@ __all__ = [
     "MAX_TURNS",
     "MAX_TURN_CHARS",
     "MODES",
+    "ORIGINES",
+    "PLEINE_A",
     "RUBRIQUES",
     "SCHEMA",
     "STATUTS",
@@ -39,6 +41,7 @@ __all__ = [
     "Tour",
     "angle_pour",
     "clean_text",
+    "mots_de_l_humain",
     "parse_date",
     "rubrique_key",
     "rubrique_ok",
@@ -61,6 +64,9 @@ GESTES_TOUR: tuple[str, ...] = (
     "sans-objet", "contradiction", "brainstorm", "pause", "reprise", "fin", "explication", "note",
 )
 MAX_TURNS = 500
+#: Au-delà, la conversation se termine d'elle-même en le disant (il reste de la place pour ses dernières paroles).
+PLEINE_A = MAX_TURNS - 3
+ORIGINES: tuple[str, ...] = ("humain", "moteur")
 MAX_TURN_CHARS = 4000
 MAX_BOT_CHARS = 1500
 MAX_ELEMENTS = 200
@@ -147,6 +153,17 @@ def clean_text(value: Any, limit: int, *, what: str = "texte") -> str:
     return flat
 
 
+def _plat(texte: str) -> str:
+    plain = unicodedata.normalize("NFKD", texte.lower())
+    return " ".join("".join(c if c.isalnum() else " " for c in plain if not unicodedata.combining(c)).split())
+
+
+def mots_de_l_humain(element: str, tour: str) -> bool:
+    """Le texte de l'élément est-il inclus dans ce que l'humain a dit (à la casse, aux accents et à la ponctuation près) ?"""
+    wanted = _plat(element.rstrip("…"))
+    return bool(wanted) and wanted in _plat(tour)
+
+
 @dataclass(slots=True)
 class Tour:
     """Un tour de parole : qui, quoi, quand, quel geste."""
@@ -194,6 +211,12 @@ class Element:
     rang: int = 0
     remplace: str = ""
     avant: list[str] = field(default_factory=list)
+    #: ``humain`` (ses mots sont dans le tour source) ou ``moteur`` (reformulé ou inventé : confirmation individuelle).
+    origine: str = "humain"
+    #: Confirmé seul, jamais par le « oui » d'un groupe : une autre rubrique que la question, ou un texte du moteur.
+    individuel: bool = False
+    #: ``ecrire`` : l'intention d'écrire est enregistrée AVANT l'écriture du document ; une reprise après panne la termine ou l'annule.
+    intention: str = ""
 
 
 @dataclass(slots=True)
@@ -225,6 +248,8 @@ class Conversation:
     plus_tard: list[Note] = field(default_factory=list)
     rang: int = 0
     seq: int = 0
+    #: Non enregistré : un fichier lisible mais à réparer à la main (identifiants en double) ne se modifie pas.
+    reparer: str = ""
 
     # ── lecture ────────────────────────────────────────────────────────────
 
@@ -254,7 +279,8 @@ class Conversation:
             raise ConversationError("trop d'éléments compris dans cette conversation : classe-la et reprends")
         if not rubrique_ok(phase, section):
             raise ConversationError(f"rubrique hors liste : {phase}/{section}")
-        self.seq += 1
+        # Jamais d'identifiant déjà pris : le compteur rattrape le plus grand numéro existant (fichier édité à la main).
+        self.seq = max(self.seq, *(int(e.id[1:]) for e in self.elements), 0) + 1
         item = Element(f"e{self.seq}", genre, clean_text(texte, MAX_ELEMENT_CHARS, what="élément"), phase, section,
                        angle, source, **extra)
         self.elements.append(item)
@@ -376,6 +402,9 @@ def _element(row: Any, turns: int) -> Element:
     avant = row.get("avant", [])
     if not isinstance(avant, list) or len(avant) > 10:
         raise ConversationError("conversation invalide : « avant » mal formé")
+    origine, individuel, intention = row.get("origine", "humain"), row.get("individuel", False), row.get("intention", "")
+    if origine not in ORIGINES or not isinstance(individuel, bool) or intention not in ("", "ecrire"):
+        raise ConversationError("conversation invalide : origine, confirmation individuelle ou intention mal formée")
     ident = _text(row, "id", 20)
     if not ident.startswith("e") or not ident[1:].isdigit():
         raise ConversationError("conversation invalide : identifiant d'élément mal formé")
@@ -384,6 +413,7 @@ def _element(row: Any, turns: int) -> Element:
         str(row["angle"]), source, str(row["statut"]), _text(row, "question", MAX_QUESTION_CHARS, empty=True),
         bool(row.get("ecrit", False)), _int({"r": row.get("rang", 0)}, "r"), _text(row, "remplace", 20, empty=True),
         [clean_text(a, MAX_ELEMENT_CHARS, what="avant") for a in avant],
+        origine, individuel, intention,
     )
 
 
@@ -415,12 +445,13 @@ def _parse(raw: Any, chantier: str | None) -> Conversation:
     if [t.n for t in tours] != list(range(1, len(tours) + 1)):
         raise ConversationError("conversation invalide : tours mal numérotés")
     elements = [_element(r, len(tours)) for r in _list(data, "elements", MAX_ELEMENTS)]
-    if len({e.id for e in elements}) != len(elements):
-        raise ConversationError("conversation invalide : identifiants d'éléments en double")
+    reparer = ""
+    if len({e.id for e in elements}) != len(elements):  # lisible, jamais modifiable : la réparation est à la main
+        reparer = "identifiants d'éléments en double dans conversation.json : renomme les doublons (e1, e2…) ou retire le fichier"
     for e in elements:
         if e.remplace and e.remplace not in {x.id for x in elements}:
             raise ConversationError("conversation invalide : élément remplacé introuvable")
-    return Conversation(
+    conv = Conversation(
         chantier=name, cree=_date(data, "cree"), active_le=_date(data, "active_le"), schema=SCHEMA,
         rev=_int(data, "rev"), mode=str(data["mode"]), mode_avant_pause=str(data["mode_avant_pause"]),
         classee_le=_date(data, "classee_le", empty=True), document=str(data["document"]),
@@ -428,3 +459,6 @@ def _parse(raw: Any, chantier: str | None) -> Conversation:
         ouvertes=_notes(data, "ouvertes", len(tours)), plus_tard=_notes(data, "plus_tard", len(tours)),
         rang=_int(data, "rang"), seq=_int(data, "seq"),
     )
+    conv.seq = max(conv.seq, *(int(e.id[1:]) for e in elements), 0)  # jamais un identifiant déjà pris
+    conv.reparer = reparer
+    return conv
