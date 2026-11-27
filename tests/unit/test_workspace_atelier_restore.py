@@ -521,10 +521,80 @@ def test_restore_allows_changing_a_requirement_that_is_not_validated(repo: Repo)
 
 def test_restore_fails_closed_when_the_authority_journal_is_unreadable(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     _declare_moa(repo)
-    monkeypatch.setattr("grimoire.missions.requirement_gate.validation_of", lambda *_a, **_k: (None, "journal d'autorité illisible : x"))
+    from grimoire.missions import mandate
+
+    def broken(_self: Any) -> list[dict[str, Any]]:
+        raise mandate.JournalError("rompu")
+
+    monkeypatch.setattr(mandate.AuthorityJournal, "read", broken)
     before = repo.exig.read_bytes()
     code, out = repo.restore(phase="exigences", expected=repo.fp(repo.exig), version=repo.shas[0])
     assert code == 403 and "illisible" in out["error"] and repo.exig.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "governance",
+    [
+        {"roles": "Ada", "requirement_gate": "block"},  # section mal formée
+        {"roles": {"moa": ""}, "requirement_gate": "block"},  # MOA vidée
+        {"roles": {"moa": "Bob"}, "requirement_gate": "block"},  # autre MOA
+        {},  # section retirée
+    ],
+)
+def test_restore_keeps_protecting_a_validated_requirement_when_the_moa_is_corrupted(repo: Repo, governance: dict[str, Any]) -> None:
+    _declare_moa(repo)
+    repo.exig.write_text("# Exigences\n\n- REQ-001 [Must] : dicter à voix haute\n", encoding="utf-8")
+    rg.approve_requirement(repo.root, rg.normalize_key("REQ-001", repo.slug), actor="ada")
+    data = yaml.safe_load((repo.root / "project-context.yaml").read_text(encoding="utf-8"))
+    data["governance"] = governance
+    (repo.root / "project-context.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = repo.exig.read_bytes()
+    code, out = repo.restore(phase="exigences", expected=repo.fp(repo.exig), version=repo.shas[0])
+    assert code == 403 and repo.exig.read_bytes() == before, out
+    info = next(p for p in repo.compare(repo.shas[0], "working")["phases"] if p["id"] == "exigences")
+    assert info["restorable"] is False and info["refusal"]
+
+
+def test_restore_refuses_any_accepted_status_key(repo: Repo) -> None:
+    sneaky = "---\nstatus: draft\nstatus: accepted\n---\n# Cahier\n"
+    repo.cdc.write_text(sneaky, encoding="utf-8")
+    git(repo.root, "add", "--", repo.rel(repo.cdc))
+    git(repo.root, "commit", "-q", "-m", "cdc double statut")
+    sha = git(repo.root, "rev-parse", "HEAD")
+    repo.cdc.write_text("---\nstatus: draft\n---\n# Cahier\n", encoding="utf-8")
+    before = repo.cdc.read_bytes()
+    code, out = repo.restore(phase="cahier-des-charges", expected=repo.fp(repo.cdc), version=sha)
+    assert code == 403 and "acceptation" in out["error"] and repo.cdc.read_bytes() == before  # la version
+    repo.cdc.write_text("---\nstatus: draft\n---\n# Cahier\n", encoding="utf-8")
+    git(repo.root, "add", "--", repo.rel(repo.cdc))
+    git(repo.root, "commit", "-q", "-m", "cdc brouillon")
+    clean = git(repo.root, "rev-parse", "HEAD")
+    repo.cdc.write_text(sneaky, encoding="utf-8")  # le fichier courant porte un statut accepté en seconde clé
+    code, out = repo.restore(phase="cahier-des-charges", expected=repo.fp(repo.cdc), version=clean)
+    assert code == 403 and "accepté" in out["error"] and repo.cdc.read_text(encoding="utf-8") == sneaky
+
+
+def test_restore_refuses_an_empty_version(repo: Repo) -> None:
+    for text in ("", "\n\n  \n"):
+        repo.brief.write_text(text, encoding="utf-8")
+        git(repo.root, "add", "--", repo.rel(repo.brief))
+        git(repo.root, "commit", "-q", "--allow-empty", "-m", "vide")
+        empty = git(repo.root, "rev-parse", "HEAD")
+        repo.brief.write_text(BRIEF_3, encoding="utf-8")
+        info = next(p for p in repo.compare(empty, "working")["phases"] if p["id"] == "brief")
+        assert info["restorable"] is False and "vide" in info["refusal"]
+        code, out = repo.restore(phase="brief", expected=repo.fp(repo.brief), version=empty)
+        assert code == 409 and out["reason"] == "version-vide" and repo.brief.read_text(encoding="utf-8") == BRIEF_3
+
+
+def test_restore_refuses_a_current_file_too_big_to_keep_for_undo(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    limit = len(BRIEF_1.encode()) + 4
+    assert len(BRIEF_3.encode()) > limit
+    monkeypatch.setattr(h, "MAX_BLOB", limit)
+    before = repo.brief.read_bytes()
+    code, out = repo.restore(phase="brief", expected=repo.fp(repo.brief), version=repo.shas[0])
+    assert code == 400 and "trop gros" in out["error"] and repo.brief.read_bytes() == before
+    assert not r._UNDO
 
 
 # ── Annuler ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -536,6 +606,17 @@ def test_undo_puts_the_previous_content_back(repo: Repo) -> None:
     assert code == 200 and repo.brief.read_text(encoding="utf-8") == BRIEF_1
     code, undone = repo.restore(phase="brief", expected=repo.fp(repo.brief), undo=done["undo"])
     assert code == 200 and repo.brief.read_bytes() == before and undone["undo"] == ""
+
+
+def test_an_undo_token_works_once(repo: Repo) -> None:
+    code, done = repo.restore(phase="brief", expected=repo.fp(repo.brief), version=repo.shas[0])
+    token = done["undo"]
+    code, _ = repo.restore(phase="brief", expected=repo.fp(repo.brief), undo=token)
+    assert code == 200
+    repo.brief.write_text(BRIEF_2, encoding="utf-8")  # une édition entre-temps
+    edited = repo.brief.read_bytes()
+    code, out = repo.restore(phase="brief", expected=repo.fp(repo.brief), undo=token)
+    assert code == 404 and "plus disponible" in out["error"] and repo.brief.read_bytes() == edited
 
 
 def test_undo_keeps_the_conflict_control_and_the_other_guards(repo: Repo) -> None:

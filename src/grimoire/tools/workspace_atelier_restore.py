@@ -33,7 +33,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.cadrage import PHASES, cadrage_dir
+from grimoire.core.cadrage import PHASES
 from grimoire.tools import atelier_blocs, atelier_conflict
 from grimoire.tools import workspace_atelier_history as h
 
@@ -174,39 +174,72 @@ def _accepted(text: str) -> bool:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return False
-    for line in lines[1:]:
+    for line in lines[1:]:  # toute clé `status` compte, pas seulement la première (règle de l'entretien du cadrage)
         if line.strip() == "---":
             break
         key, _, value = line.partition(":")
-        if key.strip() == "status":
-            return _fold(value).strip().strip("'\"") in _ACCEPTED_STATUSES
+        if key.strip() == "status" and _fold(value).strip().strip("'\"") in _ACCEPTED_STATUSES:
+            return True
     return False
 
 
-def _protected_requirements(root: Path, slug: str, phase: h._Phase, candidate: str) -> str:
-    """Le refus si ``candidate`` modifierait ou retirerait une exigence que la MOA a validée, sinon ``""``."""
+def _protected_requirements(root: Path, slug: str, phases: list[h._Phase], phase: h._Phase, candidate: str) -> str:
+    """Le refus si ``candidate`` modifierait ou retirerait une exigence que la MOA a validée, sinon ``""``.
+
+    Échec fermé, comme le gate des exigences (« corrompre la MOA ne désarme pas le gate ») : une gouvernance mal formée,
+    un journal illisible refusent ; une exigence scellée dans le journal d'autorité reste protégée même si la MOA n'est
+    plus déclarée ou a changé (l'empreinte scellée compte, pas la MOA d'aujourd'hui). Les fichiers viennent de la liste
+    réelle des phases du chantier, jamais d'un chemin recomposé.
+    """
     from grimoire.core.cadrage_requirements import REQUIREMENT_FILES, parse_requirements
-    from grimoire.missions.requirement_gate import fingerprint, normalize_key, validation_of
+    from grimoire.missions.mandate import AuthorityJournal, JournalError
+    from grimoire.missions.requirement_gate import (
+        APPROVE_CHANNEL,
+        ORIGIN_HUMAN,
+        VALIDATED_ENTRY,
+        fingerprint,
+        gate_mode,
+        normalize_key,
+        origin_root,
+    )
 
     filename = Path(phase.rel).name
     if filename not in REQUIREMENT_FILES:
         return ""
     name = None if slug == "principal" else slug
-    texts = {f: (cadrage_dir(root, name) / f).read_text(encoding="utf-8", errors="replace")
-             for f in REQUIREMENT_FILES if (cadrage_dir(root, name) / f).is_file()}
+    texts = {Path(p.rel).name: p.path.read_text(encoding="utf-8", errors="replace")
+             for p in phases if Path(p.rel).name in REQUIREMENT_FILES and p.path.is_file()}
     before = parse_requirements(texts)
     texts[filename] = candidate
     after = parse_requirements(texts).by_id()
+    project = origin_root(root)
+    mode = gate_mode(project)
+    if mode.problem:
+        return f"la gouvernance du projet est illisible ou mal formée ({mode.problem}) : impossible de savoir quelles exigences sont validées, rien n'est restauré"
+    if not before.requirements:
+        return ""
+    try:
+        entries = AuthorityJournal().read()
+    except JournalError:
+        return "le journal d'autorité est illisible : impossible de savoir quelles exigences sont validées, rien n'est restauré"
+    sealed = {(e.get("requirement"), e.get("fingerprint")) for e in entries
+              if e.get("type") == VALIDATED_ENTRY and e.get("project") == str(project)
+              and e.get("origin") == ORIGIN_HUMAN and e.get("channel") == APPROVE_CHANNEL}
     for requirement in before.requirements:
         key = normalize_key(requirement.id, name)
-        entry, why = validation_of(root, key)
-        if entry is None:
-            if why.startswith("journal d'autorité illisible"):
-                return f"le journal d'autorité est illisible : impossible de savoir si {key} est validée, rien n'est restauré"
+        now = fingerprint(key, requirement)
+        if (key, now) not in sealed:
             continue
         kept = after.get(requirement.id)
-        if kept is None or fingerprint(key, kept) != entry.get("fingerprint"):
+        if kept is None or fingerprint(key, kept) != now:
             return f"l'exigence {key} est validée par la MOA : la restauration la modifierait. Elle se rouvre par la MOA, pas d'ici"
+    return ""
+
+
+def _empty_version(phase_id: str, text: str) -> str:
+    """Le refus si la version ne contient rien (la restaurer viderait la phase), sinon ``""``."""
+    if not text.strip() or not atelier_blocs.split(phase_id, text):
+        return "la version choisie est vide : la restaurer viderait la phase."
     return ""
 
 
@@ -215,7 +248,10 @@ def _refusal(root: Path, slug: str, phase: h._Phase, current: str, candidate: st
         return "le document est au statut accepté : il ne se modifie plus d'ici."
     if _accepted(candidate):
         return "cette version porte le statut accepté : une restauration ne prononce jamais une acceptation."
-    return _protected_requirements(root, slug, phase, candidate)
+    empty = _empty_version(phase.id, candidate)
+    if empty:
+        return empty
+    return _protected_requirements(root, slug, h._phases(root, slug), phase, candidate)
 
 
 def _fetch(root: Path, slug: str, version: str, phase_id: str) -> dict[str, Any]:
@@ -311,12 +347,21 @@ def apply(root: Path, slug: str, body: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{core.filename} n'est pas de l'UTF-8 : modifiez-le hors du cockpit") from exc
         if atelier_blocs.fingerprint(current) != expected:
             raise wa.ConflictError(f"{core.filename} a changé depuis la lecture : rien n'est restauré", reason="fichier-modifie")
+        empty = _empty_version(phase.id, text)
+        if empty:
+            raise wa.ConflictError(empty, reason="version-vide")
         refused = _refusal(root, slug, phase, current, text)
         if refused:
             raise PermissionError(refused)
+        if undo is None and len(current_bytes) > h.MAX_BLOB:
+            raise ValueError("fichier trop gros pour être restauré avec annulation : modifie-le hors du cockpit")
         if current_bytes == candidate:
             written = False
         else:
+            if undo is not None:  # le jeton se consomme : une seule annulation, jamais deux
+                with _UNDO_LOCK:
+                    if _UNDO.pop(undo, None) is None:
+                        raise FileNotFoundError("l'annulation n'est plus disponible (déjà faite, session redémarrée ou trop ancienne)")
             atomic_write(phase.path, candidate)
             written = True
     if not written:
