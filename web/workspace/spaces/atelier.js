@@ -12,7 +12,8 @@
 // Données : `GET atelier/chantiers`, `POST atelier/chantiers`, `GET atelier/chantiers/<slug>`,
 // `PUT atelier/chantiers/<slug>/blocs/<id>`, `POST atelier/chantiers/<slug>/suggestions/<id>` (voir `src/grimoire/tools/workspace_atelier.py`).
 
-import { renderMarkdown } from '../markdown.js';
+import { renderBlockMarkdown } from './atelier-rendu.js';
+import { isTemplateText, plainText, templateHint, toggleTaskLine } from './atelier-rendu-logic.js';
 import { atelierIsWide, badge, icon, setAtelierWide } from '../shell.js';
 import { createLiveDoc } from './atelier-live.js';
 import { createComments } from './atelier-comments.js';
@@ -275,13 +276,19 @@ function ideasSection(ctx, ideas) {
 /** Le texte d'un bloc sans sa puce ni son guillemet de citation : ce que l'on lit. */
 const bare = (text) => text.replace(/^>\s?/gm, '').replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '');
 
-function markdown(text) {
-  const holder = el('div');
-  holder.innerHTML = renderMarkdown(text); // `renderMarkdown` échappe le HTML avant tout rendu
-  return holder;
+/** Le Markdown d'un bloc en nœuds (jamais de HTML : voir `atelier-rendu.js`) ; `onToggle` rend ses cases cochables. */
+function markdown(text, onToggle = null) {
+  return renderBlockMarkdown(text, { onToggle });
 }
 
-function renderBlock(block) {
+/** Un bloc qui n'est que le gabarit « À compléter » : un emplacement vide, pas un contenu. */
+function emptySlot(block) {
+  const node = el('div', 'at-placeholder at-empty-slot', null, { 'data-role': 'empty-slot' });
+  node.append(el('span', 'at-empty-hint', templateHint(block.text)));
+  return node;
+}
+
+function renderBlock(block, opts = {}) {
   const node = el('div');
   switch (block.kind) {
     case 'rubrique': {
@@ -322,15 +329,15 @@ function renderBlock(block) {
       return node;
     }
     default: {
-      if (block.placeholder) node.className = 'at-placeholder';
-      node.append(markdown(block.placeholder ? bare(block.text) : block.text));
+      if (block.placeholder || isTemplateText(block.text)) return emptySlot(block);
+      node.append(markdown(block.text, opts.onToggle));
       return node;
     }
   }
 }
 
 function blockTitle(block) {
-  return bare(block.text).split('\n')[0].slice(0, 60);
+  return plainText(bare(block.text)).slice(0, 60); // un libellé lisible : pas de `**`, de `[](…)` ni de puce
 }
 
 const POSTURE_LABEL = { explorer: 'Explorer', sceptique: 'Sceptique', simplificateur: 'Simplificateur' };
@@ -645,9 +652,12 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     release(host);
   };
 
-  const editBlock = (host, phase, block, resumed = null) => {
+  const editBlock = (host, phase, block, resumed = null, conflict = null) => {
     const area = el('textarea', null, null, { 'aria-label': `Modifier le bloc : ${blockTitle(block)}`, spellcheck: 'true' });
-    area.value = resumed == null ? block.text : resumed; // un brouillon n'est remis que sur demande (« Reprendre »)
+    // Un gabarit « À compléter » s'ouvre VIDE (le gabarit n'est que l'invite) ; vide ou annulé, le fichier garde le gabarit.
+    const template = Boolean(block.placeholder || isTemplateText(block.text));
+    if (template) area.setAttribute('placeholder', templateHint(block.text));
+    area.value = resumed != null ? resumed : (template ? '' : block.text); // un brouillon n'est remis que sur demande (« Reprendre »)
     drafts.bind(area, 'bloc', block.id, block.text);
     const save = el('button', 'at-btn pri', null, { type: 'button' });
     save.append(icon('i-act-save'), 'Enregistrer');
@@ -673,9 +683,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     };
     let mark = block; // ce que le serveur attend : le bloc tel qu'on l'a lu (réarmé quand on tranche un conflit)
     let blockId = block.id;
+    // La zone de conflit n'existe que le temps d'un conflit : aucune barre vide sous la zone de texte.
     const conflictBox = el('div', 'at-conflict', null, { 'data-role': 'block-conflict', role: 'alert' });
-    conflictBox.hidden = true;
-    form.insertBefore(conflictBox, bar);
     const showConflict = (payload) => {
       const cur = payload.current;
       const lead = cur
@@ -694,11 +703,12 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       if (cur) {
         const keep = el('button', 'at-btn pri', 'Garder la mienne', { type: 'button', 'data-role': 'conflict-keep-mine' });
         keep.addEventListener('click', () => {
-          mark = cur; blockId = cur.id; conflictBox.hidden = true; // la prochaine écriture part de la version actuelle
+          mark = cur; blockId = cur.id; conflictBox.remove(); // la prochaine écriture part de la version actuelle
           commit();
         });
         const take = el('button', 'at-btn', 'Prendre l’autre', { type: 'button', 'data-role': 'conflict-take-other' });
-        take.addEventListener('click', async () => {
+        take.addEventListener('click', async (event) => {
+          event.stopPropagation(); // l'édition vient de se fermer : ce clic ne doit pas la rouvrir en remontant jusqu'au bloc
           drafts.clear('bloc', block.id);
           endEdit(host);
           await reload('Version actuelle conservée : ta saisie n’a pas été enregistrée.');
@@ -707,7 +717,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         if (payload.merged) {
           const merge = el('button', 'at-btn', 'Fusion proposée', { type: 'button', 'data-role': 'conflict-merge' });
           merge.addEventListener('click', () => {
-            area.value = payload.merged; mark = cur; blockId = cur.id; conflictBox.hidden = true;
+            area.value = payload.merged; mark = cur; blockId = cur.id; conflictBox.remove();
             status.textContent = 'Fusion placée dans la zone de texte : relis-la puis enregistre.';
             area.focus();
           });
@@ -715,6 +725,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         }
       }
       conflictBox.replaceChildren(el('p', null, lead), cols, choices);
+      form.insertBefore(conflictBox, bar);
       conflictBox.hidden = false;
       // Le panneau peut tomber sous le pli : il vient sous les yeux et prend le focus (la zone `role="alert"` l'annonce).
       conflictBox.setAttribute('tabindex', '-1');
@@ -723,6 +734,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     };
     const commit = async () => {
       if (area.value === mark.text && mark === block) { leave(true); return; }
+      if (template && mark === block && !area.value.trim()) { leave(true); return; } // rien saisi : le gabarit reste tel quel
       save.disabled = true;
       error.hidden = true;
       try {
@@ -772,6 +784,51 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); leave(true); }
       else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); commit(); }
     });
+    if (conflict) showConflict(conflict); // une case cochée a rencontré un conflit : le panneau habituel, avec la case refusée comme « ma version »
+  };
+
+  /**
+   * Cocher ou décocher une case : la ligne visée du bloc est réécrite (les autres, à l'octet près) par la route d'édition de bloc,
+   * avec le contrôle de conflit par bloc. Un conflit rétablit la case et ouvre le panneau de conflit de l'éditeur.
+   */
+  const toggleTask = async (host, phase, block, line, checked, box) => {
+    const next = toggleTaskLine(block.text, line, checked);
+    const boxes = [...host.querySelectorAll('.at-task-box')];
+    const undo = () => { box.checked = !checked; boxes.forEach((b) => { b.disabled = false; }); };
+    if (next == null) { undo(); return; }
+    boxes.forEach((b) => { b.disabled = true; });
+    try {
+      const result = await ctx.api.atelierBloc(slug, block.id, next, block);
+      if (ctx.signal.aborted) return;
+      const live = state.doc.phases.find((p) => p.id === phase.id) || phase;
+      result.phase.suggestions = (live.suggestions || []).filter((x) => x.block_id !== block.id);
+      result.phase.comments = live.comments || [];
+      state.doc.phases = state.doc.phases.map((p) => (p.id === phase.id ? result.phase : p));
+      countNote();
+      phaseNav();
+      drawSection(result.phase);
+      status.textContent = checked ? 'Case cochée.' : 'Case décochée.';
+      loop.warn(result.avertissements);
+      reloadProgress();
+      liveDoc.refresh();
+      const written = result.phase.blocks.find((b) => b.text === next.trimEnd());
+      const again = sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`);
+      again?.querySelector(`.at-task-box[data-line="${line}"]`)?.focus();
+      if ((live.comments || []).length) syncComments(phase.id, next.trimEnd());
+    } catch (cause) {
+      if (ctx.signal.aborted) return;
+      undo();
+      if (cause.code === 409) {
+        if (cause.payload && cause.payload.submitted !== undefined) {
+          if (!host.classList.contains('is-editing')) editBlock(host, phase, block, next, cause.payload);
+          return;
+        }
+        await reload('Le fichier a changé entre-temps : le document a été rechargé, la case n’a pas été modifiée.', 'warn');
+        return;
+      }
+      status.setAttribute('data-kind', 'error');
+      status.textContent = `La case n’a pas été enregistrée : ${cause.message || cause}`;
+    }
   };
 
   const blockNode = (phase, block) => {
@@ -780,7 +837,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       tabindex: '0', 'data-block': block.id, 'data-kind': block.kind,
       'aria-label': `Modifier le bloc : ${blockTitle(block)}`,
     });
-    host.append(renderBlock(block), cm.addButton(phase, block, host, blockTitle(block)), assist.challenge(block));
+    const onToggle = (line, checked, box) => toggleTask(host, phase, block, line, checked, box);
+    host.append(renderBlock(block, { onToggle }), cm.addButton(phase, block, host, blockTitle(block)), assist.challenge(block));
     tag(host, 'host', sigOf(block));
     const edit = (resumed = null) => { if (!host.classList.contains('is-editing')) editBlock(host, phase, block, resumed); };
     // Une saisie commencée avant un rechargement de la page est PROPOSÉE ici (Reprendre / Jeter), jamais remise en silence.

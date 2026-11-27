@@ -1914,6 +1914,22 @@ function acceptMergedBlock(ctx, onWritten) {
   return box;
 }
 
+// Une carte de décision qui ne change pas n'est pas redessinée (même nœud d'un pouls à l'autre) : un redessin
+// complet la détachait un instant, et un clic ou une lecture qui tombait dans cet intervalle visait un nœud mort
+// (e2e « une seule action primaire » rouge par intermittence en CI). Ce qui la ferait changer est dans la
+// signature : la tâche entière, la portée, le verrou de lecture et l'âge écrit (« depuis 3 min »).
+const decisionCards = new WeakMap();
+
+function keptDecisionCard(ctx, task, portfolio, onWritten, before, cards) {
+  const key = `${task.project?.slug || ''}|${task.id}`;
+  const q = openQuestions(task)[0];
+  const sig = JSON.stringify([portfolio, !portfolio && !!ctx.host.readOnly, ageText(task.waiting.since || q.asked_at), task]);
+  const known = before.get(key);
+  const node = known && known.sig === sig ? known.node : decisionCard(ctx, task, portfolio, onWritten);
+  cards.set(key, { sig, node });
+  return node;
+}
+
 function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
   const pending = tasks.filter(isHumanWait);
   const wrap = document.createElement('div');
@@ -1931,6 +1947,10 @@ function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
     paintBulk();
     return;
   }
+  // Les cartes de ce rendu, pour le suivant : une carte dont la tâche n'a pas bougé n'est pas reconstruite.
+  const before = decisionCards.get(ctx) || new Map();
+  const cards = new Map();
+  decisionCards.set(ctx, cards);
   const groups = new Map(DECISION_TYPES.map((t) => [t.id, []]));
   for (const task of pending) groups.get(decisionType(openQuestions(task)[0])).push(task);
   // Dans chaque section, la plus ancienne d'abord.
@@ -1999,7 +2019,7 @@ function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
     ul.className = 'ex-dec-list';
     for (const task of list) {
       const li = document.createElement('li');
-      li.append(decisionCard(ctx, task, portfolio, onWritten));
+      li.append(keptDecisionCard(ctx, task, portfolio, onWritten, before, cards));
       ul.append(li);
     }
     section.append(ul);

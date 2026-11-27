@@ -308,6 +308,8 @@ def test_an_open_thread_on_a_requirement_shows_on_its_status_line_and_in_the_lib
         _thread(page, str(made["id"])).get_by_role("button", name="Résoudre").click()
         page.locator("[data-role='atelier-status']", has_text="Fil résolu").wait_for(timeout=APPEAR_MS)
         page.locator(".at-live[data-live='REQ-001']:not([hidden])").wait_for(timeout=APPEAR_MS)
+        # La ligne d'état se met à jour en place après le rechargement : on attend la disparition, on ne la suppose pas.
+        page.locator("[data-role='live-comments']").wait_for(state="detached", timeout=APPEAR_MS)
         assert page.locator("[data-role='live-comments']").count() == 0
 
 
