@@ -50,7 +50,7 @@ export const host = {
 /** Clé de session du projet retenu par cet onglet. */
 const PROJECT_KEY = 'grimoire.workspace.project';
 
-function storedProject() {
+export function storedProject() {
   try { return sessionStorage.getItem(PROJECT_KEY) || null; } catch { return null; }
 }
 

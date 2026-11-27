@@ -82,11 +82,25 @@ export function createGuided(ctx, slug, hooks) {
     const area = el('textarea', 'at-asst-area', null, { rows: '2', 'aria-label': 'Ta réponse', placeholder: 'Ta réponse — Entrée envoie, Maj+Entrée saute une ligne', maxlength: '4000' });
     area.value = drafts.get(key) || '';
     area.addEventListener('input', () => { drafts.set(key, area.value); });
+    // Filet de sécurité : la saisie est aussi gardée dans le navigateur (`sessionStorage`) ; après un rechargement de la page,
+    // elle est proposée sous la question, jamais remise en silence.
+    const store = hooks.drafts;
+    if (store) {
+      store.bind(area, 'guide', key);
+      if (!drafts.has(key)) {
+        const offer = store.offer('guide', key, {
+          resume: (text) => { area.value = text; drafts.set(key, text); area.focus(); },
+          back: () => area,
+        });
+        if (offer) box.append(offer);
+      }
+    }
     const send = () => {
       const text = area.value.trim();
       if (!text) { area.focus(); return; }
       if (busy) return;
       drafts.delete(key);
+      if (store) store.clear('guide', key);
       act({ geste: 'guide-repondre', angle: cur.angle, index: cur.index, text }, 'Réponse consignée dans le document.');
     };
     area.addEventListener('keydown', (event) => {

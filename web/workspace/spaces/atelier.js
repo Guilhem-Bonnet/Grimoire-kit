@@ -25,17 +25,17 @@ import { createNotifier } from './atelier-notify.js';
 import { createPlan } from './atelier-plan.js';
 import { createFind } from './atelier-recherche.js';
 import { createDocumentMenu } from './atelier-document-menu.js';
+import { createDrafts } from './atelier-brouillons.js';
+import { reconcileChildren, release, tag } from './atelier-reconcile.js';
+import { SELF, plainKey, sigOf } from './atelier-reconcile-logic.js';
 import {
   INDICATOR_LABEL, WIDE_MIN, activePhase, capitalize, codeSegments, newOrphans, orphanNotice,
   phaseFromParams, phaseHash, phaseIndicator, stepsOf,
 } from './atelier-layout-logic.js';
 
-
-/**
- * Ce qui montre une saisie en cours dans la feuille : bloc en édition, nouveau commentaire, réponse, confirmation.
- * Les rechargements de fond (l'entretien qui avance, le retour sur l'onglet) attendent qu'elle soit finie.
- */
-const WRITING = '.is-editing, .at-cm-new, .at-cm-reply, .at-cm-confirm';
+// Un rechargement du document ne redessine pas la feuille d'un bloc : il la réconcilie (voir `atelier-reconcile.js`). Un nœud
+// dont les données n'ont pas changé garde sa place ; un bloc en cours d'édition, un commentaire ou une réponse en cours ne
+// sont jamais remplacés. Les rechargements de fond n'ont donc plus à attendre la fin d'une saisie.
 
 /** Ordre des groupes de la bibliothèque ; `archive` vit dans une ligne repliable. */
 const GROUPS = [
@@ -367,6 +367,9 @@ function suggestionNode(sug, decide) {
     accept.disabled = true;
     refuse.disabled = true;
     error.hidden = true;
+    // Le motif part avec le geste : le formulaire de refus ne porte plus de saisie à garder, le rechargement peut redessiner la carte.
+    const form = node.querySelector('.at-refuse');
+    form?.remove();
     try {
       await decide(sug, decision, motif);
     } catch (cause) {
@@ -374,6 +377,7 @@ function suggestionNode(sug, decide) {
       error.hidden = false;
       accept.disabled = false;
       refuse.disabled = false;
+      if (form) actions.after(form);
     }
   };
   accept.addEventListener('click', () => run('accept'));
@@ -416,7 +420,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   ctx.signal.addEventListener('abort', () => mirror.disconnect());
   // Lot 3 : les commentaires ancrés. `reqBlock` dit quel bloc porte chaque exigence, pour compter ses fils ouverts.
   const reqBlock = new Map();
-  const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message) });
+  const drafts = createDrafts(ctx, slug); // le filet de sécurité : les saisies en cours sont gardées dans le navigateur
+  const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message), drafts });
   const steps = el('ol', 'at-steps', null, { 'aria-label': 'Déroulé du chantier', 'data-role': 'steps' });
   let liveTrace = null;
   let stepsShown = '';
@@ -462,7 +467,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       host.append(note);
     },
     narrow,
-    editing: () => Boolean(sheet.querySelector(WRITING)),
+    drafts,
     // La mascotte de l'assistant : combien de suggestions attendent, et la première mise sous les yeux.
     suggestions: () => state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0),
     showSuggestion: () => {
@@ -565,7 +570,9 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       return;
     }
     if (ctx.signal.aborted) return;
+    const top = root.scrollTop;
     drawAll();
+    if (root.scrollTop !== top) root.scrollTop = top; // la lecture ne saute pas
     if (message && kind) status.setAttribute('data-kind', kind);
     status.textContent = message || '';
     liveDoc.refresh();
@@ -623,9 +630,16 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     }
   };
 
-  const editBlock = (host, phase, block) => {
+  /** La saisie d'un bloc se termine : son nœud ne porte plus rien à garder, le prochain dessin le remplace. */
+  const endEdit = (host) => {
+    host.classList.remove('is-editing');
+    release(host);
+  };
+
+  const editBlock = (host, phase, block, resumed = null) => {
     const area = el('textarea', null, null, { 'aria-label': `Modifier le bloc : ${blockTitle(block)}`, spellcheck: 'true' });
-    area.value = block.text;
+    area.value = resumed == null ? block.text : resumed; // un brouillon n'est remis que sur demande (« Reprendre »)
+    drafts.bind(area, 'bloc', block.id, block.text);
     const save = el('button', 'at-btn pri', null, { type: 'button' });
     save.append(icon('i-act-save'), 'Enregistrer');
     const cancel = el('button', 'at-btn ghost', 'Annuler', { type: 'button' });
@@ -643,6 +657,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
 
     const leave = (focusBack) => {
       const fresh = state.doc.phases.find((p) => p.id === phase.id);
+      drafts.clear('bloc', block.id);
+      endEdit(host);
       drawSection(fresh);
       if (focusBack) sheet.querySelector(`[data-block="${CSS.escape(block.id)}"]`)?.focus();
     };
@@ -674,6 +690,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         });
         const take = el('button', 'at-btn', 'Prendre l’autre', { type: 'button', 'data-role': 'conflict-take-other' });
         take.addEventListener('click', async () => {
+          drafts.clear('bloc', block.id);
+          endEdit(host);
           await reload('Version actuelle conservée : ta saisie n’a pas été enregistrée.');
         });
         choices.append(keep, take);
@@ -699,11 +717,15 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         if (ctx.signal.aborted) return;
         // La vue d'un bloc réécrit n'embarque pas les suggestions : celles des autres blocs restent, celles du
         // bloc modifié sont périmées (le serveur le dira de même au prochain chargement).
-        result.phase.suggestions = (phase.suggestions || []).filter((x) => x.block_id !== block.id);
-        result.phase.comments = phase.comments || []; // provisoire : le serveur recalcule les ancres, relues ci-dessous
+        // La phase d'AUJOURD'HUI : des rechargements ont pu remplacer l'objet lu à l'ouverture pendant la saisie.
+        const live = state.doc.phases.find((p) => p.id === phase.id) || phase;
+        result.phase.suggestions = (live.suggestions || []).filter((x) => x.block_id !== block.id);
+        result.phase.comments = live.comments || []; // provisoire : le serveur recalcule les ancres, relues ci-dessous
         state.doc.phases = state.doc.phases.map((p) => (p.id === phase.id ? result.phase : p));
         countNote();
         phaseNav();
+        drafts.clear('bloc', block.id);
+        endEdit(host);
         drawSection(result.phase);
         status.textContent = 'Bloc enregistré.';
         loop.warn(result.avertissements); // un identifiant d'exigence en double dans ce fichier
@@ -711,7 +733,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         liveDoc.refresh(); // une exigence réécrite peut être « modifiée depuis la validation »
         const written = result.phase.blocks.find((b) => b.text === area.value.trimEnd());
         sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`)?.focus();
-        if ((phase.comments || []).length) syncComments(phase.id, area.value.trimEnd());
+        if ((live.comments || []).length) syncComments(phase.id, area.value.trimEnd());
       } catch (cause) {
         if (ctx.signal.aborted) return;
         if (cause.code === 409) {
@@ -721,6 +743,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
             save.disabled = false;
             return;
           }
+          endEdit(host); // le brouillon local garde la saisie
           await reload('Le fichier a changé entre-temps : le document a été rechargé, ta modification n’a pas été enregistrée.');
           return;
         }
@@ -745,7 +768,12 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       'aria-label': `Modifier le bloc : ${blockTitle(block)}`,
     });
     host.append(renderBlock(block), cm.addButton(phase, block, host, blockTitle(block)), assist.challenge(block));
-    const edit = () => { if (!host.classList.contains('is-editing')) editBlock(host, phase, block); };
+    tag(host, 'host', sigOf(block));
+    const edit = (resumed = null) => { if (!host.classList.contains('is-editing')) editBlock(host, phase, block, resumed); };
+    // Une saisie commencée avant un rechargement de la page est PROPOSÉE ici (Reprendre / Jeter), jamais remise en silence.
+    const saved = drafts.offer('bloc', block.id, { base: block.text, resume: (text) => edit(text), back: () => host });
+    const unsent = cm.draftOffer(block, host);
+    host.append(...[saved, unsent].filter(Boolean));
     // Sélectionner un passage (pour le commenter) ne doit pas ouvrir l'édition du bloc : seul un clic sans sélection le fait.
     host.addEventListener('click', () => {
       const selection = window.getSelection();
@@ -760,40 +788,68 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const drawSection = (phase) => {
     const old = sheet.querySelector(`[data-section="${phase.id}"]`);
     const section = el('section', 'at-sec', null, { 'data-section': phase.id, 'aria-labelledby': `at-h-${phase.id}` });
-    section.append(el('h2', null, PHASE_NAMES[phase.id] || phase.title, { id: `at-h-${phase.id}`, tabindex: '-1' }));
+    // Chaque enfant de la section porte son identité (`data-rk`) et ce qu'il affiche (`data-rs`) : c'est ce qui permet de
+    // réconcilier le nouveau dessin avec l'ancien au lieu de le remplacer (voir `atelier-reconcile.js`).
+    const plain = new Map();
+    section.append(tag(el('h2', null, PHASE_NAMES[phase.id] || phase.title, { id: `at-h-${phase.id}`, tabindex: '-1' }), 'title', sigOf(PHASE_NAMES[phase.id] || phase.title)));
     if (!phase.blocks.length) {
-      section.append(el('p', 'at-muted', phase.readable === false ? 'Ce fichier n’est pas de l’UTF-8 : modifie-le hors du cockpit.' : 'Cette phase n’a pas de fichier.'));
+      const text = phase.readable === false ? 'Ce fichier n’est pas de l’UTF-8 : modifie-le hors du cockpit.' : 'Cette phase n’a pas de fichier.';
+      section.append(tag(el('p', 'at-muted', text), 'empty', sigOf(text)));
     }
     let intro = true;
     const drawn = new Set();
     for (const block of phase.blocks) {
       if (block.kind === 'entete' || block.kind === 'titre') continue;
       if (intro && block.kind === 'paragraphe' && !block.section) {
-        section.append(withCode(el('p', 'at-intro'), bare(block.text).replace(/^_|_$/g, '')));
+        const text = bare(block.text).replace(/^_|_$/g, '');
+        section.append(tag(withCode(el('p', 'at-intro'), text), 'intro', sigOf(text)));
         intro = false;
         continue;
       }
       intro = false;
       if (block.editable) {
         // Le bloc et ses fils côte à côte (marge) ou l'un sous l'autre (étroit) : la mise en page décide.
-        const row = el('div', 'at-cmrow');
+        const row = el('div', 'at-cmrow', null, { 'data-rc': '1' });
         row.append(blockNode(phase, block), cm.margin(block));
-        section.append(row);
+        section.append(tag(row, `blk:${block.id}`, sigOf([block, cm.threadsOf(block).map(cm.threadSig)])));
         drawn.add(block.id);
       } else {
-        section.append(blockNode(phase, block));
+        section.append(tag(blockNode(phase, block), plainKey(block.kind, block.text, plain), ''));
       }
       if (block.kind === 'exigence' && block.req) {
         reqBlock.set(block.req, block.id);
-        section.append(liveDoc.line(block.req)); // état réel, sous l'exigence
+        section.append(tag(liveDoc.line(block.req), `live:${block.req}`, SELF)); // état réel, sous l'exigence : se met à jour lui-même
       }
-      for (const sug of (phase.suggestions || []).filter((x) => x.block_id === block.id)) section.append(suggestionNode(sug, decide));
+      for (const sug of (phase.suggestions || []).filter((x) => x.block_id === block.id)) section.append(tag(suggestionNode(sug, decide), `sugg:${sug.id}`, sigOf(sug)));
     }
     const lost = cm.orphans(phase, drawn); // les fils dont le passage a disparu : en fin de phase, avec leur extrait
     if (lost) section.append(lost);
-    if (old) { if (spy) spy.unobserve(old); touching.delete(old); old.replaceWith(section); } else sheet.append(section);
-    if (spy) spy.observe(section);
+    if (old) {
+      reconcileChildren(old, section, { stale: staleBlock });
+    } else {
+      sheet.append(section);
+      if (spy) spy.observe(section);
+    }
     cm.paint();
+  };
+
+  /**
+   * Un bloc en cours d'édition dont l'identité a disparu du document rechargé : le serveur l'a réécrit (`twin` : sa version)
+   * ou supprimé (`twin` nul) pendant la saisie. La saisie reste, un bandeau le dit ; l'enregistrement passe par le contrôle de
+   * conflit par bloc, qui montre les deux versions.
+   */
+  const staleBlock = (row, twin) => {
+    const form = row.querySelector('.is-editing > [data-role="block-edit"]');
+    if (!form) return;
+    let note = form.querySelector('[data-role="block-stale"]');
+    if (!note) {
+      note = el('p', 'at-stale', '', { role: 'status', 'data-role': 'block-stale' });
+      form.insertBefore(note, form.firstChild);
+    }
+    const text = twin
+      ? 'Ce bloc a changé dans le document pendant ta saisie. Ta saisie est conservée : à l’enregistrement, tu verras les deux versions.'
+      : 'Ce bloc a disparu du document pendant ta saisie (modifié ou supprimé ailleurs). Ta saisie est conservée : à l’enregistrement, tu verras ce qui s’est passé.';
+    if (note.textContent !== text) note.textContent = text;
   };
 
   const loop = createLoopPanel(ctx); // avancement honnête, tâches du découpage, avertissements de saisie
@@ -819,7 +875,6 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     paintHead();
     loop.update(state.doc);
     countNote();
-    sheet.replaceChildren();
     phaseNav();
     drawSteps();
     for (const phase of state.doc.phases) drawSection(phase);
