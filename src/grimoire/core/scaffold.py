@@ -1469,8 +1469,13 @@ class ProjectScaffolder:
         """
         gitignore = self._target / ".gitignore"
 
+        if gitignore.is_symlink():
+            return  # never write through a link: we cannot know what it targets
         if gitignore.is_file():
-            existing = gitignore.read_text(encoding="utf-8")
+            try:
+                existing = gitignore.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                return  # not UTF-8: left untouched (ensure_grimoire_gitignore warns about it)
             if GITIGNORE_MARKER in existing:
                 return  # Already has grimoire section
             content = existing.rstrip() + "\n\n" + GITIGNORE_SECTION

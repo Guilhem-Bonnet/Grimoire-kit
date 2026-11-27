@@ -1344,6 +1344,12 @@ def run_up_pipeline(
     if not blocked:
         _step_structure(state, target, dry_run=dry_run)
 
+    # 2gitignore. Kit lines in the project's `.gitignore` (locks…), before the refresh so the
+    # scaffold finds the marker and leaves the file to the shared, byte-safe writer.
+    from grimoire.cli.cmd_up_gitignore import step_gitignore
+
+    step_gitignore(state, target, dry_run=dry_run, blocked=blocked)
+
     # 2bis. Refresh the kit tier — this is how an existing project receives a
     # newer kit. Runs after init so a fresh project simply finds nothing to do.
     _step_refresh(state, target, dry_run=dry_run, blocked=blocked)

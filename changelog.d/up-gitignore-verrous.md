@@ -1,0 +1,1 @@
+- fix(cli): `grimoire up` complète le `.gitignore` d'un projet déjà installé par les lignes du kit (verrous compris), sans toucher aux lignes de l'utilisateur ; un `.gitignore` non UTF-8 ou lien symbolique n'est plus ni lu de travers ni écrit à travers
