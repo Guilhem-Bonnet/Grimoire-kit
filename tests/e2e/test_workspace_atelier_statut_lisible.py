@@ -12,14 +12,14 @@ première traitée (le pouls se réarme après l'avoir traitée) : tout recharge
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import APIResponse, Browser, Page, Request, Route, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier, workspace_atelier_comments, workspace_atelier_suggestions
@@ -158,6 +158,62 @@ def test_an_own_block_edit_with_a_comment_does_not_trigger_an_outside_reload(bro
         _after_two_pulses(page, pulses, since)
         # Les deux lectures du geste lui-même (avancement, fils) ; une troisième serait un « dépôt extérieur » imaginaire.
         assert len(docs) - before <= 2, f"lectures du document après le geste : {len(docs) - before}"
+
+
+def _hold_pulse_and_write(page: Page, slug: str) -> tuple[list[Route], list[tuple[Route, APIResponse]], Callable[[Route], None]]:
+    """Retient les pouls (`parked`) et la réponse d'une écriture de bloc : faite côté serveur, la page ne la reçoit pas encore (`written`)."""
+    parked: list[Route] = []
+    written: list[tuple[Route, APIResponse]] = []
+
+    def hold_pulse(route: Route) -> None:
+        parked.append(route)
+
+    def hold_write(route: Route) -> None:
+        written.append((route, route.fetch()))
+        page.evaluate("document.body.dataset.writeHeld = '1'")  # le serveur a écrit : l'état voulu est observable
+
+    page.route(f"**/chantiers/{slug}/entretien*", hold_pulse)
+    page.route(f"**/chantiers/{slug}/blocs/*", hold_write)
+    return parked, written, hold_pulse
+
+
+def test_a_pulse_answered_while_its_own_block_write_is_in_flight_does_not_reload(browser: Browser, project: tuple[str, Path]) -> None:
+    """Course déterministe : un pouls parti AVANT le geste et répondu APRÈS l'écriture du fichier, mais avant la réponse du serveur
+    au geste, voit le fichier « changé » ; ce n'est que l'écriture de la page elle-même, aucune relecture n'est due.
+
+    Le pouls est retenu (`page.route`), la réponse de l'écriture aussi : le serveur a écrit, la page n'en sait encore rien, le pouls
+    répond avec l'empreinte neuve. Puis le pouls suivant part (la page a fini de traiter le précédent) : aucune lecture du document
+    n'a eu lieu entre-temps."""
+    url, root = project
+    slug = _chantier(root, "Statut Course")
+    workspace_atelier_comments.create(root, slug, {"block_id": _block_id(root, slug), "texte": "Une question", "quote": "Une piste"}, "humain")
+    for page, _pulses in _page(browser, url, slug):
+        page.locator("[data-com]").first.wait_for(timeout=WAIT_MS)
+        docs: list[str] = page.docs  # type: ignore[attr-defined]
+        parked, written, hold_pulse = _hold_pulse_and_write(page, slug)
+
+        def is_pulse(request: Request) -> bool:
+            return request.url.split("?")[0].endswith(f"/chantiers/{slug}/entretien")
+
+        with page.expect_request(is_pulse, timeout=WAIT_MS):  # un pouls part : le geste suit, il est donc antérieur à l'écriture
+            pass
+        expect(page.locator("body")).to_be_visible()  # un aller-retour : la route a retenu le pouls
+        assert len(parked) == 1, "le pouls n'a pas été retenu"
+        before = len(docs)
+        page.locator(".at-blk", has_text="Une piste").click()
+        area = page.locator("[data-role='block-edit'] textarea")
+        area.fill(f"{PARA} Réécrite.")
+        area.press("Control+Enter")
+        expect(page.locator("body")).to_have_attribute("data-write-held", "1", timeout=WAIT_MS)
+        assert len(written) == 1, "l'écriture n'a pas atteint le serveur"
+        write_route, write_response = written[0]
+        # Le serveur a écrit, la page attend encore sa réponse : le pouls répond maintenant, avec l'empreinte du fichier neuf.
+        page.unroute(f"**/chantiers/{slug}/entretien*", hold_pulse)  # les pouls suivants passent
+        with page.expect_request(is_pulse, timeout=WAIT_MS):  # le pouls suivant ne part qu'une fois celui-ci traité
+            parked[0].fulfill(response=parked[0].fetch())
+        assert len(docs) == before, f"un pouls répondu pendant l'écriture de la page a relu le document : {len(docs) - before} lecture(s)"
+        write_route.fulfill(response=write_response)
+        expect(page.locator(STATUS)).to_have_text("Bloc enregistré.", timeout=WAIT_MS)
 
 
 def test_attaching_an_orphan_thread_announces_in_status_and_notification(browser: Browser, project: tuple[str, Path]) -> None:

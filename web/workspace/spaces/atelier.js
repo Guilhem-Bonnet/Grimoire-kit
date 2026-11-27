@@ -503,7 +503,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   setAtelierContext({ slug, phase: focusId });
   ctx.signal.addEventListener('abort', () => setAtelierContext(null));
   // Le document suit son fichier : l'empreinte que porte chaque réponse du pouls de l'assistant décide (voir `atelier-synchro.js`).
-  const sync = createSync(ctx, { doc: () => state.doc, docAt: () => docAt, reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
+  const sync = createSync(ctx, { doc: () => state.doc, docAt: () => (writing > 0 ? Infinity : docAt), reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
   const assist = createAssistant(ctx, slug, {
     focus: () => focusId,
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
@@ -661,6 +661,19 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   });
 
   let docAt = Date.now(); // quand le document affiché a été relu ou réécrit par un geste de cette page
+  // Une écriture de cette page en vol : le serveur peut avoir écrit le fichier sans que la page le sache encore. Un pouls parti avant
+  // (ou pendant) qui répond alors avec l'empreinte neuve ne dit rien d'un dépôt extérieur : tout pouls est ignoré tant qu'elle dure,
+  // et ceux partis avant sa réponse le restent après (`docAt` est avancé à sa fin).
+  let writing = 0;
+  const ownWrite = async (send) => {
+    writing += 1;
+    try {
+      return await send();
+    } finally {
+      writing -= 1;
+      docAt = Date.now();
+    }
+  };
   /** Ce que le serveur dit des suggestions et des commentaires est adopté si rien d'extérieur n'est à voir : le pouls n'y verra pas un dépôt. */
   const adoptAnnexes = (fresh) => {
     docAt = Date.now();
@@ -693,7 +706,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       if (!guard.go) return false; // renoncé : la suggestion reste en attente, rien n'est écrit
     }
     try {
-      await ctx.api.atelierDecision(slug, sug.id, decision, motif);
+      await ownWrite(() => ctx.api.atelierDecision(slug, sug.id, decision, motif));
     } catch (cause) {
       if (ctx.signal.aborted) return;
       if (cause.code === 409) {
@@ -843,7 +856,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       if (ctx.signal.aborted) return;
       if (!guard.go) { save.disabled = false; area.focus(); return; } // renoncé : rien n'est écrit, la saisie reste
       try {
-        const result = await ctx.api.atelierBloc(slug, blockId, area.value, mark);
+        const result = await ownWrite(() => ctx.api.atelierBloc(slug, blockId, area.value, mark));
         if (ctx.signal.aborted) return;
         // La vue d'un bloc réécrit n'embarque pas les suggestions : celles des autres blocs restent, celles du
         // bloc modifié sont périmées (le serveur le dira de même au prochain chargement).
@@ -908,7 +921,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     if (ctx.signal.aborted) return;
     if (!guard.go) { undo(); return; }
     try {
-      const result = await ctx.api.atelierBloc(slug, block.id, next, block);
+      const result = await ownWrite(() => ctx.api.atelierBloc(slug, block.id, next, block));
       if (ctx.signal.aborted) return;
       const live = state.doc.phases.find((p) => p.id === phase.id) || phase;
       result.phase.suggestions = (live.suggestions || []).filter((x) => x.block_id !== block.id);
