@@ -32,7 +32,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -44,7 +44,10 @@ if strict_mode():
 else:
     pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from playwright.sync_api import Browser, Page, sync_playwright
+
+if TYPE_CHECKING:
+    from playwright.sync_api import BrowserContext
 
 ROOT = Path(__file__).resolve().parents[2]
 
