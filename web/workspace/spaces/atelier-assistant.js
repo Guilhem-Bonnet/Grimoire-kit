@@ -119,7 +119,7 @@ export function createAssistant(ctx, slug, hooks) {
   let draft = '';
   // Sans agent joignable, le cadrage se joue dans la page avec les questions du kit (voir atelier-entretien.js).
   const guided = createGuided(ctx, slug, {
-    focus: () => hooks.focus(), reload: (m, k) => hooks.reload(m, k), say: (m, k) => hooks.say(m, k), refresh: () => tick(), drafts: hooks.drafts,
+    focus: () => hooks.focus(), reload: (m, k) => hooks.reload(m, k), ownWrite: (send) => (hooks.ownWrite ? hooks.ownWrite(send) : send()), say: (m, k) => hooks.say(m, k), refresh: () => tick(), drafts: hooks.drafts,
     // Voir une rubrique dans le document : l'entretien agrandi lui rend d'abord sa place (le document est replié).
     show: (phaseId, section) => { if (big) setBig(false); if (hooks.showRubrique) hooks.showRubrique(phaseId, section); },
   });
