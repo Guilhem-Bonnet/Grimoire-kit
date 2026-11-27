@@ -142,7 +142,30 @@ export function createAtelierMascotte(ctx, hooks) {
       unavailableReason: () => recorder.unavailableReason(),
     });
     element.append(conversation.element);
+    shortenNote(conversation.element);
     conversation.sync();
+  }
+
+  // Le long message « Vocal indisponible : … » du mode conversation (partagé avec le chat) devient, ici, une ligne :
+  // le message reste dans la page (il décrit le bouton) mais ne se déplie que sur « Pourquoi ? ».
+  function shortenNote(conv) {
+    const note = conv.querySelector('.conv-note');
+    if (!note) return;
+    const why = el('button', 'at-why', 'Pourquoi ?', { type: 'button', 'data-act': 'why', 'aria-expanded': 'false', 'aria-controls': note.id });
+    const sync = () => {
+      why.hidden = note.hidden;
+      if (note.hidden) { note.classList.remove('is-open'); why.setAttribute('aria-expanded', 'false'); }
+    };
+    why.addEventListener('click', () => {
+      const on = !note.classList.contains('is-open');
+      note.classList.toggle('is-open', on);
+      why.setAttribute('aria-expanded', String(on));
+    });
+    const watch = new MutationObserver(sync);
+    watch.observe(note, { attributes: true, attributeFilter: ['hidden'] });
+    ctx.signal.addEventListener('abort', () => watch.disconnect());
+    note.before(why);
+    sync();
   }
 
   // Rendu : monté seulement si WebGL 2 répond, sinon une pastille et le même libellé.

@@ -164,12 +164,20 @@ def test_without_a_selection_the_orphan_is_attached_to_the_current_block(browser
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         thread = _thread(page, cid)
         thread.wait_for(timeout=APPEAR_MS)
-        thread.get_by_role("button", name="Rattacher ce commentaire à la sélection du document ou au bloc courant").click()
-        assert "Sélectionne un passage" in thread.locator(".at-error").inner_text()  # rien à désigner : rien n'est écrit
+        attach = thread.get_by_role("button", name="Rattacher ce commentaire à la sélection du document ou au bloc courant")
+        attach.click()
+        # Mode explicite « choisis le bloc » : rien n'est écrit, les blocs deviennent des cibles.
+        assert "Choisis le bloc" in thread.locator("[data-role='attach-pick']").inner_text()
+        assert page.locator(".at-sheet.is-picking").count() == 1
         assert store.load(_folder(root, slug))[0].historique == []
-        page.locator(".at-blk", has_text=PARA_B).focus()
-        thread.get_by_role("button", name="Rattacher ce commentaire à la sélection du document ou au bloc courant").click()
+        page.keyboard.press("Escape")  # Échap annule : plus de cibles, rien d'écrit, le focus revient au bouton
+        assert page.locator(".at-sheet.is-picking").count() == 0
+        assert thread.locator("[data-role='attach-pick']").count() == 0
+        assert store.load(_folder(root, slug))[0].historique == []
+        attach.click()
+        page.locator(".at-blk", has_text=PARA_B).click()  # le clic choisit le bloc, il ne l'ouvre pas en édition
         page.locator("[data-role='atelier-status']", has_text="rattaché au bloc").wait_for(timeout=APPEAR_MS)
+        assert page.locator(".is-editing").count() == 0
         assert _thread(page, cid).get_attribute("data-anchor") == "ancre"
     assert store.load(_folder(root, slug))[0].quote == PARA_B
 

@@ -216,12 +216,12 @@ def test_split_preview_then_confirm_creates_once_and_replay_creates_nothing(
         _line(page, "REQ-001").wait_for(timeout=APPEAR_MS)
         split = page.get_by_role("button", name="Valider et découper")
         split.wait_for(timeout=APPEAR_MS)
-        assert split.is_disabled()  # le Must n'est pas validé
+        assert split.get_attribute("aria-disabled") == "true"  # le Must n'est pas validé
         assert "à valider d’abord REQ-001" in page.locator("[data-role='live-summary']").inner_text()
 
         _validate(root, slug, "REQ-001")
         page.get_by_role("button", name="Actualiser l’état des exigences").click()
-        page.wait_for_function("() => !document.querySelector('[data-act=\"split\"]').disabled", timeout=APPEAR_MS)
+        page.wait_for_function("() => document.querySelector('[data-act=\"split\"]').getAttribute('aria-disabled') === 'false'", timeout=APPEAR_MS)
         before = _plan_tasks(root)
         split.click()
         panel = page.locator("[data-role='decoupage']")
@@ -258,7 +258,7 @@ def test_stale_preview_is_refused_with_a_409_and_creates_nothing(browser: Browse
     slug = _chantier(root, "Aperçu périmé")
     _validate(root, slug, "REQ-001")
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
-        page.wait_for_function("() => !document.querySelector('[data-act=\"split\"]').disabled", timeout=APPEAR_MS)
+        page.wait_for_function("() => document.querySelector('[data-act=\"split\"]').getAttribute('aria-disabled') === 'false'", timeout=APPEAR_MS)
         page.get_by_role("button", name="Valider et découper").click()
         panel = page.locator("[data-role='decoupage']")
         panel.wait_for(timeout=APPEAR_MS)
