@@ -257,6 +257,7 @@ def test_parcours_de_l_assistant(
         assert "Chantier : Dicter une idée" in page.locator(".chat-chantier").first.inner_text()
 
     for page in _open(browser, with_agent, f"#atelier?chantier={slug}", (1024, 768)):
+        page.locator("[data-role='assistant-pill']").click()  # sous 1100 px l'assistant est un tiroir, replié par défaut
         page.locator("[data-role='assistant']").wait_for(timeout=APPEAR_MS)
         _capture(page, "07-barre-1024x768")
 

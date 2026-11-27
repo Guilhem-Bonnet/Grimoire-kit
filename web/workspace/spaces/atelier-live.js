@@ -209,19 +209,28 @@ function previewPanel(data, { confirm, cancel }) {
  * de statut du document. Rend `{ line(req), toolbar, refresh }` : `line` pour chaque bloc d'exigence au rendu,
  * `toolbar` à poser dans l'en-tête, `refresh` pour relire l'état.
  */
-export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) {
+export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, onTrace = () => {} }) {
   const commentsOf = (req) => comments(req) || 0; // lot 3 : fils ouverts sur l'exigence, comptés par le document
   const state = { trace: null, open: new Set() };
   const say = (text) => { status.textContent = text; };
   const toolbar = el('div', 'at-actions at-live-bar', null, { 'data-role': 'live-bar' });
   const summary = el('span', 'at-muted', '', { 'data-role': 'live-summary' });
-  const split = el('button', 'at-btn pri', null, { type: 'button', 'data-act': 'split' });
+  // Désactivé = `aria-disabled` (le bouton reste atteignable au clavier et au survol, et dit pourquoi), jamais `disabled`.
+  const split = el('button', 'at-btn pri', null, { type: 'button', 'data-act': 'split', 'aria-disabled': 'true', 'aria-describedby': 'at-split-why' });
   split.append(icon('i-act-launch'), 'Valider et découper');
-  split.disabled = true;
+  const why = el('span', 'at-tip', '', { id: 'at-split-why', role: 'tooltip', 'data-role': 'split-why' });
+  const splitWrap = el('span', 'at-split-wrap');
+  splitWrap.append(split, why);
+  const lockSplit = (locked, reason = '') => {
+    split.setAttribute('aria-disabled', String(locked));
+    why.textContent = locked ? reason : '';
+    split.title = locked ? reason : '';
+  };
+  lockSplit(true, 'État des exigences en cours de lecture.');
   const refreshButton = el('button', 'at-btn ghost', null, { type: 'button', 'data-act': 'live-refresh', 'aria-label': 'Actualiser l’état des exigences' });
   refreshButton.append(icon('i-act-retry'), 'Actualiser');
   const slot = el('div', null, null, { 'data-role': 'decoupage-slot' });
-  toolbar.append(split, summary, refreshButton);
+  toolbar.append(splitWrap, summary, refreshButton);
 
   /** Le détail complet d'une exigence, pour un chantier dont les lignes sont allégées. */
   const more = async (req) => {
@@ -247,18 +256,19 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
       node.replaceWith(line(node.getAttribute('data-live')));
     }
     const trace = state.trace;
+    onTrace(trace);
     if (!trace || !trace.requirements.length) {
-      split.disabled = true;
       summary.textContent = trace ? 'Aucune exigence identifiée : écris-les en « REQ-001 : … » pour les suivre.' : '';
+      lockSplit(true, summary.textContent || 'État des exigences en cours de lecture.');
       return;
     }
     const { must, must_validated: done } = trace.summary;
     const missing = trace.requirements.filter((r) => r.priority === 'must' && !r.validated).map((r) => r.id);
-    split.disabled = missing.length > 0;
     summary.textContent = missing.length
       ? `${plural(done, 'exigence Must validée', 'exigences Must validées')} sur ${must} : à valider d’abord ${missing.join(', ')}.`
       : (must ? (must > 1 ? `Les ${must} exigences Must sont validées.` : 'L’exigence Must est validée.') : 'Aucune exigence Must : le découpage est possible.');
     if (!trace.moa.declared) summary.textContent += ' Aucune MOA déclarée : personne ne peut valider.';
+    lockSplit(missing.length > 0, `Valide d’abord les exigences Must : ${missing.join(', ')}.`);
   };
 
   let busy = false;
@@ -283,7 +293,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
 
   const closeSplit = () => { slot.replaceChildren(); split.focus(); };
   const openSplit = async (message) => {
-    split.disabled = true;
+    lockSplit(true, 'Aperçu du découpage en cours.');
     try {
       const data = await ctx.api.atelierDecoupage(slug);
       if (ctx.signal.aborted) return;
@@ -323,7 +333,11 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
       if (!ctx.signal.aborted) paint();
     }
   };
-  split.addEventListener('click', () => openSplit());
+  split.addEventListener('click', () => {
+    // Désactivé, le bouton explique au lieu de rester muet.
+    if (split.getAttribute('aria-disabled') === 'true') { if (why.textContent) say(why.textContent); return; }
+    openSplit();
+  });
   refreshButton.addEventListener('click', () => { say(''); refresh(); });
 
   // Le pouls du cockpit annonce un changement du ledger ; au retour sur l'onglet on relit aussi (la MOA vient peut-être

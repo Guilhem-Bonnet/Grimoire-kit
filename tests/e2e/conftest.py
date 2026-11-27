@@ -957,7 +957,7 @@ def open_atelier(page: Page, on: bool = True) -> None:
     Par défaut la coque ne montre que la barre du haut, le contenu et le panneau
     de détail. Rail, explorateur, inspecteur permanent, preuves et dock se
     rouvrent par la bascule ``setAtelier`` — la même que ⇧⌘L, la palette et le
-    bouton « Atelier » du pied de page. Un test qui mesure l'un d'eux l'ouvre ici
+    bouton « Panneaux » du pied de page. Un test qui mesure l'un d'eux l'ouvre ici
     plutôt que de supposer qu'il est là.
     """
     page.evaluate("(on) => window.GrimoireWorkspace.setAtelier(on)", on)

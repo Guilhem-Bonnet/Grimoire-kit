@@ -8,6 +8,7 @@
 
 import { publish } from '../mascotte_bus.js';
 import { badge, icon } from '../shell.js';
+import { initialOpen, pillSummary, readPref, writePref } from './atelier-layout-logic.js';
 
 const PHASE_NAMES = { brief: 'Brief', brainstorm: 'Brainstorm', comprehension: 'Compréhension', exigences: 'Exigences', 'cahier-des-charges': 'Cahier des charges' };
 const PHASE_ORDER = ['brief', 'brainstorm', 'comprehension', 'exigences', 'cahier-des-charges'];
@@ -29,10 +30,46 @@ function el(tag, className, text, attrs) {
  * du document, `say(message)` la ligne d'état de la feuille, `editing()` vrai si un bloc est en cours d'édition.
  */
 export function createAssistant(ctx, slug, hooks) {
-  const bar = el('section', 'at-asst', null, { 'aria-label': 'Assistant du cadrage', 'data-role': 'assistant' });
+  // Colonne à droite du document (large) ou tiroir (étroit) ; replié, il ne reste que la pastille de la barre des phases.
+  const bar = el('aside', 'at-asst', null, { 'aria-label': 'Assistant du cadrage', 'data-role': 'assistant', id: 'at-asst-panel' });
   // Le contenu change à chaque état ; la mascotte (si la fonction en test est allumée) reste posée à côté, jamais refaite.
   const main = el('div', 'at-asst-main');
   bar.append(main);
+  const pill = el('button', 'at-asst-pill', null, { type: 'button', 'data-role': 'assistant-pill', 'aria-expanded': 'false', 'aria-controls': 'at-asst-panel' });
+  const pillText = el('span', 'at-asst-pill-text');
+  const pillCount = el('span', 'at-asst-pill-count', null, { 'aria-hidden': 'true' });
+  pill.append(icon('i-act-add'), pillText, pillCount);
+  const storage = (() => { try { return window.localStorage; } catch { return null; } })();
+  let open = true;
+  const setOpen = (next, { remember = true, focus = false } = {}) => {
+    open = next;
+    bar.hidden = !open;
+    pill.hidden = open;
+    pill.setAttribute('aria-expanded', String(open));
+    if (remember) writePref(storage, slug, open);
+    if (focus) (open ? bar.querySelector('[data-act="fold"]') : pill)?.focus({ preventScroll: true });
+  };
+  /** Appelée une fois la barre posée dans la page : le choix mémorisé du chantier, sinon la largeur, décide. */
+  const layout = () => setOpen(initialOpen(readPref(storage, slug), hooks.narrow ? !hooks.narrow() : true), { remember: false });
+  pill.addEventListener('click', () => setOpen(true, { focus: true }));
+  /** Ce qui attend, dit sur la pastille : question en cours, suggestions, permission. */
+  const paintPill = () => {
+    const v = view;
+    const turn = (v && v.turn) || {};
+    const sum = pillSummary({
+      error: v ? v.error : '',
+      unavailable: Boolean(v && v.agent && !v.agent.available),
+      permission: Boolean(turn.permission),
+      question: Boolean(v && v.question && !turn.mine),
+      busy: Boolean(turn.mine),
+      suggestions: hooks.suggestions ? hooks.suggestions() : 0,
+    });
+    pillText.textContent = sum.text;
+    pillCount.textContent = sum.count > 0 ? String(sum.count) : '';
+    pillCount.hidden = sum.count < 1;
+    pill.setAttribute('data-tone', sum.tone);
+    pill.setAttribute('aria-label', `${sum.text}${sum.count > 0 ? ` (${sum.count} en attente)` : ''}. Ouvrir l’assistant.`);
+  };
   let mascotte = null;
   let view = null;
   let signature = '';
@@ -46,7 +83,11 @@ export function createAssistant(ctx, slug, hooks) {
       await ctx.api.atelierAssistant(slug, { phase: hooks.focus(), ...body });
       if (done) hooks.say(done);
     } catch (cause) {
-      if (!ctx.signal.aborted) hooks.say(`L’assistant n’a pas pu partir : ${cause.message || cause}`);
+      if (!ctx.signal.aborted) {
+        const message = `L’assistant n’a pas pu partir : ${cause.message || cause}`;
+        hooks.say(message);
+        if (body.block_id && hooks.blockError) hooks.blockError(body.block_id, message); // le geste visait un bloc : l'erreur s'y lit aussi
+      }
     }
     await tick();
   };
@@ -63,12 +104,16 @@ export function createAssistant(ctx, slug, hooks) {
     const mark = el('span', 'at-ai', null, { 'aria-hidden': 'true' });
     mark.append(icon('i-act-add'));
     const who = el('div', 'at-asst-head');
-    who.append(mark, el('b', null, 'Grimoire'), el('span', 'at-muted', text || ''));
+    const fold = el('button', 'at-asst-fold', null, { type: 'button', 'data-act': 'fold', 'aria-label': 'Replier l’assistant', title: 'Replier l’assistant' });
+    fold.append(icon('i-act-close'));
+    fold.addEventListener('click', () => setOpen(false, { focus: true }));
+    who.append(mark, el('b', null, 'Grimoire'), el('span', 'at-muted', text || ''), fold);
     return who;
   };
 
   /** Les faits que la mascotte reflète : ce que l'assistant dit (entretien) et les suggestions du document. */
   const syncMascotte = () => {
+    paintPill();
     if (!mascotte) return;
     const v = view;
     const turn = (v && v.turn) || {};
@@ -89,6 +134,7 @@ export function createAssistant(ctx, slug, hooks) {
   /** Le clic sur la mascotte : le panneau passe au premier plan sur ce qui attend. */
   const activate = (target) => {
     if (target === 'suggestion') { if (hooks.showSuggestion && hooks.showSuggestion()) return; }
+    if (!open) setOpen(true, { focus: false });
     bar.scrollIntoView({ block: 'nearest' });
     const aim = (target === 'question' && bar.querySelector('.at-asst-area'))
       || (target === 'permission' && bar.querySelector('[data-act="open-chat"]'))
@@ -279,7 +325,9 @@ export function createAssistant(ctx, slug, hooks) {
         event.stopPropagation();
         close();
         if (view && !view.agent.available) {
-          hooks.say(`Challenge impossible : ${view.agent.reason || 'aucun agent d’hôte'}. Au terminal : ${view.equivalent}`);
+          const message = `Challenge impossible : ${view.agent.reason || 'aucun agent d’hôte'}. Au terminal : ${view.equivalent}`;
+          hooks.say(message);
+          if (hooks.blockError) hooks.blockError(block.id, message); // au pied du bloc visé, là où l'on a cliqué
           return;
         }
         await call({ geste: `challenger-${id}`, block_id: block.id }, `Challenge ${label.toLowerCase()} demandé : la réponse arrive sous le bloc, en suggestion ou en commentaire.`);
@@ -342,5 +390,5 @@ export function createAssistant(ctx, slug, hooks) {
 
   ctx.signal.addEventListener('abort', () => clearTimeout(timer));
   tick();
-  return { element: bar, challenge, sync: syncMascotte, refresh: () => { signature = ''; return tick(); } };
+  return { element: bar, pill, layout, challenge, sync: syncMascotte, refresh: () => { signature = ''; return tick(); } };
 }
