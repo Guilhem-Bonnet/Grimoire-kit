@@ -1,6 +1,8 @@
 .at-page { display: flex; flex-direction: column; min-height: 100%; }
 .at-test { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-2) var(--sp-5); background: var(--warn-soft); color: var(--ink); font-size: var(--t-s); border-bottom: 1px solid var(--line); }
 .at-test .ico { color: var(--warn); flex: none; width: 16px; height: 16px; }
+.at-test .at-width { height: var(--h-ctl); padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--panel); color: var(--ink); cursor: pointer; }
+.at-test .at-width[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); }
 .at-test a { margin-left: auto; color: var(--ink2); text-decoration: underline; text-underline-offset: 3px; }
 .at-body { padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); max-width: 1120px; width: 100%; box-sizing: border-box; margin: 0 auto; }
 :where(.at-page) .at-head { display: flex; align-items: flex-end; gap: var(--sp-4); flex-wrap: wrap; }

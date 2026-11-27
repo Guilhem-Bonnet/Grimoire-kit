@@ -2312,6 +2312,14 @@ body[data-active-space] .panel-head {
   display: none;
 }
 
+/* L'Atelier en pleine largeur : le détail aussi se replie (il survit au plein écran quand les panneaux d'atelier
+ * sont masqués), et le panneau ouvert au survol (`peek`) ne rogne pas la feuille. */
+@media (min-width: 901px) {
+  :root[data-focus="on"] body[data-active-area="atelier"] :is(#panel-inspector, #panel-explorer, #panel-evidence) {
+    display: none;
+  }
+}
+
 /* ── Sous 900 px : une colonne, des tiroirs ────────────────────────────────
  * Mesuré à 390 px avant ce bloc : explorateur (236) et inspecteur (300) épinglés
  * laissaient 0 px au centre, la barre d'application poussait ses onglets
