@@ -42,6 +42,7 @@ __all__ = [
     "new_chantier",
     "reachable_states",
     "read_chantier",
+    "record_write",
     "set_state",
     "slugify",
 ]
@@ -83,9 +84,19 @@ def _now() -> str:
 
 
 def slugify(titre: str) -> str:
-    """Minuscules ASCII, chiffres et tirets, au plus :data:`MAX_SLUG` caractères."""
+    """Minuscules ASCII, chiffres et tirets, au plus :data:`MAX_SLUG` caractères, coupé à une limite de mot.
+
+    Un titre trop long n'est pas tranché au milieu d'un mot : on s'arrête au dernier tiret qui tient (un seul mot plus
+    long que la limite est tranché net, faute de mieux).
+    """
     folded = unicodedata.normalize("NFKD", titre).encode("ascii", "ignore").decode("ascii").lower()
-    return re.sub(r"[^a-z0-9]+", "-", folded).strip("-")[:MAX_SLUG].strip("-")
+    slug = re.sub(r"[^a-z0-9]+", "-", folded).strip("-")
+    if len(slug) <= MAX_SLUG:
+        return slug
+    if slug[MAX_SLUG] == "-":  # la coupure tombe déjà entre deux mots
+        return slug[:MAX_SLUG]
+    head = slug[:MAX_SLUG]
+    return head.rpartition("-")[0] or head
 
 
 def _check_slug(slug: str) -> str:
@@ -230,6 +241,28 @@ def _write(root: Path, slug: str | None, current: Chantier, **changes: str) -> C
     data.update(changes)
     (directory / CHANTIER_FILE).write_text(_dump(data), encoding="utf-8")
     return read_chantier(root, slug)
+
+
+def record_write(root: Path, slug: str, etat: str | None = None) -> Chantier | None:
+    """Note qu'une écriture de l'Atelier a touché le chantier : ``modifie`` est remis à maintenant.
+
+    ``etat`` ne fait qu'AVANCER (jamais reculer, jamais depuis ``livre`` ou ``archive``, jamais vers l'un d'eux) : l'état
+    suit les faits, un état posé à la main plus loin est respecté. ``principal`` sans ``chantier.yaml`` n'en reçoit pas ici
+    (on ne lui en crée un que par une action explicite) ; rend ``None`` dans ce cas, et si le chantier est illisible.
+    Ne se lit jamais d'une lecture : l'appelant est une écriture réussie.
+    """
+    name = None if slug == DEFAULT_CHANTIER else _check_slug(slug)
+    try:
+        current = read_chantier(root, name)
+    except GrimoireValidationError:
+        return None
+    if current.error or (current.default and not (cadrage_dir(root, None) / CHANTIER_FILE).is_file()):
+        return None
+    changes: dict[str, str] = {}
+    if etat in ETATS and current.etat in ETATS and ETATS.index(etat) > ETATS.index(current.etat) \
+            and current.etat not in ("livre", "archive") and etat not in ("livre", "archive"):
+        changes["etat"] = etat
+    return _write(root, name, current, **changes)
 
 
 def new_chantier(root: Path, titre: str, *, slug: str | None = None, mission: str = "") -> Chantier:

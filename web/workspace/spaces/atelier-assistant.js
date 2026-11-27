@@ -8,6 +8,8 @@
 
 import { publish } from '../mascotte_bus.js';
 import { badge, icon } from '../shell.js';
+import { createGuided, engineBadge } from './atelier-entretien.js';
+import { avancementText } from './atelier-avancement.js';
 
 const PHASE_NAMES = { brief: 'Brief', brainstorm: 'Brainstorm', comprehension: 'Compréhension', exigences: 'Exigences', 'cahier-des-charges': 'Cahier des charges' };
 const PHASE_ORDER = ['brief', 'brainstorm', 'comprehension', 'exigences', 'cahier-des-charges'];
@@ -40,6 +42,8 @@ export function createAssistant(ctx, slug, hooks) {
   let covered = -1;
   let timer = null;
   let draft = '';
+  // Sans agent joignable, le cadrage se joue dans la page avec les questions du kit (voir atelier-entretien.js).
+  const guided = createGuided(ctx, slug, { focus: () => hooks.focus(), reload: (m) => hooks.reload(m), say: (m) => hooks.say(m), refresh: () => tick() });
 
   const call = async (body, done) => {
     try {
@@ -74,7 +78,7 @@ export function createAssistant(ctx, slug, hooks) {
     const turn = (v && v.turn) || {};
     const facts = {
       error: v ? v.error : '',
-      unavailable: Boolean(v && v.agent && !v.agent.available),
+      unavailable: Boolean(v && v.agent && !v.agent.available && !(v.guide && v.guide.available)),
       question: Boolean(v && v.question && !turn.mine),
       permission: Boolean(turn.permission),
       suggestions: hooks.suggestions ? hooks.suggestions() : 0,
@@ -132,23 +136,6 @@ export function createAssistant(ctx, slug, hooks) {
     return el('p', 'at-muted at-asst-engine', text, { 'data-role': 'engine-note' });
   };
 
-  const unavailable = (v) => {
-    const node = el('div', 'at-asst-body');
-    node.append(
-      el('p', null, `L’assistant n’est pas joignable : ${v.agent.reason || 'aucun agent d’hôte'}.`, { 'data-role': 'assistant-off' }),
-      el('p', 'at-muted'),
-    );
-    node.lastChild.append('Le même cadrage se mène au terminal : ', el('code', null, v.equivalent), '.');
-    // Le geste existe mais refuse d'avance, avec sa raison, plutôt que d'échouer après coup.
-    if (!v.started) {
-      const start = button('Démarrer le cadrage', 'start', () => {}, { primary: true, iconName: 'i-act-send' });
-      start.disabled = true;
-      start.title = v.agent.reason || 'Aucun agent d’hôte utilisable';
-      node.append(start);
-    }
-    return node;
-  };
-
   const render = () => {
     const v = view;
     main.replaceChildren();
@@ -156,9 +143,9 @@ export function createAssistant(ctx, slug, hooks) {
     if (!v) return;
     const busy = Boolean(v.turn.mine);
     const where = v.current ? `${v.current.title}, ${PHASE_NAMES[v.current.phase] || v.current.phase}` : '';
-    const progress = v.started && v.total ? `${v.covered} angle${v.covered > 1 ? 's' : ''} sur ${v.total} couvert${v.covered > 1 ? 's' : ''}` : '';
-    main.append(head(progress), engineNote(v));
-    if (!v.agent.available) { main.append(unavailable(v)); return; }
+    const progress = v.avancement ? v.avancement.resume : '';
+    main.append(head(progress), engineBadge(v), v.agent.available ? engineNote(v) : '');
+    if (!v.agent.available) { main.append(guided.render(v)); return; }
     const body = el('div', 'at-asst-body');
     main.append(body);
     if (v.error) { body.append(el('p', 'at-error', v.error, { role: 'alert' })); return; }
@@ -177,7 +164,11 @@ export function createAssistant(ctx, slug, hooks) {
     const focus = hooks.focus();
     const here = v.phases[focus];
     if (v.complete) {
-      body.append(el('p', null, 'Le cadrage est complet : tous les angles obligatoires sont couverts. Relis le document, puis valide et découpe quand tu es prêt.', { 'data-role': 'assistant-complete' }));
+      // Complet seulement si plus aucun bloc n'est resté au gabarit ; sinon on dit combien de points restent à préciser.
+      const av = v.avancement;
+      body.append(el('p', null, av && av.etat !== 'complet'
+        ? `Les angles obligatoires sont couverts, mais le cadrage n’est pas complet : ${avancementText(av)}. Complète les blocs restants dans le document.`
+        : 'Le cadrage est complet : tous les points sont renseignés. Relis le document, puis valide et découpe quand tu es prêt.', { 'data-role': av && av.etat !== 'complet' ? 'assistant-cadre' : 'assistant-complete' }));
       return;
     }
     if (here && here.complete) {

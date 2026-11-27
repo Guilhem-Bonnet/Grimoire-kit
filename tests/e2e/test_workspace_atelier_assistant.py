@@ -285,9 +285,14 @@ def test_sans_agent_d_hote_la_barre_le_dit_et_donne_la_commande(
     for page in _open(browser, without_agent, f"#atelier?chantier={slug}"):
         off = page.locator("[data-role='assistant-off']")
         off.wait_for(timeout=APPEAR_MS)
-        assert "pas joignable" in off.inner_text()
+        assert "Aucun agent n’est joignable" in off.inner_text()
+        # Sans agent, le cadrage se joue dans la page : le moteur est dit en mots simples et le bouton est vivant.
+        assert "Questions guidées, sans IA" in page.locator("[data-role='engine-label']").inner_text()
         assert f"grimoire cadrage interview --chantier {slug}" in page.locator("[data-role='assistant']").inner_text()
-        assert page.locator("[data-act='start']").count() == 0  # pas de bouton mort
+        # L'entretien a pu être entamé par les tests précédents (même projet) : « Démarrer » ou la question en cours.
+        live = page.locator("[data-act='start'], [data-role='guided-question']")
+        live.first.wait_for(timeout=APPEAR_MS)
+        assert page.locator("[data-act='start']:disabled").count() == 0  # jamais de bouton mort
         _capture(page, "08-sans-agent-1440x900")
 
 

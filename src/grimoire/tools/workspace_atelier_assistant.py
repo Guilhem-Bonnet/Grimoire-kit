@@ -25,6 +25,7 @@ from typing import Any
 from grimoire.core.cadrage import PHASES
 from grimoire.core.chantiers import MAX_SLUG
 from grimoire.tools import atelier_model
+from grimoire.tools import workspace_atelier_guide as guide
 
 __all__ = ["GESTES", "POSTURES", "act", "brief", "clean_title", "entretien_view", "question_of", "resolve_context", "split_reply"]
 
@@ -76,7 +77,7 @@ _CHALLENGE_PREFIX = "challenger-"
 
 #: Ce que l'interface peut demander : la liste fermée, publiée telle quelle par la route de lecture.
 def geste_ids() -> list[str]:
-    return [*GESTES, _ANSWER, *(f"{_CHALLENGE_PREFIX}{p}" for p in POSTURES), *atelier_model.GESTES]
+    return [*GESTES, _ANSWER, *(f"{_CHALLENGE_PREFIX}{p}" for p in POSTURES), *atelier_model.GESTES, *guide.GESTES]
 
 
 _BRIEF = (
@@ -146,10 +147,22 @@ def agent_status(root: Path) -> dict[str, Any]:
     from grimoire.tools.workspace_chat import chat_mode
 
     try:
-        mode, _command, reason = chat_mode(root)
+        mode, command, reason = chat_mode(root)
     except Exception as exc:  # hôte inconnu : la barre le dit au lieu d'un bouton mort
-        return {"available": False, "mode": "kanban", "reason": str(exc)}
-    return {"available": mode == "acp", "mode": mode, "reason": reason}
+        return {"available": False, "mode": "kanban", "reason": str(exc), "name": ""}
+    name = _agent_name(root, command) if mode == "acp" else ""
+    return {"available": mode == "acp", "mode": mode, "reason": reason, "name": name}
+
+
+def _agent_name(root: Path, command: tuple[str, ...]) -> str:
+    """Le nom de l'agent d'hôte, en mots simples (l'alias choisi pour le projet), pour dire le moteur à l'écran."""
+    from grimoire.hosts.acp_hosts import chosen_alias
+
+    try:
+        alias = str(chosen_alias(root) or "")
+    except Exception:
+        alias = ""
+    return (alias or (Path(command[0]).name if command else ""))[:40]
 
 
 def act(root: Path, slug: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -168,8 +181,13 @@ def act(root: Path, slug: str, body: dict[str, Any]) -> dict[str, Any]:
     # La reconnaissance de dictée du kit (marqueur `dictation`, `source: voice`, jetons de transcription, texte
     # transcrit) vaut pour TOUS les gestes ; seule la réponse, texte libre de l'humain, accepte une dictée.
     recognized = transcriptions.recognize(root, body)
-    if recognized.dictated and geste != _ANSWER:
+    if recognized.dictated and geste not in (_ANSWER, guide.REPONDRE):
         raise ValueError("un geste de l'assistant ne se déclenche pas par une dictée : cliquez")
+    if geste in guide.GESTES:
+        # Le cadrage guidé, sans agent : même route, mêmes gardes ; le serveur écrit comme la commande `cadrage interview`.
+        done = guide.run(root, slug, geste, body)
+        transcriptions.consume(recognized.keys)
+        return done
     if geste in atelier_model.GESTES:
         # Le modèle optionnel du kit (éteint par défaut) : une PROPOSITION déposée dans le circuit des suggestions.
         choice = body.get("modele", "")
@@ -295,5 +313,17 @@ def entretien_view(root: Path, slug: str) -> dict[str, Any]:
         if pending is not None:
             out["current"] = {"angle": pending["id"], "title": pending["title"], "phase": phase_of[pending["id"]]}
     out["turn"], out["question"] = _conversation(root).atelier_facts(slug)
+    # Le moteur, en mots simples, et le cadrage guidé sans agent (voir workspace_atelier_guide) ; l'avancement est le
+    # calcul unique du chantier (cadrage_progress), pas un compteur d'angles.
+    agent = out["agent"]
+    out["moteur"] = {
+        "id": "agent" if agent["available"] else "guide",
+        "label": f"Avec l’agent {agent['name']}".rstrip() if agent["available"] and agent.get("name")
+        else ("Avec l’agent de l’hôte" if agent["available"] else "Questions guidées, sans IA"),
+    }
+    out["guide"] = guide.view(root, slug)
+    from grimoire.core.cadrage_progress import progress
+
+    out["avancement"] = progress(root, None if slug == "principal" else slug)
     out["modele"] = atelier_model.status(root, slug)  # option du kit : jamais la clé, seulement sa présence
     return out

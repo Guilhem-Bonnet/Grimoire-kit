@@ -241,25 +241,56 @@ def _phase_path(root: Path, slug: str, filename: str) -> Path:
     return raw
 
 
-def _chantier_row(root: Path, chantier: Any) -> dict[str, Any]:
+def _compact(avancement: dict[str, Any]) -> dict[str, Any]:
+    """L'avancement allégé d'une ligne de la liste : le même calcul, sans le détail rubrique par rubrique."""
+    keep = ("etat", "resume", "a_preciser", "a_confirmer", "angles", "complet_phases", "erreur")
+    out = {k: avancement[k] for k in keep}
+    out["phases"] = [{k: p[k] for k in ("id", "complete", "remplis", "vides", "je_ne_sais_pas", "sans_objet", "total")}
+                     for p in avancement["phases"]]
+    return out
+
+
+def _asking(root: Path, slug: str, agent_ok: bool) -> bool:
+    """Une question d'entretien attend-elle la personne ? Celle de l'agent, ou la question guidée quand aucun agent ne joue."""
+    from grimoire.tools import workspace_atelier_guide as guide
+    from grimoire.tools.workspace_chat import _conversation
+
+    if _conversation(root).atelier_facts(slug)[1]:
+        return True
+    shown = guide.view(root, slug)
+    return not agent_ok and bool(shown.get("started")) and not shown.get("finished") and bool(shown.get("available"))
+
+
+def _chantier_row(root: Path, chantier: Any, agent_ok: bool | None = None) -> dict[str, Any]:
     row: dict[str, Any] = chantier.to_dict()
     name = None if chantier.default else chantier.slug
     row["phases"] = [r["state"] for r in cadrage_status(root, name)["phases"]]
     if chantier.error:
         row["chemin"] = (cadrage_dir(root, name).relative_to(root) / "chantier.yaml").as_posix()
     else:
+        from grimoire.core.cadrage_progress import progress
+        from grimoire.tools import workspace_atelier_assistant as assistant
         from grimoire.tools import workspace_atelier_comments as comments
+        from grimoire.tools import workspace_atelier_loop as loop
         from grimoire.tools import workspace_atelier_suggestions as sugg
 
         row["suggestions"] = sugg.pending_count(root, chantier.slug)  # en attente, bloc visé encore là
         row["commentaires"] = comments.open_count(root, chantier.slug)  # fils ouverts (lot 3)
+        row["avancement"] = _compact(progress(root, name))  # UN calcul : celui de l'assistant et de la page
+        if agent_ok is None:
+            agent_ok = bool(assistant.agent_status(root)["available"])
+        row["attente"] = loop.waiting(
+            root, chantier.slug, suggestions=row["suggestions"], asking=_asking(root, chantier.slug, agent_ok)
+        )
     return dict(row)
 
 
 def list_view(root: Path) -> dict[str, Any]:
     from grimoire.core.chantiers import ETATS, list_chantiers
+    from grimoire.tools import workspace_atelier_assistant as assistant
 
-    return {"chantiers": [_chantier_row(root, c) for c in list_chantiers(root)], "etats": list(ETATS)}
+    agent_ok = bool(assistant.agent_status(root)["available"])
+    return {"chantiers": [_chantier_row(root, c, agent_ok) for c in list_chantiers(root)], "etats": list(ETATS)}
 
 
 def create(root: Path, body: dict[str, Any]) -> dict[str, Any]:
@@ -325,7 +356,27 @@ def document(root: Path, slug: str) -> dict[str, Any]:
     from grimoire.tools import workspace_atelier_comments as comments
 
     comments.attach(root, slug, phases)  # lot 3 : les fils de chaque phase, avec leur ancre d'aujourd'hui
-    return {"chantier": _chantier_row(root, found), "phases": phases}
+    from grimoire.core.cadrage_progress import progress
+    from grimoire.tools import workspace_atelier_loop as loop
+
+    return {
+        "chantier": _chantier_row(root, found),
+        "phases": phases,
+        "avancement": progress(root, None if found.default else found.slug),  # le calcul unique, en détail
+        "taches": _safe_tasks(root, found.slug),  # ce que « Valider et découper » a créé
+        "avertissements": loop.duplicate_requirements(phases),
+        "auteur": loop.author(root),  # le nom que porte un commentaire humain (MOA, sinon utilisateur du projet)
+    }
+
+
+def _safe_tasks(root: Path, slug: str) -> list[dict[str, Any]]:
+    """Les tâches du chantier ; un ledger illisible ne casse pas la page (liste vide)."""
+    from grimoire.tools import workspace_atelier_loop as loop
+
+    try:
+        return loop.tasks(root, slug)
+    except Exception:
+        return []
 
 
 # ── Édition d'un bloc ───────────────────────────────────────────────────────
@@ -405,7 +456,10 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
     comments.resync_after_edit(
         root, slug
     )  # lot 3 : les fils retrouvés suivent leur passage (sans effet sur l'écriture)
-    return {"ok": True, "phase": _phase_view(root, None if slug == "principal" else slug, phase)}
+    from grimoire.tools import workspace_atelier_loop as loop
+
+    view = _phase_view(root, None if slug == "principal" else slug, phase)
+    return {"ok": True, "phase": view, "avertissements": loop.duplicate_requirements([view])}
 
 
 # ── Branchement des hôtes ───────────────────────────────────────────────────
@@ -443,7 +497,23 @@ def get(root: Path, path: str, query: dict[str, list[str]]) -> Any:
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
+#: Les écritures de l'Atelier dans un chantier qui remettent à jour sa date de modification et font avancer son état.
+_WRITING = ("suggestions", "comments", "decoupage")
+
+
 def post(root: Path, path: str, body: dict[str, Any]) -> Any:
+    result = _post(root, path, body)
+    rest = path[len(ATELIER) :].strip("/").split("/") if path.startswith(ATELIER) else []
+    if len(rest) >= 3 and rest[0] == "chantiers" and rest[2] in _WRITING and not (
+        isinstance(result, dict) and result.get("already")  # un découpage rejoué n'a rien écrit
+    ):
+        from grimoire.tools import workspace_atelier_loop as loop
+
+        loop.after_write(root, rest[1])  # écriture réussie seulement : une lecture ne passe jamais ici
+    return result
+
+
+def _post(root: Path, path: str, body: dict[str, Any]) -> Any:
     if path == FEATURES:
         if "mascotte" in body and "atelier" not in body:
             return set_mascotte_machine(root, body.get("mascotte"))
@@ -513,7 +583,11 @@ def put_http(
         rest = path[len(ATELIER) :].strip("/").split("/") if path.startswith(ATELIER) else []
         if len(rest) != 4 or rest[0] != "chantiers" or rest[2] != "blocs":
             raise FileNotFoundError(f"route inconnue : {path}")
-        return 200, edit_block(root, rest[1], rest[3], body)
+        edited = edit_block(root, rest[1], rest[3], body)
+        from grimoire.tools import workspace_atelier_loop as loop
+
+        loop.after_write(root, rest[1])
+        return 200, edited
     except ConflictError as exc:
         return 409, {"ok": False, "conflict": True, "error": str(exc)}
     except FileNotFoundError as exc:

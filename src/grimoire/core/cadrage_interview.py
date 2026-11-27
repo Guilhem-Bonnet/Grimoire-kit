@@ -34,6 +34,8 @@ __all__ = [
     "classify_depth",
     "interview_plan",
     "interview_states",
+    "retract",
+    "view",
 ]
 
 STATE_FILE = "entretien.json"
@@ -374,6 +376,62 @@ def answer(
     return _render(state, "enregistrée")
 
 
+def _remove_from_section(path: Path, section: str, line: str) -> bool:
+    """Retire de la rubrique la ligne exacte *line* ; si la rubrique n'a plus de contenu, le gabarit revient."""
+    lines = (read_regular(path) or "").splitlines()
+    head = f"## {section}"
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == head), None)
+    if start is None:
+        return False
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    at = next((i for i in range(start + 1, end) if lines[i].strip() == line.strip()), None)
+    if at is None:
+        return False  # la ligne a été retouchée dans le document : on n'y touche pas
+    del lines[at]
+    end -= 1
+    if not any(ln.strip() for ln in lines[start + 1:end]):
+        lines[start + 1:end] = ["", f"{PLACEHOLDER} {section.lower()}.", ""]
+    path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    return True
+
+
+def retract(root: Path, chantier: str | None, angle_id: str) -> dict[str, Any]:
+    """Annule la DERNIÈRE réponse consignée d'un angle (réponse, « je ne sais pas » ou écart) : l'inverse de :func:`answer`.
+
+    La ligne que ``answer`` a ajoutée au document est retirée si elle y est encore telle quelle (une ligne retouchée à la
+    main est laissée, ``removed`` le dit) ; l'angle revient à l'état d'avant. Rend ``{"kind", "text", "removed"}`` : le
+    texte retiré, pour le proposer à la correction.
+    """
+    angle = _BY_ID.get(angle_id)
+    if angle is None:
+        raise ValueError(f"angle inconnu : {angle_id!r} — {', '.join(_BY_ID)}")
+    state = _load(root, chantier)
+    rec = (state or {}).get("angles", {}).get(angle.id)
+    if state is None or not rec:
+        raise ValueError(f"rien à retirer sur l'angle {angle.id!r}")
+    target = cadrage_dir(root, chantier)
+    answers: list[str] = rec.setdefault("answers", [])
+    if rec.get("state") == "ecarte" and str(rec.get("reason", "")).strip():
+        kind, text = "skip", str(rec.pop("reason"))
+        removed = _remove_from_section(
+            target / next(p.filename for p in PHASES if p.id == "brainstorm"),
+            "Écarté (et pourquoi)", f"- Angle « {angle.title} » écarté : {text}")
+    elif answers:
+        text = str(answers.pop())
+        if text.startswith(UNKNOWN_PREFIX):
+            kind, removed = "unknown", _remove_from_section(
+                target / next(p.filename for p in PHASES if p.id == "comprehension"), "Hypothèses", f"- {text}")
+            text = text[len(UNKNOWN_PREFIX) + len(angle.title):].lstrip(" —")
+        else:
+            kind, removed = "answer", _remove_from_section(
+                target / next(p.filename for p in PHASES if p.id == angle.phase), angle.section, f"- {text}")
+    else:
+        raise ValueError(f"rien à retirer sur l'angle {angle.id!r}")
+    rec["state"] = "couvert" if answers else "ouvert"
+    _save(root, chantier, state)
+    return {"kind": kind, "text": text, "removed": removed}
+
+
 MAX_STATE_DIRS = 50
 
 
@@ -410,6 +468,16 @@ def interview_states(root: Path) -> list[dict[str, Any]]:
         except ValueError as exc:
             out.append({"chantier": label, "error": str(exc)})
     return out
+
+
+def view(root: Path, chantier: str | None = None) -> dict[str, Any] | None:
+    """La vue de l'entretien d'UN chantier, en lecture seule ; ``None`` si aucun entretien n'a été entamé.
+
+    Même vue que ``interview_plan`` (angles, réponses, complet), sans rien écrire ni lancer d'intake. Un état illisible
+    lève ``ValueError``.
+    """
+    state = _load(root, chantier)
+    return None if state is None else _render(state, "enregistrée")
 
 
 def check_interview(root: Path, chantier: str | None = None) -> list[str]:

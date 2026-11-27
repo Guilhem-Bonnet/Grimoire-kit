@@ -14,6 +14,7 @@
 
 import { badge, icon } from '../shell.js';
 import { diffRows, driftNote } from './atelier-logic.js';
+import { moaHelp, validationHelp } from './atelier-avancement.js';
 
 const TONE = { proposee: '', validee: 'acc', 'en-cours': 'acc', livree: 'ok', recette: 'ok', reprise: 'warn' };
 const TASK_STATUS = {
@@ -53,7 +54,8 @@ function commandBlock(row, say) {
   copy.append(icon('i-act-copy'), 'Copier la commande');
   copy.addEventListener('click', async () => {
     if (await copyText(row.command)) {
-      say(`Commande copiée : lance-la dans ton terminal, ${row.id} se mettra à jour ici ensuite.`);
+      say(`Commande copiée : lance-la dans un terminal ouvert par toi, hors d’une session d’agent ; ${row.id} se mettra à jour ici ensuite.`);
+      copy.dispatchEvent(new CustomEvent('at-awaiting-validation', { bubbles: true })); // la page relit l'état quelque temps
     } else {
       const range = document.createRange();
       range.selectNodeContents(code);
@@ -65,7 +67,7 @@ function commandBlock(row, say) {
   });
   const wrap = el('div', 'at-live-do', null, { 'data-role': 'approve' });
   wrap.append(
-    el('p', 'at-muted', 'Valider engage la MOA : le geste se fait depuis son terminal, qui demande confirmation à l’écran.'),
+    validationHelp(), // où lancer la commande (son propre terminal, hors agent) et ce que l'écran affichera ensuite
     code, copy,
   );
   return wrap;
@@ -152,6 +154,22 @@ function liveLine(row, { open, toggle, say, more, comments = 0 }) {
   return node;
 }
 
+/** Les tâches qui viennent d'être créées : identifiant COMPLET, et un lien vers l'espace Travail. */
+function createdNode(ctx, created) {
+  const box = el('div', 'at-card at-split-done', null, { 'data-role': 'split-done' });
+  box.append(el('p', null, plural(created.length, 'tâche créée', 'tâches créées'), { 'data-role': 'split-done-title' }));
+  const list = el('ul', 'at-live-tasks');
+  for (const task of created) {
+    const li = el('li');
+    const link = el('a', 'at-loop-link', task.task_id, { href: `#travail?task=${encodeURIComponent(task.task_id)}`, 'data-act': 'open-task' });
+    link.addEventListener('click', (event) => { event.preventDefault(); ctx.goto('travail', { task: task.task_id }); });
+    li.append(link, ` ${task.requirement} — ${task.title.replace(/^REQ-\d+\s—\s/, '')}`);
+    list.append(li);
+  }
+  box.append(list);
+  return box;
+}
+
 function previewPanel(data, { confirm, cancel }) {
   const panel = el('section', 'at-card at-split', null, { 'aria-labelledby': 'at-split-h', 'data-role': 'decoupage' });
   const close = el('button', 'at-btn ghost', 'Fermer', { type: 'button', 'data-act': 'split-cancel' });
@@ -209,7 +227,7 @@ function previewPanel(data, { confirm, cancel }) {
  * de statut du document. Rend `{ line(req), toolbar, refresh }` : `line` pour chaque bloc d'exigence au rendu,
  * `toolbar` à poser dans l'en-tête, `refresh` pour relire l'état.
  */
-export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) {
+export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, onSplit = async () => {} }) {
   const commentsOf = (req) => comments(req) || 0; // lot 3 : fils ouverts sur l'exigence, comptés par le document
   const state = { trace: null, open: new Set() };
   const say = (text) => { status.textContent = text; };
@@ -221,6 +239,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
   const refreshButton = el('button', 'at-btn ghost', null, { type: 'button', 'data-act': 'live-refresh', 'aria-label': 'Actualiser l’état des exigences' });
   refreshButton.append(icon('i-act-retry'), 'Actualiser');
   const slot = el('div', null, null, { 'data-role': 'decoupage-slot' });
+  const moaSlot = el('div', null, null, { 'data-role': 'moa-slot' }); // comment déclarer la MOA, quand elle ne l'est pas
   toolbar.append(split, summary, refreshButton);
 
   /** Le détail complet d'une exigence, pour un chantier dont les lignes sont allégées. */
@@ -247,6 +266,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
       node.replaceWith(line(node.getAttribute('data-live')));
     }
     const trace = state.trace;
+    moaSlot.replaceChildren(...(trace && !trace.moa.declared ? [moaHelp(trace.moa, say)] : []));
     if (!trace || !trace.requirements.length) {
       split.disabled = true;
       summary.textContent = trace ? 'Aucune exigence identifiée : écris-les en « REQ-001 : … » pour les suivre.' : '';
@@ -258,7 +278,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
     summary.textContent = missing.length
       ? `${plural(done, 'exigence Must validée', 'exigences Must validées')} sur ${must} : à valider d’abord ${missing.join(', ')}.`
       : (must ? (must > 1 ? `Les ${must} exigences Must sont validées.` : 'L’exigence Must est validée.') : 'Aucune exigence Must : le découpage est possible.');
-    if (!trace.moa.declared) summary.textContent += ' Aucune MOA déclarée : personne ne peut valider.';
+    if (!trace.moa.declared) summary.textContent += ' Aucune MOA déclarée : voir ci-dessous comment la déclarer.';
   };
 
   let busy = false;
@@ -289,7 +309,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
       if (ctx.signal.aborted) return;
       if (!data.ready) {
         say(`Valide d’abord les exigences Must : ${data.blocked_by.map((b) => b.id).join(', ')}.`);
-        slot.replaceChildren();
+        slot.replaceChildren(...(data.moa && !data.moa.declared ? [moaHelp(data.moa, say)] : []));
         return;
       }
       const confirm = async (go) => {
@@ -297,11 +317,13 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
         try {
           const done = await ctx.api.atelierDecouper(slug, data.digest);
           if (ctx.signal.aborted) return;
-          slot.replaceChildren();
-          say(done.created.length
-            ? `${plural(done.created.length, 'tâche créée', 'tâches créées')} : ${done.created.map((c) => c.task_id).join(', ')}. Aucun travail n’est lancé.`
-            : 'Rien de nouveau à créer : le découpage était déjà fait.');
+          slot.replaceChildren(...(done.created.length ? [createdNode(ctx, done.created)] : []));
+          const message = done.created.length
+            ? `${plural(done.created.length, 'tâche créée', 'tâches créées')}. Aucun travail n’est lancé : ouvre-les dans l’espace Travail.`
+            : 'Rien de nouveau à créer : le découpage était déjà fait.';
+          say(message);
           await refresh();
+          await onSplit(message); // la page du chantier relit son état et ses tâches
         } catch (cause) {
           if (ctx.signal.aborted) return;
           if (cause.code === 409) {
@@ -336,7 +358,24 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0 }) 
     document.removeEventListener('visibilitychange', onVisible);
     window.removeEventListener('focus', onVisible);
   });
+  // Une commande de validation vient d'être copiée : la MOA la lance au terminal. Le pouls ne voit pas toujours le journal
+  // d'autorité tout de suite ; on relit donc l'état toutes les quatre secondes, onglet visible, jusqu'à six minutes au plus.
+  let watching = null;
+  sheet.addEventListener('at-awaiting-validation', () => {
+    if (watching) return;
+    let left = 90;
+    watching = setInterval(async () => {
+      left -= 1;
+      if (ctx.signal.aborted || left <= 0 || (state.trace && state.trace.requirements.every((r) => r.validated))) {
+        clearInterval(watching);
+        watching = null;
+        return;
+      }
+      if (!document.hidden) await refresh();
+    }, 4000);
+    ctx.signal.addEventListener('abort', () => clearInterval(watching));
+  });
   const wrap = el('div');
-  wrap.append(toolbar, slot);
+  wrap.append(toolbar, moaSlot, slot);
   return { line, toolbar: wrap, refresh };
 }
