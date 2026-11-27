@@ -23,7 +23,8 @@ function el(tag, className, text, attrs) {
 
 /**
  * Le volet d'historique. `hooks` : `sheet` (la feuille du document), `main` (son conteneur : la comparaison s'y insère
- * à côté de la feuille), `grid` (la grille feuille + volet), `say(message)` (la ligne d'état). Rend `{ button, element,
+ * à côté de la feuille), `grid` (la grille feuille + volet), `say(message)` (la ligne d'état), `onCompare(ids)` (les phases de la
+ * comparaison affichée, nul à son retrait). Rend `{ button, element,
  * isOpen, close }` : `button` va dans la barre, `element` dans la grille.
  */
 export function createHistory(ctx, slug, hooks) {
@@ -59,6 +60,7 @@ export function createHistory(ctx, slug, hooks) {
     compare = null;
     current = null;
     hooks.sheet.hidden = false;
+    if (hooks.onCompare) hooks.onCompare(null);
     for (const row of body.querySelectorAll('[aria-current="true"]')) row.removeAttribute('aria-current');
     if (focus) hooks.sheet.querySelector('[data-section] h2')?.focus({ preventScroll: true });
   };
@@ -100,6 +102,7 @@ export function createHistory(ctx, slug, hooks) {
     hooks.main.insertBefore(section, hooks.sheet);
     compare = section;
     current = version.id;
+    if (hooks.onCompare) hooks.onCompare(data.phases.map((phase) => phase.id)); // la barre des phases marque celle du diff affiché
     back.focus({ preventScroll: true });
   };
 

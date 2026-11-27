@@ -33,8 +33,15 @@ export function writePref(storage, slug, open) {
   }
 }
 
-/** Le choix mémorisé l'emporte ; sans lui, déplié en colonne (large), replié en tiroir (étroit). */
-export function initialOpen(pref, wide) {
+/** Largeur de la toile (px) sous laquelle le document passe avant tout : l'assistant reste replié derrière sa pastille. */
+export const PHONE_MAX = 900;
+
+/**
+ * Le choix mémorisé l'emporte ; sans lui, déplié en colonne (large), replié en tiroir (étroit). Sous `PHONE_MAX` (`phone`), le
+ * document passe d'abord : replié à l'ouverture, même si un autre écran (le bureau) l'avait laissé déplié.
+ */
+export function initialOpen(pref, wide, phone = false) {
+  if (phone) return false;
   if (pref === 'open') return true;
   if (pref === 'closed') return false;
   return Boolean(wide);
