@@ -199,6 +199,13 @@ def groupe_a_confirmer(conv: Conversation) -> tuple[str, ...]:
     ne confirme jamais un texte qui n'était pas écrit dans le message auquel il répond.
     """
     pending = conv.en_attente()
+    waiting = {e.id for e in pending}
+    # Après une panne en plein remplacement, l'ancien élément attend de nouveau : le REMPLAÇANT passe d'abord, seul ;
+    # une fois confirmé, l'ancien est écarté sans nouvelle question. De même, un élément dont la ligne est DÉJÀ dans le
+    # document (« ecrit ») mais qui attend de nouveau (texte du document différent de celui consigné) : seul, d'abord.
+    for e in pending:
+        if e.remplace in waiting or e.ecrit:
+            return (e.id,)
     together = [e for e in pending if not e.individuel]
     if together:
         group: list[str] = []

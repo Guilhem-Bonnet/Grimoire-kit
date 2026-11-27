@@ -104,10 +104,15 @@ class EntreeExtraction:
 
 @dataclass(frozen=True, slots=True)
 class ElementExtrait:
-    """Un élément compris : son texte et sa rubrique (``phase/section``, de la liste fermée)."""
+    """Un élément compris : son texte et sa rubrique (``phase/section``, de la liste fermée).
+
+    ``tronque`` : le PROGRAMME a coupé ce texte (et marqué la coupe par « … »). Le gardien ne retient ce drapeau que du
+    moteur sans modèle, qui est du programme : celui d'un autre moteur est effacé, un « … » venu de lui n'est qu'un texte.
+    """
 
     texte: str
     rubrique: str
+    tronque: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +219,17 @@ _LEADS = ("en fait", "finalement", "je me corrige", "j ai mal dit", "je me suis 
 _POINTS_D_INTERROGATION = ("?", "？", "¿", "؟", ";", "՞", "﹖", "⁇", "⁈", "⁉", "❓", "❔")
 
 
+#: L'interrobang (U+203D) et le point d'ironie (U+2E2E), en plus de la liste ci-dessus.
+_POINTS_SUPPLEMENTAIRES = ("‽", "⸮")
+
+
+def _interroge(texte: str) -> bool:
+    """Le texte porte-t-il un point d'interrogation, de n'importe quelle écriture ? (liste connue, puis nom Unicode)"""
+    if any(mark in texte for mark in (*_POINTS_D_INTERROGATION, *_POINTS_SUPPLEMENTAIRES)) or "?" in _norm(texte):
+        return True
+    return any(m in unicodedata.name(c, "") for c in texte if not c.isascii() for m in ("QUESTION", "INTERROBANG"))
+
+
 def _norm(texte: str) -> str:
     """Minuscules, sans accents, ponctuation en espaces : de quoi reconnaître une tournure simple."""
     plain = unicodedata.normalize("NFKD", texte.lower().replace("’", "'"))
@@ -228,7 +244,7 @@ def est_un_oui(texte: str) -> bool:
     « pas vraiment » : non. Un moteur n'en décide jamais. Une question n'est jamais un oui : « d'accord ? », « oui ? »,
     « c'est bon ? » demandent quelque chose, elles n'accordent rien (tout point d'interrogation, de toute chasse, l'exclut).
     """
-    if any(mark in texte for mark in _POINTS_D_INTERROGATION) or "?" in _norm(texte):
+    if _interroge(texte):  # liste connue, puis tout caractère dont le nom Unicode dit « question » ou « interrobang »
         return False
     norm = _norm(texte)
     norm = " ".join(norm.split())
@@ -252,29 +268,29 @@ def _starts(norm: str, phrases: tuple[str, ...]) -> bool:
     return any(norm == p or norm.startswith(p + " ") for p in phrases)
 
 
-def _morceaux(texte: str, *, liste: bool) -> list[str]:
+def _morceaux(texte: str, *, liste: bool) -> list[tuple[str, bool]]:
     """Découpe une réponse en éléments : par ligne et « ; » en brainstorm, sinon par phrases tenant dans la limite."""
     if liste:
         raw = [p.strip(" -•*\t") for chunk in texte.splitlines() for p in chunk.split(";")]
         items = [" ".join(p.split()) for p in raw if p.strip()]
     else:
         items = [" ".join(texte.split())]
-    out: list[str] = []
+    out: list[tuple[str, bool]] = []  # (texte, coupé par le programme : le drapeau est posé ICI, à l'instant de la coupe)
     for item in items:
         if len(item) <= MAX_ELEMENT_CHARS:
-            out.append(item)
+            out.append((item, False))
             continue
         current = ""
         for sentence in item.replace("? ", "?\n").replace("! ", "!\n").replace(". ", ".\n").splitlines():
             if current and len(current) + 1 + len(sentence) > MAX_ELEMENT_CHARS:
-                out.append(current)
+                out.append((current, False))
                 current = ""
             current = f"{current} {sentence}".strip()
             if len(current) > MAX_ELEMENT_CHARS:  # une phrase seule trop longue : coupée à un mot, la fin est marquée
-                out.append(current[: MAX_ELEMENT_CHARS - 1].rsplit(" ", 1)[0] + "…")
+                out.append((current[: MAX_ELEMENT_CHARS - 1].rsplit(" ", 1)[0] + "…", True))
                 current = ""
         if current:
-            out.append(current)
+            out.append((current, False))
     return out[:MAX_ELEMENTS_PAR_TOUR]
 
 
@@ -334,7 +350,7 @@ class MoteurSansModele:
                     text, stripping = text.lstrip().split(None, size)[-1], True
                     break
         liste = entree.rubrique_visee == "brainstorm/Pistes" or entree.mode == "brainstorm"
-        return [ElementExtrait(m, entree.rubrique_visee) for m in _morceaux(text, liste=liste) if m]
+        return [ElementExtrait(m, entree.rubrique_visee, cut) for m, cut in _morceaux(text, liste=liste) if m]
 
     def reformuler(self, entree: EntreeReformulation) -> str:
         said = " ; ".join(entree.elements)
@@ -378,7 +394,10 @@ class Garde:
 
     def __init__(self, moteur: Any, *, delai_s: float = DELAI_MOTEUR_S, repli: MoteurSansModele | None = None,
                  rejeu: dict[tuple[str, str], Any] | None = None) -> None:
-        self.moteur = moteur
+        #: Le moteur sans modèle est du programme : le gardien en construit LUI-MÊME une instance neuve (une instance fournie
+        #: peut avoir une méthode remplacée) ; seul ce moteur interne est cru sur le drapeau de troncature.
+        self.interne = type(moteur) is MoteurSansModele
+        self.moteur = MoteurSansModele() if self.interne else moteur
         self.delai_s = delai_s
         self.repli = repli or MoteurSansModele()
         self.notes: list[str] = []
@@ -483,8 +502,9 @@ class Garde:
                 if not isinstance(item, ElementExtrait) or item.rubrique not in entree.rubriques or item.rubrique not in RUBRIQUE_KEYS:
                     self.notes.append("extraire_elements : un élément hors cadre (rubrique inconnue) est refusé")
                     continue
-                try:
-                    kept.append(ElementExtrait(clean_text(item.texte, MAX_ELEMENT_CHARS, what="élément"), item.rubrique))
+                try:  # le drapeau de coupe n'est cru que du moteur du programme : un autre moteur ne coupe pas « pour » lui
+                    cut = item.tronque is True and self.interne
+                    kept.append(ElementExtrait(clean_text(item.texte, MAX_ELEMENT_CHARS, what="élément"), item.rubrique, cut))
                 except ConversationError as exc:
                     self.notes.append(f"extraire_elements : un élément est refusé ({exc})")
             if out and not kept:

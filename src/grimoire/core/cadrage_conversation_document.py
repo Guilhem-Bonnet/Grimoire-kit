@@ -16,10 +16,11 @@ a été retouché ailleurs) on ne touche à rien et on le dit.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from grimoire.core import cadrage_interview as interview
 from grimoire.core.cadrage import cadrage_dir
-from grimoire.core.cadrage_conversation import Conversation, ConversationError, Element
+from grimoire.core.cadrage_conversation import MAX_ELEMENT_CHARS, Conversation, ConversationError, Element, clean_text
 from grimoire.core.fsio import locked
 
 __all__ = ["FORMULE_INCONNU", "a_defaire", "corriger", "ecrire", "origin", "reconcilier", "retirer", "traces", "verifier"]
@@ -43,27 +44,78 @@ def traces(root: Path, slug: str) -> dict[str, list[str | None]]:
 
     La clé ``"skip"`` de chaque angle écarté est rendue sous ``"<angle>#skip"``. Lecture seule.
     """
-    try:
-        state = interview._load(root, _name(slug))
-    except ValueError as exc:
-        raise ConversationError(str(exc)) from exc
     out: dict[str, list[str | None]] = {}
-    for angle, rec in ((state or {}).get("angles") or {}).items():
+    for angle, rec in _angles(root, slug).items():
         out[angle] = [None if line is None else line.get("origin") for line in rec.get("lines", [])]
         if isinstance(rec.get("skip"), dict):
             out[f"{angle}#skip"] = [rec["skip"].get("origin")]
     return out
 
 
+def _angles(root: Path, slug: str) -> dict[str, Any]:
+    try:
+        state = interview._load(root, _name(slug))
+    except ValueError as exc:
+        raise ConversationError(str(exc)) from exc
+    return dict((state or {}).get("angles") or {})
+
+
+def _consignes(angles: dict[str, Any], conv: Conversation, el: Element) -> list[tuple[str, dict[str, Any]]]:
+    """Les (réponse, ligne de trace) que la trace de l'entretien porte pour cet élément, repérées par son origine."""
+    rec = angles.get(el.angle) or {}
+    answers, want = rec.get("answers", []), origin(conv, el)
+    return [(str(answers[i]), line) for i, line in enumerate(rec.get("lines", []))
+            if isinstance(line, dict) and line.get("origin") == want and i < len(answers)]
+
+
+def _relue(root: Path, slug: str, reponse: str, ligne: dict[str, Any]) -> str | None:
+    """Le texte de la ligne RÉELLE du fichier de phase, si la trace et le fichier concordent ; sinon ``None`` (fail-closed).
+
+    La ligne consignée doit exister UNE fois dans son fichier de phase et porter exactement la réponse consignée ; le texte
+    doit être identique à lui-même après nettoyage (``clean_text``) : ni caractère de contrôle, ni retour à la ligne.
+    """
+    text = str(ligne.get("line", ""))
+    try:
+        reel = interview._phase_file(root, _name(slug), str(ligne.get("phase"))).read_text(encoding="utf-8").splitlines()
+        propre = clean_text(reponse, MAX_ELEMENT_CHARS, what="texte du document")
+    except (ValueError, OSError):  # ConversationError est une ValueError : fichier illisible ou texte que la conversation ne porte pas
+        return None
+    forme = text == f"- {reponse}" or (text.startswith("- *") and text.endswith(f"* {reponse}"))
+    return propre if reel.count(text) == 1 and forme and propre == reponse else None
+
+
 def reconcilier(root: Path, slug: str, conv: Conversation) -> list[str]:
     """Un élément « écrit » dont la trace de l'entretien ne porte pas son origine n'a pas été écrit par cette conversation
-    (fichier forgé, ligne de l'entretien guidé, trace perdue) : il repasse « non écrit », et on le dit. Rien n'est retiré."""
+    (fichier forgé, ligne de l'entretien guidé, trace perdue) : il repasse « non écrit », et on le dit. Rien n'est retiré.
+
+    Un élément écrit dont la trace porte un AUTRE texte que celui de la conversation (panne pendant la réécriture de ce
+    qui suit un élément corrigé : le document a le texte corrigé, la conversation l'ancien) repasse « à confirmer », avec le
+    texte EXACT relu dans la LIGNE RÉELLE du fichier de phase (origine ``document``, à confirmer seul) : une alerte le dit.
+    Fail-closed : si la trace et le fichier de phase divergent entre eux, si le texte n'est pas identique à lui-même après
+    nettoyage, ou s'il y a plusieurs lignes de même origine, l'alerte est seule : rien n'est proposé, écrit ni retiré.
+    Rien n'est jamais écrit ni retiré ici ; l'élément reste propriétaire de sa ligne, donc le confirmer ne la réécrit pas.
+    """
+    angles = _angles(root, slug)
     seen = {o for rows in traces(root, slug).values() for o in rows if o}
     alertes = []
     for el in conv.elements:
         if el.ecrit and origin(conv, el) not in seen:
             el.ecrit = False
             alertes.append(f"« {el.texte[:60]} » n'est pas dans le document de cette conversation : je ne le retirerai pas")
+    for el in conv.elements:
+        rows = _consignes(angles, conv, el) if el.ecrit and el.genre == "element" else []
+        if len(rows) == 1 and rows[0][0] == interview._fold(el.texte):
+            continue
+        if not rows:
+            continue
+        texte = _relue(root, slug, *rows[0]) if len(rows) == 1 else None
+        if texte is None:
+            alertes.append(f"« {el.texte[:60]} » : la trace et le fichier de phase ne concordent pas (ou plusieurs lignes de "
+                           "même origine) : je n'y touche pas")
+            continue
+        alertes.append(f"« {el.texte[:60]} » : le document porte « {texte[:60]} » (panne pendant une correction) : "
+                       "il attend ta confirmation sur ce texte exact")
+        el.texte, el.statut, el.individuel, el.origine = texte, "propose", True, "document"
     return alertes
 
 
@@ -115,8 +167,19 @@ def _retract(root: Path, name: str | None, angle: str) -> None:
         raise ConversationError(str(exc)) from exc
 
 
-def _write_one(root: Path, name: str | None, conv: Conversation, el: Element) -> None:
-    """Range UN élément par ``answer`` ; ``ecrit`` dit s'il est vraiment entré (un doublon exact n'écrit rien)."""
+def _write_one(root: Path, name: str | None, conv: Conversation, el: Element) -> bool:
+    """Range UN élément par ``answer`` ; ``ecrit`` dit s'il est vraiment entré (un doublon exact n'écrit rien). Rend vrai
+    si le fichier a réellement changé.
+
+    Un élément déjà rangé dont la ligne du document porte exactement son texte (repris après une panne) n'est pas réécrit :
+    il garde sa ligne et son rang. Une ligne de même origine qui existe déjà sans concorder refuse d'écrire : jamais deux
+    lignes de la même origine.
+    """
+    own = _consignes(_angles(root, "principal" if name is None else name), conv, el)
+    if own and el.ecrit and el.genre == "element" and len(own) == 1 and own[0][0] == interview._fold(el.texte):
+        return False
+    if own:
+        raise ConversationError("une ligne de cette conversation existe déjà pour cet élément : je n'en écris pas une seconde")
     before, _state, _ = _answers(root, name, el.angle)
     origine = origin(conv, el)
     try:
@@ -134,6 +197,7 @@ def _write_one(root: Path, name: str | None, conv: Conversation, el: Element) ->
     el.ecrit = state == "ecarte" and bool(reason.strip()) if el.genre == "sansobjet" else len(after) > len(before)
     conv.rang += 1
     el.rang = conv.rang
+    return el.ecrit
 
 
 def _refuse_accepted(root: Path, name: str | None, items: list[Element]) -> None:
@@ -147,19 +211,23 @@ def _refuse_accepted(root: Path, name: str | None, items: list[Element]) -> None
             raise ConversationError(str(exc)) from exc
 
 
-def ecrire(root: Path, slug: str, conv: Conversation, items: list[Element], *, remplace: Element | None = None) -> None:
+def ecrire(root: Path, slug: str, conv: Conversation, items: list[Element], *, remplace: Element | None = None) -> bool:
     """Range les éléments confirmés dans le document, tous ou aucun si le document est accepté (``ConversationError``).
 
     ``remplace`` : un élément déjà rangé que ceux-ci corrigent ; il est retiré d'abord, ce qui le suivait est réécrit.
+    Rend vrai si un fichier a réellement changé.
     """
     name = _name(slug)
     with locked(cadrage_dir(root, name) / interview.STATE_FILE):
         _refuse_accepted(root, name, [*items, *([remplace] if remplace is not None else [])])
+        changed = False
         if remplace is not None and remplace.ecrit:
+            changed = True
             for later in _unwrite(root, name, conv, remplace)[1:]:
                 _write_one(root, name, conv, later)
         for el in items:
-            _write_one(root, name, conv, el)
+            changed = _write_one(root, name, conv, el) or changed
+        return changed
 
 
 def _unwrite(root: Path, name: str | None, conv: Conversation, el: Element) -> list[Element]:
