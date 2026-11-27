@@ -24,6 +24,8 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 from playwright.sync_api import Browser, Page, expect
 
 from grimoire.core.chantiers import new_chantier
+from grimoire.core.standard_state import AGENT_MARKER_ENVS, HOST_SESSION_ENVS, SESSION_ENV
+from grimoire.missions import requirement_gate as rg
 from grimoire.tools import workspace_atelier, workspace_atelier_comments
 
 from .conftest import _serve_empty_project
@@ -42,12 +44,48 @@ EXIGENCES = (
 SECTION = "[data-section='brainstorm']"
 
 
+_AGENT_ENVS = ("GRIMOIRE_UNATTENDED", SESSION_ENV, *HOST_SESSION_ENVS, *AGENT_MARKER_ENVS)
+
+
+@pytest.fixture(autouse=True)
+def _human_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La MOA au terminal, simulée pour *préparer* l'état (une exigence validée) : l'écran n'a aucun moyen de valider."""
+    for name in _AGENT_ENVS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(rg, "_confirm_human_turn", lambda *_: True)
+
+
+def _declare_moa(root: Path, name: str) -> None:
+    from ruamel.yaml import YAML
+
+    yaml = YAML()
+    path = root / "project-context.yaml"
+    data = yaml.load(path.read_text(encoding="utf-8"))
+    governance = data.get("governance") or {}
+    governance["roles"] = {**(governance.get("roles") or {}), "moa": name}
+    data["governance"] = governance
+    with path.open("w", encoding="utf-8") as handle:
+        yaml.dump(data, handle)
+
+
 @pytest.fixture(scope="module")
 def project_on(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, Path]]:
+    """Un projet SANS MOA déclarée (aucune dépendance à l'identité git de la machine)."""
     roots: list[Path] = []
     for url in _serve_empty_project(tmp_path_factory, "atelier-liens", roots):
         workspace_atelier.set_atelier(roots[0], True)
         new_chantier(roots[0], "Chantier Cible")  # celui que visent les références `[[Chantier Cible]]`
+        yield url, roots[0]
+
+
+@pytest.fixture(scope="module")
+def project_moa(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, Path]]:
+    """Un projet dont la MOA est déclarée dans `project-context.yaml` (« Ada »)."""
+    roots: list[Path] = []
+    for url in _serve_empty_project(tmp_path_factory, "atelier-liens-moa", roots):
+        _declare_moa(roots[0], "Ada")
+        workspace_atelier.set_atelier(roots[0], True)
+        new_chantier(roots[0], "Chantier Cible")
         yield url, roots[0]
 
 
@@ -142,13 +180,67 @@ def test_hover_and_focus_show_the_requirement_card(browser: Browser, project_on:
         expect(card).to_contain_text("REQ-001")
         expect(card).to_contain_text("maintenir un bouton pour dicter une idée")
         expect(card).to_contain_text("Must")
-        expect(card).to_contain_text("Non validée", timeout=WAIT_MS)  # la trace du découpage arrive après le document
+        # Aucune MOA déclarée : le serveur ne peut valider aucune exigence, la carte le dit (et ne dit jamais « Validée »).
+        expect(card.locator("[data-role='ref-card-state']")).to_have_text("Validation : aucune MOA déclarée", timeout=WAIT_MS)
         page.mouse.move(5, 5)
         expect(card).to_be_hidden(timeout=WAIT_MS)
         page.locator("a.at-ref-req").focus()
         expect(card).to_be_visible(timeout=WAIT_MS)
         page.keyboard.press("Escape")
         expect(card).to_be_hidden(timeout=WAIT_MS)
+
+
+def test_the_card_says_not_validated_when_a_moa_is_declared(browser: Browser, project_moa: tuple[str, Path]) -> None:
+    url, root = project_moa
+    slug = _chantier(root, "Carte Non Validée")
+    for page in _doc(browser, url, slug):
+        page.locator("a.at-ref-req").hover()
+        expect(page.locator("[data-role='ref-card-state']")).to_have_text("Non validée", timeout=WAIT_MS)
+
+
+def test_the_card_says_who_validated_when_the_server_attests_it(browser: Browser, project_moa: tuple[str, Path]) -> None:
+    url, root = project_moa
+    slug = _chantier(root, "Carte Validée")
+    rg.approve_requirement(root, f"{slug}/REQ-001", actor="ada")  # la vraie garde, la MOA simulée au terminal (voir `_human_terminal`)
+    for page in _doc(browser, url, slug):
+        page.locator("a.at-ref-req").hover()
+        state = page.locator("[data-role='ref-card-state']")
+        expect(state).to_contain_text("Validée par", timeout=WAIT_MS)
+        expect(state).not_to_contain_text("Non validée")
+
+
+def test_the_card_is_honest_while_the_trace_is_missing_then_catches_up(browser: Browser, project_moa: tuple[str, Path]) -> None:
+    """La trace du découpage arrive après le document : survolée avant, la carte le dit, puis se met à jour toute seule.
+
+    La réponse de la route `…/trace` est RETENUE par interception réseau (Playwright) pour reproduire un serveur lent : c'est
+    ce qui s'est produit sur un runner lent, où la carte restait sans état.
+    """
+    url, root = project_moa
+    slug = _chantier(root, "Carte Trace Lente")
+    held: list[object] = []
+    release = {"on": False}
+
+    def gate(route: object) -> None:
+        if release["on"]:
+            route.continue_()  # type: ignore[attr-defined]
+        else:
+            held.append(route)
+
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    page.route(re.compile(r".*/atelier/chantiers/[^/]+/trace.*"), gate)  # type: ignore[arg-type]
+    try:
+        page.goto(f"{url}/workspace/index.html#atelier?chantier={slug}", wait_until="domcontentloaded")
+        page.locator(f"{SECTION} .at-md").first.wait_for(timeout=WAIT_MS)
+        page.locator("a.at-ref-req").hover()
+        state = page.locator("[data-role='ref-card-state']")
+        expect(state).to_have_text("État de validation indisponible", timeout=WAIT_MS)
+        release["on"] = True
+        for route in held:
+            route.continue_()  # type: ignore[attr-defined]
+        expect(state).to_have_text("Non validée", timeout=WAIT_MS)  # sans nouveau survol
+    finally:
+        context.close()
 
 
 def test_a_chantier_link_opens_that_chantier(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -400,13 +492,13 @@ def test_an_own_write_does_not_announce_a_change_elsewhere(browser: Browser, pro
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
-def test_captures(browser: Browser, project_on: tuple[str, Path], scheme: str) -> None:
+def test_captures(browser: Browser, project_moa: tuple[str, Path], scheme: str) -> None:
     target = os.environ.get("GRIMOIRE_E2E_CAPTURES")
     if not target:
         return
     out = Path(target)
     out.mkdir(parents=True, exist_ok=True)
-    url, root = project_on
+    url, root = project_moa
     slug = _chantier(root, f"Exigences de la refonte {scheme}")
     doc = workspace_atelier.document(root, slug)
     block = next(b for p in doc["phases"] if p["id"] == "brainstorm" for b in p["blocks"] if "Voir REQ-001" in b["text"])

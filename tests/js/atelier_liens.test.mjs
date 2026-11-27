@@ -82,7 +82,7 @@ test('exigenceBlocks : une entrée par identifiant, la première gagne', () => {
 
 test('exigenceCard : titre, priorité et validation d’après la trace ; inconnue sans trace', () => {
   const trace = { requirements: [{ id: 'REQ-001', validated: true }, { id: 'REQ-002', validated: false }] };
-  assert.deepEqual(exigenceCard(doc, 'REQ-001', trace), { req: 'REQ-001', titre: 'Exporter', priorite: 'Must', validee: true, phase: 'exigences', blockId: 'e1' });
+  assert.deepEqual(exigenceCard(doc, 'REQ-001', trace), { req: 'REQ-001', titre: 'Exporter', priorite: 'Must', validee: true, par: '', le: '', moa: null, phase: 'exigences', blockId: 'e1' });
   assert.equal(exigenceCard(doc, 'REQ-002', trace).validee, false);
   assert.equal(exigenceCard(doc, 'REQ-002', trace).titre, 'REQ-002', 'sans titre : l’identifiant');
   assert.equal(exigenceCard(doc, 'REQ-001', null).validee, null);
@@ -90,10 +90,24 @@ test('exigenceCard : titre, priorité et validation d’après la trace ; inconn
   assert.equal(exigenceCard(doc, 'REQ-099', trace), null);
 });
 
-test('cardStateText : dit validée ou non, se tait quand on ne sait pas', () => {
-  assert.equal(cardStateText({ validee: true }), 'Validée');
-  assert.equal(cardStateText({ validee: false }), 'Non validée');
-  assert.equal(cardStateText({ validee: null }), '');
+test('cardStateText : une mention vraie dans chaque cas, « Validée » seulement si le serveur l’atteste', () => {
+  assert.equal(cardStateText({ validee: true, par: 'Ada', le: '2026-11-20T12:00:00Z' }), 'Validée par Ada le 20 novembre');
+  assert.equal(cardStateText({ validee: true, par: '', le: '' }), 'Validée par la MOA');
+  assert.equal(cardStateText({ validee: true, par: 'Ada', le: 'pas une date' }), 'Validée par Ada');
+  assert.equal(cardStateText({ validee: false, moa: true }), 'Non validée');
+  assert.equal(cardStateText({ validee: false, moa: null }), 'Non validée');
+  assert.equal(cardStateText({ validee: false, moa: false }), 'Validation : aucune MOA déclarée');
+  assert.equal(cardStateText({ validee: null, moa: null }), 'État de validation indisponible');
+  assert.equal(cardStateText({}), 'État de validation indisponible');
+});
+
+test('exigenceCard : la MOA et l’attestation viennent de la trace, jamais d’ailleurs', () => {
+  const trace = { moa: { declared: false }, requirements: [{ id: 'REQ-001', validated: true, validated_by: 'Ada', validated_at: '2026-11-20T12:00:00Z' }, { id: 'REQ-002', validated: false, validated_by: 'x' }] };
+  const done = exigenceCard(doc, 'REQ-001', trace);
+  assert.deepEqual([done.validee, done.par, done.le, done.moa], [true, 'Ada', '2026-11-20T12:00:00Z', false]);
+  const open = exigenceCard(doc, 'REQ-002', trace);
+  assert.deepEqual([open.validee, open.par, open.le], [false, '', ''], 'non validée : aucune attestation reprise');
+  assert.equal(exigenceCard(doc, 'REQ-001', null).moa, null);
 });
 
 test('atelierHash : seuls les champs donnés figurent, dans un ordre stable', () => {

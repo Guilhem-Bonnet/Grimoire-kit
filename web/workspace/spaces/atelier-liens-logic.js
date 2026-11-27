@@ -71,16 +71,31 @@ export function exigenceCard(doc, req, trace) {
     titre: String(found.block.titre || '').trim() || req,
     priorite: String(found.block.priorite || '').trim(),
     validee: row ? Boolean(row.validated) : null,
+    par: row && row.validated ? String(row.validated_by || '') : '',
+    le: row && row.validated ? String(row.validated_at || '') : '',
+    moa: trace && trace.moa ? Boolean(trace.moa.declared) : null, // une MOA est-elle déclarée ? (nul : inconnu)
     phase: found.phase,
     blockId: found.block.id,
   };
 }
 
-/** La ligne d'état d'une carte d'exigence. */
+function dayText(iso) {
+  const date = new Date(iso);
+  return iso && !Number.isNaN(date.getTime()) ? date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '';
+}
+
+/**
+ * La ligne d'état d'une carte d'exigence : toujours une mention, jamais « Validée » sans l'attestation du serveur.
+ * Validée (le serveur l'atteste) : « Validée par <MOA> le <date> » ; non validée : « Non validée » ; non validée faute de MOA
+ * déclarée : « Validation : aucune MOA déclarée » ; trace pas (encore) lue : « État de validation indisponible ».
+ */
 export function cardStateText(card) {
-  if (card.validee === true) return 'Validée';
-  if (card.validee === false) return 'Non validée';
-  return '';
+  if (card.validee === true) {
+    const day = dayText(card.le);
+    return `Validée par ${card.par || 'la MOA'}${day ? ` le ${day}` : ''}`;
+  }
+  if (card.validee === false) return card.moa === false ? 'Validation : aucune MOA déclarée' : 'Non validée';
+  return 'État de validation indisponible';
 }
 
 /** L'ancre d'URL de l'Atelier : `#atelier?chantier=<slug>&phase=<id>&req=<REQ>&lecture=1` (seuls les champs donnés y figurent). */

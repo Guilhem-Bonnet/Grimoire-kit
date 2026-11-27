@@ -67,8 +67,27 @@ export function createRefs(ctx, hooks) {
     head.append(el('span', 'at-refcard-id', data.req));
     if (data.priorite) head.append(el('span', 'at-refcard-prio', data.priorite));
     card.append(head, el('p', 'at-refcard-title', data.titre));
-    const state = cardStateText(data);
-    if (state) card.append(el('p', `at-refcard-state${data.validee ? ' is-ok' : ''}`, state));
+    card.append(el('p', `at-refcard-state${data.validee ? ' is-ok' : ''}`, cardStateText(data), { 'data-role': 'ref-card-state' }));
+  };
+
+  /** Pose la carte sous son lien (au-dessus s'il n'y a pas la place). */
+  const place = (link) => {
+    const rect = link.getBoundingClientRect();
+    const width = card.offsetWidth;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const below = rect.bottom + 6;
+    const top = below + card.offsetHeight > window.innerHeight - 8 ? Math.max(8, rect.top - card.offsetHeight - 6) : below;
+    card.style.left = `${Math.round(left)}px`;
+    card.style.top = `${Math.round(top)}px`;
+  };
+
+  /** La trace du découpage vient d'arriver (ou a changé) : la carte ouverte dit l'état à jour, sans attendre un nouveau survol. */
+  const refresh = () => {
+    if (!shownFor) return;
+    const data = exigenceCard(hooks.doc(), shownFor.textContent, hooks.trace());
+    if (!data) { hide(); return; }
+    fill(data);
+    place(shownFor);
   };
 
   function hide() {
@@ -86,13 +105,7 @@ export function createRefs(ctx, hooks) {
     card.hidden = false;
     shownFor = link;
     link.setAttribute('aria-describedby', card.id);
-    const rect = link.getBoundingClientRect();
-    const width = card.offsetWidth;
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    const below = rect.bottom + 6;
-    const top = below + card.offsetHeight > window.innerHeight - 8 ? Math.max(8, rect.top - card.offsetHeight - 6) : below;
-    card.style.left = `${Math.round(left)}px`;
-    card.style.top = `${Math.round(top)}px`;
+    place(link);
   };
 
   const bind = (link, type, value) => {
@@ -112,6 +125,7 @@ export function createRefs(ctx, hooks) {
     activate,
     bind,
     hide,
+    refresh,
     /** Ce dont dépend le rendu des références : change quand une exigence ou un chantier apparaît ou disparaît. */
     signature: () => [...exigenceBlocks(hooks.doc()).keys()].join(',') + '|' + (hooks.chantiers() || []).map((r) => `${r.slug}:${r.titre}`).join(','),
     // Sous `<body>` : la toile est un conteneur (`container-type`), qui ancrerait un `position: fixed` à elle-même.

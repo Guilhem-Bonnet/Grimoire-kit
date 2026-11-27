@@ -461,7 +461,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   };
   const liveDoc = createLiveDoc(ctx, slug, {
     sheet, status, comments: (req) => cm.openOn(reqBlock.get(req)),
-    onTrace: (trace) => { liveTrace = trace; drawSteps(); },
+    onTrace: (trace) => { liveTrace = trace; drawSteps(); refs.refresh(); }, // la carte d'exigence ouverte se met à jour
     onSplit: (message) => reload(message, 'ok'),
   });
   const phaseIds = () => state.doc.phases.map((p) => p.id);
