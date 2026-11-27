@@ -99,7 +99,7 @@ def test_the_bar_stays_visible_while_scrolling_and_is_keyboard_friendly(browser:
         # Clavier : retour, détail d'avancement, phases, bouton, lien d'aide, dans l'ordre de lecture ; focus visible.
         order: list[str] = []
         page.locator(".at-back").focus()
-        for _ in range(12):
+        for _ in range(16):
             order.append(str(page.evaluate("() => { const a = document.activeElement; return a.getAttribute('data-act') || a.getAttribute('data-phase') || a.className || a.tagName; }")))
             page.keyboard.press("Tab")
         assert order[0] == "at-btn ghost at-back"

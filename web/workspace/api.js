@@ -739,6 +739,9 @@ export const api = {
   // (`geste` : un identifiant, jamais le texte d'une consigne ; `text` seulement pour `repondre`, la réponse de l'humain).
   atelierEntretien: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/entretien'),
   atelierAssistant: (slug, body) => post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/assistant', body),
+  // Historique des versions d'un chantier (git, lecture seule) : la liste paginée, puis le diff d'une version (`working` : non commité).
+  atelierHistory: (slug, page) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/history', page > 1 ? { page } : undefined),
+  atelierVersion: (slug, id) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/history/' + encodeURIComponent(id)),
   ideas: () => get(WS + 'ideas'),
   ideaAdd: (text) => post(WS + 'ideas/add', { text }),
   ideaDrop: (id, undo = false) => post(WS + 'ideas/drop', { id, undo }),
