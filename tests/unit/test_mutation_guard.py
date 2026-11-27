@@ -601,3 +601,89 @@ def test_the_atelier_restore_route_refuses_everything_but_the_page(
         journal = host.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
         entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
         assert route.removeprefix("/api/workspace/") in [e["route"] for e in entries if e["action"] == "workspace.post"]
+
+
+# ── 6. La conversation de cadrage (épique #1477, lot A) : sept gestes, mêmes gardes que les écritures voisines ──────
+
+
+def _armed_conversation(host: Host) -> tuple[Path, int, str]:
+    """Un chantier au drapeau allumé, sa conversation démarrée ; rend (fichier, version vue, préfixe des routes)."""
+    from grimoire.core import cadrage_interview as interview
+    from grimoire.tools import workspace_atelier as wa
+
+    _armed_suggestion(host)
+    interview.interview_plan(host.root, "un", depth="standard")
+    prefix = "/api/workspace/atelier/chantiers/un/conversation"
+    started = wa.post(host.root, f"{prefix}/demarrer", {})
+    return host.root / "_grimoire" / "cadrage" / "un" / "conversation.json", int(started["conversation"]["rev"]), prefix
+
+
+def _conversation_gestures(rev: int) -> dict[str, dict[str, Any]]:
+    """Chacune des routes d'écriture de la conversation, avec un corps valide : c'est ce qu'une page tierce tenterait."""
+    return {
+        "demarrer": {},
+        "tour": {"rev": rev, "texte": "Les mainteneurs"},
+        "elements/e1": {"rev": rev, "decision": "confirmer"},
+        "pause": {"rev": rev},
+        "terminer": {"rev": rev},
+        "classer": {"rev": rev},
+        "rouvrir": {"rev": rev},
+    }
+
+
+@pytest.mark.no_session_token
+@pytest.mark.parametrize("fixture_name", ["cockpit", "atelier"])
+def test_the_atelier_conversation_routes_refuse_everything_but_the_page(
+    fixture_name: str, request: pytest.FixtureRequest
+) -> None:
+    """Les sept gestes : sans jeton, avec un faux, d'une origine tierce, hors JSON, par PUT ou GET : rien n'est écrit."""
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    host: Host = request.getfixturevalue(fixture_name)
+    saved, rev, prefix = _armed_conversation(host)
+    token = {SESSION_HEADER: session_token()}
+    before_file = saved.read_bytes()
+    before_docs = {p.name: p.read_bytes() for p in saved.parent.glob("0*.md")}
+    before = host.snapshot()
+    for gesture, body in _conversation_gestures(rev).items():
+        url = f"{prefix}/{gesture}?project={host.slug}"
+        payload = json.dumps(body).encode()
+        attempts = {
+            "POST sans jeton": ("POST", JSON, payload),
+            "POST jeton faux": ("POST", {**JSON, SESSION_HEADER: "pas-le-bon"}, payload),
+            "POST origine tierce": ("POST", {**JSON, **token, "Origin": EVIL}, payload),
+            "POST fetch inter-sites": ("POST", {**JSON, **token, "Sec-Fetch-Site": "cross-site"}, payload),
+            "POST hors JSON": ("POST", {"Content-Type": "text/plain", **token}, payload),
+            "PUT": ("PUT", {**JSON, **token}, payload),
+        }
+        for label, (method, headers, data) in attempts.items():
+            code = host.request(method, url, data, headers)
+            assert code in (400, 403, 404, 405, 415, 501), f"{gesture} [{label}] a répondu {code}"
+            assert saved.read_bytes() == before_file, f"{gesture} [{label}] a écrit dans la conversation"
+            assert {p.name: p.read_bytes() for p in saved.parent.glob("0*.md")} == before_docs
+    assert host.snapshot() == before
+    # Et la page, elle, parle : même requête avec le jeton valide ; la trace gouvernée la nomme.
+    url = f"{prefix}/tour?project={host.slug}"
+    body = json.dumps({"rev": rev, "texte": "Les mainteneurs"}).encode()
+    assert host.request("POST", url, body, {**JSON, **token}) == 200
+    assert saved.read_bytes() != before_file
+    if fixture_name == "atelier":
+        journal = host.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+        entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+        assert prefix.removeprefix("/api/workspace/") + "/tour" in [e["route"] for e in entries if e["action"] == "workspace.post"]
+
+
+@pytest.mark.no_session_token
+def test_no_conversation_route_accepts_document_content(atelier: Host) -> None:
+    """Même avec le jeton valide : un corps qui porte un fichier de phase, une rubrique ou un chemin est refusé, rien n'est écrit."""
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    saved, rev, prefix = _armed_conversation(atelier)
+    headers = {**JSON, SESSION_HEADER: session_token()}
+    before_file = saved.read_bytes()
+    before_docs = {p.name: p.read_bytes() for p in saved.parent.glob("0*.md")}
+    for extra in ({"phase": "brief"}, {"section": "L'utilisateur"}, {"contenu": "## Pirate"}, {"chemin": "../../x"}):
+        body = json.dumps({"rev": rev, "texte": "x", **extra}).encode()
+        assert atelier.request("POST", f"{prefix}/tour?project={atelier.slug}", body, headers) == 400
+    assert saved.read_bytes() == before_file
+    assert {p.name: p.read_bytes() for p in saved.parent.glob("0*.md")} == before_docs
