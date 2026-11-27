@@ -17,6 +17,7 @@ import { atelierIsWide, badge, icon, setAtelierWide } from '../shell.js';
 import { createLiveDoc } from './atelier-live.js';
 import { createComments } from './atelier-comments.js';
 import { createAssistant } from './atelier-assistant.js';
+import { stable } from './atelier-focus.js';
 import { createHistory } from './atelier-historique.js';
 import { createLoopPanel, phaseState, progressCell, waitingBadges } from './atelier-avancement.js';
 import { setAtelierContext } from '../atelier-context.js';
@@ -29,6 +30,12 @@ import {
   phaseFromParams, phaseHash, phaseIndicator, stepsOf,
 } from './atelier-layout-logic.js';
 
+
+/**
+ * Ce qui montre une saisie en cours dans la feuille : bloc en édition, nouveau commentaire, réponse, confirmation.
+ * Les rechargements de fond (l'entretien qui avance, le retour sur l'onglet) attendent qu'elle soit finie.
+ */
+const WRITING = '.is-editing, .at-cm-new, .at-cm-reply, .at-cm-confirm';
 
 /** Ordre des groupes de la bibliothèque ; `archive` vit dans une ligne repliable. */
 const GROUPS = [
@@ -412,9 +419,14 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message) });
   const steps = el('ol', 'at-steps', null, { 'aria-label': 'Déroulé du chantier', 'data-role': 'steps' });
   let liveTrace = null;
+  let stepsShown = '';
   const drawSteps = () => {
+    const list = stepsOf(state.doc.phases.map((p) => ({ ...p, state: phaseState(state.doc, p) })), liveTrace);
+    const key = stable(list);
+    if (key === stepsShown) return; // rien n'a changé : le déroulé n'est pas redessiné (ni relu par un lecteur d'écran)
+    stepsShown = key;
     steps.replaceChildren();
-    for (const step of stepsOf(state.doc.phases.map((p) => ({ ...p, state: phaseState(state.doc, p) })), liveTrace)) {
+    for (const step of list) {
       const item = el('li', `at-step is-${step.status}`, null, { 'data-step': step.id });
       if (step.status === 'current') item.setAttribute('aria-current', 'step');
       const mark = el('span', 'at-step-mark', null, { 'aria-hidden': 'true' });
@@ -450,7 +462,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       host.append(note);
     },
     narrow,
-    editing: () => Boolean(sheet.querySelector('.is-editing')),
+    editing: () => Boolean(sheet.querySelector(WRITING)),
     // La mascotte de l'assistant : combien de suggestions attendent, et la première mise sous les yeux.
     suggestions: () => state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0),
     showSuggestion: () => {
@@ -492,18 +504,31 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     if (heading) { heading.scrollIntoView({ block: 'start' }); heading.focus({ preventScroll: true }); }
   };
 
+  // Mise à jour EN PLACE : un bouton de phase qui porte le focus n'est jamais remplacé (le suivi du défilement et le
+  // rechargement de l'avancement appellent ceci à tout moment, y compris pendant que quelqu'un tabule dans la barre).
   const phaseNav = () => {
-    nav.replaceChildren();
-    for (const p of state.doc.phases) {
+    const have = new Map([...nav.children].map((node) => [node.getAttribute('data-phase'), node]));
+    state.doc.phases.forEach((p, index) => {
       const indicator = phaseIndicator(phaseState(state.doc, p)); // le calcul d'avancement unique du serveur
-      const button = el('button', 'at-phase', null, { type: 'button', 'data-phase': p.id, 'data-state': indicator, title: `${PHASE_NAMES[p.id] || p.title} : ${INDICATOR_LABEL[indicator]}` });
-      if (p.id === focusId) button.setAttribute('aria-current', 'step');
-      const mark = el('span', 'at-phase-mark', null, { 'aria-hidden': 'true' });
-      if (indicator === 'complete') mark.append(icon('i-act-approve'));
-      button.append(mark, PHASE_NAMES[p.id] || p.title, el('span', 'sr-only', ` — ${INDICATOR_LABEL[indicator]}`));
-      button.addEventListener('click', () => setFocus(p.id, { scroll: true }));
-      nav.append(button);
-    }
+      let button = have.get(p.id);
+      have.delete(p.id);
+      if (!button) {
+        button = el('button', 'at-phase', null, { type: 'button', 'data-phase': p.id });
+        button.addEventListener('click', () => setFocus(p.id, { scroll: true }));
+      }
+      const name = PHASE_NAMES[p.id] || p.title;
+      if (button.getAttribute('data-state') !== indicator || button.getAttribute('data-name') !== name) {
+        button.setAttribute('data-state', indicator);
+        button.setAttribute('data-name', name);
+        button.title = `${name} : ${INDICATOR_LABEL[indicator]}`;
+        const mark = el('span', 'at-phase-mark', null, { 'aria-hidden': 'true' });
+        if (indicator === 'complete') mark.append(icon('i-act-approve'));
+        button.replaceChildren(mark, name, el('span', 'sr-only', ` — ${INDICATOR_LABEL[indicator]}`));
+      }
+      if (p.id === focusId) button.setAttribute('aria-current', 'step'); else button.removeAttribute('aria-current');
+      if (nav.children[index] !== button) nav.insertBefore(button, nav.children[index] || null);
+    });
+    for (const gone of have.values()) gone.remove();
   };
 
   // La phase lue suit le défilement : les sections qui touchent la bande de lecture (sous la barre collante).

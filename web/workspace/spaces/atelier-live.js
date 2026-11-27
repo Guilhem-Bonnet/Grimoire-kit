@@ -15,6 +15,7 @@
 import { badge, icon } from '../shell.js';
 import { diffRows, driftNote } from './atelier-logic.js';
 import { moaHelp, validationHelp } from './atelier-avancement.js';
+import { keepFocus, replaceKeepingFocus, setText, stable } from './atelier-focus.js';
 
 const TONE = { proposee: '', validee: 'acc', 'en-cours': 'acc', livree: 'ok', recette: 'ok', reprise: 'warn' };
 const TASK_STATUS = {
@@ -134,7 +135,7 @@ function liveLine(row, { open, toggle, say, more, comments = 0 }) {
           if (!full || !panel) return;
           const fresh = detail(full, say);
           fresh.hidden = panel.hidden;
-          panel.replaceWith(fresh);
+          replaceKeepingFocus(panel, fresh); // une lecture lente ne doit pas faire perdre la place de qui a déjà ouvert le détail
           panel = fresh;
         });
       }
@@ -242,7 +243,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
   splitWrap.append(split, why);
   const lockSplit = (locked, reason = '') => {
     split.setAttribute('aria-disabled', String(locked));
-    why.textContent = locked ? reason : '';
+    setText(why, locked ? reason : '');
     split.title = locked ? reason : '';
   };
   lockSplit(true, 'État des exigences en cours de lecture.');
@@ -263,10 +264,13 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
     whyLink.setAttribute('aria-expanded', String(missing && helpOpen));
   };
   const setHelp = (moa, { open = false } = {}) => {
-    moaInfo = moa && !moa.declared ? moa : null;
+    const next = moa && !moa.declared ? moa : null;
+    const unchanged = stable(next) === stable(moaInfo) && moaSlot.childElementCount === (next ? 1 : 0);
+    moaInfo = next;
     if (!moaInfo) helpOpen = false;
     else if (open) helpOpen = true;
-    moaSlot.replaceChildren(...(moaInfo ? [moaHelp(moaInfo, say)] : []));
+    // Les consignes n'ont pas changé : on ne les redessine pas (le focus et la sélection de l'exemple restent).
+    if (!unchanged) keepFocus(moaSlot, () => moaSlot.replaceChildren(...(moaInfo ? [moaHelp(moaInfo, say)] : [])));
     syncHelp();
   };
   whyLink.addEventListener('click', () => { helpOpen = !helpOpen; syncHelp(); });
@@ -282,34 +286,43 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
     }
   };
   const rowOf = (req) => (state.trace ? state.trace.requirements.find((r) => r.id === req) : null);
+  // Ce que dessine une ligne (sans « ouvert », que la ligne gère elle-même) : inchangé, elle n'est pas redessinée.
+  const drawn = new WeakMap();
+  const lineKey = (req) => stable([rowOf(req) || null, commentsOf(req)]);
   const line = (req) => {
     const row = rowOf(req);
-    if (!row) return el('div', 'at-live', null, { 'data-live': req, hidden: '' }); // pas (encore) dans la trace
-    return liveLine(row, {
-      open: state.open.has(req), toggle: (on) => { if (on) state.open.add(req); else state.open.delete(req); }, say, more,
-      comments: commentsOf(req),
-    });
+    const node = row
+      ? liveLine(row, {
+        open: state.open.has(req), toggle: (on) => { if (on) state.open.add(req); else state.open.delete(req); }, say, more,
+        comments: commentsOf(req),
+      })
+      : el('div', 'at-live', null, { 'data-live': req, hidden: '' }); // pas (encore) dans la trace
+    drawn.set(node, lineKey(req));
+    return node;
   };
 
   const paint = () => {
     for (const node of sheet.querySelectorAll('[data-live]')) {
-      node.replaceWith(line(node.getAttribute('data-live')));
+      const req = node.getAttribute('data-live');
+      if (drawn.get(node) === lineKey(req)) continue; // rien n'a changé : le focus, le détail ouvert et la sélection restent
+      replaceKeepingFocus(node, line(req));
     }
     const trace = state.trace;
     setHelp(trace ? trace.moa : null);
     onTrace(trace);
     if (!trace || !trace.requirements.length) {
-      summary.textContent = trace ? 'Aucune exigence identifiée : écris-les en « REQ-001 : … » pour les suivre.' : '';
+      setText(summary, trace ? 'Aucune exigence identifiée : écris-les en « REQ-001 : … » pour les suivre.' : '');
       summary.title = summary.textContent;
       lockSplit(true, summary.textContent || 'État des exigences en cours de lecture.');
       return;
     }
     const { must, must_validated: done } = trace.summary;
     const missing = trace.requirements.filter((r) => r.priority === 'must' && !r.validated).map((r) => r.id);
-    summary.textContent = missing.length
+    let text = missing.length
       ? `${plural(done, 'exigence Must validée', 'exigences Must validées')} sur ${must} : à valider d’abord ${missing.join(', ')}.`
       : (must ? (must > 1 ? `Les ${must} exigences Must sont validées.` : 'L’exigence Must est validée.') : 'Aucune exigence Must : le découpage est possible.');
-    if (!trace.moa.declared) summary.textContent += ' Aucune MOA déclarée.';
+    if (!trace.moa.declared) text += ' Aucune MOA déclarée.';
+    setText(summary, text);
     summary.title = summary.textContent; // la barre est compacte : le texte entier reste lisible au survol
     lockSplit(missing.length > 0, `Valide d’abord les exigences Must : ${missing.join(', ')}.`);
   };
