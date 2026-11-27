@@ -42,7 +42,7 @@ def _fps(blocks: list[Block]) -> list[str]:
     return [fingerprint(b.text) for b in blocks]
 
 
-def neighbour_fields(blocks: list[Block]) -> list[dict[str, str]]:
+def neighbour_fields(blocks: list[Block]) -> list[dict[str, str | int]]:
     """Pour chaque bloc, son empreinte et celles de ses voisins : ce que le client renvoie à l'écriture."""
     fps = _fps(blocks)
     return [
