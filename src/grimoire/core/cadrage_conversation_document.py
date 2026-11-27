@@ -22,7 +22,7 @@ from grimoire.core.cadrage import cadrage_dir
 from grimoire.core.cadrage_conversation import Conversation, ConversationError, Element
 from grimoire.core.fsio import locked
 
-__all__ = ["FORMULE_INCONNU", "corriger", "ecrire", "origin", "reconcilier", "retirer", "traces", "verifier"]
+__all__ = ["FORMULE_INCONNU", "a_defaire", "corriger", "ecrire", "origin", "reconcilier", "retirer", "traces", "verifier"]
 
 
 #: Le texte d'un « je ne sais pas » sans rien d'autre : l'entretien guidé n'écrit alors aucune note.
@@ -92,6 +92,20 @@ def _expected(el: Element) -> str:
 def _pile(conv: Conversation, angle: str) -> list[Element]:
     """Les éléments déjà rangés par cette conversation sur l'angle, dans l'ordre où ils l'ont été."""
     return sorted((e for e in conv.elements if e.ecrit and e.angle == angle and e.genre != "sansobjet"), key=lambda e: e.rang)
+
+
+def a_defaire(conv: Conversation, el: Element) -> list[Element]:
+    """Ce qu'un retrait de ``el`` défait puis réécrit : lui et ce qui a été rangé après lui sur son angle (rien s'il n'est pas rangé).
+
+    L'appelant les inscrit au journal d'intention AVANT de toucher au document : après une panne en route, ce que la trace de
+    l'entretien ne porte plus redevient « à confirmer », jamais perdu en silence.
+    """
+    if not el.ecrit:
+        return []
+    if el.genre == "sansobjet":
+        return [el]
+    stack = _pile(conv, el.angle)
+    return stack[stack.index(el):] if el in stack else [el]
 
 
 def _retract(root: Path, name: str | None, angle: str) -> None:

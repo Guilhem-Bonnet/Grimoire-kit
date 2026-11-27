@@ -41,6 +41,7 @@ from grimoire.core import cadrage_conversation_store as store
 from grimoire.core import cadrage_interview as interview
 from grimoire.core.cadrage import PHASES, cadrage_dir
 from grimoire.core.cadrage_conversation import (
+    ANGLE_IDS,
     MAX_BOT_CHARS,
     MAX_ELEMENT_CHARS,
     MAX_FILE_BYTES,
@@ -193,8 +194,12 @@ def _reprendre(ctx: Contexte, conv: Conversation) -> bool:
             el.intention = ""
             if rangement.origin(conv, el) in seen:
                 el.ecrit = True
+            elif any(o.remplace == el.id and o is not el and rangement.origin(conv, o) in seen for o in conv.elements):
+                el.statut, el.ecrit = "ecarte", False  # il était retiré pour être remplacé, et son remplaçant est écrit : c'est fait
             else:
-                el.statut = "propose"  # rien n'a été écrit : l'intention est annulée, l'humain peut reconfirmer
+                # Rien n'a été écrit pour lui, ou son ancienne ligne a été retirée avant la panne : l'intention est annulée et
+                # l'humain peut reconfirmer. Jamais « confirmé » sans que la trace de l'entretien le porte.
+                el.statut, el.ecrit = "propose", False
                 ctx.alertes.append(f"« {el.texte[:60]} » n'avait pas été écrit (panne) : il attend de nouveau ta confirmation")
     lost = rangement.reconcilier(ctx.root, ctx.slug, conv)
     ctx.alertes.extend(lost)
@@ -252,9 +257,8 @@ def _a_confirmer(conv: Conversation, ids: tuple[str, ...]) -> list[dict[str, Any
 
 def _liste_exacte(items: list[dict[str, Any]]) -> str:
     shown = [f"« {i['texte']} » ({i['action']} : {i['rubrique']['nom']}"
-             + (", reformulé par le moteur" if i["origine"] == "moteur" else "") + ")" for i in items[:3]]
-    more = f" (et {len(items) - 3} autre(s), voir la liste)" if len(items) > 3 else ""
-    return "; ".join(shown) + more
+             + (", reformulé par le moteur" if i["origine"] == "moteur" else "") + ")" for i in items]
+    return "; ".join(shown)  # tout le groupe, jamais « et N autres » : le groupe est borné à ce qui s'affiche
 
 
 def _q(kind: str, text: str, pourquoi: str, etape: Etape) -> Question:
@@ -340,11 +344,26 @@ def _question_public(q: Question) -> dict[str, Any]:
 # ── Ranger dans le document (confirmation explicite de l'humain) ───────────
 
 
+def _journaliser(ctx: Contexte, conv: Conversation, retire: Element | None) -> list[Element]:
+    """Inscrit au journal d'intention, et enregistre, ce qu'un retrait de ``retire`` va défaire puis réécrire (lui et ce qui le suit).
+
+    Sans cela, une panne entre le retrait et la réécriture laisserait des éléments « confirmés » que la trace de l'entretien ne
+    porte plus : des lignes de l'humain perdues en silence. Avec cela, la reprise les remet à confirmer. Rend ces éléments.
+    """
+    defaits = [] if retire is None else rangement.a_defaire(conv, retire)
+    for el in defaits:
+        el.intention = "ecrire"
+    store.save(ctx.directory, conv)
+    return defaits
+
+
 def _confirmer(ctx: Contexte, conv: Conversation, items: list[Element]) -> bool:
     """Confirme ces éléments (ils entrent dans le document) ; si le premier en corrige un autre, celui-ci en sort.
 
     Tout ce qui peut échouer est vérifié AVANT la première écriture ; l'intention est enregistrée avant le document.
     """
+    if not items:
+        return False
     old = conv.element(items[0].remplace) if items[0].remplace else None
     if old is not None and old.statut not in ("confirme", "corrige"):
         old = None
@@ -352,9 +371,9 @@ def _confirmer(ctx: Contexte, conv: Conversation, items: list[Element]) -> bool:
     rangement.verifier(ctx.root, ctx.slug, [*items, *([old] if old is not None else [])])
     for item in items:
         item.statut, item.intention = "confirme", "ecrire"
-    store.save(ctx.directory, conv)  # le journal d'intention : une panne ici est reprise par la trace de l'entretien
+    defaits = _journaliser(ctx, conv, old)  # le journal d'intention : une panne en route est reprise par la trace de l'entretien
     rangement.ecrire(ctx.root, ctx.slug, conv, items, remplace=old)
-    for item in items:
+    for item in [*items, *defaits]:
         item.intention = ""
         if item.genre == "inconnu":
             conv.note(conv.ouvertes, item.question, item.source)
@@ -428,10 +447,12 @@ def _appliquer(ctx: Contexte, conv: Conversation, classe: str, tour: Tour, texte
         if kind == "document":
             conv.mode = "termine"
             return "", False
+        if not group:  # une question « confirmer » sans rien en attente (fichier forgé ou édité) : rien à écrire
+            return "Je n'ai rien en attente de confirmation : je reprends où on en est.", False
         return "C'est noté.", _confirmer(ctx, conv, group)
     if classe in ("ne_sait_pas", "sans_objet"):
         genre = "inconnu" if classe == "ne_sait_pas" else "sansobjet"
-        if kind == "amorce" and conv.question is not None:
+        if kind == "amorce" and conv.question is not None and conv.question.angle in ANGLE_IDS:
             q = conv.question
             _proposer_special(conv, tour, genre, q.angle, q.texte)
             return "D'accord : je te le propose, et je ne note rien sans ton accord.", False
@@ -513,9 +534,10 @@ def _demarrer(ctx: Contexte) -> dict[str, Any]:
         out = _conclure(ctx, conv, summary.replace("\n", " "), False, False)
         out.update(cree=False, resume=summary)
         return out
-    if changed:  # une reprise après panne : ce qu'elle a réglé est enregistré
-        conv.rev += 1
-        store.save(ctx.directory, conv)
+    if changed:  # une reprise après panne : ce qu'elle a réglé est enregistré, et la question est recalculée (un « oui » doit viser le bon texte)
+        out = _conclure(ctx, conv, "", False, False)
+        out.update(cree=False, resume=resume(conv, _cadre(ctx)))
+        return out
     return {"cree": False, "resume": resume(conv, cadre), "rev": conv.rev, "document_modifie": False,
             "etape": {"kind": prochaine_etape(conv, cadre).kind}, "moteur": {"id": ctx.moteur.id, "degrade": False, "notes": []},
             "question": None if conv.question is None else _question_public(conv.question), "accuse": "", "message": "",
@@ -574,7 +596,10 @@ def _decider(ctx: Contexte, rev: int, element_id: str, decision: str, texte: Any
         old = el.texte
         if el.statut in ("confirme", "corrige"):
             store.check_room(conv)
+            defaits = _journaliser(ctx, conv, el)
             rangement.corriger(ctx.root, ctx.slug, conv, el, new)
+            for d in defaits:
+                d.intention = ""
         else:
             el.texte, el.origine, el.individuel = new, "humain", False  # c'est la frappe de l'humain : ses mots exacts
             _confirmer(ctx, conv, [el])
@@ -587,7 +612,10 @@ def _decider(ctx: Contexte, rev: int, element_id: str, decision: str, texte: Any
         modifie = el.ecrit
         if el.ecrit:
             store.check_room(conv)
+            defaits = _journaliser(ctx, conv, el)
             rangement.retirer(ctx.root, ctx.slug, conv, el)
+            for d in defaits:
+                d.intention = ""
         el.statut = "ecarte"
         return _conclure(ctx, conv, "D'accord, je l'écarte.", False, modifie)
     raise ConversationError(f"décision inconnue : {decision!r} (confirmer, corriger, ecarter)")

@@ -210,6 +210,10 @@ _NEGATIONS = ("non", "pas vraiment", "pas exactement", "plutot", "faux", "nope",
 _LEADS = ("en fait", "finalement", "je me corrige", "j ai mal dit", "je me suis trompe", "correction", "non", "plutot")
 
 
+#: Les points d'interrogation : ASCII, pleine chasse, espagnol, arabe, grec, arménien, petit.
+_POINTS_D_INTERROGATION = ("?", "？", "¿", "؟", ";", "՞", "﹖", "⁇", "⁈", "⁉", "❓", "❔")
+
+
 def _norm(texte: str) -> str:
     """Minuscules, sans accents, ponctuation en espaces : de quoi reconnaître une tournure simple."""
     plain = unicodedata.normalize("NFKD", texte.lower().replace("’", "'"))
@@ -221,9 +225,12 @@ def est_un_oui(texte: str) -> bool:
     """Le texte est-il UN OUI ? Règle stricte, courte, du programme : seulement des mots d'accord, aucune négation, aucun ajout.
 
     « oui », « c'est ça », « exactement », « oui tout à fait » : oui. « oui mais… », « non », « oui, et aussi X »,
-    « pas vraiment » : non. Un moteur n'en décide jamais.
+    « pas vraiment » : non. Un moteur n'en décide jamais. Une question n'est jamais un oui : « d'accord ? », « oui ? »,
+    « c'est bon ? » demandent quelque chose, elles n'accordent rien (tout point d'interrogation, de toute chasse, l'exclut).
     """
-    norm = _norm(texte).replace("?", " ")
+    if any(mark in texte for mark in _POINTS_D_INTERROGATION) or "?" in _norm(texte):
+        return False
+    norm = _norm(texte)
     norm = " ".join(norm.split())
     words = norm.split()
     anchored = any(w in _OUI_ANCRES for w in words) or _has(norm, _OUI_PHRASES)

@@ -27,6 +27,8 @@ from grimoire.core.cadrage_conversation import Conversation
 
 __all__ = [
     "INTENTIONS",
+    "MAX_GROUPE",
+    "MAX_GROUPE_CHARS",
     "NOMS",
     "AngleCadre",
     "Cadre",
@@ -59,6 +61,10 @@ INTENTIONS: dict[str, str] = {
     "alternatives": "pour vérifier qu'une version plus simple ne suffirait pas.",
 }
 
+
+#: Ce qu'un seul « oui » peut confirmer : ce que le message du tour montre en entier (voir :func:`groupe_a_confirmer`).
+MAX_GROUPE = 3
+MAX_GROUPE_CHARS = 700
 
 #: Les genres de question dont le texte stocké est une vraie question en attente de réponse (pas une pause ni une fin).
 _POSEES = ("amorce", "confirmer", "brainstorm", "document")
@@ -187,11 +193,24 @@ def groupe_a_confirmer(conv: Conversation) -> tuple[str, ...]:
 
     Sans groupe, le premier élément à confirmer SEUL (autre rubrique, ou texte du moteur) : le « oui » ne porte alors que
     sur lui, dont le texte exact est montré.
+
+    Le groupe est BORNÉ à ce que le message montre en entier : au plus :data:`MAX_GROUPE` éléments, et pas plus de
+    :data:`MAX_GROUPE_CHARS` caractères de texte (au moins un). Le reste attend, et se propose au tour suivant : un « oui »
+    ne confirme jamais un texte qui n'était pas écrit dans le message auquel il répond.
     """
     pending = conv.en_attente()
     together = [e for e in pending if not e.individuel]
     if together:
-        return tuple(e.id for e in together if e.source == together[0].source)
+        group: list[str] = []
+        used = 0
+        for e in together:
+            if e.source != together[0].source:
+                continue
+            used += len(e.texte)
+            if group and (len(group) >= MAX_GROUPE or used > MAX_GROUPE_CHARS):
+                break
+            group.append(e.id)
+        return tuple(group)
     return (pending[0].id,)
 
 

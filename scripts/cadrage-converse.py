@@ -16,13 +16,20 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:  # lancé depuis un clone : le paquet est sous src/
     sys.path.insert(0, str(ROOT / "src"))
+
+
+def _montrer_a_confirmer(reaction: dict[str, Any], say: Callable[[str], None]) -> None:
+    """La liste EXACTE de ce qu'un « oui » écrirait : texte mot pour mot, rubrique, origine. Ce qui n'y figure pas n'est pas confirmé."""
+    for item in reaction.get("a_confirmer", []):
+        seul = ", à confirmer seul" if item.get("individuel") else ""
+        say(f"  -> « {item['texte']} » ({item['action']} : {item['rubrique']['nom']} ; origine : {item['origine']}{seul})")
 
 
 def main(argv: Sequence[str] | None = None, stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
@@ -52,6 +59,7 @@ def main(argv: Sequence[str] | None = None, stdin: TextIO | None = None, stdout:
     try:
         started = turn.demarrer(ctx)
         say(started["message"] or started["resume"])
+        _montrer_a_confirmer(started, say)
         rev = int(started["rev"])
         for line in src:
             text = line.strip()
@@ -65,6 +73,7 @@ def main(argv: Sequence[str] | None = None, stdin: TextIO | None = None, stdout:
             reaction = turn.pause(ctx, rev) if text == "/pause" else turn.recevoir(ctx, rev, text)
             rev = int(reaction["rev"])
             say(f"{reaction['accuse']} {reaction['message']}".strip())
+            _montrer_a_confirmer(reaction, say)
             if reaction["etape"]["kind"] in ("termine", "pause"):
                 break
     except ConversationError as exc:

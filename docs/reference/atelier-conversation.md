@@ -95,7 +95,9 @@ est traité comme un auteur hostile :
 - **« Oui » n'est pas une classe de moteur.** Le programme le reconnaît seul, par une règle lexicale stricte
   (`est_un_oui` : seulement des mots d'accord, cinq mots au plus, aucune négation, aucun ajout), et seulement quand une
   confirmation est en attente. « Oui mais… », « non », « oui, et aussi X » ne sont pas un oui. Une classe hors de la liste
-  fermée rendue par un moteur est refusée.
+  fermée rendue par un moteur est refusée. **Une question n'est jamais un oui** : tout texte contenant un point
+  d'interrogation (`?`, pleine chasse `？`, espagnol `¿`, arabe, grec…) est refusé ; « d'accord ? », « oui ? » ou « c'est
+  bon ? » demandent quelque chose et n'accordent rien.
 - **Ce que l'humain confirme, c'est la liste exacte** des textes qui seront écrits, avec leur rubrique en mots simples,
   construite par le programme à partir des éléments réels (`a_confirmer`). La reformulation du moteur l'accompagne, jamais
   ne la remplace.
@@ -104,9 +106,20 @@ est traité comme un auteur hostile :
   produisent une proposition (« Tu veux qu'on note que tu ne sais pas encore ? ») appliquée par le seul « oui » de l'humain,
   avec les mêmes fichiers qu'un `answer(unknown=True)` ou `skip=True` fait à la main. Si l'humain dit « je ne sais pas »
   après avoir dit autre chose, ce qu'il avait dit devient la note de la question ouverte.
+- **Un « oui » ne confirme que ce que le message montre.** Le groupe d'un « oui » est borné à ce que le message rendu à ce
+  tour écrit en entier : trois éléments au plus (`MAX_GROUPE`) et 700 caractères de texte au plus (`MAX_GROUPE_CHARS`),
+  toujours au moins un. Le message énumère tout le groupe, jamais « et N autres » ; le reste attend et se propose au tour
+  suivant, avec son propre « oui ». L'essai en terminal (`scripts/cadrage-converse.py`) affiche cette liste exacte
+  (texte, rubrique, origine) sous le message.
 - **Un élément se confirme seul** (jamais par le « oui » du groupe) quand il vise une autre rubrique que celle de la
-  question, ou quand son texte n'est pas dans ce que l'humain a dit (`origine` = `moteur`, mesurée par le programme).
-  Cinq éléments au plus par tour, longueur bornée.
+  question, ou quand son texte n'est pas « les mots de l'humain » (`origine` = `moteur`, mesurée par le programme). Un
+  élément n'est « les mots de l'humain » que s'il reprend le **tour entier** ou une **proposition entière** de ce tour
+  (découpée par `. ! ? ;`, `…` et retours à la ligne), à la casse, aux accents et à la ponctuation près. Un fragment plus
+  court (« export CSV » tiré de « je ne veux pas d'export CSV », « sauf les bots », « ni les invités ») a perdu son contexte,
+  donc peut-être sa négation : il est du moteur. Seule exception, un élément tronqué par le programme (terminé par « … »)
+  reprend le début d'une proposition, à condition que la suite coupée ne contienne aucune négation ni restriction (ne, pas,
+  jamais, aucun, sans, sauf, ni, plutôt que, à l'exception de…). Dans le doute : individuel. Cinq éléments au plus par
+  tour, longueur bornée.
 
 ## Le rangement dans le document
 
@@ -124,7 +137,11 @@ Le gate de `cadrage check` n'est jamais modifié.
 - **Écrire dans le bon ordre.** Avant la première écriture, tout ce qui peut échouer est vérifié (document accepté,
   place dans le fichier). L'intention est enregistrée dans la conversation (`intention: ecrire`), le document est écrit,
   l'intention est levée. Après une panne, l'opération suivante termine (la trace porte l'origine) ou annule (elle ne
-  la porte pas) et le dit.
+  la porte pas) et le dit. Quand un retrait précède l'écriture (correction, remplacement ou écart d'un élément déjà rangé),
+  le journal porte aussi l'élément retiré et ceux rangés après lui : une panne en route ne laisse jamais une ligne de
+  l'humain « confirmée » mais absente du document, elle repasse à confirmer (ou, si son remplaçant est écrit, est écartée).
+  Une conversation forgée dont la question en cours est « confirmer » sans rien en attente ne lève pas : rien n'est écrit,
+  la question est recalculée.
 - **Limite de tours.** Près de 500 tours, la conversation se termine d'elle-même en le disant, sans erreur ; corriger ou
   écarter ce qui est compris reste possible.
 - **Identifiants.** Le compteur rattrape le plus grand numéro existant ; un fichier à identifiants en double reste

@@ -14,6 +14,7 @@ ne fait écrire nulle part.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -158,10 +159,43 @@ def _plat(texte: str) -> str:
     return " ".join("".join(c if c.isalnum() else " " for c in plain if not unicodedata.combining(c)).split())
 
 
+_FIN_DE_PROPOSITION = re.compile(r"[.!?;…。？！；\n\r]+")
+#: Les mots qui renversent ou restreignent ce qui précède ou suit : une partie retirée qui en contient un change le sens.
+_RESTRICTIONS = frozenset({"ne", "n", "pas", "jamais", "aucun", "aucune", "aucunement", "sans", "sauf", "ni", "non", "plus", "rien",
+                           "personne", "nul", "nulle", "hormis", "excepte", "exceptes", "exceptee", "exceptees", "plutot", "que",
+                           "contre", "moins", "seulement", "uniquement", "excluant", "exclure", "exclu"})
+_RESTRICTIONS_EXPRESSIONS = ("a l exception", "en dehors de", "a part", "pas question", "hors de", "au lieu de")
+
+
+def _restreint(reste: str) -> bool:
+    """La partie retirée contient-elle une négation ou une restriction ? Dans le doute, oui (liste large, volontairement)."""
+    flat = f" {reste} "
+    return any(w in _RESTRICTIONS for w in reste.split()) or any(f" {p} " in flat for p in _RESTRICTIONS_EXPRESSIONS)
+
+
 def mots_de_l_humain(element: str, tour: str) -> bool:
-    """Le texte de l'élément est-il inclus dans ce que l'humain a dit (à la casse, aux accents et à la ponctuation près) ?"""
-    wanted = _plat(element.rstrip("…"))
-    return bool(wanted) and wanted in _plat(tour)
+    """L'élément reprend-il, mot pour mot, le tour ENTIER de l'humain ou une proposition ENTIÈRE de ce tour ?
+
+    La comparaison se fait à la casse, aux accents et à la ponctuation près. Une proposition va d'une ponctuation forte
+    (``. ! ? ; …``) ou d'un retour à la ligne à l'autre. Un fragment plus court qu'une proposition (« export CSV » tiré de
+    « je ne veux pas d'export CSV ») n'est PAS « les mots de l'humain » : il a perdu son contexte, donc peut-être sa
+    négation ou sa restriction. Seule exception : un élément tronqué par le programme (terminé par « … ») reprend le début
+    d'une proposition, à condition que la suite coupée ne contienne ni négation ni restriction. Dans le doute : non.
+    """
+    wanted = _plat(element.rstrip("…").rstrip())
+    if not wanted:
+        return False
+    tronque = element.rstrip().endswith("…")
+    morceaux = [tour, *_FIN_DE_PROPOSITION.split(tour)]
+    for morceau in morceaux:
+        plat = _plat(morceau)
+        if not plat:
+            continue
+        if plat == wanted:
+            return True
+        if tronque and plat.startswith(wanted + " ") and not _restreint(plat[len(wanted):]):
+            return True
+    return False
 
 
 @dataclass(slots=True)

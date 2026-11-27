@@ -193,7 +193,7 @@ def test_un_element_du_moteur_ne_se_confirme_que_seul_et_texte_exact_montre(root
 
 
 def test_les_mots_de_l_humain_se_comparent_a_la_normalisation_pres() -> None:
-    assert mots_de_l_humain("les mainteneurs du kit", "Je pense aux Les Mainteneurs, du kit !")
+    assert mots_de_l_humain("Je pense aux les mainteneurs du kit", "Je pense aux Les Mainteneurs, du kit !")  # le tour entier
     assert mots_de_l_humain("Écrit à l'été", "ecrit a l ete")
     assert mots_de_l_humain("une phrase coupée…", "Une phrase coupée au bout de mille mots")
     assert not mots_de_l_humain("les relecteurs", "les mainteneurs")

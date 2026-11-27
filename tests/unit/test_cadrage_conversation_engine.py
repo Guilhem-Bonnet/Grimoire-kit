@@ -107,7 +107,7 @@ def test_le_classement_par_regles_simples(texte: str, contexte: str, attendu: st
     assert attendu in CLASSES
 
 
-@pytest.mark.parametrize("texte", ["oui", "Oui !", "ouais", "c'est ça", "exactement", "Oui, tout à fait", "d'accord", "ok", "parfait", "oui c'est ça ?"])
+@pytest.mark.parametrize("texte", ["oui", "Oui !", "ouais", "c'est ça", "exactement", "Oui, tout à fait", "d'accord", "ok", "parfait", "oui c'est ça !"])
 def test_un_oui_est_reconnu_par_le_programme_sur_des_mots_d_accord_seuls(texte: str) -> None:
     assert est_un_oui(texte)
 
@@ -118,6 +118,15 @@ def test_un_oui_est_reconnu_par_le_programme_sur_des_mots_d_accord_seuls(texte: 
      "oui oui oui oui oui oui", "peut-être", "oui non", "c'est pas ça", "ok sauf le premier", "ne dis pas oui"],
 )
 def test_ce_qui_contient_autre_chose_ou_une_negation_n_est_pas_un_oui(texte: str) -> None:
+    assert not est_un_oui(texte)
+
+
+@pytest.mark.parametrize(
+    "texte",
+    ["d'accord ?", "oui ?", "c'est bon ?", "ok ?", "oui c'est ça ?", "oui？", "d'accord？", "¿oui", "¿d'accord?",
+     "oui؟", "oui ?!", "ok ??", "oui\n?"],
+)
+def test_une_question_n_est_jamais_un_oui(texte: str) -> None:
     assert not est_un_oui(texte)
 
 
