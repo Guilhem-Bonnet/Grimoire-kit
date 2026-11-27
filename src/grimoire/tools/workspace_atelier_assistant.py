@@ -326,4 +326,12 @@ def entretien_view(root: Path, slug: str) -> dict[str, Any]:
 
     out["avancement"] = progress(root, None if slug == "principal" else slug)
     out["modele"] = atelier_model.status(root, slug)  # option du kit : jamais la clé, seulement sa présence
+    # Les empreintes des fichiers de phase : le client recharge le document quand l'une d'elles ne correspond plus à ce qu'il
+    # affiche (fichier modifié hors du cockpit). Aucune route de plus : ce relevé existe déjà au rythme du pouls de l'assistant.
+    from grimoire.tools import workspace_atelier as wa
+
+    try:
+        out["fichiers"] = wa.phase_fingerprints(root, slug)
+    except FileNotFoundError:
+        out["fichiers"] = {}  # chantier sans dossier lisible : rien à comparer, le client ne recharge pas
     return out

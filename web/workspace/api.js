@@ -742,6 +742,11 @@ export const api = {
   // Historique des versions d'un chantier (git, lecture seule) : la liste paginée, puis le diff d'une version (`working` : non commité).
   atelierHistory: (slug, page) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/history', page > 1 ? { page } : undefined),
   atelierVersion: (slug, id) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/history/' + encodeURIComponent(id)),
+  // Comparer deux versions (lecture seule ; `from`, `to` : un identifiant de la liste, ou `working`), puis restaurer une phase :
+  // `{ phase, expected, version }` (l'empreinte du fichier lue ; 409 si le fichier a changé) ou `{ phase, expected, undo }`
+  // (le jeton rendu par la restauration). Le contenu vient du serveur (git en lecture), jamais d'ici. Rien n'est commité.
+  atelierCompare: (slug, from, to) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/compare', { from, to }),
+  atelierRestore: (slug, body) => post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/restore', body),
   ideas: () => get(WS + 'ideas'),
   ideaAdd: (text) => post(WS + 'ideas/add', { text }),
   ideaDrop: (id, undo = false) => post(WS + 'ideas/drop', { id, undo }),
