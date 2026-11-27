@@ -354,7 +354,8 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
 
 def _refuse_accepted(path: Path) -> None:
     """Un document au front matter ``status`` accepté/validé n'est jamais réécrit par l'entretien."""
-    from grimoire.core.cadrage_requirements import _ACCEPTED_STATUSES, _fold as fold_status
+    from grimoire.core.cadrage_requirements import _ACCEPTED_STATUSES
+    from grimoire.core.cadrage_requirements import _fold as fold_status
 
     lines = (read_regular(path) or "").splitlines()
     if not lines or lines[0].strip() != "---":
