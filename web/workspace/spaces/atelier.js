@@ -13,7 +13,7 @@
 // `PUT atelier/chantiers/<slug>/blocs/<id>`, `POST atelier/chantiers/<slug>/suggestions/<id>` (voir `src/grimoire/tools/workspace_atelier.py`).
 
 import { renderMarkdown } from '../markdown.js';
-import { badge, icon } from '../shell.js';
+import { atelierIsWide, badge, icon, setAtelierWide } from '../shell.js';
 import { createLiveDoc } from './atelier-live.js';
 import { createComments } from './atelier-comments.js';
 import { createAssistant } from './atelier-assistant.js';
@@ -58,12 +58,27 @@ function testBanner(ctx) {
   const link = el('a', null, 'Désactiver', { href: '#fonctions-test' });
   link.addEventListener('click', (event) => { event.preventDefault(); ctx.goto('fonctions-test'); });
   const banner = el('div', 'at-test', null, { role: 'note', 'data-role': 'atelier-test' });
-  banner.append(icon('i-act-preview'), el('span'), link);
+  banner.append(icon('i-act-preview'), el('span'), link, widthToggle(ctx));
   banner.children[1].append(
     el('strong', null, 'Atelier en test.'),
     " Aucune tâche n'est lancée tant que tu n'as pas validé le découpage.",
   );
   return banner;
+}
+
+/** Pleine largeur : replie l'inspecteur et le dock (le « Plein écran » de la coque) ou les rouvre ; le choix est mémorisé. */
+function widthToggle(ctx) {
+  const button = el('button', 'at-btn at-width', 'Pleine largeur', { type: 'button', 'data-role': 'atelier-largeur' });
+  const paint = () => button.setAttribute('aria-pressed', String(atelierIsWide()));
+  button.title = 'Replier ou rouvrir l’inspecteur et le dock pour donner toute la largeur au document';
+  button.addEventListener('click', () => { setAtelierWide(!atelierIsWide()); paint(); });
+  paint();
+  if (typeof MutationObserver === 'function') {
+    const watch = new MutationObserver(paint);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-focus'] });
+    ctx.signal.addEventListener('abort', () => watch.disconnect());
+  }
+  return button;
 }
 
 function page(ctx, ...content) {

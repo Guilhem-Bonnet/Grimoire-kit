@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  MAX_TOASTS, activePhase, capitalize, codeSegments, dropToast, initialOpen, newOrphans, orphanNotice, phaseFromParams,
-  phaseHash, phaseIndicator, pillSummary, prefKey, pushToast, readPref, stepsOf, toneOf, ttlOf, writePref,
+  MAX_TOASTS, WIDTH_PREF_KEY, activePhase, capitalize, codeSegments, dropToast, focusForPref, focusStep, initialOpen, newOrphans,
+  orphanNotice, phaseFromParams, phaseHash, phaseIndicator, pillSummary, prefKey, pushToast, readPref, readWidthPref, stepsOf,
+  toneOf, ttlOf, writePref, writeWidthPref,
 } from '../../web/workspace/spaces/atelier-layout-logic.js';
 
 const memory = () => {
@@ -133,4 +134,44 @@ test('finitions : majuscule et accents graves rendus comme du code', () => {
   assert.deepEqual(codeSegments('sans code'), [{ text: 'sans code', code: false }]);
   assert.deepEqual(codeSegments('accent ` seul'), [{ text: 'accent ` seul', code: false }], 'un accent non fermé reste du texte');
   assert.deepEqual(codeSegments(''), []);
+});
+
+test('pleine largeur : le choix des panneaux se mémorise par navigateur, avec repli sûr sans stockage', () => {
+  const store = memory();
+  assert.equal(readWidthPref(store), null);
+  assert.equal(writeWidthPref(store, 'panels'), true);
+  assert.equal(readWidthPref(store), 'panels');
+  assert.equal(writeWidthPref(store, 'wide'), true);
+  assert.equal(readWidthPref(store), 'wide');
+  assert.equal(writeWidthPref(store, 'autre'), false, 'une valeur inconnue n’est pas écrite');
+  store.data.set(WIDTH_PREF_KEY, 'n’importe quoi');
+  assert.equal(readWidthPref(store), null);
+  const broken = { getItem() { throw new Error('bloqué'); }, setItem() { throw new Error('bloqué'); } };
+  assert.equal(readWidthPref(broken), null);
+  assert.equal(writeWidthPref(broken, 'wide'), false);
+  assert.equal(readWidthPref(null), null);
+  assert.equal(writeWidthPref(null, 'wide'), false);
+});
+
+test('pleine largeur : sans choix l’Atelier replie les panneaux, « panneaux » les garde ouverts', () => {
+  assert.equal(focusForPref(null), 'on');
+  assert.equal(focusForPref('wide'), 'on');
+  assert.equal(focusForPref('panels'), 'off');
+});
+
+test('pleine largeur : l’arrivée retient l’état d’avant, la sortie le rend tel quel', () => {
+  // Arrivée, panneaux ouverts avant : plein écran posé, l’ancien état retenu.
+  assert.deepEqual(focusStep({ inAtelier: true, pref: null, held: null, focus: 'off' }), { focus: 'on', held: 'off' });
+  // Un plein écran posé avant l’Atelier est retenu puis rendu.
+  assert.deepEqual(focusStep({ inAtelier: true, pref: null, held: null, focus: 'on' }), { focus: 'on', held: 'on' });
+  assert.deepEqual(focusStep({ inAtelier: false, pref: null, held: 'on', focus: 'on' }), { focus: 'on', held: null });
+  assert.deepEqual(focusStep({ inAtelier: false, pref: null, held: 'off', focus: 'on' }), { focus: 'off', held: null });
+  // Le choix mémorisé « panneaux » est respecté à l’arrivée.
+  assert.deepEqual(focusStep({ inAtelier: true, pref: 'panels', held: null, focus: 'off' }), { focus: 'off', held: 'off' });
+  // Une rubrique de plus dans l’Atelier ne touche à rien (le « Plein écran » de la barre garde la main).
+  assert.deepEqual(focusStep({ inAtelier: true, pref: null, held: 'off', focus: 'off' }), { focus: 'off', held: 'off' });
+  // Hors Atelier sans rien de retenu : inchangé, valeur normalisée.
+  assert.deepEqual(focusStep({ inAtelier: false, pref: null, held: null, focus: 'on' }), { focus: 'on', held: null });
+  assert.deepEqual(focusStep({ inAtelier: false, pref: null, held: undefined, focus: undefined }), { focus: 'off', held: null });
+  assert.deepEqual(focusStep({ inAtelier: true, pref: null, held: undefined, focus: 'off' }), { focus: 'on', held: 'off' });
 });
