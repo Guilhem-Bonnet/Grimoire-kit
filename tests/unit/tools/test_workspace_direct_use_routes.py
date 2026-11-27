@@ -7,6 +7,7 @@ la détection d'Ollama est simulée, les hôtes sont absents, la sonde de capaci
 from __future__ import annotations
 
 import json
+import os
 import threading
 from collections.abc import Iterator
 from functools import partial
@@ -63,6 +64,14 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "ck"))
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr("shutil.which", lambda _n, *a, **k: None)
+    # « Ollama local » exige un binaire `ollama` que le PATH résout, hors de la racine du projet : le test apporte le sien
+    # (la machine, ou la CI, n'en a pas forcément un) ; le projet d'essai est un autre dossier de `tmp_path`.
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    fake = fakebin / "ollama"
+    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fakebin}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setattr(av, "_fetch", lambda _u, _t, _l: TAGS)
     av.clear_cache()
 
@@ -323,12 +332,36 @@ def test_verifier_les_connexions_avec_la_cle_envoie_la_cle_au_seul_point_d_acces
     server: tuple[int, Path], witness: _Witness
 ) -> None:
     port, root = server
-    status, body = _post(port, VERIFY_REMOTE, {}, key=_key())
+    shown = _get(port)["remote_endpoints"]
+    status, body = _post(port, VERIFY_REMOTE, {"confirmed_endpoints": shown}, key=_key())
     assert status == 200, body
     assert witness.hits and set(witness.hits) == {"Bearer cle-secrete-d-essai"}
     assert body["inventory"]["verified"] is True
     assert "cle-secrete-d-essai" not in json.dumps(body)
     assert (root / "_grimoire-output" / "providers-capabilities.json").exists()
+
+
+def test_verifier_les_connexions_sans_liste_confirmee_ou_perimee_n_envoie_aucune_cle(
+    server: tuple[int, Path], witness: _Witness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    port, root = server
+    acp: list[str] = []
+    monkeypatch.setattr("grimoire.hosts.acp_hosts.acp_usable", lambda *a, **k: acp.append("acp") or (True, ""))
+    # champ absent, liste vide alors que le registre en peuple une, liste d'un autre point d'accès, liste illisible
+    for confirmed in (
+        None,
+        [],
+        [{"provider_id": "gw", "url": "https://evil.example/v1/models"}],
+        [{"provider_id": "gw"}],
+        "gw",
+    ):
+        body = {} if confirmed is None else {"confirmed_endpoints": confirmed}
+        status, answer = _post(port, VERIFY_REMOTE, body, key=_key())
+        assert status == 400, answer
+        assert witness.hits == [] and acp == []
+    assert not (root / "_grimoire-output" / "providers-capabilities.json").exists()
+    status, answer = _post(port, VERIFY_REMOTE, {"confirmed_endpoints": []}, key=_key())
+    assert "la liste a changé, relis-la" in answer["error"]
 
 
 def test_verifier_les_connexions_survit_a_une_sonde_qui_echoue(
@@ -340,7 +373,7 @@ def test_verifier_les_connexions_survit_a_une_sonde_qui_echoue(
         raise RuntimeError("réseau")
 
     monkeypatch.setattr("grimoire.providers.availability.probe_remote", boom)
-    status, body = _post(port, VERIFY_REMOTE, {}, key=_key())
+    status, body = _post(port, VERIFY_REMOTE, {"confirmed_endpoints": []}, key=_key())
     assert status == 200, body
 
 

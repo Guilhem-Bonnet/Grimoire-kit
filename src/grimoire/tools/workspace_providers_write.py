@@ -14,7 +14,6 @@ seulement, hors du dépôt — voir :mod:`grimoire.providers.secrets`).
 
 from __future__ import annotations
 
-import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -196,7 +195,7 @@ def direct_use_verify_remote_route(project_root: Path, body: dict[str, Any]) -> 
     lance la connexion des agents installés (``initialize``, sans modèle). Il ne change aucun réglage.
     """
     from grimoire.providers import direct_use_settings
-    from grimoire.providers.availability import clear_cache, detect, probe_remote
+    from grimoire.providers.availability import EndpointsChangedError, clear_cache, detect, probe_remote
     from grimoire.tools.human_gesture import require_human_key
     from grimoire.tools.project_registry import body_project_refusal
 
@@ -207,8 +206,13 @@ def direct_use_verify_remote_route(project_root: Path, body: dict[str, Any]) -> 
         project_root, body, "clé de contrôle absente ou invalide : envoyer une clé à un service est un geste d'humain"
     )
     clear_cache()
-    with contextlib.suppress(Exception):  # une sonde qui échoue se dit dans « non mesuré » ; la vérification continue
-        probe_remote(project_root)
+    try:
+        # La clé ne part que vers la liste que l'humain a confirmée (champ absent = refus) ; registre lu une seule fois.
+        probe_remote(project_root, body.get("confirmed_endpoints"))
+    except EndpointsChangedError as exc:
+        raise ValueError(str(exc)) from exc  # rien n'a été envoyé, ni la connexion des agents lancée
+    except Exception:  # noqa: S110 — une sonde qui échoue se dit dans « non mesuré » ; la vérification continue
+        pass
     return direct_use_settings.view(project_root, inventory=detect(project_root, verify=True))
 
 

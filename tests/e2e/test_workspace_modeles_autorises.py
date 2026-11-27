@@ -101,6 +101,12 @@ def served_models(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[st
     env["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path_factory.mktemp("cockpit-home-modeles"))
     env["OLLAMA_HOST"] = f"127.0.0.1:{fake.server_address[1]}"
     env["NO_COLOR"] = "1"
+    # Un faux binaire `ollama` propre au test, hors de la racine du projet : « Ollama local » exige un binaire que le PATH
+    # résout, et ni la CI ni toute machine n'en a forcément un. La règle du produit n'est pas assouplie.
+    fakebin = tmp_path_factory.mktemp("fakebin-modeles")
+    (fakebin / "ollama").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (fakebin / "ollama").chmod(0o755)
+    env["PATH"] = f"{fakebin}{os.pathsep}{env.get('PATH', '')}"
     process = subprocess.Popen(
         [sys.executable, "-m", "grimoire", "serve", "--project-root", str(root), "--port", str(port), "--no-open"],
         cwd=str(root), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

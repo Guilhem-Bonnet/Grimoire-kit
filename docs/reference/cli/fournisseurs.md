@@ -31,6 +31,20 @@ la clé de contrôle. Le repli automatique ne va jamais vers un modèle plus co�
 `payant`) ni plus exposé (`rien` < `texte`) que le modèle courant : il le propose. La clé d'API d'un fournisseur se pose au
 terminal (`grimoire providers set-key <fournisseur> <VARIABLE>`), jamais dans la page.
 
+« Vérifier les connexions » n'envoie une clé d'API qu'aux points d'accès que la page a montrés à l'humain : la page
+renvoie la liste affichée (`confirmed_endpoints`, vide comprise), le serveur lit le registre une seule fois et refuse
+(« la liste a changé, relis-la ») si cette lecture donne une autre liste ; rien n'est alors envoyé. Un modèle que
+l'Ollama de la machine liste mais exécute à distance (entrée portant `remote_host` ou `remote_model`, nom en `-cloud` ou
+`:cloud`) est toujours étiqueté exposé et payant, jamais « rien ne sort de la machine ». Un exécutable `ollama` qui se
+trouve sous la racine du projet n'est pas reconnu comme l'Ollama local.
+
+Limites connues du lot :
+
+- L'empreinte d'une autorisation lie l'autorisation à ce que le nom désigne, mais elle n'authentifie pas le fichier
+  d'autorisations lui-même : la protection de ce fichier est la zone de contrôle de l'humain, hors du dépôt.
+- Une course résiduelle subsiste sur les dossiers parents du fichier d'autorisations : la vérification de droits et de
+  liens se fait au moment de la lecture, pas de façon atomique avec elle.
+
 `providers audit` ne fait jamais l'appel réel : présence du premier mot de
 `invocation` sur le `PATH`, `--version` pour un exécutable reconnu (claude,
 gemini, copilot, codex, ollama), et pour un fournisseur local (invocation

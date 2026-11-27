@@ -314,22 +314,36 @@ export async function mount(root, ctx) {
       : `Relu à ${inventory.at.slice(11, 16)} (UTC) : lecture locale, aucune clé transmise, aucun service distant joint`;
     wrap.append(spaceHead('Modèles autorisés', sub, verify, remote, verifyStatus));
     remote.addEventListener('click', async () => {
-      const endpoints = view.remote_endpoints || [];
-      const lines = [
-        targetLine(ctx),
-        endpoints.length
-          ? `La clé d’API de chaque fournisseur ci-dessous va être ENVOYÉE à son point d’accès : ${endpoints.map((e) => `${e.provider_id} → ${e.url}`).join(' ; ')}.`
-          : 'Aucune clé d’API ne sera envoyée : aucun fournisseur n’a de clé posée et de point d’accès connu.',
-        'La connexion des agents installés sera aussi testée (aucun modèle n’est appelé).',
-      ];
       remote.disabled = true;
+      let changed = false;
       try {
-        const next2 = await runGesture(
-          { title: 'Vérifier les connexions', lines, confirmLabel: 'Vérifier' },
-          (answer) => ctx.api.directUseVerifyRemote(answer.key),
-        );
-        if (next2 && !ctx.signal.aborted) draw(next2);
-        else remote.disabled = false;
+        for (;;) {
+          // Ce qui est montré est exactement ce qui est confirmé : le serveur refuse l'envoi si la liste a changé.
+          const endpoints = (view.remote_endpoints || []).map((e) => ({ provider_id: e.provider_id, url: e.url }));
+          const lines = [
+            targetLine(ctx),
+            ...(changed ? ['La liste des points d’accès a changé depuis votre dernière lecture : relisez-la ci-dessous. Rien n’a été envoyé.'] : []),
+            endpoints.length
+              ? `La clé d’API de chaque fournisseur ci-dessous va être ENVOYÉE à son point d’accès : ${endpoints.map((e) => `${e.provider_id} → ${e.url}`).join(' ; ')}.`
+              : 'Aucune clé d’API ne sera envoyée : aucun fournisseur n’a de clé posée et de point d’accès connu.',
+            'La connexion des agents installés sera aussi testée (aucun modèle n’est appelé).',
+          ];
+          try {
+            const next2 = await runGesture(
+              { title: 'Vérifier les connexions', lines, confirmLabel: 'Vérifier' },
+              (answer) => ctx.api.directUseVerifyRemote(endpoints, answer.key),
+            );
+            if (next2 && !ctx.signal.aborted) draw(next2);
+            else remote.disabled = false;
+            return;
+          } catch (error) {
+            if (!String(error.message).includes('la liste a changé')) throw error;
+            // Liste périmée : la vue est relue et le dialogue réaffiché avec la nouvelle liste.
+            view = await ctx.api.directUse();
+            changed = true;
+            if (ctx.signal.aborted) return;
+          }
+        }
       } catch (error) {
         verifyStatus.textContent = `Refusé : ${error.message}`;
         remote.disabled = false;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 from typing import Any
@@ -320,7 +321,9 @@ def test_l_autorisation_enregistre_l_empreinte_et_la_forme_est_exacte(project: P
     stored = json.loads(ds.settings_path(project).read_text(encoding="utf-8"))
     entry = stored["usages"]["conversation"]["models"][0]
     assert entry["key"] == "ollama:llama3.2:3b"
-    assert entry["fingerprint"] == av.fingerprint("ollama-local", "llama3.2:3b")
+    assert entry["fingerprint"] == av.fingerprint(
+        "ollama-local", "llama3.2:3b", os.path.realpath("/usr/bin/ollama"), "run {model} {prompt}", "", ""
+    )
     row = inv.by_key()["registre:anthropic/claude-sonnet-5-5"]
     assert row.fingerprint == av.fingerprint(
         "registre", "anthropic", "hosted", "quota", "claude -p {prompt}", "", "", "claude-sonnet-5-5"

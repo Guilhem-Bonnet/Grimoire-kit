@@ -34,7 +34,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -58,7 +58,9 @@ __all__ = [
     "CACHE_TTL_SECONDS",
     "COSTS",
     "EGRESSES",
+    "ENDPOINTS_CHANGED_MESSAGE",
     "REASONS",
+    "EndpointsChangedError",
     "Inventory",
     "ModelAvailability",
     "OllamaScan",
@@ -174,6 +176,8 @@ class OllamaScan:
     reachable: bool
     models: tuple[tuple[str, str], ...] = ()  # (nom, taille en paramètres lue, ou "")
     note: str = ""
+    #: Noms listés par Ollama mais exécutés hors de la machine (ou dont on le soupçonne) : jamais « rien ne sort ».
+    remote: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +270,35 @@ def _clean_models(payload: Any) -> tuple[tuple[str, str], ...]:
     return tuple(found)
 
 
+def _is_cloud_name(name: str) -> bool:
+    return name.lower().endswith(("-cloud", ":cloud"))
+
+
+def _remote_names(payload: Any) -> frozenset[str]:
+    """Les modèles que ``/api/tags`` liste mais qu'Ollama exécute ailleurs : au doute, ils sont exposés.
+
+    Une entrée portant ``remote_host`` ou ``remote_model`` (même vides), ou dont le nom se termine par ``-cloud`` ou
+    ``:cloud``, est tenue pour hébergée : jamais « rien ne sort de la machine », jamais gratuite-locale.
+    """
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list):
+        return frozenset()
+    found: set[str] = set()
+    for entry in models[:MAX_OLLAMA_MODELS]:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str):
+            continue
+        alias = entry.get("model")
+        if (
+            "remote_host" in entry
+            or "remote_model" in entry
+            or _is_cloud_name(name)
+            or (isinstance(alias, str) and _is_cloud_name(alias))
+        ):
+            found.add(name)
+    return frozenset(found)
+
+
 def scan_ollama(base_url: str | None = None, *, fetch: Fetch | None = None) -> OllamaScan:
     """``GET /api/tags`` sur l'adresse locale d'Ollama ; jamais de génération, jamais d'adresse non locale.
 
@@ -285,7 +318,7 @@ def scan_ollama(base_url: str | None = None, *, fetch: Fetch | None = None) -> O
         payload = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError, RecursionError):
         return OllamaScan(base, False, (), "réponse illisible : ignorée")
-    return OllamaScan(base, True, _clean_models(payload), "")
+    return OllamaScan(base, True, _clean_models(payload), "", _remote_names(payload))
 
 
 _REAL_WHICH = shutil.which
@@ -317,12 +350,30 @@ def _is_loopback_url(value: str | None) -> bool:
     return bool(value) and _is_loopback(str(value))
 
 
-def is_local_ollama(spec: ProviderSpec, which: Callable[[str], str | None] = shutil.which) -> tuple[bool, str]:
+def _ollama_binary(which: Callable[[str], str | None]) -> str:
+    """Le chemin réel (liens résolus) du binaire ``ollama`` que le PATH trouve ; vide s'il n'y en a pas."""
+    found = which("ollama")
+    return os.path.realpath(found) if found else ""
+
+
+def _inside_project(binary: str, root: Path | None) -> bool:
+    if not binary or root is None:
+        return False
+    try:
+        return Path(binary).is_relative_to(Path(os.path.realpath(root)))
+    except (OSError, ValueError):
+        return True  # au doute, le binaire est tenu pour celui du projet
+
+
+def is_local_ollama(
+    spec: ProviderSpec, which: Callable[[str], str | None] = shutil.which, root: Path | None = None
+) -> tuple[bool, str]:
     """Cette entrée du registre est-elle réellement l'Ollama local ? ``(oui, motif du refus)``.
 
     Même définition de « local » que la politique de données (``provider_type == "local"``), et en plus : l'invocation
-    a pour nom de base ``ollama``, son chemin (s'il en a un) est le binaire que le PATH du cockpit trouve, et aucune
-    ``base_url`` n'envoie ailleurs que sur une boucle locale.
+    a pour nom de base ``ollama``, son chemin (s'il en a un) est le binaire que le PATH du cockpit trouve, aucune
+    ``base_url`` n'envoie ailleurs que sur une boucle locale, et (si *root* est donné) ce binaire ne se trouve pas
+    sous la racine du projet : un exécutable que le projet apporte lui-même n'est pas « l'Ollama de la machine ».
     """
     words = (spec.invocation or "").split()
     if not words or PurePosixPath(words[0]).name != "ollama":
@@ -336,6 +387,8 @@ def is_local_ollama(spec: ProviderSpec, which: Callable[[str], str | None] = shu
         found = which("ollama")
         if found is None or os.path.realpath(words[0]) != os.path.realpath(found):
             return False, "le chemin de la commande n'est pas l'exécutable « ollama » du PATH"
+    if _inside_project(_ollama_binary(which), root):
+        return False, "l'exécutable « ollama » trouvé est sous la racine du projet, pas celui de la machine"
     return True, ""
 
 
@@ -355,14 +408,20 @@ def fingerprint(*parts: str) -> str:
     """Empreinte SHA-256 (hex) d'une liste ordonnée de champs : ce qu'une autorisation désigne.
 
     Registre : ``("registre", id du fournisseur, type, monnaie, invocation, base_url, anthropic_base_url, modèle)``.
-    Ollama local reconnu : ``("ollama-local", modèle sans ":latest")`` (la même, configuré ou non, pour qu'ajouter
-    le modèle au registre n'invalide rien). Hôte : ``("hote", identifiant, commande ACP)``.
+    Ollama local reconnu : ``("ollama-local", modèle sans ":latest", chemin réel du binaire, invocation sans son
+    premier mot, base_url, anthropic_base_url[, "distant"])`` (la même, configuré ou non, quand l'entrée est la
+    canonique, pour qu'ajouter le modèle au registre n'invalide rien). Hôte : ``("hote", identifiant, commande ACP)``.
     """
     return hashlib.sha256(json.dumps(list(parts), ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def _ollama_fp(model: str) -> str:
-    return fingerprint("ollama-local", model.removesuffix(":latest"))
+def _ollama_fp(
+    model: str, binary: str, invocation: str, base_url: str = "", anthropic_base_url: str = "", *, remote: bool = False
+) -> str:
+    """L'empreinte d'un modèle d'Ollama local : le nom, le binaire réel, le reste de la commande et les adresses."""
+    rest = " ".join((invocation or "").split()[1:])
+    parts = ["ollama-local", model.removesuffix(":latest"), binary, rest, base_url, anthropic_base_url]
+    return fingerprint(*parts, *(["distant"] if remote else []))
 
 
 def key_command(provider_id: str) -> str:
@@ -403,15 +462,24 @@ class _Env:
     ollama: OllamaScan
 
 
+def _runs_remotely(model_id: str, scan: OllamaScan) -> bool:
+    """Ce modèle d'Ollama s'exécute-t-il hors de la machine (ou est-ce à craindre) ? Au doute, oui."""
+    return _is_cloud_name(model_id) or any(_same_model(model_id, name) for name in scan.remote)
+
+
 def _registry_rows(spec: ProviderSpec, env: _Env) -> list[ModelAvailability]:
     runtime = env.state.get(spec.id)
-    ollama_backed = is_local_ollama(spec, env.which)[0]
+    ollama_backed = is_local_ollama(spec, env.which, env.root)[0]
     verified_local = _verified_local(spec, ollama_backed)
     needs_key = spec.currency == "api" and not verified_local
     present = _key_present(spec.id, env.stored) if needs_key else None
     declared = [(m.id, m.tier) for m in spec.models] or [(mid, "") for mid in spec.default_models] or [("", "")]
+    binary = _ollama_binary(env.which) if ollama_backed else ""
     rows: list[ModelAvailability] = []
     for model_id, tier in declared:
+        # Un modèle que l'Ollama de la machine liste mais exécute ailleurs est exposé, jamais « rien ne sort ».
+        remote = ollama_backed and bool(model_id) and _runs_remotely(model_id, env.ollama)
+        local_row = verified_local and not remote
         available, reason, detail = True, "", ""
         executable = (spec.invocation or "").split()[:1]
         suspended_model = runtime is not None and model_id != "" and runtime.is_model_suspended(model_id, now=env.now)
@@ -442,7 +510,11 @@ def _registry_rows(spec: ProviderSpec, env: _Env) -> list[ModelAvailability]:
                 source=SOURCE_OLLAMA if ollama_backed else SOURCE_REGISTRY,
                 provider_id=spec.id,
                 model_id=model_id,
-                origin=("Ollama sur cette machine" if ollama_backed else f"Fournisseur « {spec.id} »"),
+                origin=(
+                    "Ollama (modèle exécuté hors de la machine)"
+                    if remote
+                    else "Ollama sur cette machine" if ollama_backed else f"Fournisseur « {spec.id} »"
+                ),
                 tier=tier,
                 tier_provenance="registre" if tier else "",
                 provider_type=spec.provider_type,
@@ -451,11 +523,14 @@ def _registry_rows(spec: ProviderSpec, env: _Env) -> list[ModelAvailability]:
                 available=available,
                 reason=reason,
                 detail=detail,
-                egress=_egress_of(verified_local=verified_local),
-                cost=_cost_of(spec.currency, verified_local=verified_local),
+                egress=_egress_of(verified_local=local_row),
+                cost=_cost_of(spec.currency, verified_local=local_row),
                 ref=key,
                 fingerprint=(
-                    _ollama_fp(model_id)
+                    _ollama_fp(
+                        model_id, binary, spec.invocation or "", spec.base_url or "", spec.anthropic_base_url or "",
+                        remote=remote,
+                    )
                     if ollama_backed and model_id
                     else fingerprint(
                         "registre", spec.id, spec.provider_type, spec.currency or "", spec.invocation or "",
@@ -475,11 +550,15 @@ def _registry_rows(spec: ProviderSpec, env: _Env) -> list[ModelAvailability]:
 
 def _ollama_rows(env: _Env, configured: set[str]) -> list[ModelAvailability]:
     rows: list[ModelAvailability] = []
+    binary = _ollama_binary(env.which)
+    project_bound = _inside_project(binary, env.root)
     for name, size in env.ollama.models:
         if f"{SOURCE_OLLAMA}:{name}" in configured or any(
             _same_model(name, k.split(":", 1)[1]) for k in configured if k.startswith(f"{SOURCE_OLLAMA}:")
         ):
             continue
+        # Exécuté ailleurs, ou binaire apporté par le projet : exposé, jamais « rien ne sort » ni gratuit-local.
+        exposed = project_bound or _runs_remotely(name, env.ollama)
         tier = tier_from_parameter_size(size)
         rows.append(
             ModelAvailability(
@@ -488,24 +567,24 @@ def _ollama_rows(env: _Env, configured: set[str]) -> list[ModelAvailability]:
                 source=SOURCE_OLLAMA,
                 provider_id=LOCAL_PROVIDER_ID,
                 model_id=name,
-                origin="Ollama sur cette machine",
+                origin="Ollama (modèle exécuté hors de la machine)" if exposed else "Ollama sur cette machine",
                 tier=tier,
                 tier_provenance="déduit de la taille" if tier else "",
-                provider_type="local",
-                currency="local",
+                provider_type="hosted" if exposed else "local",
+                currency="api" if exposed else "local",
                 configured=False,
                 available=True,
                 reason="",
                 detail="Détecté, non configuré dans le registre.",
-                egress="rien",
-                cost="gratuit-local",
+                egress=_egress_of(verified_local=not exposed),
+                cost=_cost_of("api" if exposed else "local", verified_local=not exposed),
                 key_present=None,
                 key_command="",
                 cooldown_until=None,
                 capabilities=(),
                 size_label=size,
                 ref=f"{SOURCE_OLLAMA}:{name}",
-                fingerprint=_ollama_fp(name),
+                fingerprint=_ollama_fp(name, binary, LOCAL_INVOCATION, remote=exposed),
             )
         )
     return rows
@@ -577,49 +656,90 @@ def local_ollama_entry(root: Path, which: Callable[[str], str | None] = shutil.w
     }
 
 
+class EndpointsChangedError(ValueError):
+    """La liste des points d'accès n'est plus celle que l'humain a confirmée : rien n'a été envoyé."""
+
+
+#: Le motif que la page reconnaît pour relire la vue et réafficher le dialogue (ne pas le changer sans elle).
+ENDPOINTS_CHANGED_MESSAGE = "la liste a changé, relis-la : aucune clé n'a été envoyée"
+
+
+def _spec_key_endpoint(spec: ProviderSpec) -> tuple[str, str] | None:
+    """``(provider_id, url)`` où la sonde enverrait la clé de *spec*, ou ``None`` ; sans réseau, sans valeur de clé."""
+    from grimoire.providers import capability_probe as cp
+    from grimoire.providers.capabilities import LITELLM, canonical_provider
+
+    if not (spec.enabled and is_valid_provider_id(spec.id)):
+        return None
+    kind = canonical_provider(spec.id, spec.provider_type)
+    endpoint: Any
+    if kind == "local":
+        return None
+    if kind == LITELLM:
+        base = cp.admitted_gateway_url(spec.base_url)
+        if not base or cp._names_documented_provider(spec.id):
+            return None
+        endpoint = cp._Endpoint(f"{base}/v1/models", provider_key_var(spec.id), "bearer", store_only=True)
+    else:
+        endpoint = cp._hosted_endpoint(spec)
+        if endpoint is None or (endpoint.store_only and endpoint.key_var in cp._reserved_key_vars()):
+            return None
+    if not cp._key_value(spec.id, endpoint):  # présence seulement : la valeur n'en sort pas
+        return None
+    return spec.id, str(endpoint.url).split("?", 1)[0]
+
+
+def _endpoints_of(specs: Sequence[ProviderSpec]) -> list[dict[str, str]]:
+    found = (_spec_key_endpoint(spec) for spec in specs)
+    return [{"provider_id": entry[0], "url": entry[1]} for entry in found if entry is not None]
+
+
 def key_endpoints(root: Path) -> list[dict[str, str]]:
     """Les points d'accès où la sonde de capacités enverrait une clé d'API si on la lançait : sans réseau, sans valeur de clé.
 
     Un fournisseur activé figure ici seulement si sa clé est posée ET si la sonde saurait où l'envoyer (adresse documentée,
-    ``anthropic_base_url`` en https, ou passerelle admise). Les fournisseurs locaux n'en font pas partie.
+    ``anthropic_base_url`` en https sans identifiants, ou passerelle admise). Les fournisseurs locaux n'en font pas partie.
     """
-    from grimoire.providers import capability_probe as cp
-    from grimoire.providers.capabilities import LITELLM, canonical_provider
-
     try:
-        specs = [s for s in read_registry(root) if s.enabled and is_valid_provider_id(s.id)]
+        specs = read_registry(root)
     except ProviderRegistryError:
         return []
-    found: list[dict[str, str]] = []
-    for spec in specs:
-        kind = canonical_provider(spec.id, spec.provider_type)
-        endpoint: Any
-        if kind == "local":
-            continue
-        if kind == LITELLM:
-            base = cp.admitted_gateway_url(spec.base_url)
-            if not base or cp._names_documented_provider(spec.id):
-                continue
-            endpoint = cp._Endpoint(f"{base}/v1/models", provider_key_var(spec.id), "bearer", store_only=True)
-        else:
-            endpoint = cp._hosted_endpoint(spec)
-            if endpoint is None or (endpoint.store_only and endpoint.key_var in cp._reserved_key_vars()):
-                continue
-        if cp._key_value(spec.id, endpoint):  # présence seulement : la valeur n'en sort pas
-            found.append({"provider_id": spec.id, "url": str(endpoint.url).split("?", 1)[0]})
-    return found
+    return _endpoints_of(specs)
 
 
-def probe_remote(root: Path) -> list[str]:
-    """La sonde de capacités sur les seuls fournisseurs de :func:`key_endpoints` ; rend leurs identifiants.
+def _confirmed_pairs(confirmed: Any) -> list[tuple[str, str]]:
+    if not isinstance(confirmed, list):
+        raise EndpointsChangedError("`confirmed_endpoints` : la liste affichée à l'humain est requise (relis-la)")
+    pairs: list[tuple[str, str]] = []
+    for item in confirmed:
+        pid = item.get("provider_id") if isinstance(item, dict) else None
+        url = item.get("url") if isinstance(item, dict) else None
+        if not isinstance(pid, str) or not isinstance(url, str):
+            raise EndpointsChangedError("`confirmed_endpoints` : liste illisible (relis-la)")
+        pairs.append((pid, url))
+    return sorted(pairs)
 
-    À n'appeler que derrière la clé de contrôle : elle envoie la clé d'API de chacun à son point d'accès. Rien n'est
-    sondé qui n'ait été listé, et les fournisseurs locaux (Ollama) ne passent jamais par ici.
+
+def probe_remote(root: Path, confirmed_endpoints: Any) -> list[str]:
+    """La sonde de capacités sur les seuls fournisseurs que l'humain a vus listés ; rend leurs identifiants.
+
+    À n'appeler que derrière la clé de contrôle : elle envoie la clé d'API de chacun à son point d'accès. Le registre est
+    lu UNE fois : la liste des points d'accès, sa comparaison à *confirmed_endpoints* (ce que la page a montré, liste vide
+    comprise ; absente = refus) et la sonde partent de cette seule lecture. Si la liste diffère, :class:`EndpointsChanged`
+    (une :class:`EndpointsChangedError`) est levée et rien n'est envoyé. Les fournisseurs locaux (Ollama) ne passent jamais par ici.
     """
     from grimoire.providers.capability_probe import load_probes, probe_provider_capabilities, save_probes
 
-    ids = {entry["provider_id"] for entry in key_endpoints(root)}
-    targets = [s for s in read_registry(root) if s.id in ids and s.enabled]
+    confirmed = _confirmed_pairs(confirmed_endpoints)
+    try:
+        specs = read_registry(root)
+    except ProviderRegistryError:
+        specs = ()
+    entries = _endpoints_of(specs)
+    if sorted((e["provider_id"], e["url"]) for e in entries) != confirmed:
+        raise EndpointsChangedError(ENDPOINTS_CHANGED_MESSAGE)
+    by_id = {e["provider_id"]: e["url"] for e in entries}
+    targets = [s for s in specs if _spec_key_endpoint(s) == (s.id, by_id.get(s.id))]
     if not targets:
         return []
     probes = load_probes(root)
