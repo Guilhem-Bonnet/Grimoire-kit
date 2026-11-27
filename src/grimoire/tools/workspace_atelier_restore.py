@@ -193,9 +193,9 @@ def _protected_requirements(root: Path, slug: str, phases: list[h._Phase], phase
     """
     from grimoire.core.cadrage_requirements import REQUIREMENT_FILES, parse_requirements
     from grimoire.missions.mandate import AuthorityJournal, JournalError
+    from grimoire.missions.schemas import ORIGIN_HUMAN
     from grimoire.missions.requirement_gate import (
         APPROVE_CHANNEL,
-        ORIGIN_HUMAN,
         VALIDATED_ENTRY,
         fingerprint,
         gate_mode,
