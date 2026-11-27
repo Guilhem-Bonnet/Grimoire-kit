@@ -152,8 +152,10 @@ export function createAtelierMascotte(ctx, hooks) {
     const note = conv.querySelector('.conv-note');
     if (!note) return;
     const why = el('button', 'at-why', 'Pourquoi ?', { type: 'button', 'data-act': 'why', 'aria-expanded': 'false', 'aria-controls': note.id });
+    const line = el('span', 'at-why-line', 'Vocal indisponible.', { 'data-role': 'conversation-summary', 'aria-hidden': 'true' });
     const sync = () => {
       why.hidden = note.hidden;
+      line.hidden = note.hidden;
       if (note.hidden) { note.classList.remove('is-open'); why.setAttribute('aria-expanded', 'false'); }
     };
     why.addEventListener('click', () => {
@@ -164,7 +166,7 @@ export function createAtelierMascotte(ctx, hooks) {
     const watch = new MutationObserver(sync);
     watch.observe(note, { attributes: true, attributeFilter: ['hidden'] });
     ctx.signal.addEventListener('abort', () => watch.disconnect());
-    note.before(why);
+    note.before(line, why);
     sync();
   }
 

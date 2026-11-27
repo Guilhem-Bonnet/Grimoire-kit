@@ -232,7 +232,8 @@
 .at-mascotte .conv-note { display: none; flex-basis: 100%; margin: 0; color: var(--ink2); font-size: var(--t-s); overflow-wrap: anywhere; }
 .at-mascotte .conv-note.is-open:not([hidden]) { display: block; }
 .at-why { padding: 0; border: 0; background: none; color: var(--acc); font: inherit; font-size: var(--t-s); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.at-why[hidden] { display: none; }
+.at-why[hidden], .at-why-line[hidden] { display: none; }
+.at-why-line { color: var(--ink2); font-size: var(--t-s); }
 .at-mascotte[data-tone="wait"] .at-mascotte-btn { border-color: var(--acc); }
 .at-mascotte[data-tone="error"] .at-mascotte-btn { border-color: var(--bad); }
 .at-mascotte[data-tone="off"] .at-mascotte-btn { opacity: 0.7; }

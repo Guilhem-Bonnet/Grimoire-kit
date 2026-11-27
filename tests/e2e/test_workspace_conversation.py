@@ -478,8 +478,16 @@ def test_atelier_without_voice_no_conversation(browser: Browser, project: tuple[
         toggle.wait_for(state="visible", timeout=READY_MS)  # le bouton reste, désactivé, avec la raison et le geste
         assert toggle.get_attribute("aria-disabled") == "true"
         note = page.locator("[data-role='assistant-mascotte'] [data-role='conversation-note']")
+        # Replié : une ligne visible et « Pourquoi ? » ; la raison complète reste reliée au bouton, même masquée.
+        assert page.locator("[data-role='conversation-summary']").is_visible() and not note.is_visible()
+        assert toggle.get_attribute("aria-describedby") == note.get_attribute("id")
+        assert "moteur vocal absent" in (note.text_content() or "")
+        why = page.locator("[data-role='assistant-mascotte'] [data-act='why']")
+        why.focus()
+        page.keyboard.press("Enter")  # au clavier comme à la souris
         note.wait_for(state="visible")
         assert "moteur vocal absent" in note.inner_text() and "interaction.mode: voice" in note.inner_text()
+        assert why.get_attribute("aria-expanded") == "true"
         toggle.click(force=True)
         page.wait_for_timeout(500)
         assert _mic_calls(page) == 0, "désactivé : aucun micro"
