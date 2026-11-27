@@ -74,7 +74,7 @@ def project(tmp_path: Path) -> Path:
     root.mkdir()
     _write(root, GW)
     result = runner.invoke(
-        app, ["providers", "set-key", "gw", "GW_API_KEY", "--project-root", str(root)], input=f"{SECRET}\n"
+        app, ["providers", "set-key", "gw", "GW_API_KEY", "--project-root", str(root), "--yes"], input=f"{SECRET}\n"
     )
     assert result.exit_code == 0, result.output
     return root
@@ -120,7 +120,13 @@ def test_dispatch_ancienne_cle_sans_empreinte_vers_une_adresse_personnalisee_est
     set_secret("deepseek", "DEEPSEEK_API_KEY", SECRET)  # d'avant la liaison
     code, *_ = _run_provider_call(root, read_registry(root)[0], "m1", "go", call_timeout=5)
     assert sent == [] and code != 0
-    _write(root, "https://api.deepseek.com", "deepseek")  # le défaut officiel : la clé ancienne reste utilisable
+    _write(root, "https://api.deepseek.com", "deepseek")  # même l'adresse officielle : la commande vient du registre
+    code, *_ = _run_provider_call(root, read_registry(root)[0], "m1", "go", call_timeout=5)
+    assert sent == [] and code != 0  # une clé ancienne n'est jamais remise à une commande du registre avant ressaisie
+    result = runner.invoke(
+        app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY", "--project-root", str(root), "--yes"], input=f"{SECRET}\n"
+    )
+    assert result.exit_code == 0
     code, *_ = _run_provider_call(root, read_registry(root)[0], "m1", "go", call_timeout=5)
     assert code == 0 and sent[0]["DEEPSEEK_API_KEY"] == SECRET
 

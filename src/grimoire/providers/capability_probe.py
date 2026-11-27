@@ -74,6 +74,8 @@ class _Endpoint:
     auth: str  # "bearer" | "anthropic" | "google"
     #: Hôte lu dans le registre : la clé vient du magasin seulement, jamais de l'environnement.
     store_only: bool = False
+    #: Adresse déclarée au registre, telle que la saisie de la clé l'a liée (la sonde en tire ``url`` : sans ``/v1``).
+    target: str = ""
 
 
 #: Points d'entrée documentés de la liste des modèles (sources : DOCUMENTED_DEFAULTS dans ``capabilities``,
@@ -116,6 +118,8 @@ _OPENER = urllib.request.build_opener(_NoRedirect())
 
 def _key_target(endpoint: _Endpoint) -> str:
     """Le point d'accès où la clé part : la base déclarée au registre, ou l'origine d'une adresse documentée."""
+    if endpoint.target:
+        return endpoint.target
     if endpoint.store_only:
         return endpoint.url.removesuffix("/v1/models")
     parts = urlsplit(endpoint.url)
@@ -343,7 +347,9 @@ def _probe_litellm(provider: ProviderSpec, probed_at: str) -> CapabilityProbe:
         note = "non mesuré : base_url absente ou non admise (https://, ou http:// vers une boucle locale)"
         return CapabilityProbe(provider.id, False, note, probed_at)
     # Les variables réservées (`_reserved_key_vars`) sont toutes celles d'un id refusé ci-dessus.
-    endpoint = _Endpoint(f"{base}/v1/models", provider_key_var(provider.id), "bearer", store_only=True)
+    endpoint = _Endpoint(
+        f"{base}/v1/models", provider_key_var(provider.id), "bearer", store_only=True, target=provider.base_url or ""
+    )
     try:
         key = _key_value(provider.id, endpoint)
     except KeyEndpointError as exc:
@@ -372,7 +378,13 @@ def _hosted_endpoint(provider: ProviderSpec) -> _Endpoint | None:
     # en-tête, et l'hôte réellement joint est celui qu'on affiche) ; ici https seulement.
     base = admitted_gateway_url(provider.anthropic_base_url)
     if base.startswith("https://"):
-        return _Endpoint(f"{base}/v1/models", provider_key_var(provider.id), "anthropic", store_only=True)
+        return _Endpoint(
+            f"{base}/v1/models",
+            provider_key_var(provider.id),
+            "anthropic",
+            store_only=True,
+            target=provider.anthropic_base_url or "",
+        )
     return None
 
 

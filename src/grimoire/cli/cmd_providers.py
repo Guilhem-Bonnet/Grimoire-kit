@@ -34,6 +34,7 @@ from grimoire.providers.capabilities import (
     ProviderCapabilities,
 )
 from grimoire.providers.capability_probe import capabilities_for, load_probes, probe_capabilities, read_capabilities
+from grimoire.providers.key_endpoint import spec_binding_view
 from grimoire.providers.registry import (
     SUPPORTED_CURRENCIES,
     SUPPORTED_MODEL_TIERS,
@@ -146,6 +147,8 @@ def _provider_json(
         "capabilities": capabilities_for(provider, probe).to_dict(),
         # Clés saisies avant leur liaison à un point d'accès : valables vers l'adresse officielle seulement.
         "keys_unbound": provider_unbound_keys(provider.id),
+        # Ce que la saisie d'une clé lierait maintenant (adresses normalisées, commande d'invocation) : à montrer avant le geste.
+        "key_binding": spec_binding_view(provider),
     }
 
 
@@ -654,22 +657,45 @@ def providers_set_key(
     provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur.")],
     env_var: Annotated[str, typer.Argument(help="Nom de la variable d'environnement (ex: DEEPSEEK_API_KEY).")],
     project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Sans confirmation (scripts) : affiche la même liste, puis saisie masquée.")
+    ] = False,
 ) -> None:
     """Poser une clé API en saisie masquée — jamais en argument, jamais dans le registre.
 
     Écrit dans ``~/.env-store/`` (``grimoire.providers.secrets``), lu
     automatiquement par `grimoire task dispatch` au moment d'invoquer ce
     fournisseur. La clé est liée au point d'accès que le registre du projet déclare
-    pour ce fournisseur (et à son adresse officielle s'il est documenté) : si la
-    déclaration change d'adresse ensuite, la clé n'est plus rendue — saisis-la de nouveau.
+    pour ce fournisseur (et à son adresse officielle s'il est documenté) et à sa commande
+    d'invocation : la liste est montrée AVANT la saisie, qui demande confirmation (``--yes`` pour
+    un script). Si la déclaration change ensuite, la clé n'est plus rendue — saisis-la de nouveau.
     """
     import getpass
 
-    from grimoire.providers.key_endpoint import binding_endpoints
+    from rich.markup import escape
 
+    from grimoire.providers.key_endpoint import UNADMITTED, binding_endpoints, binding_invocation, binding_view
+
+    root = project_root.resolve()
+    view = binding_view(binding_endpoints(root, provider_id), binding_invocation(root, provider_id))
+    console.print(f"Cette clé sera liée, pour {escape(provider_id)}, à :")
+    for url in view["endpoints"] or ["(aucune adresse déclarée)"]:
+        console.print(f"  adresse : {escape(url)}")
+    console.print(f"  commande d'invocation : {escape(view['invocation']) or '(aucune)'}")
+    if UNADMITTED in view["endpoints"]:
+        console.print("[red]adresse du fournisseur non admise pour une clé : corrige le registre, rien n'est saisi.[/red]")
+        raise typer.Exit(1)
+    if not yes and not typer.confirm("Approuver ces adresses et cette commande ?"):
+        raise typer.Exit(1)
     value = getpass.getpass(f"Valeur pour {env_var} ({provider_id}) — saisie masquée : ")
     try:
-        path = set_secret(provider_id, env_var, value, endpoints=binding_endpoints(project_root.resolve(), provider_id))
+        path = set_secret(
+            provider_id,
+            env_var,
+            value,
+            endpoints=binding_endpoints(root, provider_id),
+            invocation=binding_invocation(root, provider_id),
+        )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc

@@ -852,7 +852,7 @@ def _run_provider_call(
     started = time.monotonic()
     try:
         env = provider_env(provider)
-    except KeyEndpointError as exc:  # clé saisie pour une autre adresse : le sous-processus n'est pas lancé
+    except KeyEndpointError as exc:  # clé saisie pour une autre adresse ou commande : le sous-processus n'est pas lancé
         return 1, "", f"{provider.id} : {exc}", time.monotonic() - started, "error", None
     try:
         completed = subprocess.run(

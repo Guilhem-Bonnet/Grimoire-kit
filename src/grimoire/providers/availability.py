@@ -679,7 +679,9 @@ def _spec_key_endpoint(spec: ProviderSpec) -> tuple[str, str] | None:
         base = cp.admitted_gateway_url(spec.base_url)
         if not base or cp._names_documented_provider(spec.id):
             return None
-        endpoint = cp._Endpoint(f"{base}/v1/models", provider_key_var(spec.id), "bearer", store_only=True)
+        endpoint = cp._Endpoint(
+            f"{base}/v1/models", provider_key_var(spec.id), "bearer", store_only=True, target=spec.base_url or ""
+        )
     else:
         endpoint = cp._hosted_endpoint(spec)
         if endpoint is None or (endpoint.store_only and endpoint.key_var in cp._reserved_key_vars()):

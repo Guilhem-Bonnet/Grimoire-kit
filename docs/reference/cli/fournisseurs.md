@@ -54,9 +54,20 @@ fournisseur a changé depuis la saisie de la clé ; saisis-la de nouveau pour l'
 l'adresse. Une adresse en `http://` hors boucle locale, ou portant des identifiants, une requête ou un fragment, n'est
 jamais admise pour recevoir une clé.
 
+La saisie lie aussi la commande d'invocation du fournisseur (le gabarit `invocation` du registre, empreinte
+seulement) : un appel par `task dispatch` remet la clé à la commande du registre, qui doit donc être celle approuvée. Si
+l'adresse ou la commande a changé, la clé n'est pas remise et aucun sous-processus n'est lancé ; une clé liée à au moins
+une adresse ne vaut jamais pour une cible vide. `set-key` montre, avant de demander la clé, les adresses normalisées et
+la commande qui seront approuvées, puis demande confirmation (`--yes` pour un script : même liste, sans confirmation).
+La lecture du cockpit et `providers status --json` exposent `key_binding` (ce qui serait lié) et la réponse de la saisie
+du cockpit rend `bound`. Un `/v1` final fait partie de l'adresse (deux chemins peuvent être deux services) ; il n'est
+équivalent à son absence que pour l'adresse officielle du fournisseur.
+
 Migration : une clé saisie avant cette liaison (sans empreinte) reste utilisable vers l'adresse officielle par défaut de
 son fournisseur seulement ; vers toute autre adresse (passerelle, `base_url` ou `anthropic_base_url` personnalisés),
-elle exige une nouvelle saisie. `grimoire providers secrets` (colonne « Point d'accès »), `grimoire providers status`
+elle exige une nouvelle saisie. Une clé ancienne n'est en outre jamais remise à un sous-processus dont la commande vient
+du registre (`task dispatch`) tant qu'elle n'est pas ressaisie. La règle tient dans une seule fonction
+(`_legacy_may_receive`, `grimoire/providers/secrets.py`). `grimoire providers secrets` (colonne « Point d'accès »), `grimoire providers status`
 (`keys_unbound` en JSON) et `grimoire doctor` (contrôle `provider_keys_bound`, avertissement) signalent les clés non
 liées ; ressaisir la clé la lie.
 

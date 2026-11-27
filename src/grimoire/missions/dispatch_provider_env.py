@@ -16,21 +16,31 @@ Deux contrats se rencontrent ici :
 
 from __future__ import annotations
 
+import logging
 import os
 
 from grimoire.providers.key_endpoint import key_targets
 from grimoire.providers.registry import ProviderSpec
-from grimoire.providers.secrets import env_for_provider
+from grimoire.providers.secrets import KeyEndpointError, env_for_provider
+
+_LOG = logging.getLogger(__name__)
 
 
 def provider_env(provider: ProviderSpec) -> dict[str, str]:
     """Environnement du sous-processus qui réalise l'invocation du fournisseur.
 
     Les clés du magasin n'y entrent que pour les adresses que la déclaration du fournisseur désigne aujourd'hui
-    (:func:`~grimoire.providers.key_endpoint.key_targets`) ; une clé saisie pour une autre adresse lève
+    (:func:`~grimoire.providers.key_endpoint.key_targets`) et pour la commande d'invocation approuvée à la saisie
+    (une clé ancienne, sans cette approbation, n'est jamais remise à une commande du registre) ; une clé
+    saisie pour une autre adresse ou une autre commande lève
     :class:`~grimoire.providers.secrets.KeyEndpointError`, sans qu'aucune valeur sorte.
     """
-    env = {**os.environ, **env_for_provider(provider.id, endpoints=key_targets(provider))}
+    try:
+        stored = env_for_provider(provider.id, endpoints=key_targets(provider), invocation=provider.invocation or "")
+    except KeyEndpointError as exc:
+        _LOG.warning("%s : %s", provider.id, exc)  # une seule tentative : le motif et la commande à lancer sont dits ici
+        raise
+    env = {**os.environ, **stored}
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
     return env

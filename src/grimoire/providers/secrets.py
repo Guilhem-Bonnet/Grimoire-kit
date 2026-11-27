@@ -98,6 +98,11 @@ _LEGACY = (
     "cette clé a été saisie avant sa liaison à une adresse : elle ne vaut que vers l'adresse officielle du "
     "fournisseur ; saisis-la de nouveau pour l'approuver (`grimoire providers set-key {provider} {var}`)."
 )
+_INVOCATION = (
+    "la commande d'invocation de ce fournisseur a changé, ou n'a pas été approuvée, depuis la saisie de la clé : "
+    "la clé n'est jamais remise à une commande tirée du registre sans cette approbation ; saisis-la de nouveau "
+    "pour l'approuver (`grimoire providers set-key {provider} {var}`)."
+)
 _NOT_ADMITTED = (
     "adresse du fournisseur non admise pour une clé (https requis hors boucle locale, ni identifiants, ni requête, "
     "ni fragment) ; corrige la déclaration du fournisseur."
@@ -111,7 +116,8 @@ class KeyEndpointError(ValueError):
 def normalize_endpoint(url: str | None) -> str:
     """Le point d'accès normalisé de *url* ; vide si l'adresse n'est pas admise pour recevoir une clé.
 
-    Schéma et hôte en minuscules, port par défaut omis, ``/`` final et ``/v1`` final retirés. Admis : ``https://``, et
+    Schéma et hôte en minuscules, port par défaut omis, ``/`` final retiré (un ``/v1`` final reste : deux chemins
+    peuvent être deux services ; seule l'adresse officielle l'admet, voir :func:`_official_form`). Admis : ``https://``, et
     ``http://`` vers une boucle locale seulement ; jamais d'identifiants, de requête ni de fragment.
     """
     raw = (url or "").strip()
@@ -127,12 +133,18 @@ def normalize_endpoint(url: str | None) -> str:
         return ""
     shown_host = f"[{host}]" if ":" in host else host
     shown_port = "" if port in (None, _DEFAULT_PORTS[scheme]) else f":{port}"
-    path = parts.path.rstrip("/").removesuffix("/v1").rstrip("/")
+    path = parts.path.rstrip("/")
     return f"{scheme}://{shown_host}{shown_port}{path}"
 
 
 def _fingerprint(normalized: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _official_form(provider_id: str, url: str) -> str:
+    """*url* (normalisée), ramenée à l'adresse officielle de *provider_id* si elle n'en diffère que par ``/v1``."""
+    official = normalize_endpoint(official_endpoint(provider_id))
+    return official if official and url in (official, f"{official}/v1") else url
 
 
 def official_endpoint(provider_id: str, provider_type: str = "") -> str:
@@ -196,12 +208,31 @@ def _save_index(data: _Index) -> None:
     path.chmod(0o600)
 
 
-def set_secret(provider_id: str, env_var: str, value: str, *, endpoints: Iterable[str] | None = None) -> Path:
+def _entries(index: _Index) -> list[dict[str, Any]]:
+    """Les entrées bien formées de l'index (``provider`` et ``env_var`` en chaînes) ; le reste est écarté.
+
+    Une entrée mal formée ne ressortait déjà d'aucune lecture : elle n'arrête plus la saisie ni le retrait, qui
+    permettent justement de la remplacer (échec fermé : sans entrée, la clé est « non liée »).
+    """
+    raw = index.get("entries")
+    items = raw if isinstance(raw, list) else []
+    return [e for e in items if isinstance(e, dict) and isinstance(e.get("provider"), str) and isinstance(e.get("env_var"), str)]
+
+
+def set_secret(
+    provider_id: str,
+    env_var: str,
+    value: str,
+    *,
+    endpoints: Iterable[str] | None = None,
+    invocation: str | None = None,
+) -> Path:
     """Pose *value* pour *env_var* du fournisseur *provider_id* ; rend le fichier écrit.
 
     *endpoints* : les points d'accès que le fournisseur déclare à cet instant (geste de saisie de l'humain) ; la clé
     y est liée. ``None`` pose une clé non liée (valable seulement vers l'adresse officielle du fournisseur) ; une liste
-    vide lie la clé à « aucune adresse déclarée ».
+    vide lie la clé à « aucune adresse déclarée ». *invocation* : le gabarit de commande que le registre déclare
+    (``""`` : aucun) ; non vide, la clé n'est remise qu'à une commande identique.
 
     Lève ``ValueError`` sur une valeur vide — un magasin qui accepterait une
     clé vide masquerait l'absence réelle de configuration —, sur un id invalide, ou
@@ -215,7 +246,7 @@ def set_secret(provider_id: str, env_var: str, value: str, *, endpoints: Iterabl
         normalized = [normalize_endpoint(url) for url in endpoints]
         if "" in normalized:
             raise KeyEndpointError(_NOT_ADMITTED)
-        fingerprints = sorted({_fingerprint(url) for url in normalized})
+        fingerprints = sorted({_fingerprint(_official_form(provider_id, url)) for url in normalized})
     path = _provider_file(provider_id)
     _ensure_store()
     values = _read_env_file(path)
@@ -223,7 +254,7 @@ def set_secret(provider_id: str, env_var: str, value: str, *, endpoints: Iterabl
     _write_env_file(path, values)
 
     index = _load_index()
-    entries = [e for e in index["entries"] if not (e["provider"] == provider_id and e["env_var"] == env_var)]
+    entries = [e for e in _entries(index) if not (e["provider"] == provider_id and e["env_var"] == env_var)]
     entry: dict[str, Any] = {
         "provider": provider_id,
         "env_var": env_var,
@@ -232,6 +263,8 @@ def set_secret(provider_id: str, env_var: str, value: str, *, endpoints: Iterabl
     }
     if fingerprints is not None:
         entry["endpoints"] = fingerprints
+    if invocation and invocation.strip():
+        entry["invocation"] = _fingerprint(invocation.strip())
     entries.append(entry)
     index["entries"] = entries
     _save_index(index)
@@ -244,13 +277,16 @@ def _is_bound(entry: Mapping[str, Any]) -> bool:
 
 def list_secrets() -> tuple[SecretEntry, ...]:
     """Entrées déclarées (fournisseur, variable, fichier, date, liée ou non) — jamais les valeurs."""
-    index = _load_index()
     return tuple(
         SecretEntry(
-            provider=e["provider"], env_var=e["env_var"], file=e["file"], added_at=e.get("added_at", ""), bound=_is_bound(e)
+            provider=e["provider"],
+            env_var=e["env_var"],
+            file=str(e.get("file", "")),
+            added_at=str(e.get("added_at", "")),
+            bound=_is_bound(e),
         )
-        for e in index.get("entries", [])
-        if isinstance(e, dict) and e.get("provider") and e.get("env_var")
+        for e in _entries(_load_index())
+        if e["provider"] and e["env_var"]
     )
 
 
@@ -274,33 +310,55 @@ def remove_secret(provider_id: str, env_var: str | None = None) -> None:
     index = _load_index()
     index["entries"] = [
         e
-        for e in index["entries"]
+        for e in _entries(index)
         if not (e["provider"] == provider_id and (env_var is None or e["env_var"] == env_var))
     ]
     _save_index(index)
 
 
-def _check_endpoints(provider_id: str, var: str, entry: Mapping[str, Any] | None, targets: list[str]) -> None:
+def _legacy_may_receive(provider_id: str, targets: list[str], invocation: str | None) -> bool:
+    """RÈGLE DE MIGRATION (un seul endroit) : une clé sans empreinte peut-elle partir vers *targets* ?
+
+    Aujourd'hui : seulement vers l'adresse officielle par défaut de son fournisseur, et jamais à une commande du
+    registre (*invocation* déclarée non vide). Pour passer à un refus immédiat de toute clé ancienne, retourner
+    ``False``; pour une période d'avertissement, retourner ``True`` ici et laisser ``doctor`` signaler.
+    """
+    if invocation is not None and invocation.strip():
+        return False
+    official = normalize_endpoint(official_endpoint(provider_id))
+    return bool(official) and bool(targets) and all(_official_form(provider_id, url) == official for url in targets)
+
+
+def _check_endpoints(
+    provider_id: str, var: str, entry: Mapping[str, Any] | None, targets: list[str], invocation: str | None
+) -> None:
     """Lève :class:`KeyEndpointError` si la clé *var* ne peut pas partir vers *targets* (déjà normalisés)."""
     if "" in targets:
         raise KeyEndpointError(_NOT_ADMITTED)
     names = {"provider": provider_id, "var": var}
-    if entry is not None and _is_bound(entry):
-        approved = set(entry["endpoints"])
-        if any(_fingerprint(url) not in approved for url in targets):
-            raise KeyEndpointError(_CHANGED.format(**names))
+    if entry is None or not _is_bound(entry):
+        if not _legacy_may_receive(provider_id, targets, invocation):
+            raise KeyEndpointError(_LEGACY.format(**names))
         return
-    official = normalize_endpoint(official_endpoint(provider_id))
-    if not official or not targets or any(url != official for url in targets):
-        raise KeyEndpointError(_LEGACY.format(**names))
+    approved = set(entry["endpoints"])
+    # Une clé liée à au moins une adresse ne vaut jamais pour une cible vide : seul un ensemble approuvé vide l'admet.
+    if (approved and not targets) or any(_fingerprint(_official_form(provider_id, url)) not in approved for url in targets):
+        raise KeyEndpointError(_CHANGED.format(**names))
+    if invocation is not None:
+        approved_command = entry.get("invocation")
+        declared = invocation.strip()
+        if (declared or approved_command) and (not declared or approved_command != _fingerprint(declared)):
+            raise KeyEndpointError(_INVOCATION.format(**names))
 
 
-def env_for_provider(provider_id: str, *, endpoints: Iterable[str]) -> dict[str, str]:
+def env_for_provider(provider_id: str, *, endpoints: Iterable[str], invocation: str | None = None) -> dict[str, str]:
     """Variables déjà posées pour *provider_id*, rendues seulement pour les points d'accès *endpoints*.
 
-    *endpoints* : les adresses où l'appelant enverra la clé (au moins celle qu'il vise). ``{}`` si rien n'est
-    enregistré ou si l'id est invalide ; :class:`KeyEndpointError` si la clé n'a pas été saisie pour l'une d'elles
-    — aucune valeur n'est alors rendue.
+    *endpoints* : les adresses où l'appelant enverra la clé (au moins celle qu'il vise). *invocation* : pour un appel
+    qui remet la clé à une commande tirée du registre, le gabarit déclaré (``""`` si aucun) ; ``None`` pour un envoi
+    par le kit lui-même, que la commande ne concerne pas. ``{}`` si rien n'est enregistré ou si l'id est invalide ;
+    :class:`KeyEndpointError` si la clé n'a pas été saisie pour l'une d'elles ou pour cette commande — aucune valeur
+    n'est alors rendue.
     """
     if not is_valid_provider_id(provider_id):
         return {}
@@ -308,11 +366,7 @@ def env_for_provider(provider_id: str, *, endpoints: Iterable[str]) -> dict[str,
     if not values:
         return {}
     targets = [normalize_endpoint(url) for url in endpoints]
-    index = {
-        e.get("env_var"): e
-        for e in _load_index().get("entries", [])
-        if isinstance(e, dict) and e.get("provider") == provider_id
-    }
+    index = {e["env_var"]: e for e in _entries(_load_index()) if e["provider"] == provider_id}
     for var in values:
-        _check_endpoints(provider_id, var, index.get(var), targets)
+        _check_endpoints(provider_id, var, index.get(var), targets, invocation)
     return values

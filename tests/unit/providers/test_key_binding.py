@@ -77,7 +77,7 @@ def project(tmp_path: Path) -> Path:
 
 def enter_key(root: Path, pid: str = "gw", var: str = "GW_API_KEY") -> None:
     """La saisie d'un humain au terminal : le geste d'autorité existant, avec la valeur masquée."""
-    result = runner.invoke(app, ["providers", "set-key", pid, var, "--project-root", str(root)], input=f"{SECRET}\n")
+    result = runner.invoke(app, ["providers", "set-key", pid, var, "--project-root", str(root), "--yes"], input=f"{SECRET}\n")
     assert result.exit_code == 0, result.output
 
 
@@ -103,7 +103,6 @@ def transport(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, str]
         ("https://gw.example/anthropic", "HTTPS://GW.Example/anthropic"),
         ("https://gw.example/anthropic", "https://gw.example:443/anthropic"),
         ("https://gw.example/anthropic", "https://gw.example/anthropic/"),
-        ("https://gw.example", "https://gw.example/v1"),
         ("https://gw.example", "  https://gw.example/  "),
         ("http://localhost:11434", "http://LOCALHOST:11434/"),
         ("http://127.0.0.1", "http://127.0.0.1:80"),
@@ -149,7 +148,7 @@ def test_une_adresse_non_admise_n_a_pas_d_empreinte(url: str) -> None:
 
 def test_la_cle_est_rendue_pour_l_adresse_saisie_sous_toute_ecriture_equivalente() -> None:
     set_secret("gw", "GW_API_KEY", SECRET, endpoints=[GW])
-    for same in (GW, "HTTPS://Gw.Example:443/anthropic/", f"{GW}/v1"):
+    for same in (GW, "HTTPS://Gw.Example:443/anthropic/"):
         assert env_for_provider("gw", endpoints=[same]) == {"GW_API_KEY": SECRET}
 
 
@@ -268,7 +267,7 @@ def test_une_saisie_pour_un_fournisseur_documente_lie_aussi_son_defaut_officiel(
 def test_la_saisie_refuse_une_adresse_declaree_non_admise(project: Path) -> None:
     _write(project, _provider("http://gw.example"))
     result = runner.invoke(
-        app, ["providers", "set-key", "gw", "GW_API_KEY", "--project-root", str(project)], input=f"{SECRET}\n"
+        app, ["providers", "set-key", "gw", "GW_API_KEY", "--project-root", str(project), "--yes"], input=f"{SECRET}\n"
     )
     assert result.exit_code == 1
     assert "non admise" in result.output and SECRET not in result.output and "gw.example" not in result.output

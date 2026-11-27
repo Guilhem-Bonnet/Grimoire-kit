@@ -371,7 +371,7 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_set_key_then_secrets_list_shows_it_without_the_value(tmp_path: Path) -> None:
-    set_result = runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="sk-test-abc\n")
+    set_result = runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY", "--yes"], input="sk-test-abc\n")
     assert set_result.exit_code == 0, set_result.stdout
 
     secrets_result = runner.invoke(app, ["providers", "secrets"])
@@ -382,7 +382,7 @@ def test_set_key_then_secrets_list_shows_it_without_the_value(tmp_path: Path) ->
 
 
 def test_remove_key_clears_the_entry(tmp_path: Path) -> None:
-    runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="sk-test-abc\n")
+    runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY", "--yes"], input="sk-test-abc\n")
 
     remove_result = runner.invoke(app, ["providers", "remove-key", "deepseek"])
     assert remove_result.exit_code == 0, remove_result.stdout
@@ -436,14 +436,14 @@ def test_remove_unknown_provider_fails(tmp_path: Path) -> None:
 
 
 def test_set_key_blank_value_fails(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="   \n")
+    result = runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY", "--yes"], input="   \n")
 
     assert result.exit_code != 0
     assert "vide" in result.stdout
 
 
 def test_secrets_json_output(tmp_path: Path) -> None:
-    runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="sk-test-abc\n")
+    runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY", "--yes"], input="sk-test-abc\n")
 
     result = runner.invoke(app, ["providers", "secrets", "--json"])
 
