@@ -30,7 +30,7 @@ def test_ligne_d_information_avec_le_nombre_de_skills(project: Path) -> None:
     check = check_mcp_skills(project)
     assert check.name == "mcp_skills"
     assert check.passed is True and check.level == "info"
-    assert check.detail == "skills servis par MCP : 1 (extension io.modelcontextprotocol/skills)"
+    assert check.detail == "skills servis par MCP : 1 (extension io.modelcontextprotocol/skills) ; origine : kit 0, projet 1"
 
 
 def test_les_exclus_sont_nommes_avec_leur_raison_sans_bloquer(project: Path) -> None:
@@ -39,7 +39,8 @@ def test_les_exclus_sont_nommes_avec_leur_raison_sans_bloquer(project: Path) -> 
     )
     check = check_mcp_skills(project)
     assert check.passed is True and check.level == "info"
-    assert check.detail.startswith("skills servis par MCP : 1 (extension io.modelcontextprotocol/skills) ; non servis : Mauvais (")
+    assert check.detail.startswith("skills servis par MCP : 1 (extension io.modelcontextprotocol/skills)")
+    assert " ; non servis : Mauvais (" in check.detail
     assert "majuscule" in check.detail
 
 

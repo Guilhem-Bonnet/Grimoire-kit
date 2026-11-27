@@ -32,10 +32,11 @@ from mcp.shared.memory import create_client_server_memory_streams
 from pydantic import ConfigDict, TypeAdapter
 
 from grimoire.hosts.collect import parse_frontmatter
-from grimoire.mcp import skills_extension
+from grimoire.mcp import skills_extension, skills_serving
 from grimoire.mcp.project import TRANSPORT_ENV, TRANSPORT_HTTP
 from grimoire.mcp.skills_catalogue import HOST_MAX_FILE_BYTES, build_catalogue, digest_of
 from grimoire.mcp.skills_extension import EXTENSION_ID, SkillsExtension
+from grimoire.mcp.skills_serving import serve
 
 pytestmark = pytest.mark.anyio
 
@@ -123,7 +124,7 @@ async def _read(session: ClientSession, uri: str) -> str:
 def _served(root: Path) -> tuple[MCPServer, SkillsExtension]:
     ext = SkillsExtension()
     server = MCPServer(name="grimoire-test", extensions=[ext])
-    ext.serve(server, root)
+    serve(server, root, ext)
     return server, ext
 
 
@@ -261,7 +262,7 @@ class TestPagination:
         assert pages == 3
         assert seen == ["a-un", "b-deux", "c-trois", "d-quatre", "e-cinq"]
 
-    @pytest.mark.parametrize("cursor", ["abc", "o-1", "o99", "o", "ox1"])
+    @pytest.mark.parametrize("cursor", ["abc", "o-1", "o99", "o", "ox1", "o١", "o" + "9" * 5000, "o" + "0" * 10])
     async def test_curseur_invalide_refuse(self, project: Path, cursor: str) -> None:
         _skill(_skills_dir(project), "triage")
         server, _ = _served(project)
@@ -314,21 +315,20 @@ class TestExclusions:
 
         catalogue = build_catalogue(project)
         assert catalogue.served == ()
-        assert [e.reason for e in catalogue.excluded] == ["dossier des skills hors du projet"]
+        assert [(e.slug, "lien symbolique" in e.reason) for e in catalogue.excluded] == [("overrides/skills", True)]
 
-    async def test_un_skill_du_projet_ecarte_ne_laisse_pas_resservir_celui_du_kit(
+    async def test_un_skill_du_projet_en_lien_ne_laisse_pas_resservir_la_copie_du_projet_ailleurs(
         self, project: Path, tmp_path: Path
     ) -> None:
-        """Le premier fichier trouvé fait foi : refusé, on ne retombe pas sur la copie livrée."""
-        _skill(tmp_path / "framework" / "hosts" / "skills", "triage", description="livré")
+        """Un lien refusé est une exclusion de ce skill ; les autres restent servis."""
         outside = tmp_path / "x.md"
         outside.write_text("---\ndescription: pirate\n---\n\ncorps\n", encoding="utf-8")
         directory = _skills_dir(project)
-        directory.mkdir(parents=True)
+        _skill(directory, "sain")
         (directory / "triage.md").symlink_to(outside)
 
         catalogue = build_catalogue(project)
-        assert catalogue.served == ()
+        assert [s.name for s in catalogue.served] == ["sain"]
         assert [e.slug for e in catalogue.excluded] == ["triage"]
 
     async def test_skill_du_kit_servi_quand_le_projet_n_en_a_pas(self, project: Path, tmp_path: Path) -> None:
@@ -372,8 +372,12 @@ class TestCompatibilite:
         prompts, resources = srv._register_surface(project)
         assert resources >= 1
         listed = {str(r.uri) for r in await srv.mcp.list_resources()}
-        assert "grimoire://skill/compat-triage" in listed
         assert "skill://compat-triage/SKILL.md" in listed
+        # l'ancienne forme reste lisible mais n'est plus listée en double : modèle de ressource
+        assert "grimoire://skill/compat-triage" not in listed
+        assert "grimoire://skill/{slug}" in {t.uri_template for t in await srv.mcp.list_resource_templates()}
+        legacy = list(await srv.mcp.read_resource("grimoire://skill/compat-triage"))
+        assert "# Corps" in legacy[0].content
         assert "grimoire_skill" in {t.name for t in await srv.mcp.list_tools()}
         assert prompts >= 0
         body = json.loads(srv.grimoire_skill("compat-triage", str(project)))
@@ -397,7 +401,7 @@ class TestDemonSansProjet:
         monkeypatch.setenv(TRANSPORT_ENV, TRANSPORT_HTTP)
         ext = SkillsExtension()
         server = MCPServer(name="grimoire-test", extensions=[ext])
-        assert ext.serve(server, project) == 0
+        assert serve(server, project, ext) == 0
         async with _session(server) as session:
             assert session.discover_result is not None
             assert EXTENSION_ID in (session.discover_result.capabilities.extensions or {})
@@ -414,9 +418,9 @@ class TestRobustesse:
         def boom(_root: Path, *, log: bool = False) -> None:
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(skills_extension, "build_catalogue", boom)
+        monkeypatch.setattr(skills_serving, "build_catalogue", boom)
         ext = SkillsExtension()
-        assert ext.serve(MCPServer(name="t", extensions=[ext]), project) == 0
+        assert serve(MCPServer(name="t", extensions=[ext]), project, ext) == 0
         assert ext.catalogue.served == ()
 
     async def test_ressource_refusee_par_le_sdk_ecarte_le_skill_seulement(self, project: Path) -> None:
@@ -430,7 +434,7 @@ class TestRobustesse:
                 return lambda fn: fn
 
         ext = SkillsExtension()
-        assert ext.serve(Refuse(), project) == 1
+        assert serve(Refuse(), project, ext) == 1
         assert [s.name for s in ext.catalogue.served] == ["bon"]
         assert [(e.slug, e.reason) for e in ext.catalogue.excluded] == [("mauvais", "enregistrement de la ressource refusé")]
 

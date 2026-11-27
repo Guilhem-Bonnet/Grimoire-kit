@@ -42,6 +42,10 @@ Un skill servi par le serveur nommé `grimoire` dans votre configuration MCP s'i
 
 Sont servis les skills que `grimoire host sync` émettrait : ceux livrés avec le kit et ceux de votre archétype. Le contenu est rendu comme pour les autres hôtes : `name` (égal au nom du fichier), `description`, et `license` / `compatibility` s'ils existent. Les champs qui élargissent des permissions (`tools`, `allowed-tools`) ne sont **jamais** publiés.
 
+Chaque entrée annonce son **origine** dans `_meta["io.grimoire/origin"]` : `kit` (livré avec le kit) ou `project` (fichier du projet). Un skill du projet qui porte le nom d'un skill livré par le kit ne le remplace pas : il est écarté (« masque un skill du kit : renomme-le ») et la version du kit est servie.
+
+Le serveur ne sert que des fichiers réguliers du projet, sans suivre de lien, dans des limites de taille : les trois voies (`skill://`, `grimoire://skill/{slug}`, `grimoire_skill`) lisent le même catalogue et appliquent les mêmes exclusions. Un fichier est contrôlé avant d'être lu et sa lecture est bornée ; une erreur sur un fichier n'écarte que ce skill.
+
 Un skill est **écarté**, avec sa raison, jamais renommé :
 
 | Raison | Exemple |
@@ -51,6 +55,9 @@ Un skill est **écarté**, avec sa raison, jamais renommé :
 | Description ou `compatibility` hors limites | description de plus de 1024 caractères |
 | Fichier source en lien symbolique, ou dossier hors du projet | aucun lien n'est suivi |
 | Contenu binaire ou trop gros | octet nul ; plus de 100 000 octets (limite de fichier de Claude Code) |
+| Fichier qui n'est pas régulier ou pas lisible | tube, périphérique, dossier ; texte non UTF-8 |
+| Même nom qu'un skill du kit | à renommer ; la version du kit reste servie |
+| Dossier trop fourni | au plus 500 fichiers examinés par dossier |
 
 `grimoire doctor` affiche `skills servis par MCP : N (extension io.modelcontextprotocol/skills)` et nomme les skills écartés ; ce n'est qu'une information, jamais un échec. Le serveur journalise aussi chaque exclusion sur sa sortie d'erreur au démarrage.
 
@@ -61,7 +68,7 @@ Rien ne change pour les autres voies, qui restent servies à l'identique :
 - les fichiers par hôte (`grimoire up`, `grimoire host sync`), seule voie de GitHub Copilot, de Cursor, de Codex et des hôtes qui ne lisent pas l'extension ;
 - les prompts MCP (une commande Grimoire = un prompt), les ressources `grimoire://skill/{slug}` et l'outil `grimoire_skill`.
 
-Un client qui ignore l'extension voit simplement, en plus, des ressources `skill://<nom>/SKILL.md` ordinaires dans `resources/list`.
+Un client qui ignore l'extension voit simplement, en plus, des ressources `skill://<nom>/SKILL.md` ordinaires dans `resources/list`. L'ancienne forme `grimoire://skill/{slug}` reste lisible mais n'est plus listée skill par skill : elle est publiée comme modèle de ressource (`resources/templates/list`), pour que chaque skill ne figure qu'une fois dans `resources/list`.
 
 ## Limites
 

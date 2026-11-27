@@ -80,6 +80,9 @@ def check_mcp_skills(target: Path) -> EnvCheck:
     except Exception as exc:  # une sonde de doctor ne lève jamais
         return EnvCheck("mcp_skills", passed=True, level="info", detail=f"skills servis par MCP : non mesuré ({exc.__class__.__name__})")
     detail = f"skills servis par MCP : {len(catalogue.served)} (extension io.modelcontextprotocol/skills)"
+    if catalogue.served:
+        kit = sum(1 for s in catalogue.served if s.origin == "kit")
+        detail += f" ; origine : kit {kit}, projet {len(catalogue.served) - kit}"
     if catalogue.excluded:
         skipped = ", ".join(f"{e.slug} ({e.reason})" for e in catalogue.excluded)
         detail += f" ; non servis : {skipped}"
