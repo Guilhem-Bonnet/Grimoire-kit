@@ -389,6 +389,7 @@ def document(root: Path, slug: str) -> dict[str, Any]:
         "taches": _safe_tasks(root, found.slug),  # ce que « Valider et découper » a créé
         "avertissements": loop.duplicate_requirements(phases),
         "auteur": loop.author(root),  # le nom que porte un commentaire humain (MOA, sinon utilisateur du projet)
+        "annexes": annex_fingerprints(root, slug),  # ce que la page affiche des suggestions et des commentaires
     }
 
 
@@ -398,16 +399,9 @@ def phase_fingerprints(root: Path, slug: str) -> dict[str, str]:
     Le client la compare à celle des phases qu'il affiche : le fichier a changé hors du cockpit si elles diffèrent. Les chemins
     sont ceux de :func:`_phase_path` (confinés au dossier des cadrages) ; un fichier illisible vaut ``""``.
     """
-    from grimoire.core.chantiers import list_chantiers, read_chantier
     from grimoire.tools import atelier_blocs
 
-    slug = _slug(slug)
-    found = next((c for c in list_chantiers(root) if c.slug == slug), None)
-    if found is None and slug == "principal":
-        found = read_chantier(root)
-    if found is None:
-        raise FileNotFoundError(f"chantier inconnu : {slug!r}")
-    name = None if found.default else found.slug
+    name = _chantier_name(root, slug)
     out: dict[str, str] = {}
     for phase in PHASES:
         try:
@@ -416,6 +410,43 @@ def phase_fingerprints(root: Path, slug: str) -> dict[str, str]:
             out[phase.id] = ""
             continue
         out[phase.id] = atelier_blocs.fingerprint(raw.decode("utf-8", errors="replace"))
+    return out
+
+
+def _chantier_name(root: Path, slug: str) -> str | None:
+    """Le nom de dossier d'un chantier retrouvé dans la liste réelle (``None`` : le chantier par défaut)."""
+    from grimoire.core.chantiers import list_chantiers, read_chantier
+
+    slug = _slug(slug)
+    found = next((c for c in list_chantiers(root) if c.slug == slug), None)
+    if found is None and slug == "principal":
+        found = read_chantier(root)
+    if found is None:
+        raise FileNotFoundError(f"chantier inconnu : {slug!r}")
+    return None if found.default else found.slug
+
+
+ANNEX_FILES = {"suggestions": "suggestions.json", "commentaires": "comments.json"}
+
+
+def annex_fingerprints(root: Path, slug: str) -> dict[str, str]:
+    """L'empreinte des suggestions et des commentaires d'un chantier (``""`` si le magasin manque ou est illisible).
+
+    Même principe que :func:`phase_fingerprints` : le document en porte la valeur qu'il affiche, le pouls de l'assistant la
+    valeur d'aujourd'hui ; si elles diffèrent, un agent ou un autre onglet a déposé quelque chose et le client recharge. Les
+    chemins sont ceux de :func:`_phase_path` (liste réelle des chantiers, aucun lien symbolique).
+    """
+    import hashlib
+
+    name = _chantier_name(root, slug)
+    out: dict[str, str] = {}
+    for key, filename in ANNEX_FILES.items():
+        try:
+            raw = _phase_path(root, name or "principal", filename).read_bytes()
+        except OSError:  # absent, illisible ou refusé par la garde des liens symboliques
+            out[key] = ""
+            continue
+        out[key] = hashlib.sha256(raw).hexdigest()[:16]
     return out
 
 

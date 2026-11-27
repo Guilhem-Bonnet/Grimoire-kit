@@ -332,6 +332,10 @@ def entretien_view(root: Path, slug: str) -> dict[str, Any]:
 
     try:
         out["fichiers"] = wa.phase_fingerprints(root, slug)
+        # Idem pour les suggestions et les commentaires : un dépôt de l'agent plus court que le pouls ne change ni le tour vu
+        # en cours ni les angles couverts, mais change ces empreintes.
+        out["annexes"] = wa.annex_fingerprints(root, slug)
     except FileNotFoundError:
         out["fichiers"] = {}  # chantier sans dossier lisible : rien à comparer, le client ne recharge pas
+        out["annexes"] = {}
     return out

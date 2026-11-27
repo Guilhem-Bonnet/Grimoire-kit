@@ -11,6 +11,39 @@ export function staleFiles(doc, files) {
 }
 
 /**
+ * Les magasins annexes (`suggestions`, `commentaires`) dont le contenu a changé côté serveur. `doc.annexes` est ce que la page
+ * affiche, `annexes` ce que le pouls vient de lire ; un côté absent (serveur plus ancien, chantier illisible) : rien à comparer.
+ */
+export function staleAnnexes(doc, annexes) {
+  const shown = doc && doc.annexes;
+  if (!shown || typeof shown !== 'object' || !annexes || typeof annexes !== 'object') return [];
+  return Object.keys(annexes).filter((key) => Object.hasOwn(shown, key) && shown[key] !== annexes[key]);
+}
+
+/** Les identifiants des suggestions en attente et des commentaires d'un document. */
+function annexIds(doc) {
+  const sugg = new Set();
+  const comm = new Set();
+  for (const phase of (doc && doc.phases) || []) {
+    for (const s of phase.suggestions || []) sugg.add(s.id);
+    for (const c of phase.comments || []) comm.add(c.id);
+  }
+  return { sugg, comm };
+}
+
+/** La phrase qui annonce ce qui est arrivé entre deux états du document, ou vide : « 1 suggestion de l'assistant », « 2 nouveaux commentaires ». */
+export function annexMessage(before, after) {
+  const a = annexIds(before);
+  const b = annexIds(after);
+  const s = [...b.sugg].filter((id) => !a.sugg.has(id)).length;
+  const c = [...b.comm].filter((id) => !a.comm.has(id)).length;
+  const parts = [];
+  if (s) parts.push(`${s} suggestion${s > 1 ? 's' : ''} de l’assistant`);
+  if (c) parts.push(`${c} nouveau${c > 1 ? 'x' : ''} commentaire${c > 1 ? 's' : ''}`);
+  return parts.join(' et ');
+}
+
+/**
  * Ce qui a changé entre deux états du document. Un bloc est identifié par son texte (son identifiant en dérive) : un texte
  * absent de l'avant est « nouveau » (à surligner), un texte de l'avant absent de l'après est « retiré ». Un bloc réécrit
  * compte pour un (un retiré et un nouveau s'apparient). Rend `{ added: [{ phase, id }], removed, count }`.

@@ -31,7 +31,8 @@ function el(tag, className, text, attrs) {
 /**
  * `hooks` : `focus()` la phase affichée, `goPhase(id)` la navigation existante, `reload(message)` le rechargement
  * du document, `say(message)` la ligne d'état de la feuille, `drafts` les brouillons locaux (voir `atelier-brouillons.js`),
- * `files(fichiers)` (facultatif) reçoit à chaque réponse l'empreinte des fichiers de phase (voir `atelier-synchro.js`).
+ * `files(fichiers, annexes, { force })` (facultatif) reçoit à chaque réponse l'empreinte des fichiers de phase, celle des
+ * suggestions et des commentaires, et `force` quand un tour d'agent vient de finir (voir `atelier-synchro.js`).
  * Onglet caché, le pouls ne fait aucune requête ; il repart dès le retour.
  */
 export function createAssistant(ctx, slug, hooks) {
@@ -308,8 +309,9 @@ export function createAssistant(ctx, slug, hooks) {
     if (signature !== was) render();
     covered = next.covered;
     wasMine = mine;
-    if (changed) await hooks.reload(); // le redessin garde toute saisie en cours : plus besoin d'attendre qu'elle finisse
-    else if (hooks.files) await hooks.files(next.fichiers); // un fichier de phase modifié hors du cockpit : le document le suit
+    // Le redessin garde toute saisie en cours : plus besoin d'attendre qu'elle finisse. Sans le suivi des fichiers, rechargement simple.
+    if (hooks.files) await hooks.files(next.fichiers, next.annexes, { force: changed }); // fichier de phase, suggestion ou commentaire déposé hors du cockpit : le document le suit
+    else if (changed) await hooks.reload();
     timer = setTimeout(tick, mine || next.turn.busy ? FAST_MS : SLOW_MS);
   };
 

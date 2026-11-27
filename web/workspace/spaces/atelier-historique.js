@@ -33,7 +33,8 @@ function el(tag, className, text, attrs) {
 /**
  * Le volet d'historique. `hooks` : `sheet` (la feuille du document), `main` (son conteneur : la comparaison s'y insère
  * à côté de la feuille), `grid` (la grille feuille + volet), `say(message)` (la ligne d'état), `onCompare(ids)` (les phases de la
- * comparaison affichée, nul à son retrait), `reload(message, kind)` (relit le document après une restauration). Rend `{ button,
+ * comparaison affichée, nul à son retrait), `reload(message, kind)` (relit le document après une restauration), `guard(avant, après)`
+ * et `guarded(garde)` (facultatifs : la confirmation avant de défaire la validation d'une exigence, et son rappel après). Rend `{ button,
  * element, isOpen, close }` : `button` va dans la barre, `element` dans la grille.
  */
 export function createHistory(ctx, slug, hooks) {
@@ -178,6 +179,8 @@ export function createHistory(ctx, slug, hooks) {
       yes: 'Restaurer ce bloc',
     });
     if (!yes) return;
+    const guard = hooks.guard ? await hooks.guard(block.text, block.old_text) : null; // exigence validée : confirmation propre
+    if (guard && !guard.go) return;
     try {
       const mark = { fp: block.fp, prev: block.prev, next: block.next, twins: block.twins, text: block.text };
       const saved = await ctx.api.atelierBloc(slug, block.id, block.old_text, mark);
@@ -186,6 +189,7 @@ export function createHistory(ctx, slug, hooks) {
       setAck(restoredText('Le bloc', planned), { undo });
       hooks.say('Bloc restauré (non commité).');
       if (hooks.reload) await hooks.reload('Bloc restauré (non commité).', 'ok');
+      if (guard && hooks.guarded) hooks.guarded(guard);
       await refreshCompare();
     } catch (cause) {
       await failure(cause, 'Le bloc n’a pas été restauré');
