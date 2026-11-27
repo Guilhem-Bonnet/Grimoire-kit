@@ -47,6 +47,7 @@ def _body(block: dict[str, Any], text: str, **extra: Any) -> dict[str, Any]:
         "block_fp": block["fp"],
         "prev": block["prev"],
         "next": block["next"],
+        "twins": block["twins"],
         "base": block["text"],
         **extra,
     }
@@ -115,6 +116,7 @@ def test_same_block_changed_is_409_with_both_versions_and_nothing_written(projec
         "block_fp": cur["fp"],
         "prev": cur["prev"],
         "next": cur["next"],
+        "twins": cur["twins"],
         "base": cur["text"],
     }
     assert _put(project, cur["id"], retry)[0] == 200
@@ -145,6 +147,70 @@ def test_twin_blocks_are_refused_not_guessed(project: Path) -> None:
     assert _put(project, twins[1]["id"], _body(twins[1], "Second choisi."))[0] == 200
     now = path.read_text(encoding="utf-8")
     assert now.count("Jumeau.") == 1 and now.rstrip().endswith("Second choisi.")
+
+
+def _twins_in_two_sections(project: Path) -> tuple[Path, dict[str, Any]]:
+    path = _write(project, b"## Section A\n\nA preciser.\n\n## Section B\n\nA preciser.\n")
+    first = next(b for b in _phase(project)["blocks"] if b["text"] == "A preciser.")
+    assert first["twins"] == 2
+    return path, first
+
+
+def test_modified_twin_is_a_conflict_not_a_write_into_the_other_twin(project: Path) -> None:
+    path, mine = _twins_in_two_sections(project)
+    body = _body(mine, "Ma saisie.")
+    # L'agent réécrit le jumeau de la section A ; il ne reste qu'un bloc « A preciser. », celui de la section B.
+    path.write_bytes(path.read_bytes().replace(b"A preciser.", b"Rempli par l'agent.", 1))
+    snapshot = path.read_bytes()
+    code, out = _put(project, mine["id"], body)
+    assert code == 409 and out["reason"] == "bloc-modifie"
+    assert out["current"]["text"] == "Rempli par l'agent." and out["submitted"] == "Ma saisie."
+    assert path.read_bytes() == snapshot
+
+
+def test_deleted_twin_is_refused_and_the_other_twin_is_untouched(project: Path) -> None:
+    path, mine = _twins_in_two_sections(project)
+    body = _body(mine, "Ma saisie.")
+    path.write_bytes(path.read_bytes().replace(b"A preciser.\n\n## Section B", b"## Section B", 1))
+    snapshot = path.read_bytes()
+    code, out = _put(project, mine["id"], body)
+    assert code == 409 and out["reason"] == "bloc-ambigu" and out["submitted"] == "Ma saisie."
+    assert path.read_bytes() == snapshot
+
+
+def test_surviving_twin_with_matching_neighbours_is_edited(project: Path) -> None:
+    path, _first = _twins_in_two_sections(project)
+    second = [b for b in _phase(project)["blocks"] if b["text"] == "A preciser."][1]
+    # Le jumeau de la section A est rempli ailleurs : celui qu'on édite (B) garde ses voisins, il est bien le bon.
+    path.write_bytes(path.read_bytes().replace(b"A preciser.", b"Rempli.", 1))
+    assert _put(project, second["id"], _body(second, "Section B remplie."))[0] == 200
+    text = path.read_text(encoding="utf-8")
+    assert "Rempli." in text and "Section B remplie." in text and "A preciser." not in text
+
+
+def test_block_id_must_match_the_fingerprint(project: Path) -> None:
+    _write(project, b"Un.\n")
+    block = _block(project, "Un.")
+    code, out = _put(project, "brainstorm.0000000000", _body(block, "Deux."))
+    assert code == 400 and "incohérent" in out["error"]
+    code, _ = _put(project, "brainstorm", _body(block, "Deux."))
+    assert code == 400
+    assert _put(project, "zzz.abc", _body(block, "Deux."))[0] == 404  # phase inconnue
+    assert _put(project, block["id"], {**_body(block, "Deux."), "twins": 0})[0] == 400
+    assert _put(project, block["id"], {**_body(block, "Deux."), "twins": True})[0] == 400
+
+
+def test_pathological_merge_is_bounded_and_computed_outside_the_lock(project: Path) -> None:
+    import time
+
+    base = "\n".join(["a"] * 9000)
+    path = _write(project, base.encode() + b"\n")
+    block = _block(project, base)
+    path.write_bytes(path.read_bytes().replace(b"a\n", b"b\n", 1))
+    started = time.monotonic()
+    code, out = _put(project, block["id"], _body(block, "\n".join(["c"] * 9000)))
+    assert code == 409 and out["merged"] is None
+    assert time.monotonic() - started < 3
 
 
 def test_vanished_block_is_refused_with_the_submitted_text(project: Path) -> None:
@@ -215,7 +281,12 @@ def _blocks(text: str) -> list[ab.Block]:
 def test_locate_kinds() -> None:
     blocks = _blocks("Un.\n\nDeux.\n\nTrois.\n")
     fps = [ab.fingerprint(b.text) for b in blocks]
-    assert ac.locate(blocks, fps[1], "", "") == ac.Located(ac.SAME, 1)
+    assert ac.locate(blocks, fps[1], fps[0], fps[2]) == ac.Located(ac.SAME, 1)
+    assert ac.locate(blocks, fps[1], "x", "y", twins=1) == ac.Located(
+        ac.SAME, 1
+    )  # unique à la lecture : voisins libres
+    assert ac.locate(blocks, fps[1], "x", "y").kind == ac.AMBIGUOUS  # twins inconnu et voisins qui ne concordent pas
+    assert ac.locate(blocks, fps[1], "x", "y", twins=2).kind == ac.AMBIGUOUS
     assert ac.locate(blocks, "autre", fps[0], fps[2]) == ac.Located(ac.CHANGED, 1)
     assert ac.locate(blocks, "autre", "", fps[1]) == ac.Located(ac.CHANGED, 0)
     assert ac.locate(blocks, "autre", fps[1], "") == ac.Located(ac.CHANGED, 2)

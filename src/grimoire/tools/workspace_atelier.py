@@ -434,9 +434,7 @@ def _locate_block(blocks: list[Any], body: dict[str, Any], text: str, filename: 
     """Le bloc à réécrire d'après son empreinte lue (contrôle par bloc), ou un 409 qui porte tout ce qu'il faut
     pour ne rien perdre : le texte soumis, la version courante du bloc, la base lue et une fusion proposée."""
     from grimoire.tools import atelier_conflict as ac
-    from grimoire.tools.atelier_blocs import fingerprint
-
-    found = ac.locate(blocks, body["block_fp"], body.get("prev") or "", body.get("next") or "")
+    found = ac.locate(blocks, body["block_fp"], body.get("prev") or "", body.get("next") or "", body.get("twins"))
     if found.kind == ac.SAME:
         return blocks[found.index]
     payload: dict[str, Any] = {"submitted": text, "base": body.get("base"), "current": None, "merged": None}
@@ -444,15 +442,14 @@ def _locate_block(blocks: list[Any], body: dict[str, Any], text: str, filename: 
         mark = ac.neighbour_fields(blocks)[found.index]
         current = blocks[found.index]
         payload["current"] = {"id": current.id, "text": current.text, "editable": current.editable, **mark}
-        if isinstance(body.get("base"), str):
-            payload["merged"] = ac.merge3(body["base"], text, current.text)
-        if payload["merged"] is not None and fingerprint(payload["merged"]) == fingerprint(current.text):
-            payload["merged"] = None  # la fusion ne ferait rien de plus que la version courante
-        raise ConflictError(
+        error = ConflictError(
             f"le bloc a changé dans {filename} depuis la lecture : rien n'est écrit, ta saisie est conservée",
             payload,
             "bloc-modifie",
         )
+        if isinstance(body.get("base"), str):
+            error.merge_args = (body["base"], text, current.text)  # type: ignore[attr-defined]
+        raise error
     if found.kind == ac.AMBIGUOUS:
         raise ConflictError(
             f"plusieurs blocs identiques dans {filename} : impossible de savoir lequel tu modifies, rien n'est écrit",
@@ -489,32 +486,47 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
             raise ValueError("`block_fp` requis : l'empreinte du bloc lue avec le chantier")
         if len(body.get("base") or "") > MAX_BLOCK_CHARS:
             raise ValueError(f"`base` trop long ({MAX_BLOCK_CHARS} caractères au plus)")
+        twins = body.get("twins")
+        if twins is not None and (not isinstance(twins, int) or isinstance(twins, bool) or twins < 1):
+            raise ValueError("`twins` doit être un entier positif")
+        # L'identifiant de l'URL (``phase.empreinte10[.n]``) doit désigner le bloc dont on envoie l'empreinte.
+        parts = block_id.split(".")
+        if len(parts) not in (2, 3) or parts[1] != body["block_fp"][:10]:
+            raise ValueError(f"identifiant de bloc {block_id!r} incohérent avec `block_fp` : recharge le document")
     elif not isinstance(expected, str) or not expected:
         raise ValueError("`expected` requis : l'empreinte du fichier de phase lue avec le chantier")
     path = _phase_path(root, slug, phase.filename)
     if not path.is_file():
         raise FileNotFoundError(f"phase absente : {phase.filename}")
-    with locked(path):
-        try:
-            current = path.read_bytes().decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError(f"{phase.filename} n'est pas de l'UTF-8 : modifiez-le hors du cockpit") from exc
-        blocks = atelier_blocs.split(phase.id, current)
-        if per_block:
-            block = _locate_block(blocks, body, text, phase.filename)
-        else:  # client ancien : l'empreinte du fichier entier fait foi, comme avant
-            if atelier_blocs.fingerprint(current) != expected:
-                raise ConflictError(f"{phase.filename} a changé depuis la lecture : bloc rechargé")
+    try:
+        with locked(path):
             try:
-                block = atelier_blocs.find_block(blocks, block_id)
-            except atelier_blocs.BlockNotFoundError as exc:
-                raise ConflictError(f"le bloc {block_id!r} n'existe plus dans {phase.filename}") from exc
-        if not block.editable:
-            raise PermissionError(f"le bloc {block.kind} ne se modifie pas d'ici : il structure le fichier")
-        _refuse_structure(text.replace("\r\n", "\n"))
-        updated = atelier_blocs.replace_block(current, block, text)
-        if updated != current:
-            atomic_write(path, updated.encode("utf-8"))
+                current = path.read_bytes().decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"{phase.filename} n'est pas de l'UTF-8 : modifiez-le hors du cockpit") from exc
+            blocks = atelier_blocs.split(phase.id, current)
+            if per_block:
+                block = _locate_block(blocks, body, text, phase.filename)
+            else:  # client ancien : l'empreinte du fichier entier fait foi, comme avant
+                if atelier_blocs.fingerprint(current) != expected:
+                    raise ConflictError(f"{phase.filename} a changé depuis la lecture : bloc rechargé")
+                try:
+                    block = atelier_blocs.find_block(blocks, block_id)
+                except atelier_blocs.BlockNotFoundError as exc:
+                    raise ConflictError(f"le bloc {block_id!r} n'existe plus dans {phase.filename}") from exc
+            if not block.editable:
+                raise PermissionError(f"le bloc {block.kind} ne se modifie pas d'ici : il structure le fichier")
+            _refuse_structure(text.replace("\r\n", "\n"))
+            updated = atelier_blocs.replace_block(current, block, text)
+            if updated != current:
+                atomic_write(path, updated.encode("utf-8"))
+    except ConflictError as exc:
+        args = getattr(exc, "merge_args", None)
+        if args is not None:  # la fusion (coûteuse) se calcule ICI, verrou du fichier rendu
+            from grimoire.tools import atelier_conflict as ac
+
+            exc.payload["merged"] = ac.propose_merge(*args)
+        raise
     from grimoire.tools import workspace_atelier_comments as comments
 
     comments.resync_after_edit(

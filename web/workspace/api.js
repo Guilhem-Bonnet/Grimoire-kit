@@ -707,11 +707,11 @@ export const api = {
   atelierChantiers: () => get(WS + 'atelier/chantiers'),
   atelierNouveau: (titre) => post(WS + 'atelier/chantiers', { titre }),
   atelierChantier: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug)),
-  // Contrôle par bloc : `mark` = { fp, prev, next, text } du bloc tel qu'il a été lu (le document les porte) ; un autre
+  // Contrôle par bloc : `mark` = { fp, prev, next, twins, text } du bloc tel qu'il a été lu (le document les porte) ; un autre
   // bloc modifié entre-temps ne gêne pas, le même bloc modifié répond 409 avec `current`, `submitted`, `merged`.
   atelierBloc: (slug, id, text, mark) =>
     put(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/blocs/' + encodeURIComponent(id),
-      { text, block_fp: mark.fp, prev: mark.prev, next: mark.next, base: mark.text }),
+      { text, block_fp: mark.fp, prev: mark.prev, next: mark.next, twins: mark.twins, base: mark.text }),
   // Suggestions (lot 2) : l'agent dépose, l'humain tranche ici. `decision` : 'accept' | 'reject' ; un bloc changé
   // depuis le dépôt répond 409 (suggestion périmée, rien n'est écrit).
   atelierDecision: (slug, id, decision, motif) =>
