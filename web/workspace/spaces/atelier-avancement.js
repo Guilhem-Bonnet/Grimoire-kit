@@ -8,6 +8,7 @@
 // commande dans son propre terminal). Aucun geste de validation ici : la MOA valide au terminal.
 
 import { badge } from '../shell.js';
+import { keepFocus, setText, stable } from './atelier-focus.js';
 
 const PHASE_NAMES = { brief: 'Brief', brainstorm: 'Brainstorm', comprehension: 'Compréhension', exigences: 'Exigences', 'cahier-des-charges': 'Cahier des charges' };
 const TASK_STATUS = {
@@ -130,7 +131,17 @@ export function createLoopPanel(ctx) {
   const warnings = el('div', 'at-loop-warn', null, { 'data-role': 'dup-warnings' });
   element.append(tasks, warnings);
 
-  const sections = (av) => {
+  // Chaque zone se redessine seulement si ce qu'elle montre a changé : le détail déplié, son focus et la lecture
+  // d'un lecteur d'écran survivent aux rafraîchissements, et le focus est rendu si un remplacement est inévitable.
+  const shown = { sections: null, tasks: null, warn: null };
+  const redraw = (zone, host, value, draw) => {
+    const key = stable(value);
+    if (shown[zone] === key) return;
+    shown[zone] = key;
+    keepFocus(host, draw);
+  };
+
+  const sections = (av) => redraw('sections', detail, av.phases.filter((p) => p.vides > 0).map((p) => [p.id, p.title, p.sections]).concat([av.a_preciser]), () => {
     detail.replaceChildren();
     const open = av.phases.filter((p) => p.vides > 0);
     if (!open.length) return;
@@ -143,9 +154,9 @@ export function createLoopPanel(ctx) {
     }
     box.append(list);
     detail.append(box);
-  };
+  });
 
-  const taskList = (list) => {
+  const taskList = (list) => redraw('tasks', tasks, list, () => {
     tasks.replaceChildren();
     if (!list.length) return;
     tasks.append(el('h3', 'at-loop-h', `${plural(list.length, 'tâche créée', 'tâches créées')} par le découpage`));
@@ -158,18 +169,18 @@ export function createLoopPanel(ctx) {
       ul.append(li);
     }
     tasks.append(ul);
-  };
+  });
 
-  const warn = (list) => {
+  const warn = (list) => redraw('warn', warnings, list || [], () => {
     warnings.replaceChildren();
     for (const item of list || []) warnings.append(el('p', 'at-live-gap', item.message, { role: 'alert', 'data-req': item.req }));
-  };
+  });
 
   const update = (doc) => {
     const av = doc.avancement;
     if (av) {
       const marks = [av.a_confirmer ? `${av.a_confirmer} « je ne sais pas »` : '', av.phases.some((p) => p.sans_objet) ? `${av.phases.reduce((n, p) => n + p.sans_objet, 0)} « sans objet »` : ''].filter(Boolean);
-      summary.textContent = av.resume + (marks.length && av.etat !== 'complet' ? ` (dont ${marks.join(' et ')}, comptés comme couverts)` : '');
+      setText(summary, av.resume + (marks.length && av.etat !== 'complet' ? ` (dont ${marks.join(' et ')}, comptés comme couverts)` : ''));
       summary.setAttribute('data-etat', av.etat);
       sections(av);
     }

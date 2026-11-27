@@ -10,6 +10,7 @@ import { publish } from '../mascotte_bus.js';
 import { badge, icon } from '../shell.js';
 import { createGuided, engineBadge } from './atelier-entretien.js';
 import { avancementText } from './atelier-avancement.js';
+import { keepFocus, setText } from './atelier-focus.js';
 import { initialOpen, pillSummary, readPref, writePref } from './atelier-layout-logic.js';
 
 const PHASE_NAMES = { brief: 'Brief', brainstorm: 'Brainstorm', comprehension: 'Compréhension', exigences: 'Exigences', 'cahier-des-charges': 'Cahier des charges' };
@@ -68,8 +69,8 @@ export function createAssistant(ctx, slug, hooks) {
       busy: Boolean(turn.mine),
       suggestions: hooks.suggestions ? hooks.suggestions() : 0,
     });
-    pillText.textContent = sum.text;
-    pillCount.textContent = sum.count > 0 ? String(sum.count) : '';
+    setText(pillText, sum.text);
+    setText(pillCount, sum.count > 0 ? String(sum.count) : '');
     pillCount.hidden = sum.count < 1;
     pill.setAttribute('data-tone', sum.tone);
     pill.setAttribute('aria-label', `${sum.text}${sum.count > 0 ? ` (${sum.count} en attente)` : ''}. Ouvrir l’assistant.`);
@@ -184,7 +185,11 @@ export function createAssistant(ctx, slug, hooks) {
     return el('p', 'at-muted at-asst-engine', text, { 'data-role': 'engine-note' });
   };
 
-  const render = () => {
+  // Le panneau est redessiné quand l'état de l'entretien ou la phase lue change : la réponse en cours de saisie (reprise du
+  // brouillon) et le focus, curseur compris, passent au nouvel élément équivalent. Le focus n'est jamais pris s'il était ailleurs.
+  const render = () => keepFocus(main, draw);
+
+  const draw = () => {
     const v = view;
     main.replaceChildren();
     syncMascotte();

@@ -7,6 +7,7 @@
 import { icon } from '../shell.js';
 import { buildOutline, pickCurrent, planOpenDefault, STATE_WORDS } from './atelier-document-logic.js';
 import { WIDE_MIN } from './atelier-layout-logic.js';
+import { keepFocus } from './atelier-focus.js';
 
 const PREF_KEY = 'grimoire.atelier.plan';
 const PHASE_NAMES = { brief: 'Brief', brainstorm: 'Brainstorm', comprehension: 'Compréhension', exigences: 'Exigences', 'cahier-des-charges': 'Cahier des charges' };
@@ -114,7 +115,9 @@ export function createPlan(ctx, { root, sheet, doc }) {
     return mark;
   };
 
-  const draw = () => {
+  // Le plan se redessine à chaque rechargement de la feuille : un lien qui a le focus le garde (même `data-plan`).
+  const draw = () => keepFocus(list, build);
+  const build = () => {
     if (spy) spy.disconnect();
     touching.clear();
     targets = [];
