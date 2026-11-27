@@ -27,6 +27,8 @@ import { createRefs, flash } from './atelier-liens.js';
 import { atelierHash, exigenceBlocks, reqFromParams } from './atelier-liens-logic.js';
 import { createReading } from './atelier-lecture.js';
 import { createSync } from './atelier-synchro.js';
+import { annexMessage } from './atelier-synchro-logic.js';
+import { createDevalidation } from './atelier-devalidation.js';
 import { buildOutline } from './atelier-document-logic.js';
 import { createPlan } from './atelier-plan.js';
 import { createFind } from './atelier-recherche.js';
@@ -383,7 +385,11 @@ function suggestionNode(sug, decide) {
     const form = node.querySelector('.at-refuse');
     form?.remove();
     try {
-      await decide(sug, decision, motif);
+      if ((await decide(sug, decision, motif)) === false) { // renoncé à défaire la validation d'une exigence : la suggestion reste à trancher
+        accept.disabled = false;
+        refuse.disabled = false;
+        accept.focus();
+      }
     } catch (cause) {
       error.textContent = cause.message || String(cause);
       error.hidden = false;
@@ -435,7 +441,23 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   const drafts = createDrafts(ctx, slug); // le filet de sécurité : les saisies en cours sont gardées dans le navigateur
   let liveTrace = null; // la trace du découpage (carte d'une exigence au survol)
   const params = ctx.params || {};
-  const say = (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; };
+  // Annoncer : un message identique au précédent est ré-annoncé (lecteur d'écran : le texte passe par le vide ; notification : un
+  // nouveau passage dans la zone). Un message vide n'est pas une annonce ; seul un nouveau message remplace l'ancien.
+  const announce = (message, kind) => {
+    if (!message) return;
+    if (status.textContent !== message) {
+      if (kind) status.setAttribute('data-kind', kind);
+      status.textContent = message;
+      return;
+    }
+    status.textContent = '';
+    setTimeout(() => {
+      if (ctx.signal.aborted || status.textContent) return; // un autre message est passé entre-temps : il garde la place
+      if (kind) status.setAttribute('data-kind', kind);
+      status.textContent = message;
+    }, 60);
+  };
+  const say = (message, kind) => { if (message) announce(message, kind); else status.textContent = ''; };
   // Mode lecture (adresse puis navigateur) : l'adresse garde aussi la phase et l'exigence visées (voir `itemParams`).
   const reading = createReading(ctx, { sheet, say, setItem: () => { if (ctx.setItem) ctx.setItem(itemParams()); } }, params);
   const itemParams = (extra = {}) => ({ chantier: slug, phase: focusId, ...(reading.on() ? { lecture: '1' } : {}), ...extra });
@@ -464,6 +486,10 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     onTrace: (trace) => { liveTrace = trace; drawSteps(); refs.refresh(); }, // la carte d'exigence ouverte se met à jour
     onSplit: (message) => reload(message, 'ok'),
   });
+  // Modifier une exigence validée défait sa validation : une confirmation avant d'écrire, un rappel de la commande après.
+  const devalidation = createDevalidation(ctx, slug, {
+    host: root, trace: () => liveTrace, refresh: () => liveDoc.refresh(), notify: (message, options) => notifier.push(message, options),
+  });
   const phaseIds = () => state.doc.phases.map((p) => p.id);
   let focusId = phaseFromParams({ phase: phaseFocus }, phaseIds(), state.doc.phases[0].id);
   let compareIds = null; // les phases de la comparaison d'historique affichée (la feuille est alors masquée), sinon nul
@@ -474,12 +500,12 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   setAtelierContext({ slug, phase: focusId });
   ctx.signal.addEventListener('abort', () => setAtelierContext(null));
   // Le document suit son fichier : l'empreinte que porte chaque réponse du pouls de l'assistant décide (voir `atelier-synchro.js`).
-  const sync = createSync(ctx, { doc: () => state.doc, reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
+  const sync = createSync(ctx, { doc: () => state.doc, docAt: () => docAt, reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
   const assist = createAssistant(ctx, slug, {
     focus: () => focusId,
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
     reload: (message, kind) => reload(message, kind),
-    say: (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; },
+    say: (message, kind) => say(message, kind),
     // Une erreur liée à un bloc se lit aussi à son pied, là où l'on agissait.
     blockError: (blockId, message) => {
       const host = sheet.querySelector(`[data-block="${CSS.escape(blockId)}"]`);
@@ -492,7 +518,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     narrow,
     phone: () => root.clientWidth < PHONE_MAX, // sous 900 px, le document d'abord : l'assistant reste derrière sa pastille
     drafts,
-    files: (fichiers) => sync.check(fichiers).catch(() => {}), // un fichier de phase modifié hors du cockpit : le document le suit
+    files: (fichiers, annexes, options) => sync.check(fichiers, annexes, options).catch(() => {}), // un fichier de phase modifié hors du cockpit : le document le suit
     // La mascotte de l'assistant : combien de suggestions attendent, et la première mise sous les yeux.
     suggestions: () => state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0),
     showSuggestion: () => {
@@ -624,6 +650,12 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     cancelAnimationFrame(frame);
   });
 
+  let docAt = Date.now(); // quand le document affiché a été relu ou réécrit par un geste de cette page
+  /** Ce que le serveur dit des suggestions et des commentaires est adopté si rien d'extérieur n'est à voir : le pouls n'y verra pas un dépôt. */
+  const adoptAnnexes = (fresh) => {
+    docAt = Date.now();
+    if (fresh && fresh.annexes && annexMessage(state.doc, fresh) === '' && annexMessage(fresh, state.doc) === '') state.doc.annexes = fresh.annexes;
+  };
   const reload = async (message, kind) => {
     try {
       state.doc = await ctx.api.atelierChantier(slug);
@@ -635,12 +667,21 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     const top = root.scrollTop;
     drawAll();
     if (root.scrollTop !== top) root.scrollTop = top; // la lecture ne saute pas
-    if (message && kind) status.setAttribute('data-kind', kind);
-    status.textContent = message || '';
+    docAt = Date.now();
+    // La ligne d'état est une zone d'annonce : un rechargement sans message (synchro, pouls) ne la vide jamais, seul un nouveau message la change.
+    announce(message, kind);
     liveDoc.refresh();
   };
 
   const decide = async (sug, decision, motif) => {
+    let guard = null;
+    if (decision === 'accept') {
+      // Une suggestion qui réécrit une exigence validée en défait la validation : confirmation avant d'écrire.
+      const target = state.doc.phases.flatMap((p) => p.blocks || []).find((b) => b.id === sug.block_id);
+      guard = await devalidation.ask(target ? target.text : sug.avant, sug.texte);
+      if (ctx.signal.aborted) return;
+      if (!guard.go) return false; // renoncé : la suggestion reste en attente, rien n'est écrit
+    }
     try {
       await ctx.api.atelierDecision(slug, sug.id, decision, motif);
     } catch (cause) {
@@ -657,6 +698,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     }
     if (ctx.signal.aborted) return;
     await reload(decision === 'accept' ? 'Suggestion acceptée : le bloc est réécrit.' : 'Suggestion refusée : le document n’a pas changé.');
+    if (guard) devalidation.after(guard);
   };
 
   /** Après une réécriture de bloc : les fils de la phase suivent leur passage (ancres recalculées par le serveur). */
@@ -670,6 +712,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       // Des fils dont le passage vient de disparaître : on le dit là où l'on a écrit, avec un lien qui y mène.
       const lost = newOrphans(mine.comments, next.comments);
       mine.comments = next.comments;
+      adoptAnnexes(fresh);
       if (lost.length) {
         const where = lost[0];
         notifier.push(orphanNotice(lost.length), {
@@ -783,6 +826,9 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       if (template && mark === block && !area.value.trim()) { leave(true); return; } // rien saisi : le gabarit reste tel quel
       save.disabled = true;
       error.hidden = true;
+      const guard = await devalidation.ask(mark.text, area.value); // exigence validée : confirmation avant d'écrire
+      if (ctx.signal.aborted) return;
+      if (!guard.go) { save.disabled = false; area.focus(); return; } // renoncé : rien n'est écrit, la saisie reste
       try {
         const result = await ctx.api.atelierBloc(slug, blockId, area.value, mark);
         if (ctx.signal.aborted) return;
@@ -798,13 +844,14 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
         drafts.clear('bloc', block.id);
         endEdit(host);
         drawSection(result.phase);
-        status.textContent = 'Bloc enregistré.';
+        announce('Bloc enregistré.');
         loop.warn(result.avertissements); // un identifiant d'exigence en double dans ce fichier
         reloadProgress();
         liveDoc.refresh(); // une exigence réécrite peut être « modifiée depuis la validation »
         const written = result.phase.blocks.find((b) => b.text === area.value.trimEnd());
         sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`)?.focus();
         if ((live.comments || []).length) syncComments(phase.id, area.value.trimEnd());
+        devalidation.after(guard); // la validation défaite : lignes d'état relues, commande rappelée
       } catch (cause) {
         if (ctx.signal.aborted) return;
         if (cause.code === 409) {
@@ -843,6 +890,9 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     const undo = () => { box.checked = !checked; boxes.forEach((b) => { b.disabled = false; }); };
     if (next == null) { undo(); return; }
     boxes.forEach((b) => { b.disabled = true; });
+    const guard = await devalidation.ask(block.text, next); // une case d'une exigence validée : confirmation si le texte lu par la validation change
+    if (ctx.signal.aborted) return;
+    if (!guard.go) { undo(); return; }
     try {
       const result = await ctx.api.atelierBloc(slug, block.id, next, block);
       if (ctx.signal.aborted) return;
@@ -853,7 +903,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       countNote();
       phaseNav();
       drawSection(result.phase);
-      status.textContent = checked ? 'Case cochée.' : 'Case décochée.';
+      announce(checked ? 'Case cochée.' : 'Case décochée.');
       loop.warn(result.avertissements);
       reloadProgress();
       liveDoc.refresh();
@@ -861,6 +911,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       const again = sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`);
       again?.querySelector(`.at-task-box[data-line="${line}"]`)?.focus();
       if ((live.comments || []).length) syncComments(phase.id, next.trimEnd());
+      devalidation.after(guard);
     } catch (cause) {
       if (ctx.signal.aborted) return;
       undo();
@@ -984,6 +1035,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       state.doc.avancement = fresh.avancement;
       state.doc.taches = fresh.taches;
       state.doc.chantier = fresh.chantier;
+      adoptAnnexes(fresh); // l'écriture qui précède est la nôtre : le pouls n'y verra pas un dépôt extérieur
       paintHead();
       loop.update(fresh);
       phaseNav(); // la barre collante lit l'avancement unique
@@ -1037,7 +1089,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   // Lecture et navigation (lecture seule) : menu « Document », recherche Ctrl+F, plan à gauche de la feuille.
   const docMenu = createDocumentMenu(ctx, {
     slug, doc: () => state.doc,
-    say: (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; },
+    say: (message, kind) => say(message, kind),
   });
   const find = createFind(ctx, { sheet });
   const plan = createPlan(ctx, { root, sheet, doc: () => state.doc });
@@ -1049,8 +1101,11 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   grid.append(main, assist.element);
   // Historique des versions (lecture seule) : un bouton dans la barre, un volet à la place de l'assistant (voir `atelier-historique.js`).
   const versionsPane = createHistory(ctx, slug, {
-    sheet, main, grid, say: (message) => { status.textContent = message; },
+    sheet, main, grid, say: (message) => say(message),
     reload: (message, kind) => reload(message, kind), // après une restauration (ou son annulation) : le document est relu
+    // Restaurer un bloc qui réécrit une exigence validée en défait la validation : même confirmation que pour une édition.
+    guard: (before, after) => devalidation.ask(before, after),
+    guarded: (guard) => devalidation.after(guard),
     // La comparaison affichée (ses phases) : la barre des phases marque celle dont le diff est sous les yeux.
     onCompare: (ids) => { compareIds = ids; compareFocus = ids && ids.length ? ids[0] : ''; phaseNav(); },
   });
