@@ -824,16 +824,24 @@ def chat_state(root: Path, _query: dict[str, list[str]]) -> dict[str, Any]:
 
 def chat_hosts(root: Path, _query: dict[str, list[str]]) -> dict[str, Any]:
     """Les hôtes que le chat sait parler : disponibles, ou grisés avec leur raison, et celui en vigueur."""
-    from grimoire.hosts.acp_hosts import chosen_alias, host_choices
+    from grimoire.hosts.acp_hosts import chosen_alias, host_choices, other_usable_hosts
+    from grimoire.hosts.detection import alias_for_host
 
     mode, _command, reason = chat_mode(root)
     chosen = chosen_alias(root)
+    fallback = mode == "kanban" and not chosen and not os.environ.get(AGENT_COMMAND_ENV, "").strip()
     return {
         "chosen": chosen,
         "mode": mode,
         "reason": reason,
-        # Aucun choix et aucun agent utilisable : le chat s'est replié sur le Kanban, le cockpit doit le dire.
-        "fallback": mode == "kanban" and not chosen and not os.environ.get(AGENT_COMMAND_ENV, "").strip(),
+        # Aucun choix et aucun hôte DU PROJET utilisable : le chat s'est replié sur le Kanban, le cockpit doit le dire.
+        "fallback": fallback,
+        # Les autres hôtes de la machine qui répondent : proposés comme un choix explicite, jamais pris d'office.
+        "offers": (
+            [{"alias": alias_for_host(p.host_id), "display_name": p.display_name} for p in other_usable_hosts(root)]
+            if fallback
+            else []
+        ),
         "hosts": [c.to_dict() for c in host_choices(root)],
     }
 
