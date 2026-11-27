@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from .conftest import open_scope_all
 
@@ -228,8 +228,23 @@ def test_executer_un_move_reussi_deplace_la_carte_puis_un_claim_est_refuse(
     inspector.get_by_text("→ En cours").first.wait_for()
 
     # Deuxième porte, maintenant proposée : ready → in_progress (claim), refusée.
-    inspector.locator("button", has_text="Réaliser").first.click()
-    workspace.wait_for_selector(".ex-refusal")
+    # Le refus s'écrit dans le bloc de retour de l'inspecteur tel qu'il est au
+    # moment de la réponse. Le pouls (`live`) relance un dessin de l'inspecteur :
+    # s'il en avait déjà un en cours de lecture quand on clique, ce dessin
+    # remplace le panneau et emporte le refus avec lui. Le geste est sans effet
+    # de bord (le claim est refusé, rien n'est écrit) : on le rejoue donc tant
+    # que le refus n'est pas resté affiché, avec le même constat final.
+    claim = inspector.get_by_role("button", name="Réaliser : → En cours")
+    refusal = workspace.locator(".ex-refusal")
+    for _attempt in range(5):
+        claim.click()
+        try:
+            expect(refusal).to_be_visible(timeout=8_000)
+            break
+        except AssertionError:
+            continue
+    else:
+        pytest.fail("le claim refusé n'a jamais affiché son refus dans l'inspecteur")
     refusal_text = workspace.locator(".ex-refusal").inner_text().lower()
     assert "context bundle" in refusal_text or "fournisseur" in refusal_text
     assert "refusé" in refusal_text

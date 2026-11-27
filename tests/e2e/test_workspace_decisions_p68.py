@@ -294,6 +294,24 @@ def test_une_preuve_attendue_au_libelle_long_ne_deborde_pas_de_sa_pastille(works
     block = workspace.locator("#inspector-body [data-role='evidence-block']")
     block.wait_for()
     chip = block.locator(".chip", has_text="rapport.md")
+    chip.wait_for()
+    # Le retour à la ligne dépend de la largeur du texte (polices web) et de celle
+    # de l'inspecteur : on ne mesure qu'une fois les polices chargées et la
+    # géométrie de la pastille identique d'une image à l'autre.
+    workspace.evaluate("() => document.fonts.ready")
+    workspace.wait_for_function(
+        """() => {
+          const n = [...document.querySelectorAll("#inspector-body [data-role='evidence-block'] .chip")]
+            .find((c) => c.textContent.includes('rapport.md'));
+          if (!n) return false;
+          const r = n.getBoundingClientRect();
+          const now = [r.x, r.y, r.width, r.height].join();
+          const settled = window.__chipGeometry === now;
+          window.__chipGeometry = now;
+          return settled;
+        }""",
+        polling="raf",
+    )
     box = chip.evaluate("""(n) => {
       const r = n.getBoundingClientRect(), p = n.parentElement.getBoundingClientRect();
       return { fits: n.scrollHeight <= n.clientHeight + 1, inside: r.right <= p.right + 1, h: r.height };
