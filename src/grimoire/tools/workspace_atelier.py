@@ -335,6 +335,7 @@ def _phase_view(root: Path, name: str | None, phase: Any) -> dict[str, Any]:
         "state": report["state"],
         "sections": report["sections"],
         "fingerprint": "",
+        "markdown": "",
         "blocks": [],
         "readable": True,
     }
@@ -348,6 +349,7 @@ def _phase_view(root: Path, name: str | None, phase: Any) -> dict[str, Any]:
         out["readable"] = False  # lisible dans `cadrage status`, pas éditable bloc par bloc
         return out
     out["fingerprint"] = atelier_blocs.fingerprint(text)
+    out["markdown"] = text  # le fichier tel que stocké : « Copier en Markdown » et l'export lisent ceci, sans nouvelle route
     blocks = atelier_blocs.split(phase.id, text)
     marks = atelier_conflict.neighbour_fields(blocks)  # empreintes que le client renvoie à l'écriture (par bloc)
     out["blocks"] = [{**b.to_dict(), **mark} for b, mark in zip(blocks, marks, strict=True)]

@@ -21,6 +21,9 @@ import { createHistory } from './atelier-historique.js';
 import { createLoopPanel, phaseState, progressCell, waitingBadges } from './atelier-avancement.js';
 import { setAtelierContext } from '../atelier-context.js';
 import { createNotifier } from './atelier-notify.js';
+import { createPlan } from './atelier-plan.js';
+import { createFind } from './atelier-recherche.js';
+import { createDocumentMenu } from './atelier-document-menu.js';
 import {
   INDICATOR_LABEL, WIDE_MIN, activePhase, capitalize, codeSegments, newOrphans, orphanNotice,
   phaseFromParams, phaseHash, phaseIndicator, stepsOf,
@@ -828,15 +831,21 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   // Une seule barre collante : phases, déroulé en quatre étapes, « Valider et découper » et son état, pastille de l'assistant
   // replié. L'aide MOA et l'aperçu du découpage s'ouvrent sous elle ; le document et l'assistant viennent ensuite côte à côte.
   const phasebar = el('div', 'at-phasebar', null, { 'data-role': 'atelier-barre' });
-  phasebar.append(nav, steps, liveDoc.toolbar, assist.pill);
+  // Lecture et navigation (lecture seule) : menu « Document », recherche Ctrl+F, plan à gauche de la feuille.
+  const docMenu = createDocumentMenu(ctx, { slug, doc: () => state.doc });
+  const find = createFind(ctx, { sheet });
+  const plan = createPlan(ctx, { root, sheet, doc: () => state.doc });
+  phasebar.append(nav, steps, liveDoc.toolbar, plan.toggle, docMenu.element, assist.pill);
+  find.attach(phasebar);
   const main = el('div', 'at-doc-main');
-  main.append(status, sheet);
+  main.append(docMenu.printTitle, status, sheet);
   const grid = el('div', 'at-doc-grid');
   grid.append(main, assist.element);
   // Historique des versions (lecture seule) : un bouton dans la barre, un volet à la place de l'assistant (voir `atelier-historique.js`).
   const versionsPane = createHistory(ctx, slug, { sheet, main, grid, say: (message) => { status.textContent = message; } });
-  phasebar.append(versionsPane.button);
+  docMenu.element.before(versionsPane.button);
   grid.append(versionsPane.element);
+  plan.attach(grid);
   const view = page(ctx, head, loop.element, phasebar, liveDoc.panels, grid);
   view.querySelector('.at-body').classList.add('at-body-doc');
   view.append(notifier.element);

@@ -91,6 +91,24 @@ def test_document_has_five_phases_with_blocks(project: Path) -> None:
         workspace_get(project, f"{P}atelier/chantiers/..%2Fx", {})
 
 
+def test_document_carries_each_phase_file_as_stored(project: Path) -> None:
+    """« Copier en Markdown » lit le fichier tel que stocké dans le GET du document : aucune route de plus."""
+    _on(project)
+    workspace_post(project, f"{P}atelier/chantiers", {"titre": "Un"})
+    folder = project / "_grimoire" / "cadrage" / "un"
+    brief = folder / "01-brief.md"
+    brief.write_bytes(brief.read_bytes() + "\n\nUn passage accentué : é, œ.\r\n\r\n".encode())
+    (folder / "03-comprehension.md").unlink()
+    (folder / "02-brainstorm.md").write_bytes(b"\xff\xfe pas de l'UTF-8")
+    doc = workspace_get(project, f"{P}atelier/chantiers/un", {})
+    phases = {p["id"]: p for p in doc["phases"]}
+    assert phases["brief"]["markdown"] == brief.read_bytes().decode("utf-8")
+    assert "\r\n" in phases["brief"]["markdown"] and "œ" in phases["brief"]["markdown"]
+    assert phases["brainstorm"]["readable"] is False and phases["brainstorm"]["markdown"] == ""
+    assert phases["comprehension"]["markdown"] == ""
+    assert phases["exigences"]["markdown"].startswith("---") or "Exigences" in phases["exigences"]["markdown"]
+
+
 def test_principal_opens_like_the_others(project: Path) -> None:
     from grimoire.core.cadrage import scaffold
 
