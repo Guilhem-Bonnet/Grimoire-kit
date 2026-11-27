@@ -329,6 +329,16 @@ corps** (`{"project": "<slug>", ...}`) :
 | `POST /api/workspace/autonomy/autopilot` | `{on: bool, control_key}` |
 | `POST /api/workspace/providers` | `{action: enable\|disable, provider_id, control_key}` |
 | `POST /api/workspace/providers/set-key` | `{provider_id, env_var, value, control_key}` |
+| `POST /api/workspace/providers` (action `add-local`) | `{action: "add-local", models: [nom Ollama détecté], control_key}` |
+| `POST /api/workspace/providers/direct-use` | `{usage, models: [{key, daily_cap_tokens?}], control_key}` — remplace la liste ordonnée d'un usage (« Modèles autorisés ») |
+
+`GET /api/workspace/providers/direct-use` lit l'inventaire détecté, les autorisations et la décision de maintenant (aucune
+requête hors de la machine) ; `POST /api/workspace/providers/direct-use/verify` (`{}`, sans clé de contrôle) est le geste « Vérifier maintenant » : lecture
+locale seulement, aucune clé transmise, rien d'écrit. `POST /api/workspace/providers/direct-use/verify-remote`
+(`{control_key, confirmed_endpoints}`) est la vérification des connexions : sous la clé de contrôle, elle seule envoie une
+clé d'API à un point d'accès, et seulement à ceux que `remote_endpoints` liste ET que la page a renvoyés dans
+`confirmed_endpoints` (la liste affichée, vide comprise ; absente ou différente = 400 « la liste a changé, relis-la »,
+rien n'est envoyé), et teste la connexion des agents installés.
 
 Le slug est résolu par le registre (`registered_root`) — jamais un chemin envoyé
 par le client. Un `project` de corps qui ne désigne pas la racine de `?project=`

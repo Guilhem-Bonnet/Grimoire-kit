@@ -525,6 +525,19 @@ export const api = {
     post(WS + 'providers', {
       action: enabled ? 'enable' : 'disable', provider_id: providerId, control_key: controlKey, ...projectBody(),
     }),
+  // « Modèles autorisés » (épique #1477, lot B1). La lecture ne sonde aucun service distant ; « Vérifier » le fait,
+  // sur geste. Autoriser, réordonner, plafonner et ajouter des modèles locaux passent par la clé de contrôle.
+  directUse: () => get(WS + 'providers/direct-use'),
+  directUseVerify: () => post(WS + 'providers/direct-use/verify', projectBody()),
+  // `confirmedEndpoints` : exactement la liste montrée à l'humain (vide comprise) ; le serveur refuse si elle a changé.
+  directUseVerifyRemote: (confirmedEndpoints, controlKey) =>
+    post(WS + 'providers/direct-use/verify-remote', {
+      confirmed_endpoints: confirmedEndpoints, control_key: controlKey, ...projectBody(),
+    }),
+  directUseWrite: (usage, models, controlKey) =>
+    post(WS + 'providers/direct-use', { usage, models, control_key: controlKey, ...projectBody() }),
+  providersAddLocal: (models, controlKey) =>
+    post(WS + 'providers', { action: 'add-local', models, control_key: controlKey, ...projectBody() }),
   // Options du projet (P75) : taux USD→CAD de la colonne Fait, lu et écrit
   // dans project-context.yaml (section cockpit) par le serveur.
   options: () => get(WS + 'options'),

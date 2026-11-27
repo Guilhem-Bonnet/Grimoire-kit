@@ -354,7 +354,9 @@ def _hosted_endpoint(provider: ProviderSpec) -> _Endpoint | None:
     endpoint = _ENDPOINTS.get(canonical_provider(provider.id, provider.provider_type))
     if endpoint is not None:
         return endpoint
-    base = (provider.anthropic_base_url or "").strip().rstrip("/")
+    # Mêmes règles que pour une passerelle : ni identifiants, ni requête, ni fragment dans l'URL (la clé part en
+    # en-tête, et l'hôte réellement joint est celui qu'on affiche) ; ici https seulement.
+    base = admitted_gateway_url(provider.anthropic_base_url)
     if base.startswith("https://"):
         return _Endpoint(f"{base}/v1/models", provider_key_var(provider.id), "anthropic", store_only=True)
     return None
@@ -380,6 +382,9 @@ def probe_provider_capabilities(provider: ProviderSpec, *, now: datetime | None 
         return _probe_litellm(provider, probed_at)
     endpoint = _hosted_endpoint(provider)
     if endpoint is None:
+        if (provider.anthropic_base_url or "").strip():
+            note = "non mesuré : anthropic_base_url invalide (https://, sans identifiants, requête ni fragment)"
+            return CapabilityProbe(provider.id, False, note, probed_at)
         return CapabilityProbe(provider.id, False, "non mesuré : aucun point d'entrée connu", probed_at)
     if endpoint.store_only and endpoint.key_var in _reserved_key_vars():
         note = f"non mesuré : variable de clé réservée à un autre fournisseur ({endpoint.key_var})"
