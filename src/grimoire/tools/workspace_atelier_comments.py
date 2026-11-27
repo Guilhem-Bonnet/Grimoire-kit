@@ -191,6 +191,22 @@ def follow_edit(
         return
 
 
+def resync(root: Path, slug: str) -> None:
+    """Un fichier de phase vient d'être remplacé en entier (restauration d'une version) : chaque fil retrouve son bloc par
+    le mécanisme habituel (:func:`_resync`) ou devient orphelin pour de bon. Sous le verrou du magasin, hors du verrou du
+    fichier de phase ; sans effet sur l'écriture elle-même."""
+    try:
+        chantier = _dir(root, slug)
+        if not store.store_path(chantier).is_file():
+            return
+        with store.locked_store(chantier):
+            items, ignored, damaged = store.read(chantier)
+            if items and _resync(_phase_blocks(root, slug), items):
+                _persist(chantier, items, ignored, damaged)
+    except (OSError, ValueError, TimeoutError):
+        return
+
+
 def _anchored_on(blocks: list[atelier_blocs.Block], item: Comment, block_id: str) -> bool:
     return atelier_anchor.locate(blocks, item).block_id == block_id
 

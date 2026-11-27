@@ -1050,6 +1050,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   // Historique des versions (lecture seule) : un bouton dans la barre, un volet à la place de l'assistant (voir `atelier-historique.js`).
   const versionsPane = createHistory(ctx, slug, {
     sheet, main, grid, say: (message) => { status.textContent = message; },
+    reload: (message, kind) => reload(message, kind), // après une restauration (ou son annulation) : le document est relu
     // La comparaison affichée (ses phases) : la barre des phases marque celle dont le diff est sous les yeux.
     onCompare: (ids) => { compareIds = ids; compareFocus = ids && ids.length ? ids[0] : ''; phaseNav(); },
   });

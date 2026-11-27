@@ -32,6 +32,9 @@ Routes (préfixe ``/api/workspace/``) :
 - ``GET atelier/chantiers/<slug>/history[?page=n]``, ``GET …/history/<id>`` : l'historique des versions du chantier (commits
   git qui ont touché ses fichiers de phase, plus ``working`` = modifications non commitées), en lecture seule, voir
   :mod:`grimoire.tools.workspace_atelier_history`.
+- ``GET atelier/chantiers/<slug>/compare?from=<id>&to=<id>`` : le diff entre deux versions quelconques (ou ``working``) ;
+  ``POST atelier/chantiers/<slug>/restore`` : remplace le fichier d'une phase par celui d'une version (jamais git en
+  écriture, rien n'est commité), ou annule cette restauration ; voir :mod:`grimoire.tools.workspace_atelier_restore`.
 """
 
 from __future__ import annotations
@@ -612,11 +615,16 @@ def get(root: Path, path: str, query: dict[str, list[str]]) -> Any:
         if len(rest) == 3:
             return history.listing(root, rest[1], (query.get("page") or ["1"])[0])
         return history.detail(root, rest[1], rest[3])
+    if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "compare":
+        from grimoire.tools import workspace_atelier_restore as restore
+
+        # Comparer deux versions (lecture seule) : `from` et `to` sont revérifiés comme `history/<id>`.
+        return restore.compare(root, rest[1], (query.get("from") or [""])[0], (query.get("to") or [""])[0])
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
 #: Les écritures de l'Atelier dans un chantier qui remettent à jour sa date de modification et font avancer son état.
-_WRITING = ("suggestions", "comments", "decoupage")
+_WRITING = ("suggestions", "comments", "decoupage", "restore")
 
 
 def post(root: Path, path: str, body: dict[str, Any]) -> Any:
@@ -664,6 +672,10 @@ def _post(root: Path, path: str, body: dict[str, Any]) -> Any:
         from grimoire.tools import workspace_atelier_trace as live
 
         return live.decoupage_apply(root, rest[1], body)  # lot 4 ; aucune route de validation : voir ce module
+    if len(rest) == 3 and rest[0] == "chantiers" and rest[2] == "restore":
+        from grimoire.tools import workspace_atelier_restore as restore
+
+        return restore.apply(root, rest[1], body)  # restaurer une phase : voir ce module (aucune écriture git)
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
