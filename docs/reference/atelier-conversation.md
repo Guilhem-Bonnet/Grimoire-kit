@@ -96,8 +96,9 @@ est traité comme un auteur hostile :
   (`est_un_oui` : seulement des mots d'accord, cinq mots au plus, aucune négation, aucun ajout), et seulement quand une
   confirmation est en attente. « Oui mais… », « non », « oui, et aussi X » ne sont pas un oui. Une classe hors de la liste
   fermée rendue par un moteur est refusée. **Une question n'est jamais un oui** : tout texte contenant un point
-  d'interrogation (`?`, pleine chasse `？`, espagnol `¿`, arabe, grec…) est refusé ; « d'accord ? », « oui ? » ou « c'est
-  bon ? » demandent quelque chose et n'accordent rien.
+  d'interrogation (`?`, pleine chasse `？`, espagnol `¿`, arabe, grec, interrobang `‽`, point d'ironie `⸮`…) est refusé : la
+  liste connue, puis tout caractère dont le nom Unicode contient « QUESTION » ou « INTERROBANG » ; « d'accord ? »,
+  « oui ? » ou « c'est bon ? » demandent quelque chose et n'accordent rien.
 - **Ce que l'humain confirme, c'est la liste exacte** des textes qui seront écrits, avec leur rubrique en mots simples,
   construite par le programme à partir des éléments réels (`a_confirmer`). La reformulation du moteur l'accompagne, jamais
   ne la remplace.
@@ -116,10 +117,16 @@ est traité comme un auteur hostile :
   élément n'est « les mots de l'humain » que s'il reprend le **tour entier** ou une **proposition entière** de ce tour
   (découpée par `. ! ? ;`, `…` et retours à la ligne), à la casse, aux accents et à la ponctuation près. Un fragment plus
   court (« export CSV » tiré de « je ne veux pas d'export CSV », « sauf les bots », « ni les invités ») a perdu son contexte,
-  donc peut-être sa négation : il est du moteur. Seule exception, un élément tronqué par le programme (terminé par « … »)
-  reprend le début d'une proposition, à condition que la suite coupée ne contienne aucune négation ni restriction (ne, pas,
-  jamais, aucun, sans, sauf, ni, plutôt que, à l'exception de…). Dans le doute : individuel. Cinq éléments au plus par
-  tour, longueur bornée.
+  donc peut-être sa négation : il est du moteur. Seule exception, un élément **tronqué par le programme** reprend le début
+  d'une proposition, à condition que la suite coupée ne contienne aucune négation ni restriction (ne, pas, jamais, aucun,
+  sans, sauf, ni, mais, hors, à condition, seulement si, exclu, interdit, plutôt que, à l'exception de…). La troncature est
+  un **drapeau** (`ElementExtrait.tronque`) posé par le programme à l'instant où il coupe, jamais déduit du texte : le
+  gardien ne le retient que du moteur sans modèle, qui est du programme. Un texte venu d'un autre moteur qui finit par
+  « … » n'est « les mots de l'humain » que si l'humain a lui-même écrit ces points de suspension. Une **proposition entière
+  de l'humain suivie, dans le même tour, d'une proposition qui commence par « sauf », « mais », « pas », « hors »,
+  « excepté », « à l'exclusion », « à condition », « seulement si » ou « sans », ou qui contient « exclu » ou « interdit »,
+  ne se confirme pas en groupe** : elle peut retirer ce que la première accordait, donc individuel. Dans le doute :
+  individuel. Cinq éléments au plus par tour, longueur bornée.
 
 ## Le rangement dans le document
 
@@ -142,6 +149,13 @@ Le gate de `cadrage check` n'est jamais modifié.
   l'humain « confirmée » mais absente du document, elle repasse à confirmer (ou, si son remplaçant est écrit, est écartée).
   Une conversation forgée dont la question en cours est « confirmer » sans rien en attente ne lève pas : rien n'est écrit,
   la question est recalculée.
+- **Reprise d'une panne pendant une correction.** Si la ligne du document d'un élément écrit porte un autre texte que celui
+  consigné dans `conversation.json` (panne pendant la réécriture de ce qui suit un élément corrigé), la vue et la reprise
+  lèvent une alerte lisible et l'élément repasse « à confirmer » avec le texte EXACT du document (affiché en entier,
+  confirmation individuelle, proposé en premier). Rien n'est écrit ni retiré seul : l'élément reste propriétaire de sa ligne,
+  donc le confirmer ne la réécrit pas, et le corriger ou l'écarter agit sur ce que le document contient vraiment.
+- **Reprise d'une panne pendant un remplacement.** Le remplaçant est proposé d'abord, seul ; une fois confirmé, l'ancien
+  élément (redevenu « à confirmer », sa ligne ayant été retirée) est écarté sans nouvelle question.
 - **Limite de tours.** Près de 500 tours, la conversation se termine d'elle-même en le disant, sans erreur ; corriger ou
   écarter ce qui est compris reste possible.
 - **Identifiants.** Le compteur rattrape le plus grand numéro existant ; un fichier à identifiants en double reste
@@ -203,7 +217,9 @@ tranché ou une conversation en pause, terminée ou classée donne 409 ou 400 sa
   objet), `note` (ce que l'humain avait dit avant un « je ne sais pas »), `origine` (`humain` ou `moteur` : à signaler,
   « reformulé par le moteur ») et `individuel` (pas de « oui » de groupe : un bouton Confirmer par entrée, qui appelle
   `elements/<id>`). Elle affiche aussi `alertes` (ce que le programme a refusé de croire ou repris après une panne) et
-  `reparer` (fichier à réparer), et grise les gestes quand `mode` n'est plus `cadrage`.
+  `reparer` (fichier à réparer), et grise les gestes quand `mode` n'est plus `cadrage`. Le tour enregistré (1500
+  caractères) et la question en cours (600) sont coupés, pas `a_confirmer` : la vue la recalcule à l'identique depuis l'état,
+  texte entier de chaque élément, y compris en pause.
 - **Lot D (voix)** : la réaction d'un tour porte `accuse` (texte du programme, immédiat), `message` et `lourd` : une
   interface peut dire l'accusé tout de suite et attendre le message.
 - **Lot E (rédaction finale)** : lit `ranges()` et les sources (numéro de tour) pour relier chaque passage à l'échange ;

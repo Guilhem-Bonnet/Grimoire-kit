@@ -60,6 +60,7 @@ from grimoire.core.cadrage_conversation import (
     clean_text,
     mots_de_l_humain,
     rubrique_key,
+    suivie_d_une_restriction,
 )
 from grimoire.core.cadrage_conversation_engine import (
     EntreeClassement,
@@ -255,6 +256,16 @@ def _a_confirmer(conv: Conversation, ids: tuple[str, ...]) -> list[dict[str, Any
     return out
 
 
+def _a_confirmer_vue(conv: Conversation, cadre: Cadre, etape: Etape) -> list[dict[str, Any]]:
+    """``a_confirmer`` recalculé à l'identique depuis l'état, TEXTE ENTIER : le tour enregistré (1500 caractères) et la question
+    en cours (600) sont coupés, pas cette liste. En pause aussi : elle suspend les gestes, pas la relecture de ce qui attend."""
+    if etape.kind == "confirmer":
+        return _a_confirmer(conv, etape.ids)
+    if etape.kind == "pause" and conv.en_attente() and cadre.interview and cadre.blocking:
+        return _a_confirmer(conv, groupe_a_confirmer(conv))
+    return []
+
+
 def _liste_exacte(items: list[dict[str, Any]]) -> str:
     shown = [f"« {i['texte']} » ({i['action']} : {i['rubrique']['nom']}"
              + (", reformulé par le moteur" if i["origine"] == "moteur" else "") + ")" for i in items]
@@ -365,6 +376,9 @@ def _confirmer(ctx: Contexte, conv: Conversation, items: list[Element]) -> bool:
     if not items:
         return False
     old = conv.element(items[0].remplace) if items[0].remplace else None
+    # Un ancien élément redevenu « à confirmer » par une reprise (panne en plein remplacement) n'est pas dans le document :
+    # son remplaçant confirmé, il est écarté sans nouvelle question.
+    depose = old if old is not None and old.statut == "propose" and not old.ecrit else None
     if old is not None and old.statut not in ("confirme", "corrige"):
         old = None
     store.check_room(conv)
@@ -379,6 +393,8 @@ def _confirmer(ctx: Contexte, conv: Conversation, items: list[Element]) -> bool:
             conv.note(conv.ouvertes, item.question, item.source)
     if old is not None:
         old.statut = "ecarte"
+    if depose is not None:
+        depose.statut = "ecarte"
     return any(i.ecrit for i in items) or old is not None
 
 
@@ -392,10 +408,12 @@ def _proposer(conv: Conversation, ctx: Contexte, tour: Tour, texte: str, cible: 
     made: list[Element] = []
     for x in ctx.moteur.extraire_elements(EntreeExtraction(texte, rubrique_key(*cible), mode=conv.mode)):
         phase, section = _KEY[x.rubrique]
-        origine = "humain" if mots_de_l_humain(x.texte, texte) else "moteur"
+        origine = "humain" if mots_de_l_humain(x.texte, texte, tronque=x.tronque) else "moteur"
+        # Une restriction dans la proposition suivante du même tour peut retirer ce que celle-ci accordait : seul, dans le doute.
+        seul = (phase, section) != cible or origine == "moteur" or suivie_d_une_restriction(x.texte, texte, tronque=x.tronque)
         made.append(conv.new_element(
             "element", x.texte, phase, section, angle_pour(phase, section, angle), tour.n, question=label,
-            remplace=remplace if not made else "", origine=origine, individuel=(phase, section) != cible or origine == "moteur"))
+            remplace=remplace if not made else "", origine=origine, individuel=seul))
     return made
 
 
@@ -594,7 +612,7 @@ def _decider(ctx: Contexte, rev: int, element_id: str, decision: str, texte: Any
             raise ConversationError("ce point n'a pas de texte à corriger : écarte-le, ou réponds à nouveau")
         new = clean_text(texte, MAX_ELEMENT_CHARS, what="texte corrigé")
         old = el.texte
-        if el.statut in ("confirme", "corrige"):
+        if el.statut in ("confirme", "corrige") or el.ecrit:  # « ecrit » : sa ligne est dans le document, même à reconfirmer (reprise)
             store.check_room(conv)
             defaits = _journaliser(ctx, conv, el)
             rangement.corriger(ctx.root, ctx.slug, conv, el, new)
@@ -710,7 +728,7 @@ def vue(ctx: Contexte) -> dict[str, Any]:
         "tours": [{"n": t.n, "auteur": t.auteur, "texte": t.texte, "date": t.date, "geste": t.geste} for t in conv.tours[-VUE_TOURS:]],
         "tours_total": len(conv.tours),
         "question": None if conv.question is None else _question_public(conv.question),
-        "a_confirmer": _a_confirmer(conv, etape.ids) if etape.kind == "confirmer" else [],
+        "a_confirmer": _a_confirmer_vue(conv, cadre, etape),
         "elements": [_element_public(e) for e in conv.elements],
         "ouvertes": [{"texte": n.texte, "tour": n.tour} for n in conv.ouvertes],
         "plus_tard": [{"texte": n.texte, "tour": n.tour} for n in conv.plus_tard],

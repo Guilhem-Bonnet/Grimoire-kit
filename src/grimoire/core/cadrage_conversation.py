@@ -46,6 +46,7 @@ __all__ = [
     "parse_date",
     "rubrique_key",
     "rubrique_ok",
+    "suivie_d_une_restriction",
 ]
 
 SCHEMA = 1
@@ -163,8 +164,13 @@ _FIN_DE_PROPOSITION = re.compile(r"[.!?;…。？！；\n\r]+")
 #: Les mots qui renversent ou restreignent ce qui précède ou suit : une partie retirée qui en contient un change le sens.
 _RESTRICTIONS = frozenset({"ne", "n", "pas", "jamais", "aucun", "aucune", "aucunement", "sans", "sauf", "ni", "non", "plus", "rien",
                            "personne", "nul", "nulle", "hormis", "excepte", "exceptes", "exceptee", "exceptees", "plutot", "que",
-                           "contre", "moins", "seulement", "uniquement", "excluant", "exclure", "exclu"})
-_RESTRICTIONS_EXPRESSIONS = ("a l exception", "en dehors de", "a part", "pas question", "hors de", "au lieu de")
+                           "contre", "moins", "seulement", "uniquement", "excluant", "exclure", "exclu", "mais", "hors",
+                           "condition", "exclus", "exclue", "exclues", "exclusion", "interdit", "interdite", "interdits",
+                           "interdites"})
+_RESTRICTIONS_EXPRESSIONS = ("a l exception", "en dehors de", "a part", "pas question", "hors de", "au lieu de",
+                             "a condition", "seulement si", "a l exclusion")
+#: Une proposition qui COMMENCE ainsi restreint ou s'oppose à ce qui précède ; une qui CONTIENT « exclu » ou « interdit » aussi.
+_DEBUTS_DE_RESTRICTION = ("sauf", "mais", "pas", "hors", "excepte", "sans", "a l exclusion", "a condition", "seulement si")
 
 
 def _restreint(reste: str) -> bool:
@@ -173,19 +179,46 @@ def _restreint(reste: str) -> bool:
     return any(w in _RESTRICTIONS for w in reste.split()) or any(f" {p} " in flat for p in _RESTRICTIONS_EXPRESSIONS)
 
 
-def mots_de_l_humain(element: str, tour: str) -> bool:
+def _propositions(tour: str) -> list[str]:
+    """Les propositions du tour, à plat (casse, accents, ponctuation), sans les vides."""
+    return [p for p in (_plat(m) for m in _FIN_DE_PROPOSITION.split(tour)) if p]
+
+
+def suivie_d_une_restriction(element: str, tour: str, *, tronque: bool = False) -> bool:
+    """Une proposition de l'humain reprise par ``element`` est-elle suivie, dans le même tour, d'une restriction ou d'une opposition ?
+
+    Une proposition suivante qui commence par « sauf », « mais », « pas », « hors », « excepté », « à l'exclusion »,
+    « à condition », « seulement si » ou « sans », ou qui contient « exclu » ou « interdit », peut retirer ce que la première
+    accordait : l'élément ne se confirme alors pas en groupe (dans le doute : individuel).
+    """
+    wanted = _plat(element.rstrip("…").rstrip() if tronque else element)
+    props = _propositions(tour)
+    start = next((i for i, p in enumerate(props) if p == wanted or (tronque and p.startswith(wanted + " "))), None)
+    if start is None:
+        return False
+    return any(any(p == d or p.startswith(d + " ") for d in _DEBUTS_DE_RESTRICTION) or "exclu" in p or "interdit" in p
+               for p in props[start + 1:])
+
+
+def mots_de_l_humain(element: str, tour: str, *, tronque: bool = False) -> bool:
     """L'élément reprend-il, mot pour mot, le tour ENTIER de l'humain ou une proposition ENTIÈRE de ce tour ?
 
     La comparaison se fait à la casse, aux accents et à la ponctuation près. Une proposition va d'une ponctuation forte
     (``. ! ? ; …``) ou d'un retour à la ligne à l'autre. Un fragment plus court qu'une proposition (« export CSV » tiré de
     « je ne veux pas d'export CSV ») n'est PAS « les mots de l'humain » : il a perdu son contexte, donc peut-être sa
-    négation ou sa restriction. Seule exception : un élément tronqué par le programme (terminé par « … ») reprend le début
-    d'une proposition, à condition que la suite coupée ne contienne ni négation ni restriction. Dans le doute : non.
+    négation ou sa restriction. Seule exception : un élément que le PROGRAMME a tronqué (``tronque``, drapeau posé à
+    l'instant de la coupe, jamais déduit du texte) reprend le début d'une proposition, à condition que la suite coupée ne
+    contienne ni négation ni restriction. Un texte qui finit par « … » sans ce drapeau (venu d'un moteur) n'est « les mots
+    de l'humain » que si l'humain a lui-même écrit ces points de suspension. Dans le doute : non.
     """
     wanted = _plat(element.rstrip("…").rstrip())
     if not wanted:
         return False
-    tronque = element.rstrip().endswith("…")
+    if element.rstrip().endswith("…"):
+        if not tronque and " ".join(element.split()) not in " ".join(tour.split()):
+            return False
+    else:
+        tronque = False
     morceaux = [tour, *_FIN_DE_PROPOSITION.split(tour)]
     for morceau in morceaux:
         plat = _plat(morceau)
