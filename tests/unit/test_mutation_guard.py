@@ -97,7 +97,11 @@ ATELIER_POSTS = _flat(ATELIER_LITERALS)
 
 #: Les écritures de la page « Modèles autorisés » (épique #1477, lot B1) : nommées ici en plus de l'énumération
 #: automatique, pour qu'une route retirée de la table ne sorte pas silencieusement de la matrice.
-DIRECT_USE_POSTS = [f"{PREFIX}providers/direct-use", f"{PREFIX}providers/direct-use/verify"]
+DIRECT_USE_POSTS = [
+    f"{PREFIX}providers/direct-use",
+    f"{PREFIX}providers/direct-use/verify",
+    f"{PREFIX}providers/direct-use/verify-remote",
+]
 
 
 def test_direct_use_writes_are_in_both_host_matrices() -> None:

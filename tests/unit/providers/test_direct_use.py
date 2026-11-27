@@ -17,6 +17,11 @@ from grimoire.providers.direct_use import (
 )
 
 
+def A(key: str, cap: int | None = None) -> Authorization:  # noqa: N802 — abréviation de test
+    """Une autorisation liée à l'empreinte que :func:`model` donne à *key*."""
+    return Authorization(key, cap, f"fp:{key}")
+
+
 def model(
     key: str,
     *,
@@ -31,7 +36,7 @@ def model(
         key=key, label=key.split(":", 1)[1], source="x", provider_id="p", model_id=key, origin="", tier=tier,
         tier_provenance="registre" if tier else "", provider_type="", currency="", configured=True,
         available=available, reason=reason, detail="détail" if reason else "", egress=egress, cost=cost,
-        key_present=None, key_command="", cooldown_until=None, capabilities=caps,
+        key_present=None, key_command="", cooldown_until=None, capabilities=caps, ref=key, fingerprint=f"fp:{key}",
     )
 
 
@@ -58,7 +63,7 @@ def state(
 
 
 def auth(*keys: str) -> list[Authorization]:
-    return [Authorization(k) for k in keys]
+    return [A(k) for k in keys]
 
 
 def test_aucun_modele_autorise_rend_le_mode_sans_modele() -> None:
@@ -93,12 +98,12 @@ def test_l_ordre_saute_les_indisponibles_et_trace_pourquoi() -> None:
 
 
 def test_plafond_du_jour_atteint_ecarte_et_en_dessous_retient() -> None:
-    st = state(LOCAL, allowed={"conversation": [Authorization(LOCAL.key, 1000)]}, used={LOCAL.key: 1000})
+    st = state(LOCAL, allowed={"conversation": [A(LOCAL.key, 1000)]}, used={LOCAL.key: 1000})
     d = choose_for("conversation", st)
     assert d.kind == "none"
     assert "plafond du jour atteint" in d.reason
     assert "borne basse" in d.reason
-    ok = state(LOCAL, allowed={"conversation": [Authorization(LOCAL.key, 1000)]}, used={LOCAL.key: 999})
+    ok = state(LOCAL, allowed={"conversation": [A(LOCAL.key, 1000)]}, used={LOCAL.key: 999})
     assert choose_for("conversation", ok).key == LOCAL.key
 
 
@@ -228,7 +233,7 @@ def test_choix_manuel_ne_passe_pas_une_garde_de_surete() -> None:
     st = state(down, LOCAL, allowed={"conversation": auth(down.key, LOCAL.key)})
     d = choose_for("conversation", st, manual=down.key)
     assert (d.kind, d.key) == ("use", LOCAL.key)  # repli gardé : local n'est pas plus cher
-    capped = state(SUB, allowed={"conversation": [Authorization(SUB.key, 10)]}, used={SUB.key: 10})
+    capped = state(SUB, allowed={"conversation": [A(SUB.key, 10)]}, used={SUB.key: 10})
     assert choose_for("conversation", capped, manual=SUB.key).kind == "none"
     refused = state(SUB, allowed={"conversation": auth(SUB.key)}, refusals={SUB.key: "classe interdite"})
     assert choose_for("conversation", refused, manual=SUB.key).kind == "none"
@@ -313,3 +318,58 @@ def test_la_decision_se_serialise_sans_perte_de_trace() -> None:
     assert payload["kind"] == "use"
     assert [ln["verdict"] for ln in payload["trace"]] == ["écarté", "retenu"]
     assert set(USAGES) == {"conversation", "brainstorm", "redaction", "autres"}
+
+
+# ── Liaison de l'autorisation à ce qu'elle désigne (empreinte) ──────────────
+
+
+def test_autorisation_dont_l_empreinte_ne_correspond_plus_n_est_pas_retenue() -> None:
+    from dataclasses import replace
+
+    # même nom, mais la ligne détectée désigne autre chose maintenant
+    changed = replace(model("ollama:local"), fingerprint="autre-empreinte")
+    st = state(changed, allowed={"conversation": [A("ollama:local")]})
+    d = choose_for("conversation", st)
+    assert d.kind == "none"
+    assert "a changé depuis ton autorisation" in d.reason
+    assert d.trace[0].verdict == "ignoré"
+
+
+def test_autorisation_sans_empreinte_est_invalide() -> None:
+    st = state(LOCAL, allowed={"conversation": [Authorization(LOCAL.key)]})
+    d = choose_for("conversation", st)
+    assert d.kind == "none" and "sans empreinte" in d.reason
+
+
+def test_deux_lignes_de_meme_nom_ne_se_confondent_pas() -> None:
+    from dataclasses import replace
+
+    a = replace(model("registre:p/x"), key="registre:p/x#aaa", fingerprint="aaa", ref="registre:p/x")
+    b = replace(model("registre:p/x", available=False, reason="hors-ligne"), key="registre:p/x#bbb", fingerprint="bbb", ref="registre:p/x")
+    st = DirectState(
+        models={a.key: a, b.key: b}, allowed={"conversation": (Authorization("registre:p/x", None, "bbb"),)}, used_today={}
+    )
+    d = choose_for("conversation", st)
+    assert d.kind == "none"  # l'autorisation désigne la ligne b (indisponible), jamais la ligne a
+    assert "indisponible" in d.reason
+
+
+def test_plafond_sur_un_modele_non_mesure_est_dit_non_verifiable() -> None:
+    st = state(LOCAL, allowed={"conversation": [A(LOCAL.key, 500)]})
+    d = choose_for("conversation", st)
+    assert d.kind == "use"
+    assert "plafond non vérifiable" in d.reason
+    measured = DirectState(
+        models={LOCAL.key: LOCAL}, allowed={"conversation": (A(LOCAL.key, 500),)}, used_today={}, measured=frozenset({LOCAL.key})
+    )
+    assert "non vérifiable" not in choose_for("conversation", measured).reason
+
+
+def test_hosted_avec_monnaie_locale_est_expose_et_jamais_cible_d_un_repli_depuis_un_vrai_local() -> None:
+    fake_local = model("registre:p/h", cost="payant", egress="texte")  # ce que la détection rend pour hosted + currency local
+    down = model("ollama:vrai", available=False, reason="hors-ligne")
+    st = state(down, fake_local, allowed={"conversation": auth(down.key, fake_local.key)})
+    d = choose_for("conversation", st, current=down.key)
+    assert d.kind == "propose"
+    held = state(fake_local, allowed={"conversation": auth(fake_local.key)}, hold="pause")
+    assert choose_for("conversation", held).kind == "none"  # soumis aux règles hold/pause

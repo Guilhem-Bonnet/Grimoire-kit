@@ -2,7 +2,8 @@
 //
 // Tout vient de `GET /api/workspace/providers/direct-use` : ce qui est détecté sur la machine (modèles locaux d'Ollama,
 // fournisseurs du registre, agents installés), ce que l'humain a autorisé par usage et la décision de maintenant. La
-// lecture ne sonde aucun service distant ; seul « Vérifier maintenant » le fait.
+// lecture, comme « Vérifier maintenant », ne joint aucun service distant et ne transmet aucune clé ; « Vérifier les
+// connexions » le fait, sous la clé de contrôle, après avoir dit à quels points d'accès une clé va partir.
 //
 // Autoriser un modèle, changer l'ordre, poser ou lever un plafond sont des gestes d'humain : chaque enregistrement passe
 // par le dialogue de la clé de contrôle déjà utilisé par le pilotage (`runGesture`, pilotage.js) : il dit ce qui va se
@@ -47,7 +48,7 @@ const REASONS = {
 };
 const EGRESS = {
   rien: 'Rien ne sort de la machine',
-  texte: 'Le texte envoyé sort de la machine',
+  texte: 'Le texte peut sortir de la machine',
 };
 const COST = { 'gratuit-local': 'Gratuit (local)', abonnement: 'Abonnement', payant: 'Payant à l’usage' };
 const TIER = { cheap: 'léger', mid: 'intermédiaire', strong: 'fort' };
@@ -89,7 +90,7 @@ function stateBadge(model) {
 
 // ── La carte d'un modèle détecté ────────────────────────────────────────────
 
-function modelCard(model, usedToday, onAddLocal) {
+function modelCard(model, usedToday, onAddLocal, localEntry) {
   const card = el('li', 'ma-model', null, { 'data-role': 'model', 'data-key': model.key });
   const head = el('div', 'ma-model-head');
   const names = el('div', 'ma-model-names');
@@ -120,6 +121,10 @@ function modelCard(model, usedToday, onAddLocal) {
     add.setAttribute('aria-label', `Ajouter ${model.label} au registre du projet`);
     add.addEventListener('click', () => onAddLocal(model));
     card.append(add);
+    if (localEntry && !localEntry.genuine) {
+      add.disabled = true;
+      card.append(el('p', 'ma-warn', `L’entrée « ${localEntry.provider_id} » du registre n’est pas l’Ollama local (${localEntry.reason}) : ajout impossible, corrige-la à la main.`));
+    }
   }
   return card;
 }
@@ -241,6 +246,9 @@ function usageCard(view, usage, handlers) {
         status.textContent = parsed.error ? 'Plafond invalide : un nombre entier de jetons, ou rien.' : '';
       });
       li.append(up, down, cap);
+      if (model && !model.usage_measured) {
+        li.append(el('span', 'ma-sub', 'consommation non mesurée pour ce modèle : ce plafond ne s’appliquera qu’une fois le compteur branché', { 'data-role': 'cap-unmeasured' }));
+      }
       if (typeof used.get(row.key) === 'number') {
         li.append(el('span', 'ma-sub', `consommé : au moins ${used.get(row.key)} jetons aujourd’hui (borne basse)`));
       }
@@ -272,7 +280,7 @@ function targetLine(ctx) {
 function outgoingLine(models, keys) {
   const out = keys.map((k) => models.get(k)).filter((m) => m && m.egress === 'texte');
   if (!out.length) return 'Aucun de ces modèles ne fait sortir de texte de ta machine.';
-  return `Le texte envoyé à ces modèles sort de ta machine : ${out.map((m) => `${m.label} (${COST[m.cost] || m.cost})`).join(', ')}.`;
+  return `Le texte envoyé à ces modèles peut sortir de ta machine :${out.map((m) => `${m.label} (${COST[m.cost] || m.cost})`).join(', ')}.`;
 }
 
 export async function mount(root, ctx) {
@@ -300,8 +308,33 @@ export async function mount(root, ctx) {
     const inventory = view.inventory;
     const verify = el('button', 'btn', 'Vérifier maintenant', { type: 'button', 'data-role': 'verify' });
     const verifyStatus = el('span', 'ma-note', '', { role: 'status', 'aria-live': 'polite', 'data-role': 'verify-status' });
-    const sub = inventory.verified ? `Vérifié à ${inventory.at.slice(11, 16)} (UTC)` : 'Lecture locale : aucune requête hors de la machine';
-    wrap.append(spaceHead('Modèles autorisés', sub, verify, verifyStatus));
+    const remote = el('button', 'btn', 'Vérifier les connexions…', { type: 'button', 'data-role': 'verify-remote' });
+    const sub = inventory.verified
+      ? `Connexions vérifiées à ${inventory.at.slice(11, 16)} (UTC)`
+      : `Relu à ${inventory.at.slice(11, 16)} (UTC) : lecture locale, aucune clé transmise, aucun service distant joint`;
+    wrap.append(spaceHead('Modèles autorisés', sub, verify, remote, verifyStatus));
+    remote.addEventListener('click', async () => {
+      const endpoints = view.remote_endpoints || [];
+      const lines = [
+        targetLine(ctx),
+        endpoints.length
+          ? `La clé d’API de chaque fournisseur ci-dessous va être ENVOYÉE à son point d’accès : ${endpoints.map((e) => `${e.provider_id} → ${e.url}`).join(' ; ')}.`
+          : 'Aucune clé d’API ne sera envoyée : aucun fournisseur n’a de clé posée et de point d’accès connu.',
+        'La connexion des agents installés sera aussi testée (aucun modèle n’est appelé).',
+      ];
+      remote.disabled = true;
+      try {
+        const next2 = await runGesture(
+          { title: 'Vérifier les connexions', lines, confirmLabel: 'Vérifier' },
+          (answer) => ctx.api.directUseVerifyRemote(answer.key),
+        );
+        if (next2 && !ctx.signal.aborted) draw(next2);
+        else remote.disabled = false;
+      } catch (error) {
+        verifyStatus.textContent = `Refusé : ${error.message}`;
+        remote.disabled = false;
+      }
+    });
     verify.addEventListener('click', async () => {
       verify.disabled = true;
       verifyStatus.textContent = 'Vérification en cours…';
@@ -329,18 +362,18 @@ export async function mount(root, ctx) {
     }
     const used = new Map(view.usages.flatMap((u) => u.authorized.map((a) => [a.key, a.used_today])));
     const list = el('ul', 'ma-models');
-    const onAddLocal = (model) => addLocal(ctx, model, draw, notice);
+    const onAddLocal = (model) => addLocal(ctx, model, view.local_ollama, draw, notice);
     // Les agents que la machine n'a pas installés restent repliés : ils ne sont pas « branchés », juste connus du kit.
     const missing = inventory.models.filter((m) => m.source === 'hote' && m.reason === 'non-installé');
     const present = inventory.models.filter((m) => !missing.includes(m));
-    for (const model of present) list.append(modelCard(model, used.get(model.key), onAddLocal));
+    for (const model of present) list.append(modelCard(model, used.get(model.key), onAddLocal, view.local_ollama));
     if (!present.length) detected.append(el('p', 'ma-note', 'Aucun modèle détecté : ni registre de fournisseurs, ni Ollama, ni agent installé.'));
     detected.append(list);
     if (missing.length) {
       const more = el('details', 'ma-missing', null, { 'data-role': 'missing-hosts' });
       more.append(el('summary', null, `Agents que Grimoire sait utiliser, non installés ici (${missing.length})`));
       const rest = el('ul', 'ma-models');
-      for (const model of missing) rest.append(modelCard(model, used.get(model.key), onAddLocal));
+      for (const model of missing) rest.append(modelCard(model, used.get(model.key), onAddLocal, view.local_ollama));
       more.append(rest);
       detected.append(more);
     }
@@ -382,10 +415,14 @@ async function saveUsage(ctx, usage, draft, models, status, draw) {
   }
 }
 
-async function addLocal(ctx, model, draw, notice) {
+async function addLocal(ctx, model, entry, draw, notice) {
+  // Le texte vient de ce qui sera réellement écrit (l'entrée du registre, créée ou existante), jamais d'une formule fixe.
+  const target = entry && entry.exists
+    ? `à l’entrée existante « ${entry.provider_id} » (invocation : ${entry.invocation})`
+    : `à une nouvelle entrée locale « ${entry ? entry.provider_id : 'ollama'} » (invocation : ${entry ? entry.invocation : 'ollama run {model} {prompt}'})`;
   const lines = [
     targetLine(ctx),
-    `Ajoute ${model.label} au registre du projet, sous le fournisseur local « ollama » (rien ne sort de la machine).`,
+    `Ajoute ${model.label} au registre du projet, ${target}. Cette entrée est reconnue comme l’Ollama local de la machine : rien ne sort de la machine.`,
     `Son niveau sera ${model.tier ? TIER[model.tier] || model.tier : 'léger'}, ${model.tier_provenance ? model.tier_provenance : 'par prudence'}.`,
   ];
   try {

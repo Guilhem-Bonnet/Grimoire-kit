@@ -25,6 +25,7 @@ Garanties :
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -34,7 +35,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -43,7 +44,13 @@ from urllib.parse import urlsplit
 from grimoire.providers.audit import ollama_base_url
 from grimoire.providers.capabilities import MODEL_CAPABILITIES
 from grimoire.providers.capability_probe import capabilities_for, load_probes
-from grimoire.providers.registry import LOCAL_PROVIDER_ID, ProviderRegistryError, ProviderSpec, read_registry
+from grimoire.providers.registry import (
+    LOCAL_INVOCATION,
+    LOCAL_PROVIDER_ID,
+    ProviderRegistryError,
+    ProviderSpec,
+    read_registry,
+)
 from grimoire.providers.secrets import is_valid_provider_id, list_secrets, provider_key_var
 from grimoire.providers.state import ProviderRuntimeState, load_state
 
@@ -57,6 +64,11 @@ __all__ = [
     "OllamaScan",
     "clear_cache",
     "detect",
+    "fingerprint",
+    "is_local_ollama",
+    "key_endpoints",
+    "local_ollama_entry",
+    "probe_remote",
     "scan_ollama",
     "tier_from_parameter_size",
 ]
@@ -109,6 +121,11 @@ class ModelAvailability:
     connected: bool | None = None
     install_hint: str = ""
     size_label: str = ""
+    #: Nom lisible et stable (``origine:fournisseur/modèle``) ; ``key`` en est dérivé et ne s'en distingue que si deux
+    #: entrées portent le même nom avec des empreintes différentes (``ref#empreinte``).
+    ref: str = ""
+    #: Empreinte de ce que la ligne désigne (voir :func:`fingerprint`) : une autorisation n'est valable que pour elle.
+    fingerprint: str = ""
 
     def capability(self, name: str) -> tuple[int | bool, str] | None:
         """``(valeur, provenance)`` d'une capacité connue, ``None`` si elle est inconnue."""
@@ -120,6 +137,8 @@ class ModelAvailability:
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
+            "ref": self.ref or self.key,
+            "fingerprint": self.fingerprint[:12] or None,
             "label": self.label,
             "source": self.source,
             "provider_id": self.provider_id,
@@ -283,14 +302,67 @@ def clear_cache() -> None:
 # ── Normalisation ───────────────────────────────────────────────────────────
 
 
-def _cost_of(currency: str | None, provider_type: str) -> str:
-    if currency == "local" or provider_type == "local":
+def _cost_of(currency: str | None, *, verified_local: bool) -> str:
+    """``gratuit-local`` seulement si le point d'accès est vérifiablement sur la machine ; inconnu = payant."""
+    if verified_local:
         return "gratuit-local"
     return "abonnement" if currency == "quota" else "payant"
 
 
-def _egress_of(currency: str | None, provider_type: str) -> str:
-    return "rien" if currency == "local" or provider_type == "local" else "texte"
+def _egress_of(*, verified_local: bool) -> str:
+    return "rien" if verified_local else "texte"
+
+
+def _is_loopback_url(value: str | None) -> bool:
+    return bool(value) and _is_loopback(str(value))
+
+
+def is_local_ollama(spec: ProviderSpec, which: Callable[[str], str | None] = shutil.which) -> tuple[bool, str]:
+    """Cette entrée du registre est-elle réellement l'Ollama local ? ``(oui, motif du refus)``.
+
+    Même définition de « local » que la politique de données (``provider_type == "local"``), et en plus : l'invocation
+    a pour nom de base ``ollama``, son chemin (s'il en a un) est le binaire que le PATH du cockpit trouve, et aucune
+    ``base_url`` n'envoie ailleurs que sur une boucle locale.
+    """
+    words = (spec.invocation or "").split()
+    if not words or PurePosixPath(words[0]).name != "ollama":
+        return False, "l'invocation n'est pas la commande « ollama »"
+    if spec.provider_type != "local":
+        return False, f"le type du fournisseur est « {spec.provider_type or 'inconnu'} », pas « local »"
+    for url in (spec.base_url, spec.anthropic_base_url):
+        if url and not _is_loopback_url(url):
+            return False, "une adresse distante (base_url) est déclarée"
+    if "/" in words[0] or "\\" in words[0]:
+        found = which("ollama")
+        if found is None or os.path.realpath(words[0]) != os.path.realpath(found):
+            return False, "le chemin de la commande n'est pas l'exécutable « ollama » du PATH"
+    return True, ""
+
+
+def _verified_local(spec: ProviderSpec, genuine_ollama: bool) -> bool:
+    """Le point d'accès est-il vérifiablement sur la machine ? Ollama local reconnu, ou ``local`` + boucle locale.
+
+    ``currency: local`` seul ne suffit pas, et un binaire local quelconque non plus : ce qu'il fait du texte ne se vérifie pas.
+    """
+    if genuine_ollama:
+        return True
+    return spec.provider_type == "local" and _is_loopback_url(spec.base_url) and not (
+        spec.anthropic_base_url and not _is_loopback_url(spec.anthropic_base_url)
+    )
+
+
+def fingerprint(*parts: str) -> str:
+    """Empreinte SHA-256 (hex) d'une liste ordonnée de champs : ce qu'une autorisation désigne.
+
+    Registre : ``("registre", id du fournisseur, type, monnaie, invocation, base_url, anthropic_base_url, modèle)``.
+    Ollama local reconnu : ``("ollama-local", modèle sans ":latest")`` (la même, configuré ou non, pour qu'ajouter
+    le modèle au registre n'invalide rien). Hôte : ``("hote", identifiant, commande ACP)``.
+    """
+    return hashlib.sha256(json.dumps(list(parts), ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _ollama_fp(model: str) -> str:
+    return fingerprint("ollama-local", model.removesuffix(":latest"))
 
 
 def key_command(provider_id: str) -> str:
@@ -303,11 +375,6 @@ def _key_present(provider_id: str, stored: frozenset[str]) -> bool:
     """La clé est-elle là ? Présence seulement : l'index du magasin, ou la variable d'environnement posée."""
     var = provider_key_var(provider_id)
     return provider_id in stored or (bool(var) and bool(os.environ.get(var)))
-
-
-def _is_ollama_provider(spec: ProviderSpec) -> bool:
-    words = (spec.invocation or "").split()
-    return bool(words) and PurePosixPath(words[0]).name == "ollama"
 
 
 def _same_model(declared: str, seen: str) -> bool:
@@ -338,9 +405,9 @@ class _Env:
 
 def _registry_rows(spec: ProviderSpec, env: _Env) -> list[ModelAvailability]:
     runtime = env.state.get(spec.id)
-    ollama_backed = _is_ollama_provider(spec)
-    local = spec.provider_type == "local" or spec.currency == "local"
-    needs_key = spec.currency == "api" and not local
+    ollama_backed = is_local_ollama(spec, env.which)[0]
+    verified_local = _verified_local(spec, ollama_backed)
+    needs_key = spec.currency == "api" and not verified_local
     present = _key_present(spec.id, env.stored) if needs_key else None
     declared = [(m.id, m.tier) for m in spec.models] or [(mid, "") for mid in spec.default_models] or [("", "")]
     rows: list[ModelAvailability] = []
@@ -384,8 +451,17 @@ def _registry_rows(spec: ProviderSpec, env: _Env) -> list[ModelAvailability]:
                 available=available,
                 reason=reason,
                 detail=detail,
-                egress=_egress_of(spec.currency, spec.provider_type),
-                cost=_cost_of(spec.currency, spec.provider_type),
+                egress=_egress_of(verified_local=verified_local),
+                cost=_cost_of(spec.currency, verified_local=verified_local),
+                ref=key,
+                fingerprint=(
+                    _ollama_fp(model_id)
+                    if ollama_backed and model_id
+                    else fingerprint(
+                        "registre", spec.id, spec.provider_type, spec.currency or "", spec.invocation or "",
+                        spec.base_url or "", spec.anthropic_base_url or "", model_id,
+                    )
+                ),
                 key_present=present,
                 key_command=key_command(spec.id) if needs_key else "",
                 cooldown_until=(
@@ -428,6 +504,8 @@ def _ollama_rows(env: _Env, configured: set[str]) -> list[ModelAvailability]:
                 cooldown_until=None,
                 capabilities=(),
                 size_label=size,
+                ref=f"{SOURCE_OLLAMA}:{name}",
+                fingerprint=_ollama_fp(name),
             )
         )
     return rows
@@ -475,9 +553,98 @@ def _host_rows(env: _Env, *, verify: bool, acp: Callable[[Any, Path], tuple[bool
                 capabilities=(),
                 connected=connected,
                 install_hint=install_hint(profile),
+                ref=f"{SOURCE_HOST}:{profile.host_id}",
+                fingerprint=fingerprint("hote", str(profile.host_id), " ".join(profile.acp_command)),
             )
         )
     return rows
+
+
+def local_ollama_entry(root: Path, which: Callable[[str], str | None] = shutil.which) -> dict[str, Any]:
+    """Ce qu'« ajouter un modèle Ollama détecté » écrirait : l'entrée ``ollama`` du registre, créée ou existante.
+
+    ``genuine`` est faux si l'entrée existante n'est pas l'Ollama local (``reason`` dit pourquoi) : l'ajout est alors refusé.
+    """
+    try:
+        spec = next((s for s in read_registry(root) if s.id == LOCAL_PROVIDER_ID), None)
+    except ProviderRegistryError:
+        spec = None
+    if spec is None:
+        return {"exists": False, "genuine": True, "reason": "", "provider_id": LOCAL_PROVIDER_ID, "invocation": LOCAL_INVOCATION}
+    genuine, reason = is_local_ollama(spec, which)
+    return {
+        "exists": True, "genuine": genuine, "reason": reason, "provider_id": spec.id, "invocation": spec.invocation or "",
+    }
+
+
+def key_endpoints(root: Path) -> list[dict[str, str]]:
+    """Les points d'accès où la sonde de capacités enverrait une clé d'API si on la lançait : sans réseau, sans valeur de clé.
+
+    Un fournisseur activé figure ici seulement si sa clé est posée ET si la sonde saurait où l'envoyer (adresse documentée,
+    ``anthropic_base_url`` en https, ou passerelle admise). Les fournisseurs locaux n'en font pas partie.
+    """
+    from grimoire.providers import capability_probe as cp
+    from grimoire.providers.capabilities import LITELLM, canonical_provider
+
+    try:
+        specs = [s for s in read_registry(root) if s.enabled and is_valid_provider_id(s.id)]
+    except ProviderRegistryError:
+        return []
+    found: list[dict[str, str]] = []
+    for spec in specs:
+        kind = canonical_provider(spec.id, spec.provider_type)
+        endpoint: Any
+        if kind == "local":
+            continue
+        if kind == LITELLM:
+            base = cp.admitted_gateway_url(spec.base_url)
+            if not base or cp._names_documented_provider(spec.id):
+                continue
+            endpoint = cp._Endpoint(f"{base}/v1/models", provider_key_var(spec.id), "bearer", store_only=True)
+        else:
+            endpoint = cp._hosted_endpoint(spec)
+            if endpoint is None or (endpoint.store_only and endpoint.key_var in cp._reserved_key_vars()):
+                continue
+        if cp._key_value(spec.id, endpoint):  # présence seulement : la valeur n'en sort pas
+            found.append({"provider_id": spec.id, "url": str(endpoint.url).split("?", 1)[0]})
+    return found
+
+
+def probe_remote(root: Path) -> list[str]:
+    """La sonde de capacités sur les seuls fournisseurs de :func:`key_endpoints` ; rend leurs identifiants.
+
+    À n'appeler que derrière la clé de contrôle : elle envoie la clé d'API de chacun à son point d'accès. Rien n'est
+    sondé qui n'ait été listé, et les fournisseurs locaux (Ollama) ne passent jamais par ici.
+    """
+    from grimoire.providers.capability_probe import load_probes, probe_provider_capabilities, save_probes
+
+    ids = {entry["provider_id"] for entry in key_endpoints(root)}
+    targets = [s for s in read_registry(root) if s.id in ids and s.enabled]
+    if not targets:
+        return []
+    probes = load_probes(root)
+    for spec in targets:
+        probes[spec.id] = probe_provider_capabilities(spec)
+    save_probes(root, probes)
+    return [s.id for s in targets]
+
+
+def _disambiguate(rows: list[ModelAvailability]) -> tuple[ModelAvailability, ...]:
+    """Une ligne par (nom, empreinte) : deux entrées de même nom mais d'empreintes différentes ne se confondent jamais.
+
+    Un doublon exact (même nom, même empreinte) n'est gardé qu'une fois ; une collision de nom garde les deux lignes,
+    chacune sous ``nom#empreinte`` (douze premiers caractères).
+    """
+    by_ref: dict[str, list[ModelAvailability]] = {}
+    for row in rows:
+        group = by_ref.setdefault(row.ref or row.key, [])
+        if all(other.fingerprint != row.fingerprint for other in group):
+            group.append(row)
+    out: list[ModelAvailability] = []
+    for group in by_ref.values():
+        for row in group:
+            out.append(row if len(group) == 1 else replace(row, key=f"{row.ref}#{row.fingerprint[:12]}"))
+    return tuple(out)
 
 
 def detect(
@@ -527,16 +694,10 @@ def detect(
     rows: list[ModelAvailability] = []
     for spec in specs:
         rows.extend(_registry_rows(spec, env))
-    seen_keys: set[str] = set()
-    unique: list[ModelAvailability] = []
-    for row in rows:
-        if row.key not in seen_keys:  # un même modèle déclaré deux fois : la première déclaration fait foi
-            seen_keys.add(row.key)
-            unique.append(row)
-    unique.extend(_ollama_rows(env, {r.key for r in unique if r.source == SOURCE_OLLAMA}))
-    unique.extend(_host_rows(env, verify=verify, acp=acp))
+    rows.extend(_ollama_rows(env, {r.key for r in rows if r.source == SOURCE_OLLAMA}))
+    rows.extend(_host_rows(env, verify=verify, acp=acp))
     inventory = Inventory(
-        models=tuple(unique),
+        models=_disambiguate(rows),
         ollama=env.ollama,
         registry_error=registry_error,
         verified=verify,

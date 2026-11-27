@@ -107,6 +107,14 @@ def _add_local_models(project_root: Path, body: dict[str, Any]) -> Any:
     wanted = body.get("models")
     if not isinstance(wanted, list) or not wanted or not all(isinstance(n, str) for n in wanted):
         raise ValueError("`models` : la liste des noms de modèles Ollama à ajouter est requise")
+    from grimoire.providers.availability import local_ollama_entry
+
+    target = local_ollama_entry(project_root)
+    if not target["genuine"]:  # une entrée « ollama » qui n'est pas l'Ollama local ne reçoit rien : elle enverrait ailleurs
+        raise ValueError(
+            f"l'entrée « {target['provider_id']} » du registre n'est pas l'Ollama local ({target['reason']}) : "
+            "ajout refusé, corrige ou retire cette entrée à la main"
+        )
     seen = dict(detect(project_root, use_cache=False).ollama.models)
     unknown = [name for name in wanted if name not in seen]
     if unknown:
@@ -164,23 +172,44 @@ def direct_use_write_route(project_root: Path, body: dict[str, Any]) -> Any:
 def direct_use_verify_route(project_root: Path, body: dict[str, Any]) -> Any:
     """``POST /api/workspace/providers/direct-use/verify`` — le geste « Vérifier maintenant » (ni écriture d'autorité).
 
-    Refait la détection sans cache, sonde la connexion des hôtes installés (``initialize``, sans modèle) et, pour les
-    fournisseurs activés dont la clé est posée, la sonde de capacités existante (``GET /models``, sans génération) :
-    c'est la SEULE voie de cette page qui parle à un service distant, et seulement sur ce geste. Garde de requête de
-    l'hôte ; pas de clé de contrôle (rien n'est autorisé ni modifié dans les réglages).
+    Relit seulement ce qui est local, sans cache : Ollama sur une adresse de la machine, commandes présentes dans le
+    PATH, présence des clés. Aucune clé n'est transmise, aucun service distant n'est joint, rien n'est écrit dans le
+    projet. Garde de requête de l'hôte ; pas de clé de contrôle. La vérification qui parle à des services est
+    ``verify-remote``, sous la clé de contrôle.
     """
     from grimoire.providers import direct_use_settings
-    from grimoire.providers.availability import clear_cache
-    from grimoire.providers.capability_probe import probe_capabilities
+    from grimoire.providers.availability import clear_cache, detect
     from grimoire.tools.project_registry import body_project_refusal
 
     refusal = body_project_refusal(project_root, body)
     if refusal is not None:
         raise ValueError(refusal)
     clear_cache()
+    return direct_use_settings.view(project_root, inventory=detect(project_root, use_cache=False))
+
+
+def direct_use_verify_remote_route(project_root: Path, body: dict[str, Any]) -> Any:
+    """``POST /api/workspace/providers/direct-use/verify-remote`` — la vérification qui parle à des services.
+
+    Geste d'humain, sous la clé de contrôle (mêmes gardes que l'écriture des autorisations) : il envoie la clé d'API de
+    chaque fournisseur listé par ``remote_endpoints`` à SON point d'accès (la page le dit avant de demander la clé) et
+    lance la connexion des agents installés (``initialize``, sans modèle). Il ne change aucun réglage.
+    """
+    from grimoire.providers import direct_use_settings
+    from grimoire.providers.availability import clear_cache, detect, probe_remote
+    from grimoire.tools.human_gesture import require_human_key
+    from grimoire.tools.project_registry import body_project_refusal
+
+    refusal = body_project_refusal(project_root, body)
+    if refusal is not None:
+        raise ValueError(refusal)
+    require_human_key(
+        project_root, body, "clé de contrôle absente ou invalide : envoyer une clé à un service est un geste d'humain"
+    )
+    clear_cache()
     with contextlib.suppress(Exception):  # une sonde qui échoue se dit dans « non mesuré » ; la vérification continue
-        probe_capabilities(project_root)
-    return direct_use_settings.view(project_root, verify=True)
+        probe_remote(project_root)
+    return direct_use_settings.view(project_root, inventory=detect(project_root, verify=True))
 
 
 GET_ROUTES = {
@@ -192,4 +221,5 @@ POST_ROUTES = {
     f"{PREFIX}providers/set-key": providers_set_key_route,
     f"{PREFIX}providers/direct-use": direct_use_write_route,
     f"{PREFIX}providers/direct-use/verify": direct_use_verify_route,
+    f"{PREFIX}providers/direct-use/verify-remote": direct_use_verify_remote_route,
 }

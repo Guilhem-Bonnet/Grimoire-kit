@@ -47,6 +47,7 @@ ROUTES = {
     "providers": f"{PREFIX}providers",
     "set-key": f"{PREFIX}providers/set-key",
     "direct-use": f"{PREFIX}providers/direct-use",
+    "verify-remote": f"{PREFIX}providers/direct-use/verify-remote",
     "accept-merged": f"{PREFIX}tasks/accept-merged",
 }
 
@@ -76,6 +77,7 @@ def _body(route: str) -> dict[str, Any]:
         "providers": {"action": "disable", "provider_id": "anthropic"},
         "set-key": {"provider_id": "anthropic", "env_var": "ANTHROPIC_API_KEY", "value": "x"},
         "direct-use": {"usage": "conversation", "models": []},
+        "verify-remote": {},
         "accept-merged": {},
     }[route]
 

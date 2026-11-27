@@ -529,6 +529,8 @@ export const api = {
   // sur geste. Autoriser, réordonner, plafonner et ajouter des modèles locaux passent par la clé de contrôle.
   directUse: () => get(WS + 'providers/direct-use'),
   directUseVerify: () => post(WS + 'providers/direct-use/verify', projectBody()),
+  directUseVerifyRemote: (controlKey) =>
+    post(WS + 'providers/direct-use/verify-remote', { control_key: controlKey, ...projectBody() }),
   directUseWrite: (usage, models, controlKey) =>
     post(WS + 'providers/direct-use', { usage, models, control_key: controlKey, ...projectBody() }),
   providersAddLocal: (models, controlKey) =>

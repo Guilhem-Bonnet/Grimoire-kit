@@ -21,13 +21,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import stat
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from grimoire.providers.availability import Inventory, ModelAvailability, detect
+from grimoire.providers.availability import (
+    Inventory,
+    ModelAvailability,
+    detect,
+    key_endpoints,
+    local_ollama_entry,
+)
 from grimoire.providers.direct_use import (
     DEFAULT_MIN,
     USAGE_LABELS,
@@ -36,6 +45,7 @@ from grimoire.providers.direct_use import (
     Decision,
     DirectState,
     choose_for,
+    resolve_authorization,
 )
 from grimoire.providers.registry import ProviderRegistryError, read_registry
 
@@ -55,6 +65,7 @@ MAX_BYTES = 65_536
 MAX_MODELS_PER_USAGE = 32
 MAX_CAP_TOKENS = 50_000_000
 _MAX_KEY_CHARS = 200
+_FINGERPRINT = re.compile(r"[0-9a-f]{64}", re.ASCII)
 
 
 class DirectUseError(ValueError):
@@ -75,6 +86,26 @@ def settings_path(root: Path) -> Path:
 
     digest = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:16]
     return control_dir() / "direct-use" / f"{digest}.json"
+
+
+def _unsafe_location(path: Path) -> str:
+    """Pourquoi le fichier des réglages ne doit être ni lu ni écrit ; vide s'il est sûr.
+
+    Refus, jamais correction en silence : un lien symbolique sur la zone de contrôle, sur le dossier ``direct-use/`` ou
+    sur le fichier, ou des droits du dossier plus larges que 0700.
+    """
+    from grimoire.missions.mandate import control_dir
+
+    try:
+        if any(p.is_symlink() for p in (control_dir(), path.parent, path)):
+            return "lien symbolique sur le chemin des réglages"
+        if path.parent.is_dir():
+            mode = stat.S_IMODE(path.parent.stat().st_mode)
+            if mode & 0o077:
+                return f"le dossier des réglages est trop ouvert (droits {mode:04o}, 0700 attendu) : corrige-le (chmod 700)"
+    except OSError:
+        return "chemin des réglages illisible"
+    return ""
 
 
 def _empty() -> dict[str, tuple[Authorization, ...]]:
@@ -100,13 +131,16 @@ def read_settings(root: Path) -> Settings:
     path = settings_path(root)
     allowed = _empty()
     problems: list[str] = []
+    unsafe = _unsafe_location(path)
+    if unsafe:
+        return Settings(allowed, (f"réglages ignorés : {unsafe}",))
     try:
-        if path.is_symlink() or path.parent.is_symlink():
-            return Settings(allowed, ("réglages ignorés : lien symbolique",))
-        if not path.is_file():
-            return Settings(allowed)
-        with path.open("rb") as handle:
+        # Ouverture sans suivre un lien : un lien posé entre la vérification et l'ouverture est refusé par le noyau.
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as handle:
             raw = handle.read(MAX_BYTES + 1)
+    except FileNotFoundError:
+        return Settings(allowed)
     except OSError:
         return Settings(allowed, ("réglages illisibles : aucun modèle n'est autorisé",))
     if len(raw) > MAX_BYTES:
@@ -130,31 +164,35 @@ def read_settings(root: Path) -> Settings:
         for entry in entries[:MAX_MODELS_PER_USAGE]:
             key = entry.get("key") if isinstance(entry, dict) else None
             cap = entry.get("daily_cap_tokens") if isinstance(entry, dict) else None
+            fp = entry.get("fingerprint", "") if isinstance(entry, dict) else ""
             if not _valid_key(key):
                 problems.append(f"usage {usage} : entrée invalide ignorée")
             elif cap is not None and not _valid_cap(cap):
                 problems.append(f"usage {usage} : plafond invalide pour {key} (entrée ignorée)")
+            elif not isinstance(fp, str) or (fp and _FINGERPRINT.fullmatch(fp) is None):
+                problems.append(f"usage {usage} : empreinte invalide pour {key} (entrée ignorée)")
             elif any(key == item.key for item in kept):
                 problems.append(f"usage {usage} : doublon ignoré ({key})")
             else:
-                kept.append(Authorization(key, cap))
+                kept.append(Authorization(key, cap, fp))
         if len(entries) > MAX_MODELS_PER_USAGE:
             problems.append(f"usage {usage} : au plus {MAX_MODELS_PER_USAGE} modèles, le reste est ignoré")
         allowed[usage] = tuple(kept)
     return Settings(allowed, tuple(problems))
 
 
-def write_usage(root: Path, usage: str, entries: Iterable[Any], known_keys: Iterable[str]) -> Settings:
+def write_usage(root: Path, usage: str, entries: Iterable[Any], known: Mapping[str, ModelAvailability]) -> Settings:
     """Remplace la liste ordonnée des modèles autorisés pour *usage* ; ``DirectUseError`` si elle est invalide.
 
-    Chaque entrée est ``{"key": ..., "daily_cap_tokens": entier ou None}``. Une clé que *known_keys* (l'inventaire
-    détecté) ne contient pas est refusée : on n'autorise pas ce qu'on ne voit pas. Les autres usages sont conservés.
+    Chaque entrée est ``{"key": clé d'une ligne de l'inventaire, "daily_cap_tokens": entier ou None}``. Une clé que
+    *known* (l'inventaire détecté, par clé) ne contient pas est refusée : on n'autorise pas ce qu'on ne voit pas.
+    Ce qui est enregistré est le nom lisible ET l'empreinte de ce que la ligne désigne à cet instant. Les autres usages
+    sont conservés.
     """
     from grimoire.core.fsio import atomic_write, locked
 
     if usage not in USAGES:
         raise DirectUseError(f"usage inconnu : {usage!r} (attendus : {', '.join(USAGES)})")
-    known = set(known_keys)
     items = list(entries)
     if len(items) > MAX_MODELS_PER_USAGE:
         raise DirectUseError(f"au plus {MAX_MODELS_PER_USAGE} modèles par usage")
@@ -168,12 +206,14 @@ def write_usage(root: Path, usage: str, entries: Iterable[Any], known_keys: Iter
             raise DirectUseError(f"modèle inconnu de la détection : {str(key)[:80]!r}")
         if cap is not None and not _valid_cap(cap):
             raise DirectUseError(f"plafond invalide pour {key} : un entier de jetons entre 1 et {MAX_CAP_TOKENS}")
-        if any(key == item.key for item in kept):
+        row = known[key]
+        if any((row.ref or row.key) == item.key for item in kept):
             raise DirectUseError(f"modèle en double : {key}")
-        kept.append(Authorization(key, cap))
+        kept.append(Authorization(row.ref or row.key, cap, row.fingerprint))
     path = settings_path(root)
-    if path.parent.is_symlink() or path.is_symlink():
-        raise DirectUseError("réglages en lien symbolique : écriture refusée")
+    unsafe = _unsafe_location(path)
+    if unsafe:
+        raise DirectUseError(f"réglages refusés : {unsafe}")
     current = read_settings(root)
     merged = dict(current.allowed)
     merged[usage] = tuple(kept)
@@ -181,12 +221,19 @@ def write_usage(root: Path, usage: str, entries: Iterable[Any], known_keys: Iter
         "$schema": SCHEMA,
         "project": root.name,
         "usages": {
-            name: {"models": [{"key": a.key, "daily_cap_tokens": a.daily_cap_tokens} for a in auths]}
+            name: {
+                "models": [
+                    {"key": a.key, "fingerprint": a.fingerprint, "daily_cap_tokens": a.daily_cap_tokens} for a in auths
+                ]
+            }
             for name, auths in merged.items()
             if auths
         },
     }
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    unsafe = _unsafe_location(path)  # le dossier vient peut-être d'être créé : ses droits comptent aussi
+    if unsafe:
+        raise DirectUseError(f"réglages refusés : {unsafe}")
     try:
         with locked(path.with_name(path.name + ".lock"), timeout=5.0):
             atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
@@ -199,23 +246,25 @@ def write_usage(root: Path, usage: str, entries: Iterable[Any], known_keys: Iter
 # ── L'état de la décision ───────────────────────────────────────────────────
 
 
-def _used_today(root: Path, models: Iterable[ModelAvailability]) -> dict[str, int]:
-    """Ce que le kit sait de la consommation du jour, par modèle : une BORNE BASSE.
+def _used_today(root: Path, models: Iterable[ModelAvailability]) -> tuple[dict[str, int], frozenset[str]]:
+    """``(consommé, mesurés)`` : ce que le kit sait de la consommation du jour, par modèle : une BORNE BASSE.
 
     Seul le compteur de jetons de l'Atelier (:func:`grimoire.tools.atelier_model.usage`) existe aujourd'hui ; il ne
     compte que les appels que l'Atelier a faits à l'API d'Anthropic, tous modèles confondus : il est attribué à chaque
-    modèle de ce fournisseur. Rien n'est inventé pour les autres. Le lot B2 branchera les compteurs par modèle.
+    modèle de ce fournisseur, et seuls ces modèles sont « mesurés ». Rien n'est inventé pour les autres : un plafond posé
+    sur un modèle non mesuré n'est pas vérifiable. Le lot B2 branchera les compteurs par modèle.
     """
     try:
         from grimoire.tools.atelier_model import usage
 
         day = usage(root, "")
     except Exception:  # un compteur illisible ne sait rien : aucune consommation connue
-        return {}
+        return {}, frozenset()
     total = day.get("day") if isinstance(day, dict) and day.get("readable") else None
-    if not isinstance(total, int) or total <= 0:
-        return {}
-    return {m.key: total for m in models if m.source == "registre" and m.provider_id == "anthropic"}
+    if not isinstance(total, int):
+        return {}, frozenset()
+    keys = [m.key for m in models if m.source == "registre" and m.provider_id == "anthropic"]
+    return (dict.fromkeys(keys, total) if total > 0 else {}), frozenset(keys)
 
 
 def _hold(root: Path) -> str:
@@ -258,12 +307,14 @@ def build_state(
     """Assemble l'état de la décision : l'inventaire, les autorisations ramenées à ce qui est détecté, la consommation."""
     read = settings if settings is not None else read_settings(root)
     models = inventory.by_key()
+    used, measured = _used_today(root, inventory.models)
     return DirectState(
         models=models,
         allowed=dict(read.allowed),  # une clé inconnue de l'inventaire reste dans la liste : la décision l'ignore, et le dit
-        used_today=_used_today(root, inventory.models),
+        used_today=used,
         hold_reason=_hold(root) if hold is None else hold,
         data_refusals=_data_refusals(root, inventory.models, data_class),
+        measured=measured,
     )
 
 
@@ -279,20 +330,26 @@ def view(
     seen = inventory if inventory is not None else detect(root, verify=verify, now=now)
     settings = read_settings(root)
     state = build_state(root, seen, settings=settings)
-    known = seen.by_key()
     usages: list[dict[str, Any]] = []
     ignored: list[str] = []
+    problems = list(settings.problems)
     for usage in USAGES:
         authorized: list[dict[str, Any]] = []
         for auth in settings.allowed.get(usage, ()):
-            if auth.key not in known:
+            row, why = resolve_authorization(auth, state)
+            if row is None and why.startswith("ce modèle a changé"):
+                problems.append(f"{USAGE_LABELS[usage]} : {auth.key} — {why}")
+            elif row is None:
                 ignored.append(f"{USAGE_LABELS[usage]} : {auth.key} (non détecté)")
+            key = row.key if row is not None else auth.key
             authorized.append(
                 {
-                    "key": auth.key,
+                    "key": key,
+                    "ref": auth.key,
                     "daily_cap_tokens": auth.daily_cap_tokens,
-                    "used_today": state.used_today.get(auth.key),
-                    "detected": auth.key in known,
+                    "used_today": state.used_today.get(key) if row is not None else None,
+                    "detected": row is not None,
+                    "stale": row is None and why.startswith("ce modèle a changé"),
                 }
             )
         decision: Decision = choose_for(usage, state, current=(current or {}).get(usage))
@@ -305,12 +362,17 @@ def view(
                 "min_capability": DEFAULT_MIN[usage].to_dict(),
             }
         )
+    inventory_dict = seen.to_dict()
+    for entry in inventory_dict["models"]:
+        entry["usage_measured"] = entry["key"] in state.measured
     return {
-        "inventory": seen.to_dict(),
+        "inventory": inventory_dict,
         "usages": usages,
         "any_authorized": any(a["detected"] for u in usages for a in u["authorized"]),
-        "problems": list(settings.problems),
+        "problems": problems,
         "ignored": ignored,
+        "local_ollama": local_ollama_entry(root),
+        "remote_endpoints": key_endpoints(root),
         "hold": state.hold_reason or None,
         "used_note": "Consommation du jour : borne basse, seulement ce que l'Atelier a compté.",
     }

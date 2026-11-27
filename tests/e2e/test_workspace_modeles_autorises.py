@@ -172,7 +172,7 @@ def test_la_page_liste_les_modeles_detectes_avec_leur_etat_et_l_encart_vide(mode
 
     cloud = _model(page, "registre:fakecloud/fake-strong")
     expect(cloud).to_contain_text("Clé absente")
-    expect(cloud).to_contain_text("Le texte envoyé sort de la machine")
+    expect(cloud).to_contain_text("Le texte peut sortir de la machine")
     expect(cloud).to_contain_text("Payant")
     # La clé ne se saisit pas ici : la commande du terminal est montrée, aucun champ de saisie de clé n'existe.
     expect(cloud).to_contain_text("grimoire providers set-key fakecloud FAKECLOUD_API_KEY")
@@ -278,7 +278,30 @@ def test_ajouter_un_modele_detecte_passe_par_la_cle_de_controle(models_page: Pag
 def test_verifier_maintenant_relit_l_etat_sur_geste_explicite(models_page: Page) -> None:
     page = models_page
     page.get_by_role("button", name="Vérifier maintenant").click()
-    expect(page.locator("[data-role='modeles-autorises'] .space-sub")).to_contain_text("Vérifié à")
+    sub = page.locator("[data-role='modeles-autorises'] .space-sub")
+    expect(sub).to_contain_text("Relu à")
+    expect(sub).to_contain_text("aucune clé transmise")
+
+
+def test_verifier_les_connexions_demande_la_cle_et_dit_ce_qui_part(models_page: Page) -> None:
+    page = models_page
+    page.get_by_role("button", name="Vérifier les connexions…").click()
+    dialog = page.locator("dialog.pi-dialog")
+    expect(dialog).to_contain_text("Aucune clé d’API ne sera envoyée")
+    expect(dialog).to_contain_text("aucun modèle n’est appelé")
+    dialog.locator("input[type='password']").fill("fausse-cle")
+    dialog.get_by_role("button", name="Vérifier").click()
+    expect(page.locator("dialog.pi-dialog .pi-error")).to_contain_text("Clé refusée")
+    page.locator("dialog.pi-dialog input[type='password']").fill(_key())
+    page.locator("dialog.pi-dialog").get_by_role("button", name="Vérifier").click()
+    expect(page.locator("[data-role='modeles-autorises'] .space-sub")).to_contain_text("Connexions vérifiées")
+
+
+def test_un_plafond_sur_un_modele_non_mesure_est_dit_sans_effet(models_page: Page) -> None:
+    page = models_page
+    conversation = _usage(page, "conversation")
+    conversation.get_by_role("switch", name="Autoriser llama3.2:3b pour Conversation (cadrage)").check()
+    expect(conversation.locator("[data-role='cap-unmeasured']")).to_contain_text("consommation non mesurée pour ce modèle")
 
 
 def test_la_page_tient_a_480_px_sans_defilement_horizontal(browser: Browser, served_models: tuple[str, Path]) -> None:
@@ -309,12 +332,22 @@ def test_captures_de_relecture(browser: Browser, served_models: tuple[str, Path]
     out.mkdir(parents=True, exist_ok=True)
     url, root = served_models
     (root / "_grimoire" / "standard" / "llm-provider-registry.yaml").write_text(REGISTRY, encoding="utf-8")
-    known = {"ollama:llama3.2:3b", "ollama:qwen2.5:14b", "ollama:mistral:7b", "registre:fakecloud/fake-strong"}
+
+    from grimoire.providers.availability import detect
+
+    # Même registre, même Ollama simulé : les empreintes sont celles que le serveur calcule.
+    known = detect(
+        root, use_cache=False, which=lambda n: f"/usr/bin/{n}", fetch=lambda *_a: TAGS, acp=lambda _p, _r: (True, "")
+    ).by_key()
+
+    def authorize(usage: str, models: list[dict[str, object]]) -> None:
+        ds.write_usage(root, usage, models, known)
+
     for state in ("vide", "regle"):
         ds.settings_path(root).unlink(missing_ok=True)
         if state == "regle":
-            ds.write_usage(root, "conversation", [{"key": "ollama:qwen2.5:14b"}, {"key": "ollama:llama3.2:3b", "daily_cap_tokens": 5000}], known)
-            ds.write_usage(root, "brainstorm", [{"key": "ollama:llama3.2:3b"}], known)
+            authorize("conversation", [{"key": "ollama:qwen2.5:14b"}, {"key": "ollama:llama3.2:3b", "daily_cap_tokens": 5000}])
+            authorize("brainstorm", [{"key": "ollama:llama3.2:3b"}])
         for scheme in ("dark", "light"):
             for width, height in ((1440, 900), (480, 900)):
                 context = browser.new_context(viewport={"width": width, "height": height}, reduced_motion="reduce", color_scheme=scheme)  # type: ignore[arg-type]

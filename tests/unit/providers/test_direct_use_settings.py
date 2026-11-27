@@ -130,7 +130,8 @@ def test_ecriture_invalide_est_refusee_et_n_ecrit_rien(
 
 def _write_raw(project: Path, text: str | bytes) -> None:
     path = ds.settings_path(project)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
     path.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
 
 
@@ -196,7 +197,7 @@ def test_lien_symbolique_est_ignore_en_lecture_et_refuse_en_ecriture(project: Pa
     target = tmp_path / "ailleurs.json"
     target.write_text(json.dumps({"usages": {"conversation": {"models": [{"key": "ollama:llama3.2:3b"}]}}}))
     path = ds.settings_path(project)
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(mode=0o700, parents=True)
     path.symlink_to(target)
     settings = ds.read_settings(project)
     assert all(not auths for auths in settings.allowed.values())
@@ -289,3 +290,209 @@ def test_la_vue_ne_nomme_ni_chemin_de_controle_ni_valeur_de_cle(project: Path) -
     text = json.dumps(ds.view(project, inventory=inventory(project)))
     assert ".grimoire" not in text
     assert "control" not in text
+
+
+# ── Liaison de l'autorisation : l'empreinte de ce qu'elle désigne ───────────
+
+HOSTED = """\
+providers:
+  - id: "cloud"
+    enabled: true
+    provider_type: "hosted"
+    currency: "quota"
+    invocation: "cloud-cli -p {prompt}"
+    models:
+      - {id: "m1", tier: "strong"}
+    data_policy: {allowed_data_classes: ["public-docs"], forbidden_data_classes: []}
+"""
+
+
+def _registry(project: Path, text: str) -> None:
+    (project / STANDARD / "llm-provider-registry.yaml").write_text(
+        text + 'routing:\n  default_data_class: "public-docs"\n', encoding="utf-8"
+    )
+    av.clear_cache()
+
+
+def test_l_autorisation_enregistre_l_empreinte_et_la_forme_est_exacte(project: Path) -> None:
+    inv = inventory(project)
+    ds.write_usage(project, "conversation", [{"key": "ollama:llama3.2:3b"}], inv.by_key())
+    stored = json.loads(ds.settings_path(project).read_text(encoding="utf-8"))
+    entry = stored["usages"]["conversation"]["models"][0]
+    assert entry["key"] == "ollama:llama3.2:3b"
+    assert entry["fingerprint"] == av.fingerprint("ollama-local", "llama3.2:3b")
+    row = inv.by_key()["registre:anthropic/claude-sonnet-5-5"]
+    assert row.fingerprint == av.fingerprint(
+        "registre", "anthropic", "hosted", "quota", "claude -p {prompt}", "", "", "claude-sonnet-5-5"
+    )
+
+
+def test_registre_reecrit_sous_le_meme_nom_invalide_l_autorisation_puis_le_geste_la_retablit(project: Path) -> None:
+    _registry(project, HOSTED)
+    inv = inventory(project)
+    ds.write_usage(project, "conversation", [{"key": "registre:cloud/m1"}], inv.by_key())
+    assert ds.view(project, inventory=inv)["usages"][0]["decision"]["kind"] == "use"
+    # Le registre est réécrit : même nom de modèle, autre invocation (l'ancienne étiquette ne dit plus la vérité).
+    _registry(project, HOSTED.replace("cloud-cli -p {prompt}", "evil-cli {prompt}"))
+    inv2 = inventory(project)
+    view = ds.view(project, inventory=inv2)
+    conversation = view["usages"][0]
+    assert conversation["decision"]["kind"] == "none"
+    assert "a changé depuis ton autorisation" in conversation["decision"]["reason"]
+    assert conversation["decision"]["trace"][0]["verdict"] == "ignoré"
+    assert any("a changé depuis ton autorisation" in p for p in view["problems"])
+    assert view["any_authorized"] is False
+    assert conversation["authorized"][0]["stale"] is True
+    # Ré-autoriser par le geste protégé (write_usage) lie l'autorisation à ce que la ligne désigne maintenant.
+    ds.write_usage(project, "conversation", [{"key": "registre:cloud/m1"}], inv2.by_key())
+    assert ds.view(project, inventory=inv2)["usages"][0]["decision"]["kind"] == "use"
+
+
+def test_base_url_changee_invalide_aussi(project: Path) -> None:
+    _registry(project, HOSTED)
+    inv = inventory(project)
+    ds.write_usage(project, "conversation", [{"key": "registre:cloud/m1"}], inv.by_key())
+    _registry(project, HOSTED.replace('invocation:', 'base_url: "https://autre.example"\n    invocation:'))
+    assert ds.view(project, inventory=inventory(project))["usages"][0]["decision"]["kind"] == "none"
+
+
+def test_un_registre_hostile_ne_remplace_jamais_le_vrai_ollama(project: Path, tmp_path: Path) -> None:
+    inv = inventory(project)
+    ds.write_usage(project, "conversation", [{"key": "ollama:llama3.2:3b"}], inv.by_key())
+    evil = tmp_path / "bin" / "ollama"
+    evil.parent.mkdir()
+    evil.write_text("#!/bin/sh\n", encoding="utf-8")
+    evil.chmod(0o755)
+    for provider_type, currency in (("local", "local"), ("hosted", "local"), ("cli", "quota")):
+        _registry(
+            project,
+            f"""providers:
+  - id: ollama
+    enabled: true
+    provider_type: {provider_type}
+    currency: {currency}
+    invocation: "{evil} run {{model}} {{prompt}}"
+    models: [{{id: "llama3.2:3b", tier: strong}}]
+""",
+        )
+        inv2 = inventory(project)
+        rows = [m for m in inv2.models if m.model_id == "llama3.2:3b"]
+        evil_rows = [m for m in rows if m.source == "registre"]
+        assert evil_rows and all(m.egress == "texte" and m.cost != "gratuit-local" for m in evil_rows)  # jamais « local »
+        assert any(m.cost == "payant" for m in evil_rows) or currency == "quota"  # monnaie « local » seule : traité comme payant
+        decision = ds.view(project, inventory=inv2)["usages"][0]["decision"]
+        assert decision["key"] == "ollama:llama3.2:3b"  # le vrai Ollama, jamais l'entrée du registre
+        assert inv2.by_key()[decision["key"]].source == "ollama"
+
+
+def test_deux_entrees_de_meme_nom_gardent_chacune_leur_ligne(project: Path) -> None:
+    _registry(project, HOSTED + HOSTED.split("providers:\n")[1].replace('"cloud"', '"cloud"').replace("cloud-cli", "autre-cli"))
+    rows = [m for m in inventory(project).models if m.ref == "registre:cloud/m1"]
+    assert len(rows) == 2
+    assert len({m.key for m in rows}) == 2 and all("#" in m.key for m in rows)
+    assert len({m.fingerprint for m in rows}) == 2
+
+
+def test_doublon_exact_n_est_garde_qu_une_fois(project: Path) -> None:
+    _registry(project, HOSTED + HOSTED.split("providers:\n")[1])
+    assert len([m for m in inventory(project).models if m.ref == "registre:cloud/m1"]) == 1
+
+
+def test_ollama_reconnu_exige_type_local_chemin_du_path_et_aucune_adresse_distante() -> None:
+    from grimoire.providers.registry import ProviderSpec
+
+    def spec(**kw: object) -> ProviderSpec:
+        base: dict[str, Any] = {
+            "id": "ollama", "enabled": True, "provider_type": "local", "allowed_capabilities": (), "default_models": (),
+            "fallback_order": (), "currency": "local", "invocation": "ollama run {model} {prompt}",
+        }
+        return ProviderSpec(**{**base, **kw})
+
+    which = lambda _n: "/usr/bin/ollama"  # noqa: E731
+    assert av.is_local_ollama(spec(), which)[0]
+    assert av.is_local_ollama(spec(invocation="/usr/bin/ollama run {model} {prompt}"), which)[0]
+    assert av.is_local_ollama(spec(base_url="http://127.0.0.1:11434"), which)[0]
+    assert not av.is_local_ollama(spec(invocation="/tmp/evil/ollama run {prompt}"), which)[0]
+    assert not av.is_local_ollama(spec(invocation="/usr/bin/ollama run {prompt}"), lambda _n: None)[0]
+    assert not av.is_local_ollama(spec(base_url="https://x.example"), which)[0]
+    assert not av.is_local_ollama(spec(anthropic_base_url="https://x.example"), which)[0]
+    assert not av.is_local_ollama(spec(provider_type="hosted"), which)[0]
+    assert not av.is_local_ollama(spec(invocation="curl http://x {prompt}"), which)[0]
+
+
+def test_local_non_verifiable_est_etiquete_expose(project: Path) -> None:
+    _registry(
+        project,
+        """providers:
+  - id: "binaire"
+    enabled: true
+    provider_type: "local"
+    currency: "local"
+    invocation: "binaire {prompt}"
+    models: [{id: "b1", tier: mid}]
+  - id: "passerelle"
+    enabled: true
+    provider_type: "local"
+    currency: "local"
+    base_url: "http://127.0.0.1:4000"
+    invocation: "passerelle {prompt}"
+    models: [{id: "p1", tier: mid}]
+""",
+    )
+    by = inventory(project).by_key()
+    assert (by["registre:binaire/b1"].egress, by["registre:binaire/b1"].cost) == ("texte", "payant")
+    assert (by["registre:passerelle/p1"].egress, by["registre:passerelle/p1"].cost) == ("rien", "gratuit-local")
+
+
+# ── Plafonds non mesurés, durcissement du fichier ───────────────────────────
+
+
+def test_la_vue_dit_quels_modeles_ont_une_consommation_mesuree(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.tools.atelier_model.usage", lambda _r, _s: {"readable": True, "day": 0, "chantier": 0})
+    models = {m["key"]: m for m in ds.view(project, inventory=inventory(project))["inventory"]["models"]}
+    assert models["registre:anthropic/claude-sonnet-5-5"]["usage_measured"] is True
+    assert models["ollama:llama3.2:3b"]["usage_measured"] is False
+
+
+def test_dossier_trop_ouvert_est_refuse_en_lecture_et_en_ecriture_sans_correction_silencieuse(project: Path) -> None:
+    inv = inventory(project)
+    ds.write_usage(project, "conversation", [{"key": "ollama:llama3.2:3b"}], inv.by_key())
+    directory = ds.settings_path(project).parent
+    directory.chmod(0o755)
+    settings = ds.read_settings(project)
+    assert all(not auths for auths in settings.allowed.values())
+    assert "trop ouvert" in settings.problems[0]
+    with pytest.raises(ds.DirectUseError, match="trop ouvert"):
+        ds.write_usage(project, "conversation", [], inv.by_key())
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o755  # rien n'a été « réparé » en silence
+
+
+def test_zone_de_controle_en_lien_symbolique_est_refusee(project: Path, tmp_path: Path) -> None:
+    from grimoire.missions.mandate import control_dir
+
+    real = tmp_path / "ailleurs"
+    real.mkdir(mode=0o700)
+    (real / "direct-use").mkdir(mode=0o700)
+    control_dir().parent.mkdir(parents=True, exist_ok=True)
+    control_dir().symlink_to(real)
+    settings = ds.read_settings(project)
+    assert "lien symbolique" in settings.problems[0]
+    with pytest.raises(ds.DirectUseError, match="lien symbolique"):
+        ds.write_usage(project, "conversation", [], inventory(project).by_key())
+
+
+def test_dossier_direct_use_en_lien_symbolique_est_refuse(project: Path, tmp_path: Path) -> None:
+    from grimoire.missions.mandate import control_dir
+
+    real = tmp_path / "ailleurs"
+    real.mkdir(mode=0o700)
+    control_dir().mkdir(mode=0o700, parents=True)
+    (control_dir() / "direct-use").symlink_to(real)
+    assert "lien symbolique" in ds.read_settings(project).problems[0]
+
+
+def test_empreinte_invalide_dans_le_fichier_ignore_l_entree(project: Path) -> None:
+    _write_raw(project, json.dumps({"usages": {"autres": {"models": [{"key": "ollama:x", "fingerprint": "pas-hex"}]}}}))
+    settings = ds.read_settings(project)
+    assert settings.allowed["autres"] == ()
+    assert "empreinte invalide" in settings.problems[0]

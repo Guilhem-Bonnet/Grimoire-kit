@@ -267,7 +267,7 @@ def test_cle_presente_dans_le_magasin_sans_jamais_lire_la_valeur(project: Path) 
     assert (m.available, m.key_present) == (True, True)
     dumped = json.dumps(inventory.to_dict())
     assert secret not in dumped
-    assert str(len(secret)) not in dumped.replace("2026", "")  # ni la longueur : on ne l'a pas mesurée
+    assert '"key_length"' not in dumped and "length" not in dumped  # la longueur de la clé n'est jamais exposée
 
 
 def test_cle_presente_par_l_environnement(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:

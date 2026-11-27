@@ -9,8 +9,11 @@ La table de décision (ordre d'évaluation, premier motif qui s'applique) :
 
 1. Usage inconnu : rien.
 2. Aucun modèle autorisé pour l'usage : rien (« Grimoire fonctionne sans modèle »).
-3. Pour chaque modèle autorisé, dans l'ordre de préférence de l'humain, les motifs d'écart sont, dans cet ordre :
-   inconnu de la détection (ignoré) ; indisponible (raison de la détection) ; règle d'usage ``hold``/``pause``
+3. Chaque autorisation est d'abord liée à ce qu'elle désigne : même nom ET même empreinte
+   (:func:`~grimoire.providers.availability.fingerprint`). Sinon elle est invalide (« ce modèle a changé depuis ton
+   autorisation », ou « inconnu de la détection ») : ignorée, tracée, jamais retenue.
+   Pour chaque modèle autorisé, dans l'ordre de préférence de l'humain, les motifs d'écart sont, dans cet ordre :
+   indisponible (raison de la détection) ; règle d'usage ``hold``/``pause``
    (seulement pour un modèle qui n'est pas ``gratuit-local`` : un modèle local ne consomme aucun quota) ; plafond du
    jour atteint (borne basse) ; politique de données ; puis, à part, capacité minimale non satisfaite.
 4. **Choix manuel** (*manual*) : prioritaire sur l'ordre et sur la capacité. Il ne passe jamais sur une garde de
@@ -47,6 +50,7 @@ __all__ = [
     "MinCapability",
     "TraceLine",
     "choose_for",
+    "resolve_authorization",
 ]
 
 USAGES: tuple[str, ...] = ("conversation", "brainstorm", "redaction", "autres")
@@ -97,6 +101,8 @@ class Authorization:
 
     key: str
     daily_cap_tokens: int | None = None
+    #: Empreinte de ce que *key* désignait au moment du geste d'autorité (voir ``availability.fingerprint``).
+    fingerprint: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +114,8 @@ class DirectState:
     used_today: Mapping[str, int]
     hold_reason: str = ""
     data_refusals: Mapping[str, str] | None = None
+    #: Clés des modèles dont la consommation du jour est mesurée : un plafond sur un autre modèle n'est pas vérifiable.
+    measured: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +205,23 @@ def _worse(candidate: ModelAvailability, current: ModelAvailability) -> str:
     return " et ".join(why)
 
 
+def resolve_authorization(auth: Authorization, state: DirectState) -> tuple[ModelAvailability | None, str]:
+    """La ligne que l'autorisation désigne vraiment : même nom ET même empreinte ; sinon ``None`` et le motif.
+
+    Une autorisation sans empreinte, ou dont l'empreinte ne correspond plus à ce que la détection voit sous ce nom
+    (registre réécrit, autre fournisseur, autre invocation), est invalide : elle se refait par le geste protégé.
+    """
+    same_name = [m for m in state.models.values() if (m.ref or m.key) == auth.key]
+    if not same_name:
+        return None, "inconnu de la détection : autorisation ignorée"
+    for row in same_name:
+        if auth.fingerprint and row.fingerprint == auth.fingerprint:
+            return row, ""
+    if not auth.fingerprint:
+        return None, "autorisation sans empreinte : ré-autorise ce modèle"
+    return None, "ce modèle a changé depuis ton autorisation : ré-autorise-le par le geste protégé"
+
+
 def choose_for(
     usage: str,
     state: DirectState,
@@ -210,9 +235,14 @@ def choose_for(
         return Decision("none", usage, "", "", f"usage inconnu : {usage!r}", "", ())
     need = min_capability if min_capability is not None else DEFAULT_MIN[usage]
     order: list[Authorization] = []
+    stale: dict[str, str] = {}  # autorisations qui ne désignent plus rien de valable : nom lisible -> motif
     for auth in state.allowed.get(usage, ()):
-        if all(auth.key != seen.key for seen in order):
-            order.append(auth)
+        row, problem = resolve_authorization(auth, state)
+        entry = Authorization(row.key if row is not None else auth.key, auth.daily_cap_tokens, auth.fingerprint)
+        if row is None:
+            stale[entry.key] = problem
+        if all(entry.key != seen.key for seen in order):
+            order.append(entry)
     if not order:
         return Decision(
             "none", usage, "", "", "Aucun modèle autorisé pour cet usage : Grimoire fonctionne sans modèle.", "", ()
@@ -222,13 +252,14 @@ def choose_for(
     eligible: list[str] = []
     blocks: dict[str, str] = {}
     gaps: dict[str, str] = {}
+    notes: dict[str, str] = {}
     by_key = {a.key: a for a in order}
     for auth in order:
-        model = state.models.get(auth.key)
-        if model is None:
-            blocks[auth.key] = "inconnu de la détection : autorisation ignorée"
+        if auth.key in stale:
+            blocks[auth.key] = stale[auth.key]
             trace.append(TraceLine(auth.key, auth.key, "ignoré", blocks[auth.key]))
             continue
+        model = state.models[auth.key]
         block = _block(auth, model, state)
         gap = _gap(model, need, usage)
         if block:
@@ -239,9 +270,13 @@ def choose_for(
             trace.append(TraceLine(auth.key, model.label, "écarté", gap))
         else:
             eligible.append(auth.key)
+            if auth.daily_cap_tokens is not None and auth.key not in state.measured:
+                notes[auth.key] = "plafond non vérifiable : la consommation de ce modèle n'est pas mesurée"
 
     def finish(kind: str, key: str, reason: str, warning: str = "") -> Decision:
         verdict = "retenu" if kind == "use" else "proposé"
+        if key in notes:
+            reason = f"{reason} ({notes[key]})"
         lines = [line for line in trace if line.key != key]
         lines.append(TraceLine(key, _label(state, key), verdict, reason))
         ordered = tuple(sorted(lines, key=lambda ln: next((i for i, a in enumerate(order) if a.key == ln.key), 99)))
