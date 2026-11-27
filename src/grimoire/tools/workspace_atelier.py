@@ -16,7 +16,11 @@ Routes (préfixe ``/api/workspace/``) :
 - ``GET atelier/chantiers`` ; ``POST atelier/chantiers`` ``{"titre", "slug"?}``
 - ``GET atelier/chantiers/<slug>`` : cinq phases en blocs typés
 - ``PUT atelier/chantiers/<slug>/blocs/<id>`` ``{"text", "expected"}`` : réécrit la seule plage du bloc ;
-  ``expected`` est l'empreinte du fichier de phase lue avec ``GET`` ; un fichier changé depuis = 409.
+  contrôle PAR BLOC : ``block_fp`` (empreinte du bloc lue avec ``GET``, ``fp``), ``prev`` et ``next`` (celles de ses
+  voisins, ``""`` au bord), ``base`` (le texte lu, pour la fusion). Un autre bloc modifié entre-temps ne gêne pas ;
+  le même bloc modifié, ou des blocs jumeaux, rendent 409 avec ``submitted``, ``current``, ``base``, ``merged``
+  (fusion à trois voies proposée, jamais appliquée) et ``reason`` (``bloc-modifie``, ``bloc-ambigu``,
+  ``bloc-introuvable``). Client ancien : ``expected`` seul (empreinte du fichier de phase), un fichier changé = 409.
 - ``GET|POST atelier/chantiers/<slug>/suggestions``, ``POST …/suggestions/<id>`` : lot 2, voir
   :mod:`grimoire.tools.workspace_atelier_suggestions` (``POST`` rend ses refus par :func:`post_http`).
 - ``GET|POST atelier/chantiers/<slug>/comments``, ``POST …/comments/<id>`` : lot 3, les commentaires ancrés, voir
@@ -33,7 +37,7 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from grimoire.core.cadrage import PHASES, cadrage_dir
 from grimoire.core.cadrage import status as cadrage_status
@@ -54,6 +58,15 @@ class ConflictError(Exception):
     """Le fichier de phase a changé depuis la lecture (409). ``reason`` précise la cause quand on la connaît."""
 
     reason = ""
+    #: Champs ajoutés à la réponse 409 (édition par bloc : version courante, texte soumis, fusion proposée).
+    payload: ClassVar[dict[str, Any]] = {}
+
+    def __init__(self, message: str = "", payload: dict[str, Any] | None = None, reason: str = "") -> None:
+        super().__init__(message)
+        if payload is not None:
+            self.payload = payload  # type: ignore[misc]
+        if reason:
+            self.reason = reason
 
 
 def handles(path: str) -> bool:
@@ -307,7 +320,7 @@ def create(root: Path, body: dict[str, Any]) -> dict[str, Any]:
 
 def _phase_view(root: Path, name: str | None, phase: Any) -> dict[str, Any]:
     from grimoire.core.cadrage import phase_report
-    from grimoire.tools import atelier_blocs
+    from grimoire.tools import atelier_blocs, atelier_conflict
 
     # Le nom vient du chantier retrouvé par `list_chantiers`, jamais de l'URL.
     report = phase_report(root, phase, name)
@@ -332,7 +345,9 @@ def _phase_view(root: Path, name: str | None, phase: Any) -> dict[str, Any]:
         out["readable"] = False  # lisible dans `cadrage status`, pas éditable bloc par bloc
         return out
     out["fingerprint"] = atelier_blocs.fingerprint(text)
-    out["blocks"] = [b.to_dict() for b in atelier_blocs.split(phase.id, text)]
+    blocks = atelier_blocs.split(phase.id, text)
+    marks = atelier_conflict.neighbour_fields(blocks)  # empreintes que le client renvoie à l'écriture (par bloc)
+    out["blocks"] = [{**b.to_dict(), **mark} for b, mark in zip(blocks, marks, strict=True)]
     return out
 
 
@@ -415,6 +430,39 @@ def _refuse_structure(text: str) -> None:
         raise ValueError("bloc de code non fermé : il avalerait la suite du fichier")
 
 
+def _locate_block(blocks: list[Any], body: dict[str, Any], text: str, filename: str) -> Any:
+    """Le bloc à réécrire d'après son empreinte lue (contrôle par bloc), ou un 409 qui porte tout ce qu'il faut
+    pour ne rien perdre : le texte soumis, la version courante du bloc, la base lue et une fusion proposée."""
+    from grimoire.tools import atelier_conflict as ac
+    found = ac.locate(blocks, body["block_fp"], body.get("prev") or "", body.get("next") or "", body.get("twins"))
+    if found.kind == ac.SAME:
+        return blocks[found.index]
+    payload: dict[str, Any] = {"submitted": text, "base": body.get("base"), "current": None, "merged": None}
+    if found.kind == ac.CHANGED:
+        mark = ac.neighbour_fields(blocks)[found.index]
+        current = blocks[found.index]
+        payload["current"] = {"id": current.id, "text": current.text, "editable": current.editable, **mark}
+        error = ConflictError(
+            f"le bloc a changé dans {filename} depuis la lecture : rien n'est écrit, ta saisie est conservée",
+            payload,
+            "bloc-modifie",
+        )
+        if isinstance(body.get("base"), str):
+            error.merge_args = (body["base"], text, current.text)  # type: ignore[attr-defined]
+        raise error
+    if found.kind == ac.AMBIGUOUS:
+        raise ConflictError(
+            f"plusieurs blocs identiques dans {filename} : impossible de savoir lequel tu modifies, rien n'est écrit",
+            payload,
+            "bloc-ambigu",
+        )
+    raise ConflictError(
+        f"le bloc n'existe plus dans {filename} : rien n'est écrit, ta saisie est conservée",
+        payload,
+        "bloc-introuvable",
+    )
+
+
 def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """Réécrit la plage du bloc ``block_id`` ; rien d'autre dans le fichier ne bouge, d'un seul octet."""
     from grimoire.core.fsio import atomic_write, locked
@@ -429,28 +477,56 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
         raise ValueError("`text` requis : un bloc ne se vide pas")
     if len(text) > MAX_BLOCK_CHARS:
         raise ValueError(f"`text` trop long ({MAX_BLOCK_CHARS} caractères au plus)")
-    if not isinstance(expected, str) or not expected:
+    per_block = body.get("block_fp") is not None
+    if per_block:
+        for key in ("block_fp", "prev", "next", "base"):
+            if body.get(key) is not None and not isinstance(body[key], str):
+                raise ValueError(f"`{key}` doit être une chaîne")
+        if not body["block_fp"]:
+            raise ValueError("`block_fp` requis : l'empreinte du bloc lue avec le chantier")
+        if len(body.get("base") or "") > MAX_BLOCK_CHARS:
+            raise ValueError(f"`base` trop long ({MAX_BLOCK_CHARS} caractères au plus)")
+        twins = body.get("twins")
+        if twins is not None and (not isinstance(twins, int) or isinstance(twins, bool) or twins < 1):
+            raise ValueError("`twins` doit être un entier positif")
+        # L'identifiant de l'URL (``phase.empreinte10[.n]``) doit désigner le bloc dont on envoie l'empreinte.
+        parts = block_id.split(".")
+        if len(parts) not in (2, 3) or parts[1] != body["block_fp"][:10]:
+            raise ValueError(f"identifiant de bloc {block_id!r} incohérent avec `block_fp` : recharge le document")
+    elif not isinstance(expected, str) or not expected:
         raise ValueError("`expected` requis : l'empreinte du fichier de phase lue avec le chantier")
     path = _phase_path(root, slug, phase.filename)
     if not path.is_file():
         raise FileNotFoundError(f"phase absente : {phase.filename}")
-    with locked(path):
-        try:
-            current = path.read_bytes().decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError(f"{phase.filename} n'est pas de l'UTF-8 : modifiez-le hors du cockpit") from exc
-        if atelier_blocs.fingerprint(current) != expected:
-            raise ConflictError(f"{phase.filename} a changé depuis la lecture : bloc rechargé")
-        try:
-            block = atelier_blocs.find_block(atelier_blocs.split(phase.id, current), block_id)
-        except atelier_blocs.BlockNotFoundError as exc:
-            raise ConflictError(f"le bloc {block_id!r} n'existe plus dans {phase.filename}") from exc
-        if not block.editable:
-            raise PermissionError(f"le bloc {block.kind} ne se modifie pas d'ici : il structure le fichier")
-        _refuse_structure(text.replace("\r\n", "\n"))
-        updated = atelier_blocs.replace_block(current, block, text)
-        if updated != current:
-            atomic_write(path, updated.encode("utf-8"))
+    try:
+        with locked(path):
+            try:
+                current = path.read_bytes().decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"{phase.filename} n'est pas de l'UTF-8 : modifiez-le hors du cockpit") from exc
+            blocks = atelier_blocs.split(phase.id, current)
+            if per_block:
+                block = _locate_block(blocks, body, text, phase.filename)
+            else:  # client ancien : l'empreinte du fichier entier fait foi, comme avant
+                if atelier_blocs.fingerprint(current) != expected:
+                    raise ConflictError(f"{phase.filename} a changé depuis la lecture : bloc rechargé")
+                try:
+                    block = atelier_blocs.find_block(blocks, block_id)
+                except atelier_blocs.BlockNotFoundError as exc:
+                    raise ConflictError(f"le bloc {block_id!r} n'existe plus dans {phase.filename}") from exc
+            if not block.editable:
+                raise PermissionError(f"le bloc {block.kind} ne se modifie pas d'ici : il structure le fichier")
+            _refuse_structure(text.replace("\r\n", "\n"))
+            updated = atelier_blocs.replace_block(current, block, text)
+            if updated != current:
+                atomic_write(path, updated.encode("utf-8"))
+    except ConflictError as exc:
+        args = getattr(exc, "merge_args", None)
+        if args is not None:  # la fusion (coûteuse) se calcule ICI, verrou du fichier rendu
+            from grimoire.tools import atelier_conflict as ac
+
+            exc.payload["merged"] = ac.propose_merge(*args)
+        raise
     from grimoire.tools import workspace_atelier_comments as comments
 
     comments.resync_after_edit(
@@ -589,7 +665,7 @@ def put_http(
         loop.after_write(root, rest[1])
         return 200, edited
     except ConflictError as exc:
-        return 409, {"ok": False, "conflict": True, "error": str(exc)}
+        return 409, {"ok": False, "conflict": True, "reason": exc.reason, "error": str(exc), **exc.payload}
     except FileNotFoundError as exc:
         return 404, {"ok": False, "error": f"introuvable : {exc}"}
     except PermissionError as exc:

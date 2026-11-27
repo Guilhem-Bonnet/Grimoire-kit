@@ -616,12 +616,56 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       drawSection(fresh);
       if (focusBack) sheet.querySelector(`[data-block="${CSS.escape(block.id)}"]`)?.focus();
     };
+    let mark = block; // ce que le serveur attend : le bloc tel qu'on l'a lu (réarmé quand on tranche un conflit)
+    let blockId = block.id;
+    const conflictBox = el('div', 'at-conflict', null, { 'data-role': 'block-conflict', role: 'alert' });
+    conflictBox.hidden = true;
+    form.insertBefore(conflictBox, bar);
+    const showConflict = (payload) => {
+      const cur = payload.current;
+      const lead = cur
+        ? 'Ce bloc a changé depuis que tu l’as ouvert. Rien n’est écrit, ta saisie est conservée : choisis quelle version garder.'
+        : (payload.error || 'Ce bloc est introuvable ou ambigu.') + ' Ta saisie est conservée ci-dessous.';
+      const pane = (label, body, role) => {
+        const box = el('div', 'at-conflict-col');
+        const pre = el('pre', 'at-conflict-text', body, { 'data-role': role });
+        box.append(el('strong', null, label), pre);
+        return box;
+      };
+      const cols = el('div', 'at-conflict-cols');
+      cols.append(pane('Ma version', area.value, 'conflict-mine'));
+      if (cur) cols.append(pane('Version actuelle', cur.text, 'conflict-theirs'));
+      const choices = el('div', 'at-edit-bar');
+      if (cur) {
+        const keep = el('button', 'at-btn pri', 'Garder la mienne', { type: 'button', 'data-role': 'conflict-keep-mine' });
+        keep.addEventListener('click', () => {
+          mark = cur; blockId = cur.id; conflictBox.hidden = true; // la prochaine écriture part de la version actuelle
+          commit();
+        });
+        const take = el('button', 'at-btn', 'Prendre l’autre', { type: 'button', 'data-role': 'conflict-take-other' });
+        take.addEventListener('click', async () => {
+          await reload('Version actuelle conservée : ta saisie n’a pas été enregistrée.');
+        });
+        choices.append(keep, take);
+        if (payload.merged) {
+          const merge = el('button', 'at-btn', 'Fusion proposée', { type: 'button', 'data-role': 'conflict-merge' });
+          merge.addEventListener('click', () => {
+            area.value = payload.merged; mark = cur; blockId = cur.id; conflictBox.hidden = true;
+            status.textContent = 'Fusion placée dans la zone de texte : relis-la puis enregistre.';
+            area.focus();
+          });
+          choices.append(merge);
+        }
+      }
+      conflictBox.replaceChildren(el('p', null, lead), cols, choices);
+      conflictBox.hidden = false;
+    };
     const commit = async () => {
-      if (area.value === block.text) { leave(true); return; }
+      if (area.value === mark.text && mark === block) { leave(true); return; }
       save.disabled = true;
       error.hidden = true;
       try {
-        const result = await ctx.api.atelierBloc(slug, block.id, area.value, phase.fingerprint);
+        const result = await ctx.api.atelierBloc(slug, blockId, area.value, mark);
         if (ctx.signal.aborted) return;
         // La vue d'un bloc réécrit n'embarque pas les suggestions : celles des autres blocs restent, celles du
         // bloc modifié sont périmées (le serveur le dira de même au prochain chargement).
@@ -641,7 +685,12 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       } catch (cause) {
         if (ctx.signal.aborted) return;
         if (cause.code === 409) {
-          // Le fichier a changé depuis la lecture : rien n'est écrit, on recharge et on le dit.
+          // Conflit par bloc : rien n'est écrit et la saisie reste dans la zone ; les deux versions sont montrées.
+          if (cause.payload && cause.payload.submitted !== undefined) {
+            showConflict(cause.payload);
+            save.disabled = false;
+            return;
+          }
           await reload('Le fichier a changé entre-temps : le document a été rechargé, ta modification n’a pas été enregistrée.');
           return;
         }
