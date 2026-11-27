@@ -1,0 +1,1 @@
+- fix(cockpit): Travail › Décisions ne reconstruit plus une carte dont la tâche n'a pas changé quand le pouls redessine la vue : un clic ou un focus sur une réponse ne tombe plus sur un nœud détaché le temps d'un redessin

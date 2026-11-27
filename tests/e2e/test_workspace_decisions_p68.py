@@ -69,8 +69,11 @@ def _card(page: Page, tid: str):  # type: ignore[no-untyped-def]
     return page.locator(f"[data-role='decision'][data-task='{tid}']")
 
 
-def _visible_primaries(card) -> int:  # type: ignore[no-untyped-def]
-    return card.locator(".btn.pri").evaluate_all("(nodes) => nodes.filter((n) => n.getClientRects().length).length")
+def _expect_one_primary(card) -> None:  # type: ignore[no-untyped-def]
+    # Une assertion qui se rejoue sur l'état attendu, pas un comptage en deux temps : `evaluate_all` cherche les
+    # nœuds PUIS les mesure dans un second aller-retour ; un redessin du pouls entre les deux laissait des nœuds
+    # détachés (zéro rectangle) et faisait compter 0. `:visible` est évalué dans la même requête.
+    expect(card.locator(".btn.pri:visible")).to_have_count(1)
 
 
 def test_chaque_type_de_decision_a_sa_carte_et_une_seule_action_primaire(workspace: Page, real_project: Path) -> None:
@@ -91,7 +94,7 @@ def test_chaque_type_de_decision_a_sa_carte_et_une_seule_action_primaire(workspa
     order = workspace.locator(".ex-dec-section").evaluate_all("(nodes) => nodes.map((n) => n.dataset.type)")
     assert order == ["geste", "choix", "libre", "reprise"], order
     for tid in (geste, choix, libre, reprise):
-        assert _visible_primaries(_card(workspace, tid)) == 1, tid
+        _expect_one_primary(_card(workspace, tid))
 
     # Geste humain : « Fait » primaire, la zone libre repliée derrière « Autre réponse… ».
     card = _card(workspace, geste)
@@ -169,6 +172,39 @@ def test_chaque_type_de_decision_a_sa_carte_et_une_seule_action_primaire(workspa
     assert json.loads(answered.value.request.post_data or "{}")["text"] == "reprendre"
     assert TaskService(real_project).require(reprise).status is not TaskState.WAITING
     _answer_all(TaskService(real_project))
+
+
+def test_une_decision_inchangee_garde_son_noeud_quand_le_pouls_redessine_la_vue(
+    workspace: Page, real_project: Path
+) -> None:
+    """Le pouls ne détruit pas une carte qui n'a pas bougé : un clic ou un focus dessus ne tombe pas dans le vide.
+
+    Avant : chaque pouls reconstruisait toutes les cartes, la carte visée disparaissait un instant et son bouton primaire
+    avec elle (e2e « une seule action primaire » rouge au hasard en CI).
+    """
+    service = TaskService(real_project)
+    _answer_all(service)
+    choix = _running(service, "Choix qui ne bouge pas")
+    service.ask(choix, "Lequel ?", "agent-a", kind="choice", options=("Un", "Deux"))
+    geste = _running(service, "Geste qui ne bouge pas")
+    service.ask(geste, "Poser la clé.", "agent-a", kind="permission")
+    _open_decisions(workspace)
+    workspace.evaluate("() => document.querySelectorAll(\"[data-role='decision']\").forEach((n) => { n.__tenu = true; })")
+    _card(workspace, choix).locator("[data-role='answer-option']").first.click()
+
+    # Une autre décision arrive : le pouls redessine la vue (la nouvelle carte est la preuve du redessin).
+    nouvelle = _running(service, "Décision qui arrive")
+    service.ask(nouvelle, "Et celle-ci ?", "agent-a", kind="permission")
+    expect(_card(workspace, nouvelle)).to_have_count(1, timeout=20_000)
+
+    for tid in (choix, geste):
+        assert _card(workspace, tid).evaluate("(n) => n.__tenu === true"), f"{tid} : carte reconstruite sans raison"
+    # Le choix fait n'est pas perdu, et « Valider » reste armé.
+    expect(_card(workspace, choix).locator("[data-role='answer-option']").first).to_have_attribute("aria-pressed", "true")
+    expect(_card(workspace, choix).get_by_role("button", name="Valider ce choix")).to_be_enabled()
+    # La carte arrivée est neuve : rien n'est figé par erreur.
+    assert not _card(workspace, nouvelle).evaluate("(n) => n.__tenu === true")
+    _answer_all(service)
 
 
 def test_les_compteurs_filtrent_par_type(workspace: Page, real_project: Path) -> None:
