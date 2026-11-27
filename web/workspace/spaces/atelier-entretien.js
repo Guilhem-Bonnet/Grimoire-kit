@@ -113,12 +113,10 @@ export function createGuided(ctx, slug, hooks) {
     const guide = v.guide || {};
     const body = el('div', 'at-asst-body', null, { 'data-role': 'guided' });
     if (v.agent && !v.agent.available) {
-      const terminal = el('p', 'at-muted');
-      terminal.append('Le même cadrage se mène au terminal : ', el('code', null, v.equivalent), '.');
-      body.append(
-        el('p', 'at-muted', `Aucun agent n’est joignable (${v.agent.reason || 'aucun agent d’hôte'}) : le cadrage se mène ici avec les questions du kit, sans IA.`, { 'data-role': 'assistant-off' }),
-        terminal,
-      );
+      // Une seule ligne d'explication (le panneau est un tiroir sur écran étroit) : pourquoi, et le même cadrage au terminal.
+      const off = el('p', 'at-muted', 'Aucun agent n’est joignable. Au terminal : ', { 'data-role': 'assistant-off', title: v.agent.reason || 'aucun agent d’hôte' });
+      off.append(el('code', null, v.equivalent), '.');
+      body.append(off);
     }
     if (v.error || guide.error) { body.append(el('p', 'at-error', v.error || guide.error, { role: 'alert' })); return body; }
     if (!guide.available) {
@@ -126,9 +124,10 @@ export function createGuided(ctx, slug, hooks) {
       return body;
     }
     if (!guide.started) {
-      body.append(el('p', null, 'Je te pose les questions une à une, tu réponds, et le document se remplit. Ce sont les questions du kit : aucune IA ne répond.', { 'data-role': 'assistant-invite' }));
-      const row = el('div', 'at-asst-row');
-      row.append(button('Démarrer le cadrage', 'start', () => !busy && act({ geste: 'guide-demarrer' }, 'Cadrage guidé démarré : voici la première question.'), { primary: true, iconName: 'i-act-send' }));
+      const row = el('div', 'at-asst-row', null, { 'data-role': 'assistant-invite' });
+      const go = button('Démarrer le cadrage', 'start', () => !busy && act({ geste: 'guide-demarrer' }, 'Cadrage guidé démarré : voici la première question.'), { primary: true, iconName: 'i-act-send' });
+      go.title = 'Je te pose les questions du kit une à une, tu réponds, le document se remplit.';
+      row.append(go);
       body.append(row);
       return body;
     }

@@ -128,6 +128,8 @@ def test_cadrage_guide_sans_agent_de_bout_en_bout(browser: Browser, sans_agent: 
         page.locator("[data-act='unknown']").click()
         page.locator("[data-role='atelier-status']", has_text="hypothèse").wait_for(timeout=APPEAR_MS)
         assert "À valider (je ne sais pas)" in _read(root, slug, "03-comprehension.md")
+        # La capture montre le panneau, pas la pile de notifications (certaines se ferment seules : on n'attend pas leur clic).
+        page.evaluate("() => document.querySelectorAll('[data-act=\"toast-close\"]').forEach((b) => b.click())")
         _capture(page, "02-cadrage-guide-question")
 
         # Reprise après rechargement : la même question revient, déduite de l'état écrit.

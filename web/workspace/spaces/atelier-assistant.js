@@ -191,7 +191,7 @@ export function createAssistant(ctx, slug, hooks) {
     if (!v) return;
     const busy = Boolean(v.turn.mine);
     const where = v.current ? `${v.current.title}, ${PHASE_NAMES[v.current.phase] || v.current.phase}` : '';
-    const progress = v.avancement ? v.avancement.resume : '';
+    const progress = v.avancement ? avancementText(v.avancement) : ''; // court : le panneau est une colonne étroite
     main.append(head(progress), engineBadge(v), v.agent.available ? engineNote(v) : '');
     if (!v.agent.available) { main.append(guided.render(v)); return; }
     const body = el('div', 'at-asst-body');
