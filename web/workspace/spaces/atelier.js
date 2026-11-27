@@ -17,6 +17,7 @@ import { atelierIsWide, badge, icon, setAtelierWide } from '../shell.js';
 import { createLiveDoc } from './atelier-live.js';
 import { createComments } from './atelier-comments.js';
 import { createAssistant } from './atelier-assistant.js';
+import { createHistory } from './atelier-historique.js';
 import { createLoopPanel, phaseState, progressCell, waitingBadges } from './atelier-avancement.js';
 import { setAtelierContext } from '../atelier-context.js';
 import { createNotifier } from './atelier-notify.js';
@@ -840,6 +841,10 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   main.append(docMenu.printTitle, status, sheet);
   const grid = el('div', 'at-doc-grid');
   grid.append(main, assist.element);
+  // Historique des versions (lecture seule) : un bouton dans la barre, un volet à la place de l'assistant (voir `atelier-historique.js`).
+  const versionsPane = createHistory(ctx, slug, { sheet, main, grid, say: (message) => { status.textContent = message; } });
+  docMenu.element.before(versionsPane.button);
+  grid.append(versionsPane.element);
   plan.attach(grid);
   const view = page(ctx, head, loop.element, phasebar, liveDoc.panels, grid);
   view.querySelector('.at-body').classList.add('at-body-doc');

@@ -97,11 +97,17 @@ def test_the_bar_stays_visible_while_scrolling_and_is_keyboard_friendly(browser:
         assert page.locator(SPLIT).is_visible() and page.locator(".at-phase[data-phase='brief']").is_visible()
         page.evaluate(f"{CANVAS}.scrollTop = 0")
         # Clavier : retour, détail d'avancement, phases, bouton, lien d'aide, dans l'ordre de lecture ; focus visible.
+        # La barre se redessine quand l'état en direct arrive : un parcours interrompu par ce redessin est rejoué.
         order: list[str] = []
-        page.locator(".at-back").focus()
-        for _ in range(12):
-            order.append(str(page.evaluate("() => { const a = document.activeElement; return a.getAttribute('data-act') || a.getAttribute('data-phase') || a.className || a.tagName; }")))
-            page.keyboard.press("Tab")
+        for _attempt in range(3):
+            order = []
+            page.locator(".at-back").focus()
+            for _ in range(16):
+                order.append(str(page.evaluate("() => { const a = document.activeElement; return a.getAttribute('data-act') || a.getAttribute('data-phase') || a.className || a.tagName; }")))
+                page.keyboard.press("Tab")
+            if "split" in order and "moa-why" in order:
+                break
+            page.wait_for_timeout(400)
         assert order[0] == "at-btn ghost at-back"
         assert order.index("brief") < order.index("split") < order.index("moa-why")
         page.locator(WHY).focus()
