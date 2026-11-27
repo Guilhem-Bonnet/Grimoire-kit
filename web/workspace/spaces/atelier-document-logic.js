@@ -47,6 +47,46 @@ export function findMatches(text, needle) {
   return out;
 }
 
+/**
+ * Les occurrences de `needle` dans le texte d'UN bloc, lu à travers ses nœuds de texte : `segments` est la liste des textes des
+ * nœuds, dans l'ordre (un passage en gras, en code ou en lien en fait un nœud à part). Une occurrence peut commencer dans un
+ * nœud et finir dans un autre : `[{ startSeg, startOffset, endSeg, endOffset }]`, les décalages étant ceux du nœud.
+ */
+export function findAcross(segments, needle) {
+  const texts = (segments || []).map((s) => String(s == null ? '' : s));
+  const starts = [];
+  let total = 0;
+  for (const text of texts) { starts.push(total); total += text.length; }
+  const startAt = (index) => { // le nœud qui contient l'unité `index`
+    for (let i = 0; i < texts.length; i += 1) if (index >= starts[i] && index < starts[i] + texts[i].length) return i;
+    return -1;
+  };
+  const endAt = (index) => { // le nœud qui contient l'unité `index - 1` : la fin se pose juste après elle
+    for (let i = 0; i < texts.length; i += 1) if (index > starts[i] && index <= starts[i] + texts[i].length) return i;
+    return -1;
+  };
+  const out = [];
+  for (const { start, end } of findMatches(texts.join(''), needle)) {
+    const a = startAt(start);
+    const b = endAt(end);
+    if (a < 0 || b < 0) continue;
+    out.push({ startSeg: a, startOffset: start - starts[a], endSeg: b, endOffset: end - starts[b] });
+  }
+  return out;
+}
+
+/** Les morceaux d'une occurrence, un par nœud touché : `[{ seg, start, end }]` (pour poser un `<mark>` par nœud). */
+export function matchSlices(match, segments) {
+  const slices = [];
+  for (let seg = match.startSeg; seg <= match.endSeg; seg += 1) {
+    const length = String(segments[seg] == null ? '' : segments[seg]).length;
+    const start = seg === match.startSeg ? match.startOffset : 0;
+    const end = seg === match.endSeg ? match.endOffset : length;
+    if (end > start) slices.push({ seg, start, end });
+  }
+  return slices;
+}
+
 /** Index de l'occurrence suivante (`dir` = 1) ou précédente (-1), en boucle ; -1 s'il n'y en a aucune. */
 export function stepIndex(current, count, dir) {
   if (count <= 0) return -1;
@@ -93,10 +133,93 @@ export function joinMarkdown(phases) {
   return parts.map((t) => (t.endsWith('\n') ? t : `${t}\n`)).join('\n');
 }
 
+const FRONT_MATTER = /^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+const TEMPLATE_LINE = /^\s*>\s*À compléter\b/;
+const FENCE = /^\s*(```|~~~)/;
+
+/**
+ * Une phase en Markdown propre, sous un `##` : sans front matter, ses titres descendus d'un niveau (`##` devient `###`), sans
+ * gabarit (« > À compléter… » et l'intro en italique du modèle), et sans titre dont il ne reste rien dessous. Vide si la phase
+ * n'a aucun contenu de la personne.
+ */
+export function cleanPhase(markdown, fallbackTitle = '') {
+  const text = String(markdown || '').replace(FRONT_MATTER, '').replace(/\r\n?/g, '\n');
+  const nodes = [];
+  let title = '';
+  let fenced = false;
+  for (const line of text.split('\n')) {
+    if (FENCE.test(line)) fenced = !fenced;
+    const found = fenced ? null : /^(#{1,6})\s+(.*\S)\s*$/.exec(line);
+    if (!found) {
+      if (!fenced && TEMPLATE_LINE.test(line)) continue;
+      nodes.push({ text: line });
+    } else if (!title && found[1].length === 1 && !nodes.some((n) => n.text.trim())) {
+      title = found[2];
+    } else {
+      const level = Math.min(6, Math.max(3, found[1].length + 1));
+      nodes.push({ level, text: `${'#'.repeat(level)} ${found[2]}` });
+    }
+  }
+  // L'intro du modèle : un paragraphe tout en italique avant la première rubrique.
+  const firstHeading = nodes.findIndex((n) => n.level);
+  const head = firstHeading < 0 ? nodes.length : firstHeading;
+  const intro = nodes.slice(0, head).map((n) => n.text.trim()).filter(Boolean).join(' ');
+  if (intro && /^_[\s\S]*_$/.test(intro)) for (let i = 0; i < head; i += 1) nodes[i] = { text: '' };
+  for (let changed = true; changed;) { // un titre dont il ne reste rien dessous s'en va, titres de niveau inférieur compris
+    changed = false;
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      if (!nodes[i].level) continue;
+      let j = i + 1;
+      while (j < nodes.length && !nodes[j].level && !nodes[j].text.trim()) j += 1;
+      if (j >= nodes.length || (nodes[j].level && nodes[j].level <= nodes[i].level)) { nodes.splice(i, 1); changed = true; }
+    }
+  }
+  const body = nodes.map((n) => n.text).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (!body) return '';
+  return `## ${title || String(fallbackTitle || '').trim() || 'Phase'}\n\n${body}`;
+}
+
+/**
+ * Le document en Markdown propre : un titre de chantier, un `##` par phase qui a du contenu, sans front matter répété ni
+ * gabarit vide. Vide quand aucune phase n'a de contenu. (Les fichiers tels que stockés : `joinMarkdown`.)
+ */
+export function cleanMarkdown(phases, title = '') {
+  const parts = (phases || []).map((p) => cleanPhase(p && p.markdown, p && p.title)).filter(Boolean);
+  if (!parts.length) return '';
+  const name = String(title || '').trim();
+  return `${name ? `# ${name}\n\n` : ''}${parts.join('\n\n')}\n`;
+}
+
+/**
+ * Les commentaires ouverts, prêts à être imprimés en fin de document : `[{ phase, quote, author, text, replies }]`. Ceux qui
+ * sont résolus n'y sont pas ; un fil sans texte non plus. `titles` : le nom affiché de chaque phase.
+ */
+export function printableComments(doc, titles = {}) {
+  const out = [];
+  for (const phase of (doc && doc.phases) || []) {
+    for (const c of phase.comments || []) {
+      if (!c || c.etat === 'resolu' || !String(c.texte || '').trim()) continue;
+      out.push({
+        phase: titles[phase.id] || String(phase.title || phase.id || '').split(' — ')[0],
+        quote: String(c.quote || '').replace(/\s+/g, ' ').trim(),
+        author: c.auteur === 'agent' ? 'Agent' : 'Humain',
+        text: String(c.texte).trim(),
+        replies: (c.replies || []).filter((r) => r && String(r.texte || '').trim()).map((r) => ({ author: r.auteur === 'agent' ? 'Agent' : 'Humain', text: String(r.texte).trim() })),
+      });
+    }
+  }
+  return out;
+}
+
+/** La date de l'en-tête d'impression : « 27 novembre 2026 ». */
+export function printDateLabel(date = new Date()) {
+  return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
 /** Le nom du fichier téléchargé : le chantier, en caractères sûrs. */
-export function downloadName(slug) {
+export function downloadName(slug, suffix = '') {
   const safe = String(slug || 'chantier').replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '');
-  return `${safe || 'chantier'}.md`;
+  return `${safe || 'chantier'}${suffix}.md`;
 }
 
 /** L'état d'une rubrique pour le plan : `rempli`, `couvert` (« je ne sais pas » ou « sans objet ») ou `vide` (à compléter). */

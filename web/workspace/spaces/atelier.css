@@ -453,7 +453,7 @@
 .at-docmenu-item:hover { background: var(--hover); }
 .at-docmenu-item .ico { width: 14px; height: 14px; color: var(--ink2); }
 .at-docmenu-say { margin: 0; padding: 0 var(--sp-2); min-height: 1.2em; color: var(--ink2); font-size: var(--t-s); }
-.at-print-title { display: none; }
+.at-print-head, .at-print-notes { display: none; }
 /* Impression : seule la feuille du document reste (ni barres, ni panneaux, ni mascotte, ni gestes d'édition). Gardé par la présence de la feuille,
    pour ne rien changer à l'impression des autres espaces. */
 @media print {
@@ -469,19 +469,62 @@
   body:has(.at-sheet) .at-body > :not(.at-doc-grid),
   body:has(.at-sheet) .at-page > :not(.at-body),
   body:has(.at-sheet) .at-doc-grid > :not(.at-doc-main),
-  body:has(.at-sheet) .at-doc-main > :not(.at-sheet):not(.at-print-title),
+  body:has(.at-sheet) .at-doc-main > :not(.at-sheet):not(.at-print-head):not(.at-print-notes),
   body:has(.at-sheet) .at-cm-add, body:has(.at-sheet) .at-ch, body:has(.at-sheet) .at-cm-margin, body:has(.at-sheet) .at-cm,
+  body:has(.at-sheet) .at-cm-orphans, body:has(.at-sheet) .at-skip, body:has(.at-sheet) .at-draft, body:has(.at-sheet) .at-stale,
   body:has(.at-sheet) .at-sugg, body:has(.at-sheet) .at-error, body:has(.at-sheet) [class*="at-live"],
   body:has(.at-sheet) .at-sheet .at-cmrow > :not(.at-blk) { display: none !important; }
   body:has(.at-sheet), body:has(.at-sheet) #shell, body:has(.at-sheet) #middle, body:has(.at-sheet) #center, body:has(.at-sheet) #canvas,
   body:has(.at-sheet) .at-page, body:has(.at-sheet) .at-body, body:has(.at-sheet) .at-doc-grid, body:has(.at-sheet) .at-doc-main {
     display: block; position: static; height: auto; min-height: 0; max-height: none; overflow: visible; padding: 0; margin: 0; width: auto; max-width: none; justify-self: stretch; align-self: auto; background: Canvas; container-type: normal;
   }
-  body:has(.at-sheet) .at-print-title { display: block; margin: 0 0 12pt; font-size: 20pt; }
+  /* En-tête d'impression : le titre du chantier et la date. */
+  body:has(.at-sheet) .at-print-head { display: block; margin: 0 0 14pt; padding: 0 0 8pt; border-bottom: 0.75pt solid CanvasText; }
+  body:has(.at-sheet) .at-print-title { display: block; margin: 0; font-size: 20pt; line-height: 1.2; }
+  body:has(.at-sheet) .at-print-date { display: block; margin: 3pt 0 0; font-size: 10pt; }
   body:has(.at-sheet) .at-sheet { display: block; padding: 0; border-radius: 0; }
-  body:has(.at-sheet) .at-sheet .at-sec { break-before: page; }
-  body:has(.at-sheet) .at-sheet .at-sec:first-of-type { break-before: auto; }
+  /* Les phases s'enchaînent : un saut de page seulement quand un bloc ne tient pas (jamais forcé entre deux phases). */
+  body:has(.at-sheet) .at-sheet .at-sec { break-before: auto; margin: 0 0 14pt; }
   body:has(.at-sheet) .at-sheet h2, body:has(.at-sheet) .at-sheet .at-rub { break-after: avoid; }
   body:has(.at-sheet) .at-sheet .at-blk, body:has(.at-sheet) .at-sheet .at-req, body:has(.at-sheet) .at-sheet .at-cmrow, body:has(.at-sheet) .at-sheet li { break-inside: avoid; }
-  body:has(.at-sheet) .at-blk { border: 0; padding: 0; background: none; box-shadow: none; }
+  /* Les blocs d'écran se tirent de 12 px vers la gauche (marge négative) : sur le papier ce débord rognait le premier caractère. */
+  body:has(.at-sheet) .at-blk { border: 0; padding: 0; margin: 0; background: none; box-shadow: none; }
+  body:has(.at-sheet) .at-sheet .at-cmrow { padding: 0; margin: 0; }
+  /* Les commentaires ouverts, imprimés proprement en fin de document (le même texte que celui de la page, sans ses gestes). */
+  body:has(.at-sheet) .at-print-notes { display: block; margin: 14pt 0 0; padding-top: 8pt; border-top: 0.75pt solid CanvasText; color: CanvasText; background: Canvas; }
+  body:has(.at-sheet) .at-print-notes-h { margin: 0 0 6pt; font-size: 14pt; break-after: avoid; }
+  body:has(.at-sheet) .at-print-notes-list { margin: 0; padding-left: 16pt; }
+  body:has(.at-sheet) .at-print-note { margin: 0 0 8pt; break-inside: avoid; }
+  body:has(.at-sheet) .at-print-note p { margin: 0 0 2pt; font-size: 10.5pt; }
+  body:has(.at-sheet) .at-print-note-head { font-weight: 600; }
+  body:has(.at-sheet) .at-print-note-text.is-reply { padding-left: 10pt; }
+}
+
+/* ── Lot correctif de lecture : lien d'évitement, panneau de conflit, écran étroit ── */
+/* Lien d'évitement : hors champ tant qu'il n'a pas le focus, puis posé en haut à gauche de la toile. */
+.at-skip { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.at-skip:focus { position: fixed; top: var(--sp-2); left: var(--sp-2); z-index: 8; width: auto; height: auto; margin: 0; padding: var(--sp-2) var(--sp-4); overflow: visible; clip-path: none; border-radius: var(--r-pill); background: var(--acc); color: var(--on-acc); font-weight: 600; text-decoration: none; outline: 2px solid var(--ink); outline-offset: 2px; }
+.at-conflict { scroll-margin-top: 84px; }
+.at-conflict:focus { outline: none; }
+.at-conflict:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+@container canvas (max-width: 900px) {
+  /* Les actions d'un bloc passent en rangée SOUS le texte : elles ne le recouvrent plus et n'interceptent plus son clic. */
+  .at-sheet .at-cmrow { padding-top: 0; }
+  .at-blk { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+  .at-blk > * { flex: 1 1 100%; min-width: 0; }
+  .at-blk > .at-cm-add, .at-blk > .at-ch { position: static; flex: 0 0 auto; }
+  .at-blk > .at-ch:has(.at-ch-menu:not([hidden])) { flex: 1 1 100%; }
+  .at-blk .at-cm-add, .at-blk .at-ch-add { height: 40px; padding: 0 var(--sp-3); opacity: 1; }
+  .at-blk .at-ch-menu { position: static; width: auto; max-width: none; margin-top: var(--sp-1); }
+  .at-blk .at-ch-menu .at-btn { min-height: 40px; }
+  /* La barre des phases défile au lieu de tronquer ses libellés ; les cibles tactiles font 40 px au moins. */
+  .at-phasebar .at-phases { overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+  /* `position: relative` : le mot caché pour les lecteurs d'écran s'ancre dans la pastille, que le défilement de la barre rogne. */
+  .at-phasebar .at-phase { position: relative; flex: none; white-space: nowrap; height: 40px; padding: 0 var(--sp-3); }
+  .at-phasebar .at-docmenu-btn, .at-phasebar .at-hist-btn, .at-phasebar .at-asst-pill, .at-phasebar .at-find-btn { min-height: 40px; }
+  .at-phasebar .at-find-btn { min-width: 40px; }
+  .at-find { flex-wrap: wrap; }
+  .at-find-count { min-width: 0; }
+  .at-docmenu-item { min-height: 40px; }
+  .at-phasebar .at-live-bar .at-btn { height: 40px; }
 }
