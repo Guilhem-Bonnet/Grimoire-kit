@@ -5,6 +5,8 @@
 // tout. Surlignage sans `innerHTML` : l'API CSS Custom Highlight quand elle existe, sinon des `<mark>` créés par le DOM et
 // retirés proprement. Insensible à la casse et aux accents. Lecture seule : la feuille n'est jamais modifiée dans son contenu.
 
+/* global NodeFilter, Highlight */
+
 import { icon } from '../shell.js';
 import { countLabel, findMatches, stepIndex } from './atelier-document-logic.js';
 
