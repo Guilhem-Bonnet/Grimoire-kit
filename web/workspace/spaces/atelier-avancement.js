@@ -34,6 +34,18 @@ export function avancementText(av) {
   return av.a_confirmer ? `Complet, dont ${av.a_confirmer} à confirmer` : 'Complet';
 }
 
+/**
+ * L'état d'une phase pour la barre collante et le déroulé : lu du calcul d'avancement unique du serveur (`doc.avancement`),
+ * jamais de l'ancien `phase.state`. `rempli` : plus aucun bloc au gabarit ; `partiel` : des blocs remplis ou couverts ;
+ * `vide` sinon. Sans avancement (chargement), l'état de la phase tel que le serveur l'a donné.
+ */
+export function phaseState(doc, phase) {
+  const mine = ((doc && doc.avancement && doc.avancement.phases) || []).find((p) => p.id === phase.id);
+  if (!mine) return phase.state;
+  if (mine.complete) return 'rempli';
+  return mine.remplis + mine.je_ne_sais_pas + mine.sans_objet > 0 ? 'partiel' : 'vide';
+}
+
 /** La barre de cinq segments et le texte de la liste : un segment est allumé quand sa phase n'a plus aucun point au gabarit. */
 export function progressCell(row) {
   const phases = (row.avancement && row.avancement.phases) || [];

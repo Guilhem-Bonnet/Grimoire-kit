@@ -91,9 +91,8 @@ function readSelection(host, block) {
 export function createComments(ctx, slug, { doc, sheet, reload }) {
   const ranges = new Map();
   const supported = typeof CSS !== 'undefined' && CSS.highlights && typeof window.Highlight === 'function';
-  // « Rattacher ici » : la dernière sélection de l'humain dans un bloc et le dernier bloc touché (le clic sur le bouton ne les efface pas).
+  // « Rattacher ici » : la dernière sélection de l'humain dans un bloc (le clic sur le bouton ne l'efface pas).
   let lastPick = null;
-  let lastBlock = null;
 
   const phases = () => doc().phases;
   // Le nom déclaré (MOA, sinon utilisateur du projet) quand il existe ; sinon « Toi ».
@@ -189,6 +188,47 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     return go;
   };
 
+  // « Rattacher ici » sans sélection : mode « choisis le bloc ». Les blocs sont des cibles (clic ou Entrée), sans s'ouvrir en
+  // édition ; Échap ou un second clic sur le bouton annule. La route est la même : seul le geste de choix change.
+  let picking = null;
+  const stopPicking = (refocus) => {
+    if (!picking) return;
+    const { box, button, onClick, onKey, note } = picking;
+    picking = null;
+    sheet.classList.remove('is-picking');
+    sheet.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKey, true);
+    button.setAttribute('aria-pressed', 'false');
+    note.remove();
+    if (refocus && box.isConnected) button.focus();
+  };
+  const startPicking = (box, button, send) => {
+    const note = el('p', 'at-cm-pick', 'Choisis le bloc : clique sur celui où le commentaire doit se rattacher (Entrée au clavier). Échap annule.', { role: 'status', 'data-role': 'attach-pick' });
+    const choose = (host) => {
+      stopPicking(false);
+      send({ blockId: host.getAttribute('data-block'), quote: '', start: null, whole: true });
+    };
+    const onClick = (event) => {
+      const host = event.target.closest && event.target.closest('.at-blk');
+      if (!host || !sheet.contains(host)) return;
+      event.preventDefault();
+      event.stopPropagation(); // le clic choisit le bloc, il ne l'ouvre pas en édition
+      choose(host);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); stopPicking(true); return; }
+      const host = event.target.classList && event.target.classList.contains('at-blk') ? event.target : null;
+      if (event.key === 'Enter' && host && sheet.contains(host)) { event.preventDefault(); event.stopPropagation(); choose(host); }
+    };
+    picking = { box, button, onClick, onKey, note };
+    sheet.classList.add('is-picking');
+    sheet.addEventListener('click', onClick, true);
+    document.addEventListener('keydown', onKey, true);
+    button.setAttribute('aria-pressed', 'true');
+    (button.closest('.at-edit-bar') || button).after(note);
+    (sheet.querySelector('.at-blk') || button).focus({ preventScroll: true });
+  };
+
   const threadNode = (c) => {
     const resolved = c.etat === 'resolu';
     const orphan = !attached(c);
@@ -216,22 +256,20 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     if (canAttach(c)) {
       const attach = el('button', 'at-btn', null, { type: 'button', 'data-act': 'attach', 'aria-label': 'Rattacher ce commentaire à la sélection du document ou au bloc courant' });
       attach.append(icon('i-act-next'), 'Rattacher ici');
+      const send = (target) => run(box, () => ctx.api.atelierRattacher(slug, c.id, target.blockId, target.quote, target.start).then(() => {
+        lastPick = null;
+        return { focus: c.id };
+      }), target.whole ? 'Commentaire rattaché au bloc.' : 'Commentaire rattaché à la sélection.');
       attach.addEventListener('click', () => {
+        if (picking) { stopPicking(true); return; }
         const exists = (id) => phases().some((p) => p.blocks.some((b) => b.id === id));
-        const target = attachTarget(lastPick && exists(lastPick.blockId) ? lastPick : null, lastBlock && exists(lastBlock.id) ? lastBlock : null);
-        const error = box.querySelector('.at-error');
-        if (!target) {
-          error.textContent = 'Sélectionne un passage du document (ou clique dans un bloc), puis rattache le commentaire.';
-          error.hidden = false;
-          return;
-        }
-        run(box, () => ctx.api.atelierRattacher(slug, c.id, target.blockId, target.quote, target.start).then(() => {
-          lastPick = null;
-          return { focus: c.id };
-        }), target.whole ? 'Commentaire rattaché au bloc.' : 'Commentaire rattaché à la sélection.');
+        // Un passage déjà sélectionné est rattaché tel quel ; sinon, mode explicite : les blocs deviennent des cibles.
+        const target = attachTarget(lastPick && exists(lastPick.blockId) ? lastPick : null, null);
+        if (target) { send(target); return; }
+        startPicking(box, attach, send);
       });
       actions.append(attach);
-      inner.push(el('p', 'at-muted', 'Sélectionne un passage du document (ou clique dans un bloc), puis « Rattacher ici ».', { 'data-role': 'attach-hint' }));
+      inner.push(el('p', 'at-muted', 'Sélectionne un passage du document puis « Rattacher ici », ou clique « Rattacher ici » et choisis le bloc.', { 'data-role': 'attach-hint' }));
     }
     if (resolved) {
       const reopen = el('button', 'at-btn', null, { type: 'button', 'data-act': 'reopen' });
@@ -392,15 +430,9 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     }
   };
   document.addEventListener('selectionchange', onSelect);
-  const onTouch = (event) => {
-    const holder = event.target.closest && event.target.closest('.at-blk');
-    if (holder && sheet.contains(holder)) lastBlock = { id: holder.getAttribute('data-block') };
-  };
-  sheet.addEventListener('pointerdown', onTouch);
-  sheet.addEventListener('focusin', onTouch);
 
   // Un agent a pu commenter pendant que l'onglet était ailleurs : au retour on relit, sauf si l'humain écrit.
-  const writing = () => sheet.querySelector('.is-editing, .at-cm-new, .at-cm-reply, .at-cm-confirm');
+  const writing = () => picking || sheet.querySelector('.is-editing, .at-cm-new, .at-cm-reply, .at-cm-confirm');
   const onVisible = () => { if (!document.hidden && !writing()) reload(); };
   document.addEventListener('visibilitychange', onVisible);
   window.addEventListener('focus', onVisible);
@@ -408,6 +440,7 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     document.removeEventListener('selectionchange', onSelect);
     document.removeEventListener('visibilitychange', onVisible);
     window.removeEventListener('focus', onVisible);
+    stopPicking(false);
     if (supported) { CSS.highlights.delete('at-cm'); CSS.highlights.delete('at-cm-on'); }
   });
 

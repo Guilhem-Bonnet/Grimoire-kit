@@ -47,15 +47,16 @@ export function createGuided(ctx, slug, hooks) {
         drafts.set(`${gone.angle}:${body.index}`, gone.kind === 'answer' ? gone.text : '');
         await hooks.reload(gone.removed
           ? 'Réponse retirée du document : corrige-la, puis renvoie-la.'
-          : 'Réponse retirée de l’entretien ; la ligne du document, retouchée à la main, est restée en place.');
+          : 'Réponse retirée de l’entretien ; la ligne du document, retouchée à la main, est restée en place.', gone.removed ? 'ok' : 'warn');
       } else {
-        await hooks.reload(done);
+        await hooks.reload(done, 'ok');
       }
     } catch (cause) {
       if (ctx.signal.aborted) return;
+      // Le type est explicite (succès, avertissement, erreur), jamais déduit du texte.
       hooks.say(cause.code === 409
         ? 'La question a changé depuis l’affichage (autre onglet ?) : l’entretien est rechargé.'
-        : `Le cadrage guidé n’a pas pu avancer : ${cause.message || cause}`);
+        : `Le cadrage guidé n’a pas pu avancer : ${cause.message || cause}`, cause.code === 409 ? 'warn' : 'error');
     } finally {
       busy = false;
     }

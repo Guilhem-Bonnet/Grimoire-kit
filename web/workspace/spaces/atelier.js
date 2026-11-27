@@ -17,8 +17,13 @@ import { badge, icon } from '../shell.js';
 import { createLiveDoc } from './atelier-live.js';
 import { createComments } from './atelier-comments.js';
 import { createAssistant } from './atelier-assistant.js';
-import { createLoopPanel, progressCell, waitingBadges } from './atelier-avancement.js';
+import { createLoopPanel, phaseState, progressCell, waitingBadges } from './atelier-avancement.js';
 import { setAtelierContext } from '../atelier-context.js';
+import { createNotifier } from './atelier-notify.js';
+import {
+  INDICATOR_LABEL, WIDE_MIN, activePhase, capitalize, codeSegments, newOrphans, orphanNotice,
+  phaseFromParams, phaseHash, phaseIndicator, stepsOf,
+} from './atelier-layout-logic.js';
 
 
 /** Ordre des groupes de la bibliothèque ; `archive` vit dans une ligne repliable. */
@@ -67,6 +72,12 @@ function page(ctx, ...content) {
   const wrap = el('div', 'at-page');
   wrap.append(testBanner(ctx), body);
   return wrap;
+}
+
+/** Un texte avec ses `accents graves` rendus comme du code (nœuds de texte et `<code>`, jamais de HTML). */
+function withCode(node, text) {
+  for (const part of codeSegments(text)) node.append(part.code ? el('code', 'at-code', part.text) : part.text);
+  return node;
 }
 
 const open = (ctx, slug, phase) => ctx.goto('atelier', phase ? { chantier: slug, phase } : { chantier: slug });
@@ -119,7 +130,8 @@ function library(ctx, root, data, ideas) {
   const list = el('section', null, null, { 'aria-label': 'Chantiers par état' });
   const sub = rows.length
     ? `${rows.length} chantier${rows.length > 1 ? 's' : ''}, groupés par état.`
-    : 'Aucun chantier pour l’instant : crée-en un, ou ouvre-en un depuis une idée.';
+    : 'Un chantier cadre une demande avant tout code : tu remplis le document phase par phase, avec l’assistant, jusqu’aux exigences. '
+      + 'Quand les exigences Must sont validées, « Valider et découper » crée les tâches, sans rien lancer. Crée un premier chantier, ou ouvre-en un depuis une idée.';
   const actions = el('div', 'at-actions');
   actions.append(search, create);
   const head = el('div', 'at-head');
@@ -201,14 +213,14 @@ function library(ctx, root, data, ideas) {
 }
 
 function ideasSection(ctx, ideas) {
-  const section = el('section', 'at-card', null, { 'aria-labelledby': 'at-ideas-h', 'data-role': 'ideas' });
-  const h = el('h3', null, 'Idées', { id: 'at-ideas-h' });
+  // Sans idée, l'encart se replie sur une ligne : il ne prend plus la place de la liste des chantiers.
+  const section = el(ideas.length ? 'section' : 'details', 'at-card' + (ideas.length ? '' : ' at-card-empty'), null, { 'data-role': 'ideas' });
+  const h = el(ideas.length ? 'h3' : 'summary', null, ideas.length ? 'Idées' : 'Idées (aucune gardée)', { id: 'at-ideas-h' });
   const top = el('div', 'at-actions');
   top.append(h, el('span', 'at-muted', 'Une idée devient un chantier quand tu veux la creuser.'));
-  section.append(top);
+  if (ideas.length) { section.setAttribute('aria-labelledby', 'at-ideas-h'); section.append(top); } else { section.append(h, el('p', 'at-muted', 'Aucune idée gardée. Une idée devient un chantier quand tu veux la creuser.')); }
   const error = el('p', 'at-error', '', { role: 'alert' });
   error.hidden = true;
-  if (!ideas.length) section.append(el('p', 'at-muted', 'Aucune idée gardée.'));
   for (const idea of ideas) {
     const line = el('div', 'at-idea', null, { 'data-idea': idea.id });
     const button = el('button', 'at-btn', 'Ouvrir un chantier', { type: 'button' });
@@ -301,7 +313,7 @@ function suggestionNode(sug, decide) {
   const mark = el('span', 'at-ai', null, { 'aria-hidden': 'true' });
   mark.append(icon('i-act-add'));
   const who = el('span', 'at-sugg-who');
-  who.append(mark, `${sug.auteur || 'agent'} propose`);
+  who.append(mark, `${capitalize(sug.auteur || 'agent')} propose`);
   const head = el('div', 'at-sugg-head');
   head.append(who, badge(POSTURE_LABEL[sug.posture] || sug.posture, ''));
   const before = el('div', 'at-diff del');
@@ -363,20 +375,61 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const chantier = doc.chantier;
   const sheet = el('article', 'at-sheet', null, { 'aria-label': 'Document du chantier' });
   const nav = el('nav', 'at-phases', null, { 'aria-label': 'Étapes du cadrage' });
-  const status = el('p', 'at-muted at-status', '', { role: 'status', 'aria-live': 'polite', 'data-role': 'atelier-status' });
+  // La ligne d'état reste le miroir lisible du dernier retour (les modules y écrivent) ; l'affichage et l'annonce passent
+  // par la zone de notification, ancrée au bas de la fenêtre visible.
+  const status = el('p', 'at-status sr-only', '', { 'data-role': 'atelier-status' });
+  const notifier = createNotifier(ctx);
+  // Un message peut porter son type (`data-kind` : ok, warn, error) ; sans lui, le type se déduit du texte.
+  const mirror = new MutationObserver(() => {
+    const kind = status.getAttribute('data-kind');
+    status.removeAttribute('data-kind');
+    if (status.textContent) notifier.push(status.textContent, kind ? { kind } : {});
+  });
+  mirror.observe(status, { childList: true, characterData: true, subtree: true });
+  ctx.signal.addEventListener('abort', () => mirror.disconnect());
   // Lot 3 : les commentaires ancrés. `reqBlock` dit quel bloc porte chaque exigence, pour compter ses fils ouverts.
   const reqBlock = new Map();
   const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message) });
-  const liveDoc = createLiveDoc(ctx, slug, { sheet, status, comments: (req) => cm.openOn(reqBlock.get(req)), onSplit: (message) => reload(message) });
-  let focusId = phaseFocus || state.doc.phases[0].id;
+  const steps = el('ol', 'at-steps', null, { 'aria-label': 'Déroulé du chantier', 'data-role': 'steps' });
+  let liveTrace = null;
+  const drawSteps = () => {
+    steps.replaceChildren();
+    for (const step of stepsOf(state.doc.phases.map((p) => ({ ...p, state: phaseState(state.doc, p) })), liveTrace)) {
+      const item = el('li', `at-step is-${step.status}`, null, { 'data-step': step.id });
+      if (step.status === 'current') item.setAttribute('aria-current', 'step');
+      const mark = el('span', 'at-step-mark', null, { 'aria-hidden': 'true' });
+      if (step.status === 'done') mark.append(icon('i-act-approve'));
+      item.append(mark, step.label, el('span', 'sr-only', step.status === 'done' ? ' — fait' : step.status === 'current' ? ' — en cours' : ' — à venir'));
+      steps.append(item);
+    }
+  };
+  const liveDoc = createLiveDoc(ctx, slug, {
+    sheet, status, comments: (req) => cm.openOn(reqBlock.get(req)),
+    onTrace: (trace) => { liveTrace = trace; drawSteps(); },
+    onSplit: (message) => reload(message, 'ok'),
+  });
+  const phaseIds = () => state.doc.phases.map((p) => p.id);
+  let focusId = phaseFromParams({ phase: phaseFocus }, phaseIds(), state.doc.phases[0].id);
+  let lockUntil = 0; // juste après un clic sur une phase, le défilement ne la redécide pas
+  const narrow = () => root.clientWidth < WIDE_MIN;
   // Lot 5 : le chat sait quel chantier est ouvert (et quelle phase) ; la barre de l'assistant guide le cadrage.
   setAtelierContext({ slug, phase: focusId });
   ctx.signal.addEventListener('abort', () => setAtelierContext(null));
   const assist = createAssistant(ctx, slug, {
     focus: () => focusId,
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
-    reload: (message) => reload(message),
-    say: (message) => { status.textContent = message; },
+    reload: (message, kind) => reload(message, kind),
+    say: (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; },
+    // Une erreur liée à un bloc se lit aussi à son pied, là où l'on agissait.
+    blockError: (blockId, message) => {
+      const host = sheet.querySelector(`[data-block="${CSS.escape(blockId)}"]`);
+      if (!host) return;
+      host.querySelector('[data-role="block-error"]')?.remove();
+      const note = el('p', 'at-error at-blk-err', message, { role: 'alert', 'data-role': 'block-error' });
+      note.addEventListener('click', (event) => event.stopPropagation()); // lire l'erreur n'ouvre pas l'édition du bloc
+      host.append(note);
+    },
+    narrow,
     editing: () => Boolean(sheet.querySelector('.is-editing')),
     // La mascotte de l'assistant : combien de suggestions attendent, et la première mise sous les yeux.
     suggestions: () => state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0),
@@ -397,26 +450,69 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     assist.sync();
   };
 
+  /**
+   * La phase affichée change : l'assistant et le chat le savent, la barre la marque, l'URL la garde. Un clic (`scroll`)
+   * crée une entrée d'historique (« Précédent » y revient) ; le suivi du défilement la remplace seulement.
+   */
+  const setFocus = (id, { scroll = false } = {}) => {
+    if (id === focusId && !scroll) return;
+    const changed = id !== focusId;
+    focusId = id;
+    if (changed) {
+      setAtelierContext({ slug, phase: focusId });
+      assist.refresh();
+      phaseNav();
+    }
+    const hash = phaseHash(slug, id);
+    if (scroll && location.hash !== hash) history.pushState(null, '', location.pathname + location.search + hash);
+    if (ctx.setItem) ctx.setItem({ chantier: slug, phase: id });
+    if (!scroll) return;
+    lockUntil = Date.now() + 700;
+    const heading = sheet.querySelector(`[data-section="${id}"] h2`);
+    if (heading) { heading.scrollIntoView({ block: 'start' }); heading.focus({ preventScroll: true }); }
+  };
+
   const phaseNav = () => {
     nav.replaceChildren();
     for (const p of state.doc.phases) {
-      const button = el('button', 'at-phase', null, { type: 'button', 'data-phase': p.id });
+      const indicator = phaseIndicator(phaseState(state.doc, p)); // le calcul d'avancement unique du serveur
+      const button = el('button', 'at-phase', null, { type: 'button', 'data-phase': p.id, 'data-state': indicator, title: `${PHASE_NAMES[p.id] || p.title} : ${INDICATOR_LABEL[indicator]}` });
       if (p.id === focusId) button.setAttribute('aria-current', 'step');
-      if (p.state === 'rempli') button.append(icon('i-act-approve'));
-      button.append(PHASE_NAMES[p.id] || p.title);
-      button.addEventListener('click', () => {
-        focusId = p.id;
-        setAtelierContext({ slug, phase: focusId });
-        assist.refresh();
-        phaseNav();
-        const heading = sheet.querySelector(`[data-section="${p.id}"] h2`);
-        if (heading) { heading.scrollIntoView({ block: 'start' }); heading.focus(); }
-      });
+      const mark = el('span', 'at-phase-mark', null, { 'aria-hidden': 'true' });
+      if (indicator === 'complete') mark.append(icon('i-act-approve'));
+      button.append(mark, PHASE_NAMES[p.id] || p.title, el('span', 'sr-only', ` — ${INDICATOR_LABEL[indicator]}`));
+      button.addEventListener('click', () => setFocus(p.id, { scroll: true }));
       nav.append(button);
     }
   };
 
-  const reload = async (message) => {
+  // La phase lue suit le défilement : les sections qui touchent la bande de lecture (sous la barre collante).
+  const touching = new Set(); // les éléments de section dans la bande ; ceux qui ont été remplacés ne comptent plus
+  const follow = () => {
+    if (Date.now() < lockUntil || !sheet.isConnected) return;
+    const atBottom = root.scrollTop > 0 && root.scrollHeight - root.scrollTop - root.clientHeight < 4;
+    const inBand = new Set([...touching].filter((node) => node.isConnected).map((node) => node.getAttribute('data-section')));
+    const next = activePhase(phaseIds(), inBand, focusId, atBottom);
+    if (next !== focusId) setFocus(next);
+  };
+  const spy = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) touching.add(entry.target); else touching.delete(entry.target);
+      }
+      follow();
+    }, { root, rootMargin: '-88px 0px -62% 0px' })
+    : null;
+  let frame = 0;
+  const onScroll = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; follow(); }); };
+  root.addEventListener('scroll', onScroll, { passive: true });
+  ctx.signal.addEventListener('abort', () => {
+    if (spy) spy.disconnect();
+    root.removeEventListener('scroll', onScroll);
+    cancelAnimationFrame(frame);
+  });
+
+  const reload = async (message, kind) => {
     try {
       state.doc = await ctx.api.atelierChantier(slug);
     } catch (cause) {
@@ -425,6 +521,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     }
     if (ctx.signal.aborted) return;
     drawAll();
+    if (message && kind) status.setAttribute('data-kind', kind);
     status.textContent = message || '';
     liveDoc.refresh();
   };
@@ -456,7 +553,22 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       const mine = state.doc.phases.find((p) => p.id === phaseId);
       const next = fresh.phases.find((p) => p.id === phaseId);
       if (!mine || !next) return;
+      // Des fils dont le passage vient de disparaître : on le dit là où l'on a écrit, avec un lien qui y mène.
+      const lost = newOrphans(mine.comments, next.comments);
       mine.comments = next.comments;
+      if (lost.length) {
+        const where = lost[0];
+        notifier.push(orphanNotice(lost.length), {
+          kind: 'warn',
+          action: {
+            label: lost.length > 1 ? 'Voir les commentaires' : 'Voir le commentaire',
+            run: () => {
+              const thread = sheet.querySelector(`[data-com="${CSS.escape(where)}"]`);
+              if (thread) { thread.scrollIntoView({ block: 'center' }); thread.focus({ preventScroll: true }); }
+            },
+          },
+        });
+      }
       countNote();
       drawSection(mine);
       const again = mine.blocks.find((b) => b.text === written);
@@ -563,7 +675,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     for (const block of phase.blocks) {
       if (block.kind === 'entete' || block.kind === 'titre') continue;
       if (intro && block.kind === 'paragraphe' && !block.section) {
-        section.append(el('p', 'at-intro', bare(block.text).replace(/^_|_$/g, '')));
+        section.append(withCode(el('p', 'at-intro'), bare(block.text).replace(/^_|_$/g, '')));
         intro = false;
         continue;
       }
@@ -585,7 +697,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     }
     const lost = cm.orphans(phase, drawn); // les fils dont le passage a disparu : en fin de phase, avec leur extrait
     if (lost) section.append(lost);
-    if (old) old.replaceWith(section); else sheet.append(section);
+    if (old) { if (spy) spy.unobserve(old); touching.delete(old); old.replaceWith(section); } else sheet.append(section);
+    if (spy) spy.observe(section);
     cm.paint();
   };
 
@@ -600,6 +713,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       state.doc.chantier = fresh.chantier;
       paintHead();
       loop.update(fresh);
+      phaseNav(); // la barre collante lit l'avancement unique
+      drawSteps();
       assist.refresh();
     } catch {
       // Le prochain chargement du document remettra l'avancement à jour.
@@ -612,6 +727,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     countNote();
     sheet.replaceChildren();
     phaseNav();
+    drawSteps();
     for (const phase of state.doc.phases) drawSection(phase);
   };
 
@@ -641,9 +757,38 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   left.append(back, title, meta);
   head.append(left);
   drawAll();
-  root.replaceChildren(page(ctx, head, loop.element, liveDoc.toolbar, nav, status, sheet, assist.element));
+  // Barre collante des phases (avec la pastille de l'assistant replié), puis le document et l'assistant côte à côte.
+  const phasebar = el('div', 'at-phasebar');
+  phasebar.append(nav, assist.pill);
+  const main = el('div', 'at-doc-main');
+  main.append(status, sheet);
+  const grid = el('div', 'at-doc-grid');
+  grid.append(main, assist.element);
+  const view = page(ctx, head, loop.element, steps, liveDoc.toolbar, phasebar, grid);
+  view.querySelector('.at-body').classList.add('at-body-doc');
+  view.append(notifier.element);
+  root.replaceChildren(view);
+  assist.layout(); // le choix mémorisé, ou la largeur, décide si le panneau est déplié
+  // Le tiroir (écran étroit) recouvre le bas de la fenêtre : la toile garde une marge d'autant, et les notifications le dépassent.
+  const lift = () => {
+    const drawer = narrow() && !assist.element.hidden;
+    const height = drawer ? assist.element.offsetHeight : 0;
+    view.style.setProperty('--at-lift', `${height}px`);
+    root.style.scrollPaddingBottom = height ? `${height + 16}px` : '';
+  };
+  if (typeof ResizeObserver === 'function') {
+    const watch = new ResizeObserver(lift);
+    watch.observe(assist.element);
+    watch.observe(root);
+    ctx.signal.addEventListener('abort', () => watch.disconnect());
+  }
+  ctx.signal.addEventListener('abort', () => { root.style.scrollPaddingBottom = ''; });
+  lift();
   liveDoc.refresh();
-  if (phaseFocus) sheet.querySelector(`[data-section="${phaseFocus}"] h2`)?.scrollIntoView({ block: 'start' });
+  if (phaseFocus) {
+    lockUntil = Date.now() + 700;
+    sheet.querySelector(`[data-section="${focusId}"] h2`)?.scrollIntoView({ block: 'start' });
+  }
 }
 
 export async function mount(root, ctx) {

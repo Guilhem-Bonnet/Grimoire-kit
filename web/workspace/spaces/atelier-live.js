@@ -54,7 +54,7 @@ function commandBlock(row, say) {
   copy.append(icon('i-act-copy'), 'Copier la commande');
   copy.addEventListener('click', async () => {
     if (await copyText(row.command)) {
-      say(`Commande copiée : lance-la dans un terminal ouvert par toi, hors d’une session d’agent ; ${row.id} se mettra à jour ici ensuite.`);
+      say(`Commande copiée : lance-la dans un terminal ouvert par toi, hors d’une session d’agent ; ${row.id} se mettra à jour ici ensuite.`, 'ok');
       copy.dispatchEvent(new CustomEvent('at-awaiting-validation', { bubbles: true })); // la page relit l'état quelque temps
     } else {
       const range = document.createRange();
@@ -62,7 +62,7 @@ function commandBlock(row, say) {
       const selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
-      say('Copie impossible ici : la commande est sélectionnée, copie-la à la main.');
+      say('Copie impossible ici : la commande est sélectionnée, copie-la à la main.', 'warn');
     }
   });
   const wrap = el('div', 'at-live-do', null, { 'data-role': 'approve' });
@@ -227,20 +227,30 @@ function previewPanel(data, { confirm, cancel }) {
  * de statut du document. Rend `{ line(req), toolbar, refresh }` : `line` pour chaque bloc d'exigence au rendu,
  * `toolbar` à poser dans l'en-tête, `refresh` pour relire l'état.
  */
-export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, onSplit = async () => {} }) {
+export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, onTrace = () => {}, onSplit = async () => {} }) {
   const commentsOf = (req) => comments(req) || 0; // lot 3 : fils ouverts sur l'exigence, comptés par le document
   const state = { trace: null, open: new Set() };
-  const say = (text) => { status.textContent = text; };
+  // `kind` (ok, warn, error) donne son type à la notification ; sans lui, il se déduit du texte.
+  const say = (text, kind) => { if (kind && text) status.setAttribute('data-kind', kind); status.textContent = text; };
   const toolbar = el('div', 'at-actions at-live-bar', null, { 'data-role': 'live-bar' });
   const summary = el('span', 'at-muted', '', { 'data-role': 'live-summary' });
-  const split = el('button', 'at-btn pri', null, { type: 'button', 'data-act': 'split' });
+  // Désactivé = `aria-disabled` (le bouton reste atteignable au clavier et au survol, et dit pourquoi), jamais `disabled`.
+  const split = el('button', 'at-btn pri', null, { type: 'button', 'data-act': 'split', 'aria-disabled': 'true', 'aria-describedby': 'at-split-why' });
   split.append(icon('i-act-launch'), 'Valider et découper');
-  split.disabled = true;
+  const why = el('span', 'at-tip', '', { id: 'at-split-why', role: 'tooltip', 'data-role': 'split-why' });
+  const splitWrap = el('span', 'at-split-wrap');
+  splitWrap.append(split, why);
+  const lockSplit = (locked, reason = '') => {
+    split.setAttribute('aria-disabled', String(locked));
+    why.textContent = locked ? reason : '';
+    split.title = locked ? reason : '';
+  };
+  lockSplit(true, 'État des exigences en cours de lecture.');
   const refreshButton = el('button', 'at-btn ghost', null, { type: 'button', 'data-act': 'live-refresh', 'aria-label': 'Actualiser l’état des exigences' });
   refreshButton.append(icon('i-act-retry'), 'Actualiser');
   const slot = el('div', null, null, { 'data-role': 'decoupage-slot' });
   const moaSlot = el('div', null, null, { 'data-role': 'moa-slot' }); // comment déclarer la MOA, quand elle ne l'est pas
-  toolbar.append(split, summary, refreshButton);
+  toolbar.append(splitWrap, summary, refreshButton);
 
   /** Le détail complet d'une exigence, pour un chantier dont les lignes sont allégées. */
   const more = async (req) => {
@@ -267,18 +277,19 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
     }
     const trace = state.trace;
     moaSlot.replaceChildren(...(trace && !trace.moa.declared ? [moaHelp(trace.moa, say)] : []));
+    onTrace(trace);
     if (!trace || !trace.requirements.length) {
-      split.disabled = true;
       summary.textContent = trace ? 'Aucune exigence identifiée : écris-les en « REQ-001 : … » pour les suivre.' : '';
+      lockSplit(true, summary.textContent || 'État des exigences en cours de lecture.');
       return;
     }
     const { must, must_validated: done } = trace.summary;
     const missing = trace.requirements.filter((r) => r.priority === 'must' && !r.validated).map((r) => r.id);
-    split.disabled = missing.length > 0;
     summary.textContent = missing.length
       ? `${plural(done, 'exigence Must validée', 'exigences Must validées')} sur ${must} : à valider d’abord ${missing.join(', ')}.`
       : (must ? (must > 1 ? `Les ${must} exigences Must sont validées.` : 'L’exigence Must est validée.') : 'Aucune exigence Must : le découpage est possible.');
     if (!trace.moa.declared) summary.textContent += ' Aucune MOA déclarée : voir ci-dessous comment la déclarer.';
+    lockSplit(missing.length > 0, `Valide d’abord les exigences Must : ${missing.join(', ')}.`);
   };
 
   let busy = false;
@@ -303,12 +314,12 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
 
   const closeSplit = () => { slot.replaceChildren(); split.focus(); };
   const openSplit = async (message) => {
-    split.disabled = true;
+    lockSplit(true, 'Aperçu du découpage en cours.');
     try {
       const data = await ctx.api.atelierDecoupage(slug);
       if (ctx.signal.aborted) return;
       if (!data.ready) {
-        say(`Valide d’abord les exigences Must : ${data.blocked_by.map((b) => b.id).join(', ')}.`);
+        say(`Valide d’abord les exigences Must : ${data.blocked_by.map((b) => b.id).join(', ')}.`, 'warn');
         slot.replaceChildren(...(data.moa && !data.moa.declared ? [moaHelp(data.moa, say)] : []));
         return;
       }
@@ -321,7 +332,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
           const message = done.created.length
             ? `${plural(done.created.length, 'tâche créée', 'tâches créées')}. Aucun travail n’est lancé : ouvre-les dans l’espace Travail.`
             : 'Rien de nouveau à créer : le découpage était déjà fait.';
-          say(message);
+          say(message, 'ok');
           await refresh();
           await onSplit(message); // la page du chantier relit son état et ses tâches
         } catch (cause) {
@@ -332,7 +343,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
             await refresh();
             return;
           }
-          say(`Découpage impossible : ${cause.message || cause}`);
+          say(`Découpage impossible : ${cause.message || cause}`, 'error');
           go.disabled = false;
         }
       };
@@ -340,12 +351,16 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
       if (message) say(message);
       slot.querySelector('[data-act="split-confirm"]')?.focus();
     } catch (cause) {
-      if (!ctx.signal.aborted) say(`Aperçu impossible : ${cause.message || cause}`);
+      if (!ctx.signal.aborted) say(`Aperçu impossible : ${cause.message || cause}`, 'error');
     } finally {
       if (!ctx.signal.aborted) paint();
     }
   };
-  split.addEventListener('click', () => openSplit());
+  split.addEventListener('click', () => {
+    // Désactivé, le bouton explique au lieu de rester muet.
+    if (split.getAttribute('aria-disabled') === 'true') { if (why.textContent) say(why.textContent); return; }
+    openSplit();
+  });
   refreshButton.addEventListener('click', () => { say(''); refresh(); });
 
   // Le pouls du cockpit annonce un changement du ledger ; au retour sur l'onglet on relit aussi (la MOA vient peut-être

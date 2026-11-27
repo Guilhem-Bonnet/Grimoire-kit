@@ -63,7 +63,7 @@ def _exe(folder: Path, name: str, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-Serve = Callable[[bool], str]
+Serve = Callable[..., str]
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def serve(tmp_path: Path) -> Iterator[Serve]:
     """Démarre un cockpit sur un PATH de faux hôtes ; ``alive`` ajoute un ``opencode`` qui parle ACP."""
     started: list[subprocess.Popen[bytes]] = []
 
-    def start(alive: bool) -> str:
+    def start(alive: bool, enabled: tuple[str, ...] = ("copilot", "opencode")) -> str:
         bins = tmp_path / "bin"
         bins.mkdir(exist_ok=True)
         # `copilot` existe mais ne parle pas ACP : le raccourci de VS Code répond « non installé » et sort.
@@ -83,8 +83,9 @@ def serve(tmp_path: Path) -> Iterator[Serve]:
         root = tmp_path / "projet-hote"
         root.mkdir(exist_ok=True)
         subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+        listed = ", ".join(f'"{h}"' for h in enabled)
         (root / "project-context.yaml").write_text(
-            'project:\n  name: "projet-hote"\nhosts:\n  enabled: ["copilot", "opencode"]\n', encoding="utf-8"
+            f'project:\n  name: "projet-hote"\nhosts:\n  enabled: [{listed}]\n', encoding="utf-8"
         )
         env = dict(os.environ)
         env["PATH"] = f"{bins}:/usr/bin:/bin"  # aucun hôte réel du poste ne doit apparaître
@@ -195,6 +196,33 @@ def test_aucun_hote_utilisable_le_chat_se_replie_sur_le_kanban_saisie_ouverte_et
         _capture(page, "chat-hote-03-aucun-hote")
         # Un seul projet : le sélecteur « Parler au projet » n'existe pas à l'écran.
         expect(page.locator("[data-role='chat-target-bar']")).to_be_hidden()
+    finally:
+        context.close()  # type: ignore[attr-defined]
+
+
+def test_un_agent_seulement_installe_sur_la_machine_est_propose_jamais_pris_d_office(browser: Browser, serve: Serve) -> None:
+    """Le projet déclare Claude Code (sans adaptateur ACP) ; opencode répond mais n'est pas l'hôte du projet."""
+    page, context = _open_chat(browser, serve(True, ("claude",)))
+    try:
+        banner = page.locator("[data-role='chat-no-agent']")
+        expect(banner).to_be_visible(timeout=60_000)
+        expect(banner).to_contain_text("Claude Code est l'hôte de ce projet")
+        expect(banner).to_contain_text("npm install -g @agentclientprotocol/claude-agent-acp")
+        offer = page.locator("[data-role='chat-offer']")
+        expect(offer).to_contain_text("opencode est installé et répond")
+        # Rien n'est pris d'office : Kanban sélectionné, saisie ouverte, opencode simplement choisissable.
+        options = _options(page)
+        assert options["kanban"]["selected"] and not options["opencode"]["selected"]
+        assert not options["opencode"]["disabled"]
+        expect(page.locator(".chat-input")).to_be_enabled()
+        _capture(page, "chat-hote-05-proposition-d-un-autre-hote")
+
+        offer.locator("button").click()  # le choix explicite, fait par la personne
+        page.wait_for_function("() => document.querySelector('#chat-host').value === 'opencode'", timeout=60_000)
+        expect(banner).to_be_hidden()
+        page.locator(".chat-input").fill("bonjour")
+        page.locator(".chat-input").press("Enter")
+        page.locator(".chat-msg.is-agent").first.wait_for(timeout=60_000)
     finally:
         context.close()  # type: ignore[attr-defined]
 

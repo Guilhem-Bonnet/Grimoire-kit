@@ -41,6 +41,7 @@ __all__ = [
     "host_choices",
     "install_hint",
     "no_host_reason",
+    "other_usable_hosts",
     "set_chosen_alias",
     "start_failure_remedy",
     "usable_map",
@@ -221,8 +222,8 @@ def _valid(alias: str) -> bool:
     return alias == KANBAN or resolve_host(alias) is not None
 
 
-def _candidates(root: Path) -> list[HostProfile]:
-    """Les hôtes à essayer, dans l'ordre : ceux du projet (déclarés ou détectés), puis tous les autres hôtes ACP."""
+def _project_hosts(root: Path) -> list[HostProfile]:
+    """Les hôtes DU PROJET (``hosts.enabled`` déclaré, sinon détectés) qui déclarent un mode ACP, dans l'ordre."""
     ordered: list[HostProfile] = []
     seen: set[HostId] = set()
     for alias in resolve_enabled_hosts(root):
@@ -230,19 +231,19 @@ def _candidates(root: Path) -> list[HostProfile]:
         if host_id is not None and host_id not in seen and profile_for(host_id).acp_command:
             seen.add(host_id)
             ordered.append(profile_for(host_id))
-    ordered.extend(p for p in all_profiles() if p.acp_command and p.host_id not in seen)
     return ordered
 
 
 def default_alias(root: Path, *, probe: Probe | None = None) -> str:
-    """L'hôte par défaut du chat : le premier dont l'ACP est RÉELLEMENT utilisable ici, ``""`` s'il n'y en a aucun.
+    """L'hôte par défaut du chat : le premier hôte DU PROJET dont l'ACP est réellement utilisable, ``""`` sinon.
 
-    Les hôtes du projet passent d'abord, puis les autres : un hôte « détecté » par ses seuls fichiers
-    (``.github/copilot-instructions.md``) mais sans exécutable, ou dont l'exécutable ne parle pas ACP, n'est jamais
-    choisi tant qu'un autre répond. Un hôte « utilisable » a un exécutable présent et répond à ``initialize``
-    (:func:`acp_usable`) ; les verdicts sont gardés, rouvrir le chat ne sonde rien de nouveau.
+    Le défaut ne sort jamais des hôtes du projet : un agent seulement installé sur la machine (qu'on n'a pas choisi,
+    peut-être jamais configuré) n'est pas pris d'office ; il est PROPOSÉ (:func:`other_usable_hosts`), la personne le
+    choisit elle-même. Un hôte « détecté » par ses seuls fichiers mais sans exécutable, ou dont l'exécutable ne parle
+    pas ACP, n'est pas utilisable. « Utilisable » : exécutable présent et réponse à ``initialize`` (:func:`acp_usable`),
+    verdicts gardés.
     """
-    candidates = _candidates(root)
+    candidates = _project_hosts(root)
     verdicts = usable_map(candidates, root, probe=probe)
     for profile in candidates:
         if verdicts[profile.host_id][0]:
@@ -254,21 +255,23 @@ def _detected_alias(root: Path) -> str:
     return default_alias(root)
 
 
+def other_usable_hosts(root: Path, *, probe: Probe | None = None) -> list[HostProfile]:
+    """Les hôtes de la machine qui ne sont PAS ceux du projet mais dont l'ACP répond : des choix à proposer, jamais pris."""
+    mine = {p.host_id for p in _project_hosts(root)}
+    others = [p for p in all_profiles() if p.acp_command and p.host_id not in mine]
+    verdicts = usable_map(others, root, probe=probe)
+    return [p for p in others if verdicts[p.host_id][0]]
+
+
 def no_host_reason(root: Path) -> str:
-    """Pourquoi aucun hôte n'est utilisable, et quoi lancer pour en avoir un (phrase pour le fil et l'assistant)."""
-    candidates = _candidates(root)
-    verdicts = usable_map(candidates, root)
-    broken = [
-        f"{p.display_name} : {verdicts[p.host_id][1].split(' ; ')[0]}"
-        for p in candidates
-        if acp_availability(p)[0] and not verdicts[p.host_id][0]
-    ]
-    parts = ["Aucun hôte d'agent n'est utilisable sur ce poste"]
-    if broken:
-        parts.append(" (" + " ; ".join(broken) + ")")
+    """Pourquoi aucun hôte DU PROJET n'est utilisable et quoi faire (phrase du bandeau du chat et de l'assistant)."""
+    mine = _project_hosts(root)
+    verdicts = usable_map(mine, root)
+    if mine:
+        return " ".join(f"{p.display_name} est l'hôte de ce projet, mais {verdicts[p.host_id][1]}." for p in mine)
     first = next((p for p in all_profiles() if p.acp_command and install_hint(p)), None)
     hint = f" Pour en installer un : `{install_hint(first)}` ({first.display_name})." if first else ""
-    return "".join(parts) + "." + hint
+    return "Ce projet ne déclare ni ne détecte aucun hôte d'agent compatible ACP." + hint
 
 
 def start_failure_remedy(root: Path) -> str:
