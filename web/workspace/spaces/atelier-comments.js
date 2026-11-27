@@ -12,6 +12,8 @@
 
 import { badge, icon } from '../shell.js';
 import { QUOTE_MAX, attachTarget, canAttach, historyLine, nearestStart } from './atelier-logic.js';
+import { tag } from './atelier-reconcile.js';
+import { sigOf } from './atelier-reconcile-logic.js';
 
 const AUTHOR = { humain: 'Humain', agent: 'Agent' };
 const STATE_NOTE = {
@@ -88,7 +90,7 @@ function readSelection(host, block) {
   return best < 0 ? whole : { quote: picked, start: best, whole: false };
 }
 
-export function createComments(ctx, slug, { doc, sheet, reload }) {
+export function createComments(ctx, slug, { doc, sheet, reload, drafts }) {
   const ranges = new Map();
   const supported = typeof CSS !== 'undefined' && CSS.highlights && typeof window.Highlight === 'function';
   // « Rattacher ici » : la dernière sélection de l'humain dans un bloc (le clic sur le bouton ne l'efface pas).
@@ -109,6 +111,13 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     if (node) { node.scrollIntoView({ block: 'nearest' }); node.focus(); }
   };
 
+  // Le geste est fait (ou refusé pour de bon) : les formulaires du fil ne portent plus de saisie à garder, le rechargement
+  // peut redessiner ce fil. Le texte tapé reste, lui, dans le brouillon local tant qu'il n'a pas été envoyé.
+  const settle = (box) => {
+    if (box.classList.contains('at-cm-new')) box.remove();
+    else for (const form of box.querySelectorAll('.at-cm-reply, .at-cm-confirm, .at-cm-pick')) form.remove();
+  };
+
   const run = async (box, work, done) => {
     const error = box.querySelector('.at-error');
     error.hidden = true;
@@ -116,12 +125,14 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     try {
       const result = await work();
       if (ctx.signal.aborted) return;
+      settle(box);
       await reload(done);
       if (result && result.focus) focusThread(result.focus);
     } catch (cause) {
       if (ctx.signal.aborted) return;
       if (cause.code === 409) {
         const why = cause.payload && cause.payload.reason;
+        settle(box);
         await reload(why === 'resolu'
           ? 'Ce fil a été résolu entre-temps : rouvre-le pour y répondre.'
           : 'Ce fil avait déjà changé d’état : le document a été rechargé.');
@@ -150,8 +161,10 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     return item;
   };
 
-  const replyForm = (c, box) => {
+  const replyForm = (c, box, text = '') => {
     const area = el('textarea', 'at-cm-area', null, { 'aria-label': 'Ta réponse', rows: '3', maxlength: '2000', spellcheck: 'true' });
+    area.value = text;
+    drafts.bind(area, 'reply', c.id);
     const send = el('button', 'at-btn pri', null, { type: 'button', 'data-act': 'reply-send' });
     send.append(icon('i-act-send'), 'Répondre');
     const cancel = el('button', 'at-btn ghost', 'Annuler', { type: 'button' });
@@ -161,10 +174,10 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     form.append(area, bar);
     const submit = () => {
       if (!area.value.trim()) { area.focus(); return; }
-      run(box, () => ctx.api.atelierFil(slug, c.id, 'reply', area.value).then(() => ({ focus: c.id })), 'Réponse ajoutée.');
+      run(box, () => ctx.api.atelierFil(slug, c.id, 'reply', area.value).then(() => { drafts.clear('reply', c.id); return { focus: c.id }; }), 'Réponse ajoutée.');
     };
     send.addEventListener('click', submit);
-    cancel.addEventListener('click', () => { form.remove(); box.querySelector('[data-act="reply"]')?.focus(); });
+    cancel.addEventListener('click', () => { drafts.clear('reply', c.id); form.remove(); box.querySelector('[data-act="reply"]')?.focus(); });
     area.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel.click(); }
       else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); submit(); }
@@ -229,12 +242,15 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     (sheet.querySelector('.at-blk') || button).focus({ preventScroll: true });
   };
 
+  /** Ce qu'un fil affiche : ses données, le nom de l'auteur humain et l'attente de la suggestion liée (`suggestionLink`). */
+  const threadSig = (c) => sigOf([c, humanName(), c.suggestion ? phases().some((p) => (p.suggestions || []).some((s) => s.id === c.suggestion)) : null]);
+
   const threadNode = (c) => {
     const resolved = c.etat === 'resolu';
     const orphan = !attached(c);
     const quote = el('blockquote', 'at-cm-quote', c.quote, { 'data-role': 'quote' });
     const box = el(resolved ? 'details' : 'div', `at-cm${orphan ? ' is-orphan' : ''}${resolved ? ' is-resolved' : ''}`, null, {
-      'data-com': c.id, 'data-author': c.auteur, 'data-anchor': c.anchor.state, 'data-etat': c.etat, tabindex: '-1',
+      'data-com': c.id, 'data-author': c.auteur, 'data-anchor': c.anchor.state, 'data-etat': c.etat, tabindex: '-1', 'data-rk': `com:${c.id}`, 'data-rs': threadSig(c),
       role: 'group', 'aria-label': `Commentaire de ${c.auteur === 'agent' ? AUTHOR.agent.toLowerCase() : humanName()},${resolved ? 'résolu' : 'ouvert'}`,
     });
     const flags = el('div', 'at-cm-flags');
@@ -279,13 +295,17 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     } else {
       const reply = el('button', 'at-btn', null, { type: 'button', 'data-act': 'reply' });
       reply.append(icon('i-act-send'), 'Répondre');
-      reply.addEventListener('click', () => {
+      const openReply = (text = '') => {
         const open = box.querySelector('[data-role="reply-form"]');
         if (open) { open.querySelector('textarea').focus(); return; }
-        const { form, area } = replyForm(c, box);
+        const { form, area } = replyForm(c, box, text);
         actions.before(form);
         area.focus();
-      });
+      };
+      reply.addEventListener('click', () => openReply());
+      // Une réponse commencée avant un rechargement de la page : proposée ici, jamais remise en silence.
+      const kept = drafts.offer('reply', c.id, { resume: openReply, back: () => reply });
+      if (kept) inner.push(kept);
       const resolve = el('button', 'at-btn', null, { type: 'button', 'data-act': 'resolve' });
       resolve.append(icon('i-act-approve'), 'Résoudre');
       resolve.addEventListener('click', () => run(box, () => ctx.api.atelierFil(slug, c.id, 'resolve').then(() => ({})), 'Fil résolu.'));
@@ -328,7 +348,7 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     return box;
   };
 
-  const composer = (phase, block, host, row) => {
+  const composer = (phase, block, host, row, text = '') => {
     const margin = row.querySelector('.at-cm-margin');
     const open = margin.querySelector('.at-cm-new');
     if (open) { open.querySelector('textarea').focus(); return; }
@@ -340,6 +360,8 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
       ? 'Aucun passage sélectionné : le commentaire porte sur le bloc.'
       : 'Le commentaire porte sur le passage sélectionné.');
     const area = el('textarea', 'at-cm-area', null, { 'aria-label': 'Ton commentaire', rows: '3', maxlength: '2000', spellcheck: 'true' });
+    area.value = text;
+    drafts.bind(area, 'comment', block.id);
     const send = el('button', 'at-btn pri', null, { type: 'submit', 'data-act': 'comment-send' });
     send.append(icon('i-act-send'), 'Commenter');
     const cancel = el('button', 'at-btn ghost', 'Annuler', { type: 'button' });
@@ -351,12 +373,13 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     margin.prepend(form);
     sheet.classList.add('has-cm');
     area.focus();
-    const close = () => { form.remove(); sheet.classList.toggle('has-cm', all().length > 0); host.querySelector('.at-cm-add')?.focus(); };
+    const close = () => { drafts.clear('comment', block.id); form.remove(); sheet.classList.toggle('has-cm', all().length > 0); row.querySelector('.at-cm-add')?.focus(); };
     cancel.addEventListener('click', close);
     const submit = () => {
       if (!area.value.trim()) { area.focus(); return; }
       run(form, async () => {
         const made = await ctx.api.atelierCommenter(slug, block.id, picked.whole ? '' : picked.quote, picked.whole ? null : picked.start, area.value);
+        drafts.clear('comment', block.id);
         return { focus: made.comment.id };
       }, 'Commentaire ajouté.');
     };
@@ -379,13 +402,23 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     return button;
   };
 
+  /** Les fils d'un bloc : ceux qui lui sont rattachés, et les orphelins dont il est le voisin. */
+  const threadsOf = (block) => all().filter((c) => (attached(c) ? c.anchor.block_id === block.id : c.anchor.near === block.id));
+
   /** Le fil de ces blocs : dans la marge (large) ou sous le bloc (étroit), géré par la mise en page. */
   const margin = (block) => {
     const aside = el('aside', 'at-cm-margin', null, { 'aria-label': 'Commentaires du bloc' });
-    const mine = all().filter((c) => (attached(c) ? c.anchor.block_id === block.id : c.anchor.near === block.id));
+    const mine = threadsOf(block);
     aside.append(...mine.map(threadNode));
-    return aside;
+    aside.setAttribute('data-rc', '1'); // ses fils se réconcilient un à un
+    return tag(aside, 'margin', sigOf(mine.map(threadSig)));
   };
+
+  /** Le bandeau « Commentaire non envoyé » d'un bloc dont un commentaire a été commencé avant un rechargement de la page. */
+  const draftOffer = (block, host) => drafts.offer('comment', block.id, {
+    resume: (text) => composer(null, block, host, host.closest('.at-cmrow'), text),
+    back: () => host,
+  });
 
   /** Les fils orphelins sans bloc voisin : en fin de phase, avec l'extrait d'origine. */
   const orphans = (phase, blockIds) => {
@@ -394,7 +427,7 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     const box = el('section', 'at-cm-orphans', null, { 'data-role': 'orphans', 'aria-label': 'Commentaires dont le passage a changé' });
     box.append(el('h3', null, 'Passage modifié ou supprimé'), el('p', 'at-muted', STATE_NOTE.orphelin));
     box.append(...lost.map(threadNode));
-    return box;
+    return tag(box, 'orphans', sigOf(lost.map(threadSig)));
   };
 
   /** Surligne le passage cité de chaque fil ouvert rattaché ; à rappeler après chaque dessin du document. */
@@ -431,9 +464,9 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
   };
   document.addEventListener('selectionchange', onSelect);
 
-  // Un agent a pu commenter pendant que l'onglet était ailleurs : au retour on relit, sauf si l'humain écrit.
-  const writing = () => picking || sheet.querySelector('.is-editing, .at-cm-new, .at-cm-reply, .at-cm-confirm');
-  const onVisible = () => { if (!document.hidden && !writing()) reload(); };
+  // Un agent a pu commenter pendant que l'onglet était ailleurs : au retour on relit. Le redessin réconcilie par bloc et par
+  // fil : une saisie en cours (bloc, commentaire, réponse) n'est jamais remplacée, il n'y a donc plus à attendre qu'elle finisse.
+  const onVisible = () => { if (!document.hidden) reload(); };
   document.addEventListener('visibilitychange', onVisible);
   window.addEventListener('focus', onVisible);
   ctx.signal.addEventListener('abort', () => {
@@ -449,5 +482,5 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     return n ? ` ${plural(n, 'commentaire ouvert', 'commentaires ouverts')}.` : '';
   };
 
-  return { addButton, margin, orphans, paint, openOn, summary };
+  return { addButton, margin, orphans, paint, openOn, summary, threadsOf, threadSig, draftOffer };
 }

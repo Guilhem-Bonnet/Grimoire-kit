@@ -298,6 +298,9 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
       })
       : el('div', 'at-live', null, { 'data-live': req, hidden: '' }); // pas (encore) dans la trace
     drawn.set(node, lineKey(req));
+    // Identité pour la réconciliation de la feuille : la ligne se met à jour elle-même (`paint`), un rechargement du document la garde.
+    node.setAttribute('data-rk', `live:${req}`);
+    node.setAttribute('data-rs', '=');
     return node;
   };
 

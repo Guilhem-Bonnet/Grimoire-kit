@@ -30,7 +30,7 @@ function el(tag, className, text, attrs) {
 
 /**
  * `hooks` : `focus()` la phase affichée, `goPhase(id)` la navigation existante, `reload(message)` le rechargement
- * du document, `say(message)` la ligne d'état de la feuille, `editing()` vrai si un bloc est en cours d'édition.
+ * du document, `say(message)` la ligne d'état de la feuille, `drafts` les brouillons locaux (voir `atelier-brouillons.js`).
  */
 export function createAssistant(ctx, slug, hooks) {
   // Colonne à droite du document (large) ou tiroir (étroit) ; replié, il ne reste que la pastille de la barre des phases.
@@ -83,7 +83,7 @@ export function createAssistant(ctx, slug, hooks) {
   let timer = null;
   let draft = '';
   // Sans agent joignable, le cadrage se joue dans la page avec les questions du kit (voir atelier-entretien.js).
-  const guided = createGuided(ctx, slug, { focus: () => hooks.focus(), reload: (m, k) => hooks.reload(m, k), say: (m, k) => hooks.say(m, k), refresh: () => tick() });
+  const guided = createGuided(ctx, slug, { focus: () => hooks.focus(), reload: (m, k) => hooks.reload(m, k), say: (m, k) => hooks.say(m, k), refresh: () => tick(), drafts: hooks.drafts });
 
   const call = async (body, done) => {
     try {
@@ -304,7 +304,7 @@ export function createAssistant(ctx, slug, hooks) {
     if (signature !== was) render();
     covered = next.covered;
     wasMine = mine;
-    if (changed && !hooks.editing()) await hooks.reload();
+    if (changed) await hooks.reload(); // le redessin garde toute saisie en cours : plus besoin d'attendre qu'elle finisse
     timer = setTimeout(tick, mine || next.turn.busy ? FAST_MS : SLOW_MS);
   };
 
