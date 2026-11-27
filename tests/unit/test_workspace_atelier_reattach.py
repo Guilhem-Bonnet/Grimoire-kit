@@ -52,7 +52,8 @@ def _orphan(root: Path) -> str:
     )
     assert code == 200, out
     file = root / "_grimoire/cadrage/un" / BRAINSTORM
-    file.write_text(file.read_text(encoding="utf-8").replace(PARA_A, NEW_A), encoding="utf-8")
+    # Hors cockpit, le passage ET ses voisins changent : rien ne le suit (même place perdue, texte trop différent).
+    file.write_text(file.read_text(encoding="utf-8").replace(PARA_A, NEW_A).replace(PARA_B, "Autre sujet."), encoding="utf-8")
     thread = workspace_get(root, f"{P}atelier/chantiers/un/comments", {})["comments"][0]
     assert thread["anchor"]["state"] == "orphelin"
     return str(out["comment"]["id"])
@@ -105,7 +106,7 @@ def _orphan_after(root: Path) -> str:
     )
     assert code == 200, out
     file = root / "_grimoire/cadrage/un" / BRAINSTORM
-    file.write_text(file.read_text(encoding="utf-8").replace(PARA_A, NEW_A), encoding="utf-8")
+    file.write_text(file.read_text(encoding="utf-8").replace(PARA_A, NEW_A).replace(PARA_B, "Autre sujet."), encoding="utf-8")
     return str(out["comment"]["id"])
 
 
@@ -136,7 +137,7 @@ def test_forged_identifiers_sizes_and_passages_are_refused_and_write_nothing(pro
         ({"action": "attach", "block_id": good, "quote": "jusqu'au", "start": -1}, 400),
         ({"action": "attach", "block_id": good, "quote": "jusqu'au", "start": True}, 400),
         ({"action": "attach", "block_id": good, "quote": "jusqu'au", "start": 0}, 400),
-        ({"action": "attach", "block_id": _block(project, PARA_B), "quote": ["x"]}, 400),
+        ({"action": "attach", "block_id": _block(project, "Autre sujet."), "quote": ["x"]}, 400),
     ]
     for body, wanted in cases:
         code, out = _post(project, cid, body)
@@ -165,8 +166,11 @@ def test_the_history_keeps_the_latest_attachments_only(project: Path, monkeypatc
         phases = workspace_get(project, f"{P}atelier/chantiers/un", {})["phases"]
         block = next(b["id"] for p in phases for b in p["blocks"] if word in b["text"] and p["id"] == "brainstorm")
         assert _post(project, cid, {"action": "attach", "block_id": block, "quote": word})[0] == 200
-        file = project / "_grimoire/cadrage/un" / BRAINSTORM
-        file.write_text(file.read_text(encoding="utf-8").replace(word, word.upper(), 1), encoding="utf-8")
+        folder = project / "_grimoire/cadrage/un"
+        with store.locked_store(folder):
+            rows = store.load(folder)
+            rows[0].orphelin = True  # « un orphelin le reste » : l'état écrit au magasin
+            store.save(folder, rows)
         assert _thread(project)["anchor"]["state"] == "orphelin"
     assert [h["apres"]["quote"] for h in _thread(project)["historique"]] == ["maintenu", "relâchement"]
 

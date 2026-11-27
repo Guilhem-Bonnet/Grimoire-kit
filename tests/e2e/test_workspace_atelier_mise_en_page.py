@@ -386,18 +386,23 @@ def test_rewriting_a_commented_passage_says_so_with_a_link_and_the_orphan_is_att
     cid = _comment(root, slug, "Que se passe-t-il quand la touche est lâchée ?")
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         page.locator(f"[data-com='{cid}']").wait_for(timeout=APPEAR_MS)
-        block = page.locator(".at-blk", has_text=PARA_A)
-        block.click()
+        # Réécrit par le cockpit : le fil suit son bloc (« Le passage commenté a été modifié »), il n'est pas orphelin.
+        page.locator(".at-blk", has_text=PARA_A).click()
         area = page.locator("[data-role='block-edit'] textarea")
         area.fill(NEW_A)
         area.press("Control+Enter")
-        notice = page.locator("[data-role='atelier-toasts'] [data-kind='warn']", has_text="n’a plus son passage")
-        notice.wait_for(timeout=APPEAR_MS)
-        assert "1 commentaire n’a plus son passage" in notice.inner_text()
-        page.evaluate(f"{CANVAS}.scrollTop = {CANVAS}.scrollHeight")  # loin du fil : le lien y ramène
-        notice.get_by_role("button", name="Voir le commentaire").click()
-        page.wait_for_function(f"() => document.activeElement && document.activeElement.getAttribute('data-com') === '{cid}'", timeout=APPEAR_MS)
-        assert page.locator(f"[data-com='{cid}']").get_attribute("data-anchor") == "orphelin"
+        page.locator(".at-blk", has_text="relâchement").wait_for(timeout=APPEAR_MS)
+        followed = page.locator(f"[data-com='{cid}']")
+        page.wait_for_function(f"() => document.querySelector(\"[data-com='{cid}']\")?.getAttribute('data-anchor') === 'retrouve'", timeout=APPEAR_MS)
+        assert "Le passage commenté a été modifié" in followed.inner_text() and "n’a plus son passage" not in page.inner_text("body")
+        followed.locator("[data-role='origin'] summary").click()  # l'extrait d'origine se déplie
+        assert followed.locator("[data-role='origin'] blockquote").inner_text() == QUOTE
+        # Réécrit hors du cockpit, passage ET voisin : plus rien ne le place, il est orphelin ; la page le dit.
+        path = _folder(root, slug) / "02-brainstorm.md"
+        path.write_text(path.read_text(encoding="utf-8").replace(NEW_A, "Un tout autre texte.").replace(PARA_B, f"{PARA_B} (revu)"), encoding="utf-8")
+        page.evaluate("window.dispatchEvent(new Event('focus'))")  # le retour sur l'onglet relit le document
+        page.wait_for_function(f"() => document.querySelector(\"[data-com='{cid}']\")?.getAttribute('data-anchor') === 'orphelin'", timeout=APPEAR_MS)
+        assert "Orphelin" in page.locator(f"[data-com='{cid}']").inner_text()
         # « Rattacher ici » sans sélection : mode « choisis le bloc », clavier compris.
         page.locator(f"[data-com='{cid}']").get_by_role("button", name="Rattacher ce commentaire à la sélection du document ou au bloc courant").click()
         assert page.locator(".at-sheet.is-picking").count() == 1

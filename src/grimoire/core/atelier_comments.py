@@ -146,7 +146,10 @@ def _clamp_anchor(value: dict[str, Any]) -> dict[str, Any]:
 def _clamp_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Les ``MAX_HISTORY`` derniers rattachements, aux champs bornés (les seuls champs que le serveur écrit)."""
     return [
-        {"date": r["date"][:64], "avant": _clamp_anchor(r["avant"]), "apres": _clamp_anchor(r["apres"])}
+        {
+            "date": r["date"][:64], "avant": _clamp_anchor(r["avant"]), "apres": _clamp_anchor(r["apres"]),
+            **({"auto": True} if r.get("auto") is True else {}),  # suivi par le serveur (bloc réécrit), pas un rattachement
+        }
         for r in rows[-MAX_HISTORY:]
     ]
 

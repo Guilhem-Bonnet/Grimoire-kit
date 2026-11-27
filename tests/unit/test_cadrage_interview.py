@@ -86,9 +86,11 @@ def test_cadrage_interview_answer_writes_files(tmp_path: Path) -> None:
     view = answer(tmp_path, "demo", "hors-perimetre", "", unknown=True)
     d = tmp_path / "_grimoire" / "cadrage" / "demo"
     brief = (d / "01-brief.md").read_text()
-    assert "- Les mainteneurs du kit" in brief and "- `pytest -k x` passe" in brief
+    assert "Les mainteneurs du kit" in brief and "`pytest -k x` passe" in brief
     assert "À compléter" not in brief.split("## L'utilisateur")[1].split("##")[0]
-    assert "À valider (je ne sais pas)" in (d / "03-comprehension.md").read_text().split("## Hypothèses")[1]
+    # « Je ne sais pas » : la question posée, rangée parmi les questions ouvertes (plus le titre de l'angle en hypothèse).
+    asked = "À préciser : Qu'est-ce qui est explicitement exclu de cette livraison ?"
+    assert asked in (d / "02-brainstorm.md").read_text().split("## Questions ouvertes")[1]
     assert view["complete"] is True and check_interview(tmp_path, "demo") == []
 
 
@@ -140,7 +142,7 @@ def test_cadrage_interview_answer_cannot_inject_structure(tmp_path: Path) -> Non
     spec = (tmp_path / "_grimoire" / "cadrage" / "demo" / PHASES[-1].filename).read_text()
     assert [ln for ln in spec.splitlines() if ln.startswith("## Synthèse")].__len__() <= 1
     assert "\n---\nphase: x" not in spec
-    assert "- ok ## Synthèse faux --- phase: x" in spec
+    assert " ok ## Synthèse faux --- phase: x" in spec
 
 
 def test_cadrage_interview_duplicate_answer_written_once(tmp_path: Path) -> None:
@@ -149,7 +151,7 @@ def test_cadrage_interview_duplicate_answer_written_once(tmp_path: Path) -> None
     answer(tmp_path, "demo", "utilisateurs", "Les mainteneurs")
     answer(tmp_path, "demo", "utilisateurs", "Les mainteneurs")
     brief = (tmp_path / "_grimoire" / "cadrage" / "demo" / "01-brief.md").read_text()
-    assert brief.count("- Les mainteneurs") == 1
+    assert brief.count("Les mainteneurs") == 1
 
 
 @pytest.mark.parametrize("angles", [

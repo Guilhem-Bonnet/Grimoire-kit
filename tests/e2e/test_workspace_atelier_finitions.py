@@ -137,6 +137,7 @@ def test_an_orphan_is_attached_to_the_selection_and_keeps_the_trace(browser: Bro
     slug = _chantier(root, "Rattacher a la selection")
     cid = _orphan(root, slug, "Que se passe-t-il quand la touche est lâchée ?")
     _rewrite(root, slug, PARA_A, NEW_A)
+    _rewrite(root, slug, PARA_B, f"{PARA_B} (revu)")  # le voisin change aussi : rien ne suit le fil, il est orphelin
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         thread = _thread(page, cid)
         thread.wait_for(timeout=APPEAR_MS)
@@ -161,6 +162,7 @@ def test_without_a_selection_the_orphan_is_attached_to_the_current_block(browser
     slug = _chantier(root, "Rattacher au bloc")
     cid = _orphan(root, slug, "Et le second paragraphe ?")
     _rewrite(root, slug, PARA_A, NEW_A)
+    _rewrite(root, slug, PARA_B, f"{PARA_B} (revu)")  # le voisin change aussi : rien ne suit le fil, il est orphelin
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         thread = _thread(page, cid)
         thread.wait_for(timeout=APPEAR_MS)
@@ -179,7 +181,7 @@ def test_without_a_selection_the_orphan_is_attached_to_the_current_block(browser
         page.locator("[data-role='atelier-status']", has_text="rattaché au bloc").wait_for(timeout=APPEAR_MS)
         assert page.locator(".is-editing").count() == 0
         assert _thread(page, cid).get_attribute("data-anchor") == "ancre"
-    assert store.load(_folder(root, slug))[0].quote == PARA_B
+    assert store.load(_folder(root, slug))[0].quote == f"{PARA_B} (revu)"
 
 
 def test_a_drifted_requirement_shows_what_changed(browser: Browser, project_on: tuple[str, Path]) -> None:

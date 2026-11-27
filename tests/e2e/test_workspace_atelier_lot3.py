@@ -241,7 +241,7 @@ def test_a_changed_block_gives_its_quote_back(browser: Browser, project_on: tupl
         page.locator(".at-blk", has_text="enfoncé").wait_for(timeout=APPEAR_MS)
         thread = _thread(page, str(made["id"]))
         thread.wait_for(timeout=APPEAR_MS)
-        assert thread.get_attribute("data-anchor") == "retrouve" and "Passage modifié depuis le commentaire" in thread.inner_text()
+        assert thread.get_attribute("data-anchor") == "retrouve" and "Le passage commenté a été modifié" in thread.inner_text()
         assert page.locator(".at-cmrow", has_text="enfoncé").locator(f"[data-com='{made['id']}']").count() == 1
 
 
@@ -251,14 +251,15 @@ def test_a_deleted_quote_becomes_a_visible_orphan_with_its_original_quote(browse
     made = _agent(root, slug, "Pourquoi tenue ?", quote=QUOTE)
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         _thread(page, str(made["id"])).wait_for(timeout=APPEAR_MS)
-        _rewrite(root, slug, QUOTE, "tant que le doigt reste posé")
+        _rewrite(root, slug, QUOTE, "selon le contexte d'usage")  # hors cockpit : le passage ET son voisin changent
+        _rewrite(root, slug, PARA_B, f"{PARA_B} (revu)")
         _refresh(page)
         orphans = page.locator("[data-role='orphans']")
         orphans.wait_for(timeout=APPEAR_MS)
         thread = orphans.locator(f"[data-com='{made['id']}']")
         assert thread.get_attribute("data-anchor") == "orphelin" and "Orphelin" in thread.inner_text()
         assert thread.locator("[data-role='quote']").inner_text() == QUOTE  # l'extrait d'origine reste dit
-        assert page.locator(".at-cmrow", has_text="tant que le doigt").locator("[data-com]").count() == 0  # jamais rattaché ailleurs
+        assert page.locator(".at-cmrow", has_text="selon le contexte d'usage").locator("[data-com]").count() == 0  # jamais rattaché ailleurs
         assert page.evaluate("CSS.highlights.has('at-cm')") is False
         assert page.locator("[data-role='doc-comment-count']").inner_text().strip() == "1 commentaire ouvert."
 

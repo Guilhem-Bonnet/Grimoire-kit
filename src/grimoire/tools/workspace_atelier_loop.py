@@ -149,18 +149,22 @@ def author(root: Path) -> dict[str, str]:
 
 
 def fact_state(root: Path, slug: str) -> str:
-    """L'état que les faits justifient : ``en-cours`` (découpé), ``pret-a-valider`` (exigences écrites),
-    ``en-discussion`` (cadrage entamé), sinon ``idee``."""
+    """L'état que les faits justifient : ``en-cours`` (découpé), ``pret-a-valider`` (exigences écrites ET cadrage sans
+    point à préciser : l'écran dit « Complet »), ``en-discussion`` (cadrage entamé), sinon ``idee``."""
     from grimoire.core.cadrage_progress import progress
     from grimoire.core.cadrage_requirements import read_requirements
 
     with contextlib.suppress(Exception):
         if tasks(root, slug):
             return "en-cours"
+    advance = progress(root, _name(slug))["etat"]
+    written = False
     with contextlib.suppress(ValueError, OSError):
-        if read_requirements(root, _name(slug)).identified:
-            return "pret-a-valider"
-    return "idee" if progress(root, _name(slug))["etat"] == "a-cadrer" else "en-discussion"
+        written = bool(read_requirements(root, _name(slug)).identified)
+    # Des exigences écrites ne suffisent pas : « Prêt à valider » ne se dit que si rien ne reste à préciser.
+    if written and advance == "complet":
+        return "pret-a-valider"
+    return "idee" if advance == "a-cadrer" and not written else "en-discussion"
 
 
 def after_write(root: Path, slug: str) -> None:

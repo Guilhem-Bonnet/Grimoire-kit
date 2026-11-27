@@ -111,7 +111,7 @@ def test_cadrage_guide_sans_agent_de_bout_en_bout(browser: Browser, sans_agent: 
         page.locator(".at-sheet", has_text="Les mainteneurs du kit.").wait_for(timeout=APPEAR_MS)
         page.locator("[data-role='guided-question']", has_text="Question 2 sur").wait_for(timeout=APPEAR_MS)
         assert page.locator("[data-role='guided-text']").inner_text() != first
-        assert "- Les mainteneurs du kit." in _read(root, slug, "01-brief.md")
+        assert "* Les mainteneurs du kit." in _read(root, slug, "01-brief.md")  # la question en italique, puis la réponse
 
         # Retour à la question précédente : la ligne quitte le document, la réponse revient dans le champ.
         page.locator("[data-act='previous']").click()
@@ -121,13 +121,13 @@ def test_cadrage_guide_sans_agent_de_bout_en_bout(browser: Browser, sans_agent: 
         page.locator(".at-asst-area").fill("Les mainteneurs et les relecteurs du kit.")
         page.locator("[data-act='answer']").click()
         page.locator(".at-sheet", has_text="relecteurs du kit").wait_for(timeout=APPEAR_MS)
-        assert "- Les mainteneurs et les relecteurs du kit." in _read(root, slug, "01-brief.md")
+        assert "* Les mainteneurs et les relecteurs du kit." in _read(root, slug, "01-brief.md")
 
         # « Je ne sais pas » : une hypothèse à valider, l'angle suivant.
         page.locator("[data-role='guided-question']", has_text="Question 2 sur").wait_for(timeout=APPEAR_MS)
         page.locator("[data-act='unknown']").click()
         page.locator("[data-role='atelier-status']", has_text="hypothèse").wait_for(timeout=APPEAR_MS)
-        assert "À valider (je ne sais pas)" in _read(root, slug, "03-comprehension.md")
+        assert "- À préciser : " in _read(root, slug, "02-brainstorm.md")  # la question posée, rangée parmi les questions ouvertes
         # La capture montre le panneau, pas la pile de notifications (certaines se ferment seules : on n'attend pas leur clic).
         page.evaluate("() => document.querySelectorAll('[data-act=\"toast-close\"]').forEach((b) => b.click())")
         _capture(page, "02-cadrage-guide-question")
