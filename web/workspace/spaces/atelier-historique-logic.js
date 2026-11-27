@@ -96,6 +96,79 @@ export function diffLines(phase) {
   return out;
 }
 
+/** « la version actuelle » ou « la version du 27 novembre 2026 à 14:32 » : de quoi nommer un côté d'une comparaison. */
+export function versionName(version) {
+  if (!version || version.kind === 'working') return 'la version actuelle';
+  const date = validDate(version.date);
+  if (!date) return `la version ${version.short || ''}`.trim();
+  return `la version du ${date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} à ${timeLabel(version.date)}`;
+}
+
+/** Le bandeau d'une comparaison entre deux versions : « Tu compares la version du … et la version actuelle. » */
+export function pairLabel(from, to) {
+  return `Tu compares ${versionName(from)} et ${versionName(to)}.`;
+}
+
+/** Les deux identifiants rangés [plus ancienne, plus récente] d'après la liste (plus récente d'abord) ; `null` si l'un manque. */
+export function orderPair(versions, a, b) {
+  const ids = (versions || []).map((v) => v.id);
+  const ia = ids.indexOf(a);
+  const ib = ids.indexOf(b);
+  if (ia < 0 || ib < 0 || ia === ib) return null;
+  return ia > ib ? [a, b] : [b, a];
+}
+
+/** La sélection de deux versions : cocher ajoute, décocher retire ; une troisième fait sortir la plus ancienne choisie. */
+export function toggleSelection(selected, id, max = 2) {
+  const list = selected.filter((x) => x !== id);
+  if (list.length !== selected.length) return list;
+  return [...list, id].slice(-max);
+}
+
+/** Ce que changerait la restauration d'une phase (de la version actuelle vers l'ancienne) : l'inverse du diff affiché. */
+export function restoreCounts(phase) {
+  return { plus: (phase && phase.removed) || 0, minus: (phase && phase.added) || 0 };
+}
+
+/** Ce que changerait la restauration d'un bloc : les lignes de l'ancien texte absentes du courant (+), et l'inverse (−). */
+export function blockCounts(block) {
+  const count = (text) => {
+    const map = new Map();
+    for (const line of String(text || '').split('\n')) map.set(line, (map.get(line) || 0) + 1);
+    return map;
+  };
+  const before = count(block && block.old_text);
+  const now = count(block && block.text);
+  let plus = 0;
+  let minus = 0;
+  for (const [line, n] of before) plus += Math.max(0, n - (now.get(line) || 0));
+  for (const [line, n] of now) minus += Math.max(0, n - (before.get(line) || 0));
+  return { plus, minus };
+}
+
+/** « +3 −2 lignes » (le signe porte l'information, pas seulement la couleur). */
+export function countsText(counts) {
+  const n = counts.plus + counts.minus;
+  return `+${counts.plus} −${counts.minus} ligne${n > 1 ? 's' : ''}`;
+}
+
+/** Pourquoi une phase ne se restaure pas d'ici : le refus du serveur, sinon sa note ; `''` si elle se restaure. */
+export function restoreNote(phase) {
+  if (!phase || phase.restorable) return '';
+  return phase.refusal || phase.restore_note || '';
+}
+
+/** Le bloc (de la vue rendue par le serveur après écriture) qui porte ce texte, s'il est seul à le porter ; sinon `null`. */
+export function findOnlyBlock(blocks, text) {
+  const found = (blocks || []).filter((b) => b.text === text);
+  return found.length === 1 ? found[0] : null;
+}
+
+/** La phrase de l'accusé après une restauration (rien n'est commité : elle le dit). */
+export function restoredText(what, counts) {
+  return `${what} restauré${what.startsWith('La ') ? 'e' : ''} (${countsText(counts)}). Ce n’est pas commité : c’est une modification de plus dans tes fichiers.`;
+}
+
 /** La liste vide : le texte du serveur, ou un texte neutre. */
 export function emptyText(data) {
   if (data && data.reason_text) return data.reason_text;

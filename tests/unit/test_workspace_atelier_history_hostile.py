@@ -101,6 +101,76 @@ def exercise(root: Path, slug: str) -> list[dict[str, object]]:
     return list(versions)  # type: ignore[no-any-return]
 
 
+def exercise_compare_and_restore(root: Path, slug: str, brief: Path) -> None:
+    """Comparer (deux commits, puis la version actuelle) et restaurer la phase, puis annuler : par les routes de l'Atelier."""
+    from grimoire.core.cadrage import CADRAGE_DIR
+    from grimoire.tools import atelier_blocs
+
+    del CADRAGE_DIR
+    ids = [v["id"] for v in h.listing(root, slug)["versions"] if v["kind"] == "commit"]
+    assert len(ids) >= 2
+    old, new = ids[-1], ids[0]
+    base = f"/api/workspace/atelier/chantiers/{slug}"
+    assert wa.get(root, f"{base}/compare", {"from": [old], "to": [new]})["phases"]
+    assert wa.get(root, f"{base}/compare", {"from": [old], "to": ["working"]})["phases"]
+    fp = atelier_blocs.fingerprint(brief.read_text(encoding="utf-8"))
+    code, done = wa.post_http(root, f"{base}/restore", {"phase": "brief", "expected": fp, "version": old})
+    assert code == 200, done
+    assert brief.read_text(encoding="utf-8") == "# B\nun\n"
+    fp = atelier_blocs.fingerprint(brief.read_text(encoding="utf-8"))
+    code, undone = wa.post_http(root, f"{base}/restore", {"phase": "brief", "expected": fp, "undo": done["undo"]})
+    assert code == 200, undone
+    assert brief.read_text(encoding="utf-8").endswith("non commité\n")
+
+
+def test_compare_and_restore_never_run_a_declared_program(tmp_path: Path) -> None:
+    root, slug, brief, trap = build(tmp_path)
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    for name in ("post-checkout", "post-index-change", "reference-transaction", "pre-commit", "post-merge", "fsmonitor-watchman"):
+        shutil.copy(trap.prog(f"hook-{name}"), hooks / name)
+    (root / ".gitattributes").write_text("*.md diff=evil filter=evil text eol=crlf\n", encoding="utf-8")
+    config(root, core__hooksPath=str(hooks), core__pager=trap.prog("pager"), core__fsmonitor=trap.prog("fsmonitor"),
+           core__sshCommand=trap.prog("ssh"), diff__external=trap.prog("extdiff"), diff__evil__textconv=trap.prog("textconv"),
+           diff__evil__command=trap.prog("diffcmd"), filter__evil__clean=trap.prog("clean"), filter__evil__smudge=trap.prog("smudge"),
+           alias__show=f"!{trap.prog('alias')}", alias__log=f"!{trap.prog('alias2')}",
+           log__showSignature="true", gpg__program=trap.prog("gpg"), core__editor=trap.prog("editor"))
+    subprocess.run(["git", "diff", "HEAD~1", "HEAD"], cwd=root, capture_output=True, env=_env(), check=False)
+    assert trap.written()  # contrôle positif : le piège est armé
+    trap.clear()
+    exercise_compare_and_restore(root, slug, brief)
+    assert trap.written() == []
+    assert git(root, "rev-parse", "HEAD") == git(root, "rev-parse", "refs/heads/main")
+
+
+def test_compare_and_restore_never_fetch_a_promised_blob(tmp_path: Path) -> None:
+    root, slug, brief, trap = build(tmp_path)
+    rel = brief.relative_to(root).as_posix()
+    blob = git(root, "rev-parse", f"HEAD:{rel}")
+    (root / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+    config(root, core__repositoryformatversion="1", extensions__partialClone="origin", remote__origin__promisor="true",
+           remote__origin__url=str(tmp_path / "nowhere"), remote__origin__uploadpack=trap.prog("uploadpack"),
+           core__sshCommand=trap.prog("ssh"), core__gitProxy=trap.prog("proxy"))
+    ids = git(root, "rev-list", "HEAD").split()  # la liste de l'Atelier n'a plus de compteurs : on nomme les commits à la main
+    base = f"/api/workspace/atelier/chantiers/{slug}"
+    wa.get(root, f"{base}/compare", {"from": [ids[-1]], "to": [ids[0]]})
+    code, _ = wa.post_http(root, f"{base}/restore", {"phase": "brief", "expected": "x", "version": ids[0]})
+    assert code in (400, 409)
+    assert trap.written() == []
+
+
+def test_a_restore_leaves_the_repository_untouched(tmp_path: Path) -> None:
+    root, slug, brief, _trap = build(tmp_path)
+    before = {p.relative_to(root).as_posix(): p.read_bytes() for p in (root / ".git").rglob("*") if p.is_file()
+              and p.name != "index" and "/logs/" not in p.as_posix()}
+    index = (root / ".git" / "index").read_bytes()
+    exercise_compare_and_restore(root, slug, brief)
+    after = {p.relative_to(root).as_posix(): p.read_bytes() for p in (root / ".git").rglob("*") if p.is_file()
+             and p.name != "index" and "/logs/" not in p.as_posix()}
+    assert after == before
+    assert (root / ".git" / "index").read_bytes() == index
+
+
 def test_signature_verification_never_runs(tmp_path: Path) -> None:
     root, slug, _brief, trap = build(tmp_path, signed=True)
     config(root, log__showSignature="true", gpg__program=trap.prog("gpg"), gpg__ssh__program=trap.prog("gpgssh"))

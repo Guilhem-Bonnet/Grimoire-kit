@@ -532,3 +532,72 @@ def test_the_atelier_split_is_guarded_and_leaves_its_governed_trace(atelier: Hos
     journal = atelier.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
     entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
     assert f"atelier/chantiers/{made.slug}/decoupage" in [e["route"] for e in entries if e["action"] == "workspace.post"]
+
+
+def _armed_restore(host: Host) -> tuple[Path, str, str, str]:
+    """Un dépôt git réel, un chantier à deux versions du brief ; rend (brief, route, empreinte lue, première version)."""
+    import os
+    import subprocess
+
+    from grimoire.core.chantiers import new_chantier
+    from grimoire.tools import atelier_blocs
+    from grimoire.tools import workspace_atelier as wa
+
+    def git(*args: str) -> str:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_AUTHOR_NAME": "A",
+                    "GIT_AUTHOR_EMAIL": "a@x", "GIT_COMMITTER_NAME": "A", "GIT_COMMITTER_EMAIL": "a@x"})
+        done = subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=host.root, capture_output=True, text=True,
+                              check=True, env=env)
+        return done.stdout.strip()
+
+    (host.root / "project-context.yaml").write_text("project:\n  name: demo\n", encoding="utf-8")
+    wa.set_atelier(host.root, True)
+    made = new_chantier(host.root, "Trois")
+    brief = host.root / "_grimoire" / "cadrage" / made.slug / "01-brief.md"
+    git("init", "-q", "-b", "main")
+    brief.write_text("# Brief\n\nPremière version.\n", encoding="utf-8")
+    git("add", "--", str(brief.relative_to(host.root)))
+    git("commit", "-q", "-m", "v1")
+    first = git("rev-parse", "HEAD")
+    brief.write_text("# Brief\n\nSeconde version.\n", encoding="utf-8")
+    fp = atelier_blocs.fingerprint(brief.read_text(encoding="utf-8"))
+    return brief, f"/api/workspace/atelier/chantiers/{made.slug}/restore", fp, first
+
+
+@pytest.mark.no_session_token
+@pytest.mark.parametrize("fixture_name", ["cockpit", "atelier"])
+def test_the_atelier_restore_route_refuses_everything_but_the_page(
+    fixture_name: str, request: pytest.FixtureRequest
+) -> None:
+    """« Restaurer cette phase » : sans jeton, avec un faux, d'une origine tierce, hors JSON, par PUT ou GET : rien n'est écrit."""
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    host: Host = request.getfixturevalue(fixture_name)
+    brief, route, fp, first = _armed_restore(host)
+    token = {SESSION_HEADER: session_token()}
+    body = json.dumps({"phase": "brief", "expected": fp, "version": first}).encode()
+    before_brief = brief.read_bytes()
+    before = host.snapshot()
+    url = f"{route}?project={host.slug}"
+    attempts = {
+        "POST sans jeton": ("POST", JSON, body),
+        "POST jeton faux": ("POST", {**JSON, SESSION_HEADER: "pas-le-bon"}, body),
+        "POST origine tierce": ("POST", {**JSON, **token, "Origin": EVIL}, body),
+        "POST fetch inter-sites": ("POST", {**JSON, **token, "Sec-Fetch-Site": "cross-site"}, body),
+        "POST hors JSON": ("POST", {"Content-Type": "text/plain", **token}, body),
+        "PUT": ("PUT", {**JSON, **token}, body),
+        "GET": ("GET", {}, None),
+    }
+    for label, (method, headers, payload) in attempts.items():
+        code = host.request(method, url, payload, headers)
+        assert code in (400, 403, 404, 405, 415, 501), f"{label} a répondu {code}"
+        assert brief.read_bytes() == before_brief, f"{label} a écrit dans la phase"
+    assert host.snapshot() == before
+    # Et la page, elle, restaure : même requête avec le jeton valide ; la trace gouvernée la nomme.
+    assert host.request("POST", url, body, {**JSON, **token}) == 200
+    assert brief.read_text(encoding="utf-8") == "# Brief\n\nPremière version.\n"
+    if fixture_name == "atelier":
+        journal = host.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+        entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+        assert route.removeprefix("/api/workspace/") in [e["route"] for e in entries if e["action"] == "workspace.post"]
