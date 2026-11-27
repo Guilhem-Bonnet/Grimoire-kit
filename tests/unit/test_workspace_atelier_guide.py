@@ -105,7 +105,7 @@ def test_sans_objet_ecarte_l_angle_avec_sa_raison(project: Path) -> None:
     _act(project, "guide-demarrer")
     step = _step(project)
     _act(project, "guide-sans-objet", **step)
-    assert "> Sans objet" in _read(project, "01-brief.md").split("## L'utilisateur")[1].split("##")[0]  # à sa place
+    assert "> À compléter — sans objet d'après l'entretien" in _read(project, "01-brief.md").split("## L'utilisateur")[1].split("##")[0]  # à sa place
     assert "Angle «" not in _read(project, "02-brainstorm.md")  # le brainstorm n'est pas pollué
     rec = next(a for a in interview.view(project, "un")["angles"] if a["id"] == step["angle"])
     assert rec["state"] == "ecarte" and rec["reason"] == "sans objet"

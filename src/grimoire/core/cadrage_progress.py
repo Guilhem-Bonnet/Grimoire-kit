@@ -50,7 +50,7 @@ def _phase(root: Path, phase: Any, chantier: str | None, marks: dict[tuple[str, 
     for name in phase.sections:
         if report["sections"].get(name) == "rempli":
             sections[name] = "rempli"
-        else:  # la mention « Sans objet » n'est pas du contenu (cadrage._section_filled) : la marque de l'angle la dit
+        else:  # le « sans objet » de l'entretien reste au gabarit pour le gate : la marque de l'angle le dit
             sections[name] = marks.get((phase.id, name), "vide")
     count = {s: sum(1 for v in sections.values() if v == s) for s in ("rempli", "vide", "je-ne-sais-pas", "sans-objet")}
     return {

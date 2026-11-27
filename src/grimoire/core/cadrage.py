@@ -28,8 +28,6 @@ from typing import Any
 
 CADRAGE_DIR = Path("_grimoire") / "cadrage"
 PLACEHOLDER = "> À compléter —"
-#: Ce que l'entretien écrit à la place du gabarit quand une rubrique est « sans objet » (suivi de la raison, s'il y en a une).
-NOT_APPLICABLE = "> Sans objet"
 #: Le chantier par défaut : les fichiers historiques, posés à la racine de ``_grimoire/cadrage/``.
 DEFAULT_CHANTIER = "principal"
 
@@ -172,13 +170,9 @@ def scaffold(
 
 
 def _section_filled(body_lines: list[str]) -> bool:
-    """Une section est remplie si elle contient du contenu hors gabarit.
-
-    La mention « Sans objet » (écrite par l'entretien) n'est PAS du contenu pour le gate : elle ne le satisfait pas,
-    exactement comme avant qu'elle existe. Qu'un « sans objet » puisse le satisfaire est une décision laissée à l'humain.
-    """
+    """Une section est remplie si elle contient du contenu hors gabarit."""
     return any(
-        line.strip() and not line.strip().startswith((PLACEHOLDER, NOT_APPLICABLE))
+        line.strip() and not line.strip().startswith(PLACEHOLDER)
         for line in body_lines
     )
 

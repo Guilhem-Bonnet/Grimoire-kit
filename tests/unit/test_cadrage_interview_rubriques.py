@@ -116,8 +116,13 @@ def test_sans_objet_marks_the_rubric_in_place_and_leaves_the_brainstorm_alone(pr
     before = _read(project, "02-brainstorm.md")
     interview.answer(project, "un", "hors-perimetre", "sans objet", skip=True)
     interview.answer(project, "un", "contraintes", "Hors de portée du métier", skip=True)
-    assert _section(project, "05-cahier-des-charges.md", "Hors périmètre").strip() == "> Sans objet"
-    assert _section(project, "03-comprehension.md", "Contraintes").strip() == "> Sans objet — Hors de portée du métier"
+    assert _section(project, "05-cahier-des-charges.md", "Hors périmètre").strip() == "> À compléter — sans objet d'après l'entretien (à confirmer)"
+    assert _section(project, "03-comprehension.md", "Contraintes").strip() == (
+        "> À compléter — sans objet d'après l'entretien : Hors de portée du métier (à confirmer)"
+    )
+    # Le découpage en blocs le voit comme un emplacement non rempli, sans le casser.
+    blocks = atelier_blocs.split("cahier-des-charges", _read(project, "05-cahier-des-charges.md"))
+    assert any(b.data.get("placeholder") and "sans objet" in b.text for b in blocks)
     assert _read(project, "02-brainstorm.md") == before
     scope = _row(project, "cahier-des-charges")
     assert scope["sections"]["Hors périmètre"] == "sans-objet" and scope["sans_objet"] == 1
@@ -133,10 +138,32 @@ def test_sans_objet_never_satisfies_the_gate(project: Path) -> None:
     assert any("Hors périmètre" in e and "Risques" in e for e in before)
     for angle in ("hors-perimetre", "risques"):
         interview.answer(project, "un", angle, "sans objet", skip=True)
-    assert "> Sans objet" in _section(project, "05-cahier-des-charges.md", "Risques")  # visible dans le document
+    assert "sans objet d'après l'entretien" in _section(project, "05-cahier-des-charges.md", "Risques")  # visible dans le document
     after = [e for e in check(project, "un")[0] if "Cahier des charges" in e or "Exigences" in e]
     assert after == before  # mais le gate ne l'a pas lu comme rempli
     assert _row(project, "cahier-des-charges")["sections"]["Risques"] == "sans-objet"  # et l'avancement le dit
+
+
+def test_a_human_written_sans_objet_still_fills_the_rubric_for_the_gate(project: Path) -> None:
+    """Comme sur main : un « > Sans objet » écrit à la main est du contenu pour `cadrage check` (rubrique remplie)."""
+    from grimoire.core.cadrage import PHASES, check, phase_report
+
+    path = project / "_grimoire/cadrage/un/05-cahier-des-charges.md"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("> À compléter — risques.", "> Sans objet : pas de risque identifié"),
+        encoding="utf-8",
+    )
+    report = phase_report(project, next(p for p in PHASES if p.id == "cahier-des-charges"), "un")
+    assert report["sections"]["Risques"] == "rempli"
+    assert not any("Risques" in e and "Cahier des charges" in e for e in check(project, "un")[0])
+
+
+def test_retract_of_a_sans_objet_restores_the_exact_template(project: Path) -> None:
+    interview.interview_plan(project, "un", depth="standard")
+    before = _read(project, "05-cahier-des-charges.md")
+    interview.answer(project, "un", "risques", "sans objet", skip=True)
+    assert interview.retract(project, "un", "risques")["removed"] is True
+    assert _read(project, "05-cahier-des-charges.md") == before
 
 
 def test_sans_objet_on_a_rubric_that_already_has_content_writes_nothing(project: Path) -> None:
@@ -275,7 +302,7 @@ def test_the_cockpit_route_and_the_command_write_the_same_files(tmp_path: Path, 
     {"lines": [{"phase": "brief", "section": "Un succès ressemble à", "line": "- a\n- REQ-001 : deux lignes"}]},
     {"lines": [{"phase": "brief", "section": "Un succès ressemble à", "line": "- a", "extra": "x"}]},
     {"lines": [{"phase": "brief", "section": "Un succès ressemble à", "line": "- À préciser : x"}]},
-    {"skip": {"phase": "exigences", "section": "Fonctionnelles", "line": "> Sans objet"}},
+    {"skip": {"phase": "exigences", "section": "Fonctionnelles", "line": "> À compléter — sans objet d'après l'entretien (à confirmer)"}},
     {"skip": {"phase": "brief", "section": "Un succès ressemble à", "line": "- REQ-001 : x"}},
 ])
 def test_a_malformed_trace_in_the_state_is_refused(project: Path, bad: dict[str, Any]) -> None:

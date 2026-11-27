@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.cadrage import DEFAULT_CHANTIER, NOT_APPLICABLE, PHASES, PLACEHOLDER, cadrage_dir
+from grimoire.core.cadrage import DEFAULT_CHANTIER, PHASES, PLACEHOLDER, cadrage_dir
 from grimoire.core.regular_file import open_regular
 from grimoire.missions.request_kind import KIND_PROFILES, RequestKind, parse_kind
 
@@ -45,6 +45,9 @@ STATES: tuple[str, ...] = ("ouvert", "couvert", "ecarte")
 MAX_STATE_BYTES = 1_048_576
 _SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 UNKNOWN_PREFIX = "À valider (je ne sais pas) : "
+#: Ce qu'un « sans objet » de l'entretien écrit à la place du gabarit. Il commence par le gabarit (``PLACEHOLDER``) :
+#: le gate de ``cadrage check`` l'ignore donc déjà (la rubrique reste « à compléter » jusqu'à confirmation humaine).
+NOT_APPLICABLE = f"{PLACEHOLDER} sans objet d'après l'entretien"
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,7 +423,8 @@ def answer(
     if skip:
         # La rubrique de l'angle est marquée « Sans objet » à sa place (le gabarit s'efface), le brainstorm reste net.
         rec.update(state="ecarte", reason=text)
-        marker = NOT_APPLICABLE if text.rstrip(". ").lower() == "sans objet" else f"{NOT_APPLICABLE} — {text}"
+        reason = "" if text.rstrip(". ").lower() == "sans objet" else f" : {text}"
+        marker = f"{NOT_APPLICABLE}{reason} (à confirmer)"
         phase_id, section = angle.phase, angle.section
         filename = next(p.filename for p in PHASES if p.id == phase_id)
         free = not _section_has_content(target / filename, section)
