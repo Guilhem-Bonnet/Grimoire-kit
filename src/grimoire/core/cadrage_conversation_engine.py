@@ -394,7 +394,10 @@ class Garde:
 
     def __init__(self, moteur: Any, *, delai_s: float = DELAI_MOTEUR_S, repli: MoteurSansModele | None = None,
                  rejeu: dict[tuple[str, str], Any] | None = None) -> None:
-        self.moteur = moteur
+        #: Le moteur sans modèle est du programme : le gardien en construit LUI-MÊME une instance neuve (une instance fournie
+        #: peut avoir une méthode remplacée) ; seul ce moteur interne est cru sur le drapeau de troncature.
+        self.interne = type(moteur) is MoteurSansModele
+        self.moteur = MoteurSansModele() if self.interne else moteur
         self.delai_s = delai_s
         self.repli = repli or MoteurSansModele()
         self.notes: list[str] = []
@@ -500,7 +503,7 @@ class Garde:
                     self.notes.append("extraire_elements : un élément hors cadre (rubrique inconnue) est refusé")
                     continue
                 try:  # le drapeau de coupe n'est cru que du moteur du programme : un autre moteur ne coupe pas « pour » lui
-                    cut = item.tronque is True and type(self.moteur) is MoteurSansModele
+                    cut = item.tronque is True and self.interne
                     kept.append(ElementExtrait(clean_text(item.texte, MAX_ELEMENT_CHARS, what="élément"), item.rubrique, cut))
                 except ConversationError as exc:
                     self.notes.append(f"extraire_elements : un élément est refusé ({exc})")

@@ -42,11 +42,11 @@ __all__ = [
     "Tour",
     "angle_pour",
     "clean_text",
+    "confirmable_en_groupe",
     "mots_de_l_humain",
     "parse_date",
     "rubrique_key",
     "rubrique_ok",
-    "suivie_d_une_restriction",
 ]
 
 SCHEMA = 1
@@ -68,7 +68,8 @@ GESTES_TOUR: tuple[str, ...] = (
 MAX_TURNS = 500
 #: Au-delà, la conversation se termine d'elle-même en le disant (il reste de la place pour ses dernières paroles).
 PLEINE_A = MAX_TURNS - 3
-ORIGINES: tuple[str, ...] = ("humain", "moteur")
+#: ``document`` : le texte a été relu dans le fichier de phase par le programme (reprise après panne), ni dit ni reformulé.
+ORIGINES: tuple[str, ...] = ("humain", "moteur", "document")
 MAX_TURN_CHARS = 4000
 MAX_BOT_CHARS = 1500
 MAX_ELEMENTS = 200
@@ -169,8 +170,6 @@ _RESTRICTIONS = frozenset({"ne", "n", "pas", "jamais", "aucun", "aucune", "aucun
                            "interdites"})
 _RESTRICTIONS_EXPRESSIONS = ("a l exception", "en dehors de", "a part", "pas question", "hors de", "au lieu de",
                              "a condition", "seulement si", "a l exclusion")
-#: Une proposition qui COMMENCE ainsi restreint ou s'oppose à ce qui précède ; une qui CONTIENT « exclu » ou « interdit » aussi.
-_DEBUTS_DE_RESTRICTION = ("sauf", "mais", "pas", "hors", "excepte", "sans", "a l exclusion", "a condition", "seulement si")
 
 
 def _restreint(reste: str) -> bool:
@@ -184,20 +183,21 @@ def _propositions(tour: str) -> list[str]:
     return [p for p in (_plat(m) for m in _FIN_DE_PROPOSITION.split(tour)) if p]
 
 
-def suivie_d_une_restriction(element: str, tour: str, *, tronque: bool = False) -> bool:
-    """Une proposition de l'humain reprise par ``element`` est-elle suivie, dans le même tour, d'une restriction ou d'une opposition ?
+def confirmable_en_groupe(elements: list[tuple[str, bool]], tour: str) -> bool:
+    """Les éléments tirés de ce tour peuvent-ils se confirmer par le « oui » d'un groupe ?
 
-    Une proposition suivante qui commence par « sauf », « mais », « pas », « hors », « excepté », « à l'exclusion »,
-    « à condition », « seulement si » ou « sans », ou qui contient « exclu » ou « interdit », peut retirer ce que la première
-    accordait : l'élément ne se confirme alors pas en groupe (dans le doute : individuel).
+    Règle simple et sûre, sans liste de mots : oui seulement si le tour ne contient QUE ces éléments, c'est-à-dire si l'un
+    d'eux est le tour entier, ou si chaque proposition du tour est elle-même un de ces éléments. Dès qu'une autre
+    proposition du tour n'est pas dans le groupe (« Sauf les bots », « Uniquement en lecture », « Jamais le week-end »…),
+    elle peut retirer ou restreindre ce que les autres accordent : confirmation individuelle. ``(texte, tronque)`` : un
+    élément tronqué par le programme couvre la proposition dont il est le début.
     """
-    wanted = _plat(element.rstrip("…").rstrip() if tronque else element)
+    whole = _plat(tour)
+    wanted = [(_plat(t.rstrip("…").rstrip() if cut else t), cut) for t, cut in elements]
+    if any(w == whole for w, _cut in wanted):
+        return True
     props = _propositions(tour)
-    start = next((i for i, p in enumerate(props) if p == wanted or (tronque and p.startswith(wanted + " "))), None)
-    if start is None:
-        return False
-    return any(any(p == d or p.startswith(d + " ") for d in _DEBUTS_DE_RESTRICTION) or "exclu" in p or "interdit" in p
-               for p in props[start + 1:])
+    return bool(props) and all(any(p == w or (cut and p.startswith(w + " ")) for w, cut in wanted) for p in props)
 
 
 def mots_de_l_humain(element: str, tour: str, *, tronque: bool = False) -> bool:

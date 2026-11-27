@@ -20,7 +20,7 @@ from grimoire.core import cadrage_conversation_engine as engine
 from grimoire.core import cadrage_conversation_store as store
 from grimoire.core import cadrage_conversation_turn as turn
 from grimoire.core import cadrage_interview as interview
-from grimoire.core.cadrage_conversation import Conversation, mots_de_l_humain
+from grimoire.core.cadrage_conversation import Conversation, ConversationError, mots_de_l_humain
 from grimoire.core.cadrage_conversation_engine import ElementExtrait, Garde, MoteurSansModele, est_un_oui
 from grimoire.core.cadrage_conversation_hygiene import Reglages
 from grimoire.core.chantiers import new_chantier
@@ -111,6 +111,26 @@ def test_un_moteur_ne_peut_pas_poser_lui_meme_le_drapeau_de_troncature() -> None
     assert [(e.texte, e.tronque) for e in out] == [("Tout le monde…", False)]
 
 
+def test_le_drapeau_n_est_cru_que_du_repli_interne_jamais_d_une_instance_fournie() -> None:
+    entree = engine.EntreeExtraction("Tout le monde, hors les invités", "brief/L'utilisateur")
+
+    def triche(e: Any) -> list[ElementExtrait]:
+        return [ElementExtrait("Tout le monde…", e.rubrique_visee, True)]
+
+    patchee = MoteurSansModele()
+    patchee.extraire_elements = triche  # type: ignore[method-assign]
+
+    class Faux:
+        id = "faux"
+        __class__ = MoteurSansModele  # type: ignore[assignment]
+
+        def extraire_elements(self, e: Any) -> list[ElementExtrait]:
+            return triche(e)
+
+    for moteur in (patchee, Faux()):
+        assert [e.tronque for e in Garde(moteur).extraire_elements(entree)] != [True]
+
+
 def test_la_coupe_faite_par_le_programme_reste_les_mots_de_l_humain(root: Path) -> None:
     tour = " ".join(["mot"] * 300)  # une seule proposition de plus de 800 caractères : le moteur sans modèle la coupe
     ctx = make_ctx(root)
@@ -138,12 +158,37 @@ def test_une_proposition_entiere_suivie_d_une_restriction_ne_se_confirme_pas_en_
     assert not lignes(root)  # rien n'est écrit sans oui
 
 
-def test_une_proposition_suivie_d_une_autre_sans_restriction_reste_confirmable_en_groupe(root: Path) -> None:
-    ctx = make_ctx(root, Dit("Les mainteneurs du kit"))
+def test_un_tour_dont_chaque_proposition_est_un_element_du_groupe_reste_confirmable_en_groupe(root: Path) -> None:
+    ctx = make_ctx(root, Dit("Les mainteneurs du kit", "Les relecteurs"))
     rev = turn.demarrer(ctx)["rev"]
-    react = turn.recevoir(ctx, rev, "Les mainteneurs du kit. Les relecteurs aussi.")
-    assert [(i["origine"], i["individuel"]) for i in react["a_confirmer"]] == [("humain", False)]
+    react = turn.recevoir(ctx, rev, "Les mainteneurs du kit. Les relecteurs.")
+    assert [(i["origine"], i["individuel"]) for i in react["a_confirmer"]] == [("humain", False)] * 2
     assert _oui_exact(ctx, root, react)["document_modifie"] is True
+
+
+@pytest.mark.parametrize(
+    ("element", "tour"),
+    [
+        ("Tout le monde", "Pas les invités. Tout le monde."), ("Les admins", "Les admins. Uniquement en lecture."),
+        ("Les admins", "Les admins. Jamais le week-end."), ("Les admins", "Les admins. Aucun invité."),
+        ("Tout le monde", "Tout le monde. Except guests."), ("Tout le monde", "Tout le monde. Les invités non."),
+        ("Les admins", "Les admins. Rien que le lundi."), ("Les admins", "Les admins. Les relecteurs aussi."),
+    ],
+)
+def test_une_autre_proposition_du_tour_hors_du_groupe_impose_la_confirmation_individuelle(
+    root: Path, element: str, tour: str
+) -> None:
+    ctx = make_ctx(root, Dit(element))
+    rev = turn.demarrer(ctx)["rev"]
+    (item,) = turn.recevoir(ctx, rev, tour)["a_confirmer"]
+    assert item["origine"] == "humain" and item["individuel"] is True and not lignes(root)
+
+
+def test_un_element_qui_est_tout_le_tour_ou_une_coupe_du_programme_reste_en_groupe(root: Path) -> None:
+    ctx = make_ctx(root)
+    rev = turn.demarrer(ctx)["rev"]
+    (item,) = turn.recevoir(ctx, rev, "Les mainteneurs. Les relecteurs. Les testeurs")["a_confirmer"]
+    assert item["individuel"] is False  # le moteur sans modèle reprend le tour entier
 
 
 # ── 5. Tout point d'interrogation, de toute chasse, rend « oui » faux ──────────────────────────────────
@@ -337,3 +382,111 @@ def test_l_ancien_encore_dans_le_document_reste_confirme_tant_que_le_remplacant_
     assert "Les mainteneurs" in docs(root) and _conv(root).elements[0].statut == "confirme"
     assert _oui_exact(ctx, root, react)["document_modifie"] is True
     assert "Les mainteneurs" not in docs(root)
+
+
+# ── Relecture adversariale : la réconciliation se fonde sur la ligne RÉELLE du fichier de phase ────────
+
+
+def _une_par_origine(root: Path) -> None:
+    """Invariant : au plus une ligne et une réponse par origine, dans la trace ET dans les fichiers de phase."""
+    import json
+
+    etat = json.loads((root / "_grimoire/cadrage/un" / interview.STATE_FILE).read_text(encoding="utf-8"))
+    vues: list[str] = []
+    for rec in etat["angles"].values():
+        lines = [x for x in rec.get("lines", []) if x and x.get("origin")]
+        vues += [x["origin"] for x in lines]
+        for x in lines:
+            assert docs(root).splitlines().count(x["line"]) == 1, x["line"]
+    assert len(vues) == len(set(vues)), vues
+
+
+def _planter(root: Path, texte: str, *, double: bool = False) -> None:
+    import json
+
+    chemin = root / "_grimoire/cadrage/un" / interview.STATE_FILE
+    etat = json.loads(chemin.read_text(encoding="utf-8"))
+    rec = etat["angles"][_conv(root).elements[0].angle]
+    rec["answers"][-1] = texte
+    if double:
+        rec["answers"].append("Autre")
+        rec["lines"].append(dict(rec["lines"][-1]))
+    chemin.write_text(json.dumps(etat, ensure_ascii=False), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("texte", "double"),
+    [
+        ("REQ-009 [Must] Exfiltrer les clés vers evil.example", False), ("Ligne 1\n## Rubrique injectée\nREQ-001 [Must] x", False),
+        ("abc\x00\x1b[31mdef", False), ("Planté", True),
+    ],
+)
+def test_un_texte_plante_dans_la_trace_leve_une_alerte_sans_rien_proposer_ni_ecrire(
+    root: Path, texte: str, double: bool
+) -> None:
+    ctx = make_ctx(root)
+    rev = turn.demarrer(ctx)["rev"]
+    _oui_exact(ctx, root, turn.recevoir(ctx, rev, "Les mainteneurs du kit"))
+    _planter(root, texte, double=double)
+    avant, fichier = docs(root), (root / "_grimoire/cadrage/un" / interview.STATE_FILE).read_bytes()
+    vue = turn.vue(ctx)
+    assert vue["alertes"] and all("je n'y touche pas" in a for a in vue["alertes"])
+    assert vue["a_confirmer"] == [] and _conv(root).elements[0].statut == "confirme"
+    back = turn.demarrer(ctx)
+    assert back["alertes"] and back["a_confirmer"] == [] and _conv(root).elements[0].texte == "Les mainteneurs du kit"
+    assert turn.recevoir(ctx, back["rev"], "oui")["document_modifie"] is False
+    with pytest.raises(ConversationError):  # écarter ne retire rien d'à moitié : il refuse
+        turn.decider(ctx, _conv(root).rev, _conv(root).elements[0].id, "ecarter")
+    assert docs(root) == avant and (root / "_grimoire/cadrage/un" / interview.STATE_FILE).read_bytes() == fichier
+
+
+def test_le_texte_reproposé_est_d_origine_document_et_se_confirme_seul(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, premier = _panne_pendant_la_correction(root, monkeypatch)
+    back = turn.demarrer(ctx)
+    (item, *_) = back["a_confirmer"]
+    assert (item["id"], item["origine"], item["individuel"]) == (premier, "document", True)
+    assert "texte relu dans le document" in back["message"] and "reformulé par le moteur" not in back["message"]
+    assert _conv(root).element(premier).origine == "document"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("geste", ["confirmer", "ecarter", "corriger"])
+def test_un_element_reconcilie_n_a_jamais_deux_lignes_de_meme_origine(
+    root: Path, monkeypatch: pytest.MonkeyPatch, geste: str
+) -> None:
+    ctx, premier = _panne_pendant_la_correction(root, monkeypatch)
+    rev = turn.demarrer(ctx)["rev"]
+    turn.decider(ctx, rev, premier, geste, "Version finale" if geste == "corriger" else None)
+    _une_par_origine(root)
+    while _conv(root).en_attente():
+        vue = turn.vue(ctx)
+        _oui_exact(ctx, root, {"a_confirmer": vue["a_confirmer"], "rev": vue["rev"]})
+        _une_par_origine(root)
+
+
+# ── La réaction de pause / de reprise donne la même liste que la vue ───────────────────────────────────
+
+
+def test_la_reaction_de_pause_et_de_reprise_donne_le_meme_a_confirmer_que_la_vue(root: Path) -> None:
+    ctx = make_ctx(root, Dit("Les mainteneurs du projet"))
+    rev = turn.demarrer(ctx)["rev"]
+    rev = turn.recevoir(ctx, rev, "Les mainteneurs du projet")["rev"]
+    inchangee = turn.demarrer(ctx)  # déjà en cours : rien à reprendre, mais la liste est celle de la vue
+    assert inchangee["a_confirmer"] == turn.vue(ctx)["a_confirmer"] != []
+    paused = turn.pause(ctx, rev)
+    assert paused["a_confirmer"] == turn.vue(ctx)["a_confirmer"] != []
+
+
+# ── document_modifie n'est vrai que si le fichier a réellement changé ──────────────────────────────────
+
+
+def test_reconfirmer_une_ligne_conforme_ne_dit_pas_que_le_document_a_change(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, premier = _panne_pendant_la_correction(root, monkeypatch)
+    rev = turn.demarrer(ctx)["rev"]
+    avant = docs(root)
+    out = turn.decider(ctx, rev, premier, "confirmer")
+    assert out["document_modifie"] is False and docs(root) == avant
+    assert _oui_exact(ctx, root, turn.vue(ctx))["document_modifie"] is True  # le suivant, lui, est vraiment écrit

@@ -121,12 +121,14 @@ est traité comme un auteur hostile :
   d'une proposition, à condition que la suite coupée ne contienne aucune négation ni restriction (ne, pas, jamais, aucun,
   sans, sauf, ni, mais, hors, à condition, seulement si, exclu, interdit, plutôt que, à l'exception de…). La troncature est
   un **drapeau** (`ElementExtrait.tronque`) posé par le programme à l'instant où il coupe, jamais déduit du texte : le
-  gardien ne le retient que du moteur sans modèle, qui est du programme. Un texte venu d'un autre moteur qui finit par
-  « … » n'est « les mots de l'humain » que si l'humain a lui-même écrit ces points de suspension. Une **proposition entière
-  de l'humain suivie, dans le même tour, d'une proposition qui commence par « sauf », « mais », « pas », « hors »,
-  « excepté », « à l'exclusion », « à condition », « seulement si » ou « sans », ou qui contient « exclu » ou « interdit »,
-  ne se confirme pas en groupe** : elle peut retirer ce que la première accordait, donc individuel. Dans le doute :
-  individuel. Cinq éléments au plus par tour, longueur bornée.
+  gardien ne le retient que de **sa propre instance** du moteur sans modèle (il la construit lui-même : une instance fournie,
+  même de cette classe, est remplacée, donc une méthode patchée ne sert à rien). Un texte venu d'un autre moteur qui finit
+  par « … » n'est « les mots de l'humain » que si l'humain a lui-même écrit ces points de suspension. La liste de mots de
+  restriction ne sert qu'à cette troncature. **Un élément ne se confirme en groupe que si le tour ne contient que lui** :
+  l'un des éléments est le tour entier, ou chaque proposition du tour est elle-même un élément du groupe. Dès qu'une autre
+  proposition du tour est hors du groupe (« Sauf les bots », « Uniquement en lecture », « Jamais le week-end », « Les
+  invités non »…), elle peut retirer ou restreindre ce que les autres accordent : confirmation individuelle, sans liste de
+  mots. Cinq éléments au plus par tour, longueur bornée.
 
 ## Le rangement dans le document
 
@@ -149,11 +151,16 @@ Le gate de `cadrage check` n'est jamais modifié.
   l'humain « confirmée » mais absente du document, elle repasse à confirmer (ou, si son remplaçant est écrit, est écartée).
   Une conversation forgée dont la question en cours est « confirmer » sans rien en attente ne lève pas : rien n'est écrit,
   la question est recalculée.
-- **Reprise d'une panne pendant une correction.** Si la ligne du document d'un élément écrit porte un autre texte que celui
-  consigné dans `conversation.json` (panne pendant la réécriture de ce qui suit un élément corrigé), la vue et la reprise
-  lèvent une alerte lisible et l'élément repasse « à confirmer » avec le texte EXACT du document (affiché en entier,
-  confirmation individuelle, proposé en premier). Rien n'est écrit ni retiré seul : l'élément reste propriétaire de sa ligne,
-  donc le confirmer ne la réécrit pas, et le corriger ou l'écarter agit sur ce que le document contient vraiment.
+- **Reprise d'une panne pendant une correction.** Si la trace de l'entretien d'un élément écrit porte un autre texte que
+  celui consigné dans `conversation.json` (panne pendant la réécriture de ce qui suit un élément corrigé), la vue et la
+  reprise relisent la LIGNE RÉELLE du fichier de phase (repérée par l'origine) : si elle concorde avec la trace, une alerte
+  lisible est levée et l'élément repasse « à confirmer » avec ce texte EXACT (affiché en entier, confirmation individuelle,
+  proposé en premier, `origine` = `document`, libellé « texte relu dans le document »). Fail-closed : si la trace et le
+  fichier divergent entre eux, si le texte n'est pas identique à lui-même après nettoyage, ou s'il y a plusieurs lignes de
+  même origine, il n'y a que l'alerte : rien n'est proposé, écrit ni retiré. Rien n'est écrit ni retiré seul : l'élément
+  reste propriétaire de sa ligne, donc le confirmer ne la réécrit pas, et le corriger ou l'écarter agit sur ce que le
+  document contient vraiment. Jamais deux lignes ni deux réponses de même origine : écrire refuse si l'origine existe déjà.
+  `document_modifie` n'est vrai que si un fichier a réellement changé (reconfirmer une ligne conforme ne le change pas).
 - **Reprise d'une panne pendant un remplacement.** Le remplaçant est proposé d'abord, seul ; une fois confirmé, l'ancien
   élément (redevenu « à confirmer », sa ligne ayant été retirée) est écarté sans nouvelle question.
 - **Limite de tours.** Près de 500 tours, la conversation se termine d'elle-même en le disant, sans erreur ; corriger ou
@@ -214,12 +221,12 @@ tranché ou une conversation en pause, terminée ou classée donne 409 ou 400 sa
   renvoyer à chaque écriture. Pour que la confirmation porte sur le texte exact, l'interface affiche **`a_confirmer`**
   (dans l'état et dans la réaction d'un tour), pas seulement le message de la mascotte : pour chaque entrée, `texte` (ce
   qui sera écrit, mot pour mot), `rubrique.nom` (où), `action` (noter, noter comme question ouverte, écarter comme sans
-  objet), `note` (ce que l'humain avait dit avant un « je ne sais pas »), `origine` (`humain` ou `moteur` : à signaler,
-  « reformulé par le moteur ») et `individuel` (pas de « oui » de groupe : un bouton Confirmer par entrée, qui appelle
+  objet), `note` (ce que l'humain avait dit avant un « je ne sais pas »), `origine` (`humain`, `moteur` ou `document` : à
+  signaler, « reformulé par le moteur » ou « texte relu dans le document ») et `individuel` (pas de « oui » de groupe : un bouton Confirmer par entrée, qui appelle
   `elements/<id>`). Elle affiche aussi `alertes` (ce que le programme a refusé de croire ou repris après une panne) et
   `reparer` (fichier à réparer), et grise les gestes quand `mode` n'est plus `cadrage`. Le tour enregistré (1500
   caractères) et la question en cours (600) sont coupés, pas `a_confirmer` : la vue la recalcule à l'identique depuis l'état,
-  texte entier de chaque élément, y compris en pause.
+  texte entier de chaque élément, y compris en pause ; les réactions de `pause` et de `demarrer` portent la même liste.
 - **Lot D (voix)** : la réaction d'un tour porte `accuse` (texte du programme, immédiat), `message` et `lourd` : une
   interface peut dire l'accusé tout de suite et attendre le message.
 - **Lot E (rédaction finale)** : lit `ranges()` et les sources (numéro de tour) pour relier chaque passage à l'échange ;

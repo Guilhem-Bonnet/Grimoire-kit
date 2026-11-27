@@ -58,9 +58,9 @@ from grimoire.core.cadrage_conversation import (
     Tour,
     angle_pour,
     clean_text,
+    confirmable_en_groupe,
     mots_de_l_humain,
     rubrique_key,
-    suivie_d_une_restriction,
 )
 from grimoire.core.cadrage_conversation_engine import (
     EntreeClassement,
@@ -268,7 +268,8 @@ def _a_confirmer_vue(conv: Conversation, cadre: Cadre, etape: Etape) -> list[dic
 
 def _liste_exacte(items: list[dict[str, Any]]) -> str:
     shown = [f"« {i['texte']} » ({i['action']} : {i['rubrique']['nom']}"
-             + (", reformulé par le moteur" if i["origine"] == "moteur" else "") + ")" for i in items]
+             + {"moteur": ", reformulé par le moteur", "document": ", texte relu dans le document"}.get(i["origine"], "") + ")"
+             for i in items]
     return "; ".join(shown)  # tout le groupe, jamais « et N autres » : le groupe est borné à ce qui s'affiche
 
 
@@ -342,7 +343,7 @@ def _conclure(ctx: Contexte, conv: Conversation, accuse: str, lourd: bool, modif
         "accuse": accuse, "message": message, "lourd": lourd, "rev": conv.rev, "document_modifie": modifie,
         "etape": {"kind": etape.kind, "pourquoi": etape.pourquoi, "angle": etape.angle, "manque": list(etape.manque)},
         "question": None if conv.question is None else _question_public(conv.question),
-        "a_confirmer": _a_confirmer(conv, etape.ids) if etape.kind == "confirmer" else [],
+        "a_confirmer": _a_confirmer_vue(conv, cadre, etape),
         "moteur": {"id": ctx.moteur.id, "degrade": ctx.moteur.degrade, "notes": list(ctx.moteur.notes)},
     }
 
@@ -386,7 +387,7 @@ def _confirmer(ctx: Contexte, conv: Conversation, items: list[Element]) -> bool:
     for item in items:
         item.statut, item.intention = "confirme", "ecrire"
     defaits = _journaliser(ctx, conv, old)  # le journal d'intention : une panne en route est reprise par la trace de l'entretien
-    rangement.ecrire(ctx.root, ctx.slug, conv, items, remplace=old)
+    ecrit = rangement.ecrire(ctx.root, ctx.slug, conv, items, remplace=old)  # vrai seulement si un fichier a changé
     for item in [*items, *defaits]:
         item.intention = ""
         if item.genre == "inconnu":
@@ -395,7 +396,7 @@ def _confirmer(ctx: Contexte, conv: Conversation, items: list[Element]) -> bool:
         old.statut = "ecarte"
     if depose is not None:
         depose.statut = "ecarte"
-    return any(i.ecrit for i in items) or old is not None
+    return ecrit
 
 
 def _proposer(conv: Conversation, ctx: Contexte, tour: Tour, texte: str, cible: tuple[str, str], angle: str, label: str,
@@ -406,11 +407,13 @@ def _proposer(conv: Conversation, ctx: Contexte, tour: Tour, texte: str, cible: 
     confirment seuls (``individuel``) ; aucun ne marque un angle couvert tant qu'il n'est pas confirmé.
     """
     made: list[Element] = []
-    for x in ctx.moteur.extraire_elements(EntreeExtraction(texte, rubrique_key(*cible), mode=conv.mode)):
+    extraits = ctx.moteur.extraire_elements(EntreeExtraction(texte, rubrique_key(*cible), mode=conv.mode))
+    # Une autre proposition du tour hors du groupe peut retirer ou restreindre ce qu'il accorde : confirmation individuelle.
+    groupable = confirmable_en_groupe([(x.texte, x.tronque) for x in extraits], texte)
+    for x in extraits:
         phase, section = _KEY[x.rubrique]
         origine = "humain" if mots_de_l_humain(x.texte, texte, tronque=x.tronque) else "moteur"
-        # Une restriction dans la proposition suivante du même tour peut retirer ce que celle-ci accordait : seul, dans le doute.
-        seul = (phase, section) != cible or origine == "moteur" or suivie_d_une_restriction(x.texte, texte, tronque=x.tronque)
+        seul = (phase, section) != cible or origine == "moteur" or not groupable
         made.append(conv.new_element(
             "element", x.texte, phase, section, angle_pour(phase, section, angle), tour.n, question=label,
             remplace=remplace if not made else "", origine=origine, individuel=seul))
@@ -556,10 +559,11 @@ def _demarrer(ctx: Contexte) -> dict[str, Any]:
         out = _conclure(ctx, conv, "", False, False)
         out.update(cree=False, resume=resume(conv, _cadre(ctx)))
         return out
+    etape = prochaine_etape(conv, cadre)
     return {"cree": False, "resume": resume(conv, cadre), "rev": conv.rev, "document_modifie": False,
-            "etape": {"kind": prochaine_etape(conv, cadre).kind}, "moteur": {"id": ctx.moteur.id, "degrade": False, "notes": []},
+            "etape": {"kind": etape.kind}, "moteur": {"id": ctx.moteur.id, "degrade": False, "notes": []},
             "question": None if conv.question is None else _question_public(conv.question), "accuse": "", "message": "",
-            "lourd": False, "a_confirmer": []}
+            "lourd": False, "a_confirmer": _a_confirmer_vue(conv, cadre, etape)}  # la même liste que la vue
 
 
 def recevoir(ctx: Contexte, rev: int, texte: Any) -> dict[str, Any]:
@@ -618,12 +622,14 @@ def _decider(ctx: Contexte, rev: int, element_id: str, decision: str, texte: Any
             rangement.corriger(ctx.root, ctx.slug, conv, el, new)
             for d in defaits:
                 d.intention = ""
+            modifie = True
+            el.origine = "humain"  # c'est la frappe de l'humain, même si le texte relu venait du document
         else:
             el.texte, el.origine, el.individuel = new, "humain", False  # c'est la frappe de l'humain : ses mots exacts
-            _confirmer(ctx, conv, [el])
+            modifie = _confirmer(ctx, conv, [el])
         el.avant = [*el.avant, old][-10:]
         el.statut = "corrige"
-        return _conclure(ctx, conv, "C'est corrigé.", False, True)
+        return _conclure(ctx, conv, "C'est corrigé.", False, modifie)
     if decision == "ecarter":
         if el.statut == "ecarte":
             raise ConversationConflictError("cet élément est déjà écarté", "deja-tranche")
