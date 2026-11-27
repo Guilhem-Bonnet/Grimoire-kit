@@ -60,6 +60,7 @@ import { agoText, createLive, refreshSince } from './live.js';
 import { createChat } from './chat.js';
 import { createNotify } from './notify.js';
 import { createAutopilot } from './autopilot.js';
+import { focusForPref, focusStep, readWidthPref, writeWidthPref } from './spaces/atelier-layout-logic.js';
 
 // Fin du premier montage d'espace : la première lecture du compteur d'attention
 // l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
@@ -896,6 +897,38 @@ function syncDetail() {
 function toggleFocus() {
   root.dataset.focus = root.dataset.focus === 'on' ? 'off' : 'on';
   applyPreferences();
+}
+
+// L'Atelier de spec prend la toile : à l'arrivée il pose le plein écran (`data-focus`, le même que ⇧⌘F, qui replie
+// panneaux et dock sans toucher à leur état mémorisé), au départ il rend celui d'avant. Le choix « rouvrir les
+// panneaux » fait dans l'Atelier est mémorisé par navigateur et respecté aux arrivées suivantes.
+let focusHeld = null;
+
+function setFocus(value) {
+  if (root.dataset.focus === value) return;
+  root.dataset.focus = value;
+  applyPreferences();
+}
+
+function syncAtelierFocus() {
+  const inAtelier = (SECTIONS.get(current)?.space.id ?? null) === 'atelier';
+  let pref = null;
+  try { pref = readWidthPref(localStorage); } catch { /* sans stockage : pleine largeur */ }
+  const step = focusStep({ inAtelier, pref, held: focusHeld, focus: root.dataset.focus });
+  focusHeld = step.held;
+  setFocus(step.focus);
+}
+
+/** Vrai tant que l'Atelier est en pleine largeur (panneaux repliés). */
+export function atelierIsWide() {
+  return root.dataset.focus === 'on';
+}
+
+/** Bouton de l'Atelier : replie (`wide`) ou rouvre (`panels`) les panneaux, et s'en souvient. */
+export function setAtelierWide(wide) {
+  try { writeWidthPref(localStorage, wide ? 'wide' : 'panels'); } catch { /* sans stockage */ }
+  if (focusHeld === null) syncAtelierFocus();
+  setFocus(focusForPref(wide ? 'wide' : 'panels'));
 }
 
 // ── Panneaux à trois états : collapsed, peek, pinned ────────────────────────
@@ -2253,6 +2286,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   if (openMenu) openMenu.setOpen(false);
   live.clear();
   restorePanelsForSpace();
+  syncAtelierFocus();
   // Une navigation venue de l'URL ne la réécrit qu'à l'identique (forme
   // canonique d'un ancien `#piloter`) ; un clic, lui, crée une entrée
   // d'historique — « Précédent » ramène à l'espace d'avant.

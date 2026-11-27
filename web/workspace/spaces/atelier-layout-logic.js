@@ -40,6 +40,45 @@ export function initialOpen(pref, wide) {
   return Boolean(wide);
 }
 
+// ── Pleine largeur : l'Atelier prend la toile (même mécanisme que « Plein écran », `data-focus`) ──────────
+
+export const WIDTH_PREF_KEY = 'grimoire.atelier.panneaux';
+
+/** `'panels'` (la personne a rouvert les panneaux dans l'Atelier), `'wide'` (replié, choix explicite) ou null. */
+export function readWidthPref(storage) {
+  try {
+    const value = storage ? storage.getItem(WIDTH_PREF_KEY) : null;
+    return value === 'panels' || value === 'wide' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Vrai si le choix a pu être mémorisé (par navigateur, pas par chantier) ; la mise en page marche de même sans. */
+export function writeWidthPref(storage, mode) {
+  try {
+    if (!storage || (mode !== 'panels' && mode !== 'wide')) return false;
+    storage.setItem(WIDTH_PREF_KEY, mode);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Valeur de `data-focus` que réclame un choix : sans choix, l'Atelier s'ouvre pleine largeur. */
+export const focusForPref = (pref) => (pref === 'panels' ? 'off' : 'on');
+
+/**
+ * Une arrivée dans un espace, ou un départ : `{ focus, held }`. `held` garde le plein écran d'avant l'Atelier (null
+ * hors Atelier) ; en sortir le restitue tel quel. Un changement de rubrique dans l'Atelier ne touche à rien.
+ */
+export function focusStep({ inAtelier, pref, held, focus }) {
+  const current = focus === 'on' ? 'on' : 'off';
+  if (!inAtelier) return held === null || held === undefined ? { focus: current, held: null } : { focus: held, held: null };
+  if (held !== null && held !== undefined) return { focus: current, held };
+  return { focus: focusForPref(pref), held: current };
+}
+
 const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
 
 /**

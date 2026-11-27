@@ -123,6 +123,14 @@ def flag_off(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     yield from _serve(root, tmp_path_factory, {})
 
 
+def _show_dock(page: Page) -> None:
+    """L'Atelier s'ouvre en pleine largeur (dock replié) : le bouton « Pleine largeur » rouvre les panneaux pour lire le fil du chat."""
+    page.evaluate(
+        "() => { if (document.documentElement.dataset.focus === 'on') document.querySelector(\"[data-role='atelier-largeur']\").click(); }"
+    )
+    page.evaluate("() => window.GrimoireWorkspace.setAtelier(true)")
+
+
 def _open(browser: Browser, url: str, hash_: str, viewport: tuple[int, int] = (1440, 900)) -> Iterator[Page]:
     context = browser.new_context(viewport={"width": viewport[0], "height": viewport[1]}, reduced_motion="reduce")
     page = context.new_page()
@@ -168,7 +176,7 @@ def test_parcours_de_l_assistant(
     root, slug = on_root
     for page in _open(browser, with_agent, f"#atelier?chantier={slug}"):
         # Le fil du chat est ouvert d'abord (le flux écoute), puis la page revient sur l'onglet du dock plus bas.
-        page.evaluate("() => window.GrimoireWorkspace.setAtelier(true)")
+        _show_dock(page)
         page.locator("[data-dock-tab='orchestrateur']").click()
         page.wait_for_selector(".chat-input")
         page.evaluate("() => window.GrimoireWorkspace.setAtelier(false)")
@@ -253,7 +261,7 @@ def test_parcours_de_l_assistant(
         _capture(page, "06-suggestion-1440x900")
 
         # 7. Le fil du chat dit le chantier visé.
-        page.evaluate("() => window.GrimoireWorkspace.setAtelier(true)")
+        _show_dock(page)
         page.locator("[data-dock-tab='orchestrateur']").click()
         page.locator(".chat-chantier").first.wait_for(timeout=APPEAR_MS)
         assert "Chantier : Dicter une idée" in page.locator(".chat-chantier").first.inner_text()
@@ -268,7 +276,7 @@ def test_le_chat_libre_porte_le_chantier(browser: Browser, with_agent: str, on_r
     _root, slug = on_root
     before = len(_prompts(agent_log))
     for page in _open(browser, with_agent, f"#atelier?chantier={slug}"):
-        page.evaluate("() => window.GrimoireWorkspace.setAtelier(true)")
+        _show_dock(page)
         page.locator("[data-dock-tab='orchestrateur']").click()
         page.wait_for_selector(".chat-input")
         page.locator(".chat-input").fill("Une remarque libre depuis le chat")
