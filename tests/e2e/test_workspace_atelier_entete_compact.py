@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.tools import workspace_atelier
 
@@ -54,25 +54,27 @@ def test_the_document_starts_high_and_the_help_is_folded(browser: Browser, proje
         # Le titre de la première section et son premier paragraphe se lisent aussi dans le premier écran.
         assert _box(page, ".at-sec h2")["y"] < 340
         # Rien n'a disparu : avancement, détail, étapes, phases, bouton et son état sont tous là.
-        assert "au gabarit" in page.locator("[data-role='avancement']").inner_text()
-        assert page.locator("[data-role='avancement-detail'] summary").is_visible()
-        assert page.locator("[data-role='steps'] li").count() == 4
-        assert page.locator(".at-phase").count() == 5
-        assert "REQ-001" in page.locator("[data-role='live-summary']").inner_text()
-        assert page.locator(SPLIT).is_visible()
+        expect(page.locator("[data-role='avancement']")).to_contain_text("au gabarit", use_inner_text=True)
+        expect(page.locator("[data-role='avancement-detail'] summary")).to_be_visible()
+        expect(page.locator("[data-role='steps'] li")).to_have_count(4)
+        expect(page.locator(".at-phase")).to_have_count(5)
+        expect(page.locator("[data-role='live-summary']")).to_contain_text("REQ-001", use_inner_text=True)
+        expect(page.locator(SPLIT)).to_be_visible()
         for selector in ("[data-role='steps']", ".at-phases", SPLIT, "[data-role='live-summary']"):  # une seule barre
             inside = page.evaluate("([s]) => !!document.querySelector(s).closest('.at-phasebar')", [selector])
             assert inside, selector
         # Aide MOA repliée par défaut, ouverte sur place par son lien court, refermée par le même.
-        assert page.locator(MOA_HELP).count() == 1 and not page.locator(MOA_HELP).is_visible()
+        expect(page.locator(MOA_HELP)).to_have_count(1)
+        expect(page.locator(MOA_HELP)).to_be_hidden()
         why = page.locator(WHY)
-        assert why.is_visible() and why.get_attribute("aria-expanded") == "false"
+        expect(why).to_be_visible()
+        expect(why).to_have_attribute("aria-expanded", "false")
         assert canvas["y"] < sheet["y"]
         why.click()
-        assert why.get_attribute("aria-expanded") == "true"
-        assert "governance.roles.moa" in page.locator(MOA_HELP).inner_text()
+        expect(why).to_have_attribute("aria-expanded", "true")
+        expect(page.locator(MOA_HELP)).to_contain_text("governance.roles.moa", use_inner_text=True)
         why.click()
-        assert not page.locator(MOA_HELP).is_visible()
+        expect(page.locator(MOA_HELP)).to_be_hidden()
 
 
 def test_a_refused_split_opens_the_moa_help(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -80,10 +82,10 @@ def test_a_refused_split_opens_the_moa_help(browser: Browser, project_on: tuple[
     slug = _chantier(root, "Refus ouvre l'aide")
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         _ready(page)
-        assert not page.locator(MOA_HELP).is_visible()
+        expect(page.locator(MOA_HELP)).to_be_hidden()
         page.locator(SPLIT).click(force=True)  # inerte (grisé) : la raison est redite, et l'aide s'ouvre car la MOA est la cause
         page.locator(MOA_HELP).wait_for(state="visible", timeout=APPEAR_MS)
-        assert page.locator(WHY).get_attribute("aria-expanded") == "true"
+        expect(page.locator(WHY)).to_have_attribute("aria-expanded", "true")
 
 
 def test_the_bar_stays_visible_while_scrolling_and_is_keyboard_friendly(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -94,7 +96,8 @@ def test_the_bar_stays_visible_while_scrolling_and_is_keyboard_friendly(browser:
         page.evaluate(f"{CANVAS}.scrollTop = {CANVAS}.scrollHeight")
         bar, canvas = _box(page, ".at-phasebar"), _box(page, "#canvas")
         assert abs(bar["y"] - canvas["y"]) <= 2 and bar["height"] <= 90
-        assert page.locator(SPLIT).is_visible() and page.locator(".at-phase[data-phase='brief']").is_visible()
+        expect(page.locator(SPLIT)).to_be_visible()
+        expect(page.locator(".at-phase[data-phase='brief']")).to_be_visible()
         page.evaluate(f"{CANVAS}.scrollTop = 0")
         # Clavier : retour, détail d'avancement, phases, bouton, lien d'aide, dans l'ordre de lecture ; focus visible.
         order: list[str] = []
@@ -107,8 +110,7 @@ def test_the_bar_stays_visible_while_scrolling_and_is_keyboard_friendly(browser:
         page.locator(WHY).focus()
         page.keyboard.press("Tab")
         page.keyboard.press("Shift+Tab")
-        outline = page.evaluate("() => getComputedStyle(document.activeElement).outlineStyle")
-        assert outline != "none"
+        expect(page.locator(":focus")).not_to_have_css("outline-style", "none")
         page.keyboard.press("Enter")
         page.locator(MOA_HELP).wait_for(state="visible", timeout=APPEAR_MS)
 
@@ -121,14 +123,18 @@ def test_no_horizontal_overflow_on_narrow_widths(browser: Browser, project_on: t
             _ready(page)
             page.locator(WHY).click()
             page.locator("[data-role='avancement-detail'] summary").click()
-            over = page.evaluate(
-                "() => [document.documentElement, document.body, document.getElementById('canvas')]"
-                ".map((n) => n.scrollWidth - n.clientWidth)"
+            # La mise en page se pose en place après l'ouverture des détails : on attend l'état voulu (aucun débordement), le test
+            # échoue si elle ne s'y pose jamais.
+            page.wait_for_function(
+                "() => Math.max(...[document.documentElement, document.body, document.getElementById('canvas')].map((n) => n.scrollWidth - n.clientWidth)) <= 1",
+                timeout=APPEAR_MS,
             )
-            assert max(over) <= 1, f"débordement à {width} px : {over}"
             # Hors de la barre des phases : elle défile (ses pastilles ne tronquent plus leur libellé), son conteneur, lui, ne déborde pas.
-            right = page.evaluate("() => Math.max(...[...document.querySelectorAll('.at-page *:not(.at-phases *)')].map((n) => n.getBoundingClientRect().right))")
-            assert right <= width + 1, f"un élément dépasse à droite à {width} px : {right}"
+            page.wait_for_function(
+                "(w) => Math.max(...[...document.querySelectorAll('.at-page *:not(.at-phases *)')].map((n) => n.getBoundingClientRect().right)) <= w + 1",
+                arg=width,
+                timeout=APPEAR_MS,
+            )
 
 
 def test_capture_entete_compact(browser: Browser, project_on: tuple[str, Path]) -> None:

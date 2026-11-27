@@ -18,7 +18,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.core import atelier_suggestions as store
 from grimoire.core.chantiers import new_chantier
@@ -112,15 +112,15 @@ def test_accept_rewrites_only_the_block(browser: Browser, project_on: tuple[str,
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         card = page.locator(f"[data-sugg='{made['id']}']")
         card.wait_for(timeout=APPEAR_MS)
-        text = card.inner_text()
-        assert "Simplificateur" in text and "dire où ça tourne" in text
-        assert "Bouton maintenu pour parler." in card.locator("del").inner_text()
-        assert "transcription locale" in card.locator("ins").inner_text()
-        assert page.locator("[data-role='doc-sugg-count']").inner_text().strip() == "1 suggestion en attente."
+        expect(card).to_contain_text("Simplificateur", use_inner_text=True)
+        expect(card).to_contain_text("dire où ça tourne", use_inner_text=True)
+        expect(card.locator("del")).to_contain_text("Bouton maintenu pour parler.", use_inner_text=True)
+        expect(card.locator("ins")).to_contain_text("transcription locale", use_inner_text=True)
+        expect(page.locator("[data-role='doc-sugg-count']")).to_have_text("1 suggestion en attente.", use_inner_text=True)
         assert path.read_bytes() == before  # le dépôt et l'affichage n'ont rien écrit
         card.get_by_role("button", name="Accepter").click()
         page.locator("[data-role='atelier-status']", has_text="Suggestion acceptée").wait_for(timeout=APPEAR_MS)
-        assert page.locator(f"[data-sugg='{made['id']}']").count() == 0
+        expect(page.locator(f"[data-sugg='{made['id']}']")).to_have_count(0)
     after = path.read_bytes()
     assert after == before.replace(PISTES.encode(), b"- Bouton maintenu pour parler, transcription locale.\n- Repli sur le navigateur.", 1)
     assert [s.etat for s in _stored(root, slug)] == ["acceptee"]
@@ -139,7 +139,7 @@ def test_reject_leaves_the_file_alone_and_keeps_the_reason(browser: Browser, pro
         card.get_by_label("Motif du refus (facultatif)").fill("trop large")
         card.get_by_role("button", name="Confirmer le refus").click()
         page.locator("[data-role='atelier-status']", has_text="Suggestion refusée").wait_for(timeout=APPEAR_MS)
-        assert page.locator(f"[data-sugg='{made['id']}']").count() == 0
+        expect(page.locator(f"[data-sugg='{made['id']}']")).to_have_count(0)
     assert path.read_bytes() == before
     (kept,) = _stored(root, slug)
     assert kept.etat == "refusee" and kept.decide_motif == "trop large" and kept.texte == "- Tout réécrire"
@@ -160,7 +160,7 @@ def test_stale_suggestion_is_409_and_writes_nothing(browser: Browser, project_on
             card.get_by_role("button", name="Accepter").click()
         assert seen.value.status == 409
         page.locator("[data-role='atelier-status']", has_text="elle est périmée").wait_for(timeout=APPEAR_MS)
-        assert page.locator(f"[data-sugg='{made['id']}']").count() == 0
+        expect(page.locator(f"[data-sugg='{made['id']}']")).to_have_count(0)
         assert path.read_bytes() == concurrent
     assert [s.etat for s in _stored(root, slug)] == ["perimee"]
 
@@ -173,7 +173,7 @@ def test_library_counts_pending_suggestions(browser: Browser, project_on: tuple[
     for page in _open(browser, url, "#atelier"):
         row = page.locator(f"a.at-row[data-slug='{slug}']")
         row.wait_for(timeout=APPEAR_MS)
-        assert row.locator("[data-role='sugg-count']").inner_text() == "2 suggestions"
+        expect(row.locator("[data-role='sugg-count']")).to_have_text("2 suggestions", use_inner_text=True)
 
 
 @pytest.mark.parametrize("size", [(1440, 900), (1024, 768)])
@@ -219,4 +219,4 @@ def test_already_decided_elsewhere_is_not_called_stale(browser: Browser, project
         assert seen.value.status == 409
         status = page.locator("[data-role='atelier-status']", has_text="déjà été tranchée")
         status.wait_for(timeout=APPEAR_MS)
-        assert "périmée" not in status.inner_text()
+        expect(status).not_to_contain_text("périmée", use_inner_text=True)

@@ -18,7 +18,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.tools import workspace_atelier
 
@@ -37,12 +37,21 @@ def project_on(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, 
         yield url, roots[0]
 
 
-def _focus(page: Page) -> str:
-    return str(page.evaluate("document.documentElement.dataset.focus"))
+def _focus_is(page: Page, value: str) -> None:
+    """Le plein écran de la coque se pose en place après le geste : on attend la valeur voulue, on ne lit pas l'état d'avant."""
+    expect(page.locator("html")).to_have_attribute("data-focus", value)
 
 
-def _visible(page: Page, selector: str) -> bool:
-    return bool(page.evaluate("(s) => { const n = document.querySelector(s); return !!n && getComputedStyle(n).display !== 'none'; }", selector))
+def _shown(page: Page, selector: str, shown: bool = True) -> None:
+    page.wait_for_function(
+        "([s, want]) => { const n = document.querySelector(s); return (!!n && getComputedStyle(n).display !== 'none') === want; }",
+        arg=[selector, shown],
+        timeout=APPEAR_MS,
+    )
+
+
+def _stored_is(page: Page, value: str) -> None:
+    page.wait_for_function("([k, v]) => localStorage.getItem(k) === v", arg=[PREF_KEY, value], timeout=APPEAR_MS)
 
 
 def _enter(page: Page, slug: str) -> None:
@@ -59,7 +68,7 @@ def _panels_on(page: Page) -> None:
     """L'état d'avant l'Atelier : les panneaux d'atelier rouverts par le raccourci « Panneaux »."""
     if page.evaluate("document.documentElement.dataset.atelier") != "on":
         page.locator("#st-atelier").click()
-    assert _visible(page, "#dock")
+    _shown(page, "#dock")
 
 
 def test_entering_the_atelier_folds_the_panels_and_leaving_restores_them(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -67,12 +76,13 @@ def test_entering_the_atelier_folds_the_panels_and_leaving_restores_them(browser
     slug = _chantier(root, "Pleine largeur", long=True)
     for page in _open(browser, url, "#hotes"):
         _panels_on(page)
-        assert _focus(page) == "off"
+        _focus_is(page, "off")
         _enter(page, slug)
         # Le plein écran de la coque est posé : ni dock, ni inspecteur, et la feuille prend la largeur utile.
-        assert _focus(page) == "on"
-        assert not _visible(page, "#dock") and not _visible(page, "#panel-inspector")
-        assert page.locator(TOGGLE).get_attribute("aria-pressed") == "true"
+        _focus_is(page, "on")
+        _shown(page, "#dock", False)
+        _shown(page, "#panel-inspector", False)
+        expect(page.locator(TOGGLE)).to_have_attribute("aria-pressed", "true")
         sheet = _box(page, ".at-sheet")
         assert sheet["width"] > 900, sheet
         # Colonne de lecture centrée : la feuille n'est pas collée à gauche.
@@ -81,14 +91,16 @@ def test_entering_the_atelier_folds_the_panels_and_leaving_restores_them(browser
         assert _box(page, "[data-role='assistant']")["x"] >= sheet["x"] + sheet["width"] - 1  # l'assistant reste accessible
         # Sortie : l'état d'avant revient, panneaux d'atelier et plein écran compris.
         _leave(page)
-        assert _focus(page) == "off"
-        assert _visible(page, "#dock")
-        assert page.evaluate("document.documentElement.dataset.atelier") == "on"
+        _focus_is(page, "off")
+        _shown(page, "#dock")
+        expect(page.locator("html")).to_have_attribute("data-atelier", "on")
         # Le raccourci « Plein écran » n'est pas cassé : il fonctionne hors Atelier comme dans l'Atelier.
         page.locator("#st-fullscreen").click()
-        assert _focus(page) == "on" and not _visible(page, "#dock")
+        _focus_is(page, "on")
+        _shown(page, "#dock", False)
         page.locator("#st-fullscreen").click()
-        assert _focus(page) == "off" and _visible(page, "#dock")
+        _focus_is(page, "off")
+        _shown(page, "#dock")
 
 
 def test_a_fullscreen_set_before_the_atelier_is_given_back_untouched(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -96,11 +108,11 @@ def test_a_fullscreen_set_before_the_atelier_is_given_back_untouched(browser: Br
     slug = _chantier(root, "Plein ecran avant", long=False)
     for page in _open(browser, url, "#hotes"):
         page.locator("#st-fullscreen").click()
-        assert _focus(page) == "on"
+        _focus_is(page, "on")
         _enter(page, slug)
-        assert _focus(page) == "on"
+        _focus_is(page, "on")
         _leave(page)
-        assert _focus(page) == "on", "le plein écran posé avant l'Atelier survit à l'Atelier"
+        _focus_is(page, "on")  # le plein écran posé avant l'Atelier survit à l'Atelier
 
 
 def test_reopening_the_panels_in_the_atelier_is_remembered_by_browser(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -109,22 +121,25 @@ def test_reopening_the_panels_in_the_atelier_is_remembered_by_browser(browser: B
     for page in _open(browser, url, "#hotes"):
         _panels_on(page)
         _enter(page, slug)
-        assert _focus(page) == "on"
+        _focus_is(page, "on")
         page.locator(TOGGLE).click()
-        assert _focus(page) == "off" and _visible(page, "#dock")
-        assert page.locator(TOGGLE).get_attribute("aria-pressed") == "false"
-        assert page.evaluate("(k) => localStorage.getItem(k)", PREF_KEY) == "panels"
+        _focus_is(page, "off")
+        _shown(page, "#dock")
+        expect(page.locator(TOGGLE)).to_have_attribute("aria-pressed", "false")
+        _stored_is(page, "panels")
         # Respecté aux entrées suivantes, et au rechargement.
         _leave(page)
         _enter(page, slug)
-        assert _focus(page) == "off" and _visible(page, "#dock")
+        _focus_is(page, "off")
+        _shown(page, "#dock")
         page.reload()
         page.wait_for_selector("body[data-ready='1']", timeout=APPEAR_MS)
         page.locator(".at-sheet").wait_for(timeout=APPEAR_MS)
-        assert _focus(page) == "off"
+        _focus_is(page, "off")
         # Replier de nouveau est mémorisé aussi.
         page.locator(TOGGLE).click()
-        assert _focus(page) == "on" and page.evaluate("(k) => localStorage.getItem(k)", PREF_KEY) == "wide"
+        _focus_is(page, "on")
+        _stored_is(page, "wide")
 
 
 def test_the_atelier_is_wide_even_when_storage_is_blocked(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -132,9 +147,9 @@ def test_the_atelier_is_wide_even_when_storage_is_blocked(browser: Browser, proj
     slug = _chantier(root, "Sans stockage", long=False)
     for page in _open(browser, url, f"#atelier?chantier={slug}", block_storage=True):
         page.locator(".at-sheet").wait_for(timeout=APPEAR_MS)
-        assert _focus(page) == "on"
+        _focus_is(page, "on")
         page.locator(TOGGLE).click()
-        assert _focus(page) == "off"  # le choix vaut pour la session, faute de pouvoir le mémoriser
+        _focus_is(page, "off")  # le choix vaut pour la session, faute de pouvoir le mémoriser
 
 
 def test_capture_pleine_largeur(browser: Browser, project_on: tuple[str, Path]) -> None:

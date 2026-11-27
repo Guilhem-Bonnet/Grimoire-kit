@@ -11,6 +11,7 @@ fait rien (il ne se skippe pas : le mode strict de la CI promeut tout skip en é
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -18,7 +19,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Locator, Page, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.core.standard_state import AGENT_MARKER_ENVS, HOST_SESSION_ENVS, SESSION_ENV
@@ -105,8 +106,14 @@ def _open(
         context.close()
 
 
-def _line(page: Page, req: str) -> object:
+def _line(page: Page, req: str) -> Locator:
     return page.locator(f".at-live[data-live='{req}']:not([hidden])")
+
+
+def _once(text: str) -> re.Pattern[str]:
+    """Motif « ``text`` apparaît exactement une fois », pour ``to_have_text`` (qui se rejoue jusqu'à l'état voulu)."""
+    word = re.escape(text)
+    return re.compile(rf"^(?:(?!{word})[\s\S])*{word}(?:(?!{word})[\s\S])*$")
 
 
 def _plan_tasks(root: Path) -> list[str]:
@@ -137,23 +144,24 @@ def test_criterion_to_task_to_displayed_state(browser: Browser, project_on: tupl
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         first = _line(page, "REQ-001")
         first.wait_for(timeout=APPEAR_MS)
-        assert first.get_attribute("data-state") == "proposee"
-        assert "proposée" in first.inner_text() and "aucune tâche" in first.inner_text()
-        assert _line(page, "REQ-004").inner_text().count("exigence sans critère") == 1  # le trou est dit
-        assert page.locator(".at-live[data-live='REQ-005']:not([hidden])").count() == 0  # Won't : pas planifiée
+        expect(first).to_have_attribute("data-state", "proposee")
+        expect(first).to_contain_text("proposée", use_inner_text=True)
+        expect(first).to_contain_text("aucune tâche", use_inner_text=True)
+        expect(_line(page, "REQ-004")).to_have_text(_once("exigence sans critère"), use_inner_text=True)  # le trou est dit, une fois
+        expect(page.locator(".at-live[data-live='REQ-005']:not([hidden])")).to_have_count(0)  # Won't : pas planifiée
 
         _validate(root, slug, "REQ-001")  # la MOA, au terminal
         page.get_by_role("button", name="Actualiser l’état des exigences").click()
         page.locator(".at-live[data-live='REQ-001'][data-state='validee']").wait_for(timeout=APPEAR_MS)
-        assert "validée sans tâche" in _line(page, "REQ-001").inner_text()
+        expect(_line(page, "REQ-001")).to_contain_text("validée sans tâche", use_inner_text=True)
 
         task = TaskService(root).add("Dictée", ("la transcription est rapide",), requirement=f"{slug}/REQ-001", owner="ada").task
         page.get_by_role("button", name="Actualiser l’état des exigences").click()
         row = _line(page, "REQ-001")
         row.get_by_text("1 tâche").wait_for(timeout=APPEAR_MS)
-        assert "validée sans tâche" not in row.inner_text()
+        expect(row).not_to_contain_text("validée sans tâche", use_inner_text=True)
         row.get_by_role("button", name="Détail de REQ-001").click()
-        assert task.id in row.locator("[data-role='live-detail']").inner_text()
+        expect(row.locator("[data-role='live-detail']")).to_contain_text(task.id, use_inner_text=True)
 
         # La tâche avance : l'état réel suit (une tâche qui ne peut plus avancer compte comme en cours).
         service = TaskService(root)
@@ -170,13 +178,13 @@ def test_an_edited_requirement_asks_to_be_validated_again(browser: Browser, proj
     path = root / "_grimoire" / "cadrage" / slug / "04-exigences.md"
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         _line(page, "REQ-001").wait_for(timeout=APPEAR_MS)
-        assert page.locator(".at-live[data-live='REQ-001'][data-state='validee']").count() == 1
+        expect(page.locator(".at-live[data-live='REQ-001'][data-state='validee']")).to_have_count(1)
         path.write_text(path.read_text(encoding="utf-8").replace("2 secondes", "1 seconde"), encoding="utf-8")
         page.get_by_role("button", name="Actualiser l’état des exigences").click()
         row = _line(page, "REQ-001")
         row.get_by_text("modifiée depuis la validation").first.wait_for(timeout=APPEAR_MS)
-        assert row.get_attribute("data-state") == "proposee"
-        assert row.get_by_role("button", name="Revalider REQ-001 : copier la commande du terminal").count() == 1
+        expect(row).to_have_attribute("data-state", "proposee")
+        expect(row.get_by_role("button", name="Revalider REQ-001 : copier la commande du terminal")).to_have_count(1)
 
 
 def test_validate_gives_the_terminal_command_and_never_validates(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -189,13 +197,13 @@ def test_validate_gives_the_terminal_command_and_never_validates(browser: Browse
         row.wait_for(timeout=APPEAR_MS)
         row.get_by_role("button", name="Valider REQ-001 : copier la commande du terminal").click()
         command = f"grimoire cadrage approve REQ-001 --chantier {slug}"
-        assert row.locator("[data-role='approve-command']").inner_text() == command
+        expect(row.locator("[data-role='approve-command']")).to_have_text(command, use_inner_text=True)
         row.get_by_role("button", name="Copier la commande", exact=True).click()
         page.locator("[data-role='atelier-status']", has_text="Commande copiée").wait_for(timeout=APPEAR_MS)
         assert page.evaluate("() => navigator.clipboard.readText()") == command
         # Rien n'a été validé : l'écran n'a aucun geste qui scelle.
         assert (sealed.read_bytes() if sealed.exists() else b"") == before
-        assert row.get_attribute("data-state") == "proposee"
+        expect(row).to_have_attribute("data-state", "proposee")
         # Un agent qui poste sur une route de validation n'en trouve aucune (ou n'a pas le jeton de la page).
         status = page.evaluate(
             """async (slug) => (await fetch(`/api/workspace/atelier/chantiers/${slug}/exigences/REQ-001/valider`, {
@@ -216,8 +224,8 @@ def test_split_preview_then_confirm_creates_once_and_replay_creates_nothing(
         _line(page, "REQ-001").wait_for(timeout=APPEAR_MS)
         split = page.get_by_role("button", name="Valider et découper")
         split.wait_for(timeout=APPEAR_MS)
-        assert split.get_attribute("aria-disabled") == "true"  # le Must n'est pas validé
-        assert "à valider d’abord REQ-001" in page.locator("[data-role='live-summary']").inner_text()
+        expect(split).to_have_attribute("aria-disabled", "true")  # le Must n'est pas validé
+        expect(page.locator("[data-role='live-summary']")).to_contain_text("à valider d’abord REQ-001", use_inner_text=True)
 
         _validate(root, slug, "REQ-001")
         page.get_by_role("button", name="Actualiser l’état des exigences").click()
@@ -226,20 +234,20 @@ def test_split_preview_then_confirm_creates_once_and_replay_creates_nothing(
         split.click()
         panel = page.locator("[data-role='decoupage']")
         panel.wait_for(timeout=APPEAR_MS)
-        assert panel.locator("[data-create]").count() == 3  # REQ-001, 002, 003 : une tâche par exigence avec critère
+        expect(panel.locator("[data-create]")).to_have_count(3)  # REQ-001, 002, 003 : une tâche par exigence avec critère
         # Le texte des critères qui seront écrits se lit dans l'aperçu, sans geste.
         shown = panel.locator("[data-create='REQ-001'] [data-role='criteria']")
-        assert "la transcription apparaît en moins de 2 secondes" in shown.inner_text()
-        assert shown.locator("li").first.is_visible()
-        assert panel.locator("[data-skipped='REQ-004']").inner_text().count("sans critère") == 1
-        assert panel.locator("[data-skipped='REQ-005']").inner_text().count("hors périmètre") == 1
+        expect(shown).to_contain_text("la transcription apparaît en moins de 2 secondes", use_inner_text=True)
+        expect(shown.locator("li").first).to_be_visible()
+        expect(panel.locator("[data-skipped='REQ-004']")).to_have_text(_once("sans critère"), use_inner_text=True)
+        expect(panel.locator("[data-skipped='REQ-005']")).to_have_text(_once("hors périmètre"), use_inner_text=True)
         assert _plan_tasks(root) == before  # l'aperçu n'écrit rien
 
         with page.expect_response(lambda r: "/decoupage" in r.url and r.request.method == "POST") as seen:
             panel.get_by_role("button", name="Créer 3 tâches").click()
         assert seen.value.status == 200
         page.locator("[data-role='atelier-status']", has_text="3 tâches créées").wait_for(timeout=APPEAR_MS)
-        assert "Aucun travail n’est lancé" in page.locator("[data-role='atelier-status']").inner_text()
+        expect(page.locator("[data-role='atelier-status']")).to_contain_text("Aucun travail n’est lancé", use_inner_text=True)
         created = _plan_tasks(root)
         assert len(created) == len(before) + 3
         page.locator(".at-live[data-live='REQ-002']").get_by_text("1 tâche").wait_for(timeout=APPEAR_MS)
@@ -249,7 +257,8 @@ def test_split_preview_then_confirm_creates_once_and_replay_creates_nothing(
         split.click()
         replay = page.locator("[data-role='decoupage']")
         replay.wait_for(timeout=APPEAR_MS)
-        assert replay.locator("[data-create]").count() == 0 and "Rien à créer" in replay.inner_text()
+        expect(replay.locator("[data-create]")).to_have_count(0)
+        expect(replay).to_contain_text("Rien à créer", use_inner_text=True)
         assert _plan_tasks(root) == created
 
 

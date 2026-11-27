@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -20,7 +21,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, BrowserContext, Page
+from playwright.sync_api import Browser, BrowserContext, Page, expect
 
 from grimoire.tools import workspace_atelier
 
@@ -116,6 +117,15 @@ def _capture(page: Page, name: str) -> None:
     page.screenshot(path=str(folder / f"{name}.png"), full_page=False)
 
 
+def _mascotte_flag(page: Page, slug: str, wanted: bool) -> None:
+    """Attend que le serveur donne ``wanted`` pour la mascotte de ``slug`` (la préférence est écrite à la suite du geste)."""
+    page.wait_for_function(
+        "async ([p, want]) => (await (await fetch(`/api/workspace/features?project=${p}`)).json()).mascotte === want",
+        arg=[slug, wanted],
+        timeout=READY_MS,
+    )
+
+
 def _anchor_ready(page: Page) -> None:
     page.locator(ANCHOR).wait_for(state="visible", timeout=READY_MS)
 
@@ -128,7 +138,7 @@ def test_visible_on_the_home_page_of_a_project_without_the_flag_and_nothing_open
     context = _context(browser, scheme)
     try:
         page, requests, errors = _open(context, url, f"?project={slug_without}")
-        assert page.evaluate("() => window.GrimoireWorkspace.theme") == scheme
+        page.wait_for_function("(s) => window.GrimoireWorkspace.theme === s", arg=scheme, timeout=READY_MS)
         _anchor_ready(page)
         # Aucune requête de plus au premier rendu : la réponse de `features` est celle que la coque lit déjà (lue AVANT que
         # le test ne fasse ses propres appels).
@@ -142,14 +152,10 @@ def test_visible_on_the_home_page_of_a_project_without_the_flag_and_nothing_open
             )
             is True
         )
-        assert page.locator(CAPTION).inner_text().strip() == "Mascotte : au repos"
-        assert page.locator(ANCHOR).evaluate("(el) => el.tagName") == "BUTTON", (
-            "un simple bouton, accessible au clavier"
-        )
-        assert page.locator(f"{ANCHOR} canvas").count() == 0, "aucun canevas WebGL hors du chat et de l'Atelier"
-        assert page.locator(".chat-mascotte").count() == 0, (
-            "le dock n'est pas ouvert : rien n'a été chargé dans le chat"
-        )
+        expect(page.locator(CAPTION)).to_have_text("Mascotte : au repos", use_inner_text=True)
+        expect(page.locator(ANCHOR)).to_have_js_property("tagName", "BUTTON")  # un simple bouton, accessible au clavier
+        expect(page.locator(f"{ANCHOR} canvas")).to_have_count(0)  # aucun canevas WebGL hors du chat et de l'Atelier
+        expect(page.locator(".chat-mascotte")).to_have_count(0)  # le dock n'est pas ouvert : rien n'a été chargé dans le chat
         assert not [r for r in requests if r.endswith(("/mascotte.js", "/mascotte_shader.js"))], "ni rendu ni shader"
         _capture(page, f"accueil-projet-{'sombre' if scheme == 'dark' else 'clair'}")
         assert not errors, errors
@@ -163,9 +169,9 @@ def test_visible_in_the_global_view(browser: Browser, cockpit: tuple[str, str, s
     context = _context(browser, scheme)
     try:
         page, _requests, errors = _open(context, url, "?scope=all")
-        assert page.evaluate("() => window.GrimoireWorkspace.scope.all") is True
+        page.wait_for_function("() => window.GrimoireWorkspace.scope.all === true", timeout=READY_MS)
         _anchor_ready(page)
-        assert page.locator(CAPTION).inner_text().strip() == "Mascotte : au repos"
+        expect(page.locator(CAPTION)).to_have_text("Mascotte : au repos", use_inner_text=True)
         _capture(page, f"accueil-global-{'sombre' if scheme == 'dark' else 'clair'}")
         assert not errors, errors
     finally:
@@ -187,8 +193,8 @@ def test_the_chat_watch_starts_after_the_first_render_and_a_click_opens_the_chat
         page.locator(ANCHOR).click()
         page.locator(".chat-input").wait_for(state="visible", timeout=READY_MS)
         # Un seul projet : le sélecteur « Parler au projet » n'existe pas à l'écran (il est réservé à la vue globale).
-        assert page.locator("select.chat-target").is_hidden()
-        assert page.locator(".chat-targetbar").is_hidden()
+        expect(page.locator("select.chat-target")).to_be_hidden()
+        expect(page.locator(".chat-targetbar")).to_be_hidden()
         assert len([r for r in requests if "/chat/stream" in r]) == 1, "ouvrir le chat ne rouvre pas un second flux"
         assert not errors, errors
     finally:
@@ -203,7 +209,7 @@ def test_the_target_selector_exists_in_the_global_view_only(browser: Browser, co
         _anchor_ready(page)
         page.locator(ANCHOR).click()
         page.locator("select.chat-target").wait_for(state="visible", timeout=READY_MS)
-        assert page.locator(".chat-targetbar").is_visible()
+        expect(page.locator(".chat-targetbar")).to_be_visible()
         assert not errors, errors
     finally:
         context.close()
@@ -219,12 +225,10 @@ def test_the_launcher_stays_on_every_page_and_is_reachable_by_keyboard(
         _anchor_ready(page)
         for space in ("flotte", "travail", "savoir", "fonctions-test"):
             page.evaluate("(s) => window.GrimoireWorkspace.goto(s)", space)
-            assert page.locator(ANCHOR).is_visible(), f"présent sur {space}"
+            expect(page.locator(ANCHOR), f"présent sur {space}").to_be_visible()
         page.locator(ANCHOR).focus()
-        outline = page.evaluate("(el) => getComputedStyle(el).outlineStyle", page.locator(ANCHOR).element_handle())
-        assert outline != "none", "un anneau de focus est visible"
-        label = page.locator(ANCHOR).get_attribute("aria-label") or ""
-        assert label.startswith("Mascotte : au repos") and "Ouvrir le chat" in label
+        expect(page.locator(ANCHOR)).not_to_have_css("outline-style", "none")  # un anneau de focus est visible
+        expect(page.locator(ANCHOR)).to_have_attribute("aria-label", re.compile(r"^Mascotte : au repos.*Ouvrir le chat", re.DOTALL))
         page.keyboard.press("Enter")
         page.locator(".chat-input").wait_for(state="visible", timeout=READY_MS)
         assert not errors, errors
@@ -243,28 +247,20 @@ def test_the_settings_screen_says_the_scope_and_the_toggle_follows_everywhere(
         page.evaluate("() => window.GrimoireWorkspace.goto('fonctions-test')")
         card = page.locator("section.ft-card[aria-label='Mascotte']")
         card.wait_for(timeout=READY_MS)
-        text = card.inner_text()
-        assert "Portée : toute cette machine" in text and "tous les projets" in text
-        assert (
-            "Portée : ce projet seulement" in page.locator("section.ft-card[aria-label='Atelier de spec']").inner_text()
-        )
+        expect(card).to_contain_text("Portée : toute cette machine", use_inner_text=True)
+        expect(card).to_contain_text("tous les projets", use_inner_text=True)
+        expect(page.locator("section.ft-card[aria-label='Atelier de spec']")).to_contain_text("Portée : ce projet seulement", use_inner_text=True)
         _capture(page, "fonctions-en-test-portee")
         switch = card.locator("button[role='switch']")
-        assert switch.get_attribute("aria-checked") == "true"
+        expect(switch).to_have_attribute("aria-checked", "true")
         switch.click()  # éteint : partout, sans recharger
         page.locator(ANCHOR).wait_for(state="detached", timeout=READY_MS)
         for slug in (slug_without, slug_with):
-            on = page.evaluate(
-                "async (p) => (await (await fetch(`/api/workspace/features?project=${p}`)).json()).mascotte", slug
-            )
-            assert on is False, f"éteint pour {slug} aussi"
+            _mascotte_flag(page, slug, False)  # éteint pour ce projet aussi
         switch.click()  # rallumé : la mascotte revient tout de suite
         page.locator(ANCHOR).wait_for(state="visible", timeout=READY_MS)
         for slug in (slug_without, slug_with):
-            on = page.evaluate(
-                "async (p) => (await (await fetch(`/api/workspace/features?project=${p}`)).json()).mascotte", slug
-            )
-            assert on is True
+            _mascotte_flag(page, slug, True)
         assert not errors, errors
     finally:
         context.close()

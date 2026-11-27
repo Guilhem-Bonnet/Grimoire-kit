@@ -30,7 +30,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier
@@ -41,10 +41,12 @@ from .test_workspace_atelier_mise_en_page import (
     BRAINSTORM,
     PARA_A,
     PARA_B,
+    _box,
     _chantier,
     _comment,
     _folder,
     _human_terminal,  # noqa: F401  (fixture autouse : la MOA au terminal pour préparer l'état)
+    _steady_box,
 )
 
 FIND = "[data-role='atelier-recherche']"
@@ -114,7 +116,13 @@ def test_find_matches_across_bold_code_and_link_nodes(browser: Browser, project_
     for page in _open_page(browser, url, slug):
         page.keyboard.press("Control+f")
         page.locator(INPUT).fill(needle)
-        assert page.locator(COUNT).inner_text() == "1 sur 1"
+        expect(page.locator(COUNT)).to_have_text("1 sur 1", use_inner_text=True)
+        # Le surlignage se pose après le décompte : on attend la plage voulue, puis on compare les deux.
+        page.wait_for_function(
+            "(want) => ['at-find', 'at-find-current'].every((k) => { const h = CSS.highlights.get(k); return h && [...h].map((r) => r.toString()).join('|') === want; })",
+            arg=needle,
+            timeout=APPEAR_MS,
+        )
         got = page.evaluate("() => [...CSS.highlights.get('at-find')].map((r) => r.toString())")
         assert got == [needle]
         current = page.evaluate("() => [...CSS.highlights.get('at-find-current')].map((r) => r.toString())")
@@ -127,13 +135,13 @@ def test_find_counts_each_occurrence_once_across_nodes(browser: Browser, project
     for page in _open_page(browser, url, slug):
         page.keyboard.press("Control+f")
         page.locator(INPUT).fill("comptables passent trois")
-        assert page.locator(COUNT).inner_text() == "1 sur 1"
+        expect(page.locator(COUNT)).to_have_text("1 sur 1", use_inner_text=True)
         page.locator(INPUT).fill("jours")
-        assert page.locator(COUNT).inner_text() == "1 sur 1"
+        expect(page.locator(COUNT)).to_have_text("1 sur 1", use_inner_text=True)
         page.locator(INPUT).fill("mois sur")
-        assert page.locator(COUNT).inner_text() == "1 sur 1"
+        expect(page.locator(COUNT)).to_have_text("1 sur 1", use_inner_text=True)
         page.locator(INPUT).fill("zzz inexistant")
-        assert page.locator(COUNT).inner_text() == "Aucun résultat"
+        expect(page.locator(COUNT)).to_have_text("Aucun résultat", use_inner_text=True)
 
 
 def test_find_fallback_wraps_each_node_in_a_mark_and_leaves_nothing_behind(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -143,15 +151,15 @@ def test_find_fallback_wraps_each_node_in_a_mark_and_leaves_nothing_behind(brows
         before = page.evaluate(SNAPSHOT)
         page.keyboard.press("Control+f")
         page.locator(INPUT).fill("passent trois jours par")
-        assert page.locator(COUNT).inner_text() == "1 sur 1"
+        expect(page.locator(COUNT)).to_have_text("1 sur 1", use_inner_text=True)
         # Le suivi en direct peut redessiner la feuille (la recherche relit alors ses occurrences) : on attend l'état posé.
         page.wait_for_function(
             "() => { const m = [...document.querySelectorAll('mark.at-hit')]; return m.length >= 2 && m.map((n) => n.textContent).join('') === 'passent trois jours par' && m.every((n) => n.classList.contains('is-current')); }",
             timeout=APPEAR_MS,
         )
         page.keyboard.press("Escape")
-        assert page.locator("mark.at-hit").count() == 0
-        assert page.evaluate(SNAPSHOT) == before
+        expect(page.locator("mark.at-hit")).to_have_count(0)
+        page.wait_for_function(f"(before) => ({SNAPSHOT})() === before", arg=before, timeout=APPEAR_MS)
 
 
 # ── D9 et D10 : le menu « Document » ────────────────────────────────────────
@@ -163,7 +171,10 @@ def test_a_click_on_print_calls_window_print_once(browser: Browser, project_on: 
     for page in _open_page(browser, url, slug, scripts=(COUNT_PRINTS,)):
         page.locator(MENU).click()
         page.locator("[data-role='doc-print']").click()
-        page.wait_for_timeout(600)
+        page.wait_for_function("() => window.__prints >= 1", timeout=APPEAR_MS)
+        # « Une seule fois » est une assertion négative : le clic appelle ``window.print()`` de façon synchrone, donc un second appel
+        # viendrait du même geste ; deux images d'animation de plus bornent l'attente sans minuterie arbitraire.
+        page.evaluate("() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))")
         assert page.evaluate("window.__prints") == 1
 
 
@@ -192,15 +203,16 @@ def test_copy_and_download_give_a_clean_document_and_raw_files_keep_the_stored_c
         assert re.findall(r"^## (.+)$", clean, flags=re.MULTILINE) == ["Brainstorm — diverger", "Exigences"]
         assert PARA_A in clean and "REQ-001" in clean
         # Le menu se ferme après l'action et annonce le résultat.
-        assert page.locator(PANEL).is_hidden()
+        expect(page.locator(PANEL)).to_be_hidden()
         say = page.locator(SAY)
-        assert say.get_attribute("role") == "status" and "téléchargé" in say.inner_text()
+        expect(say).to_have_attribute("role", "status")
+        expect(say).to_contain_text("téléchargé", use_inner_text=True)
         # La copie rend le même document.
         page.locator(MENU).click()
         page.locator("[data-role='doc-copy']").click()
         page.wait_for_function("() => document.querySelector('[data-role=doc-say]').textContent.includes('copié')", timeout=APPEAR_MS)
         assert page.evaluate("navigator.clipboard.readText()") == clean
-        assert page.locator(PANEL).is_hidden()
+        expect(page.locator(PANEL)).to_be_hidden()
         # Les fichiers bruts : le contenu stocké, tel quel.
         page.locator(MENU).click()
         with page.expect_download(timeout=APPEAR_MS) as raw:
@@ -209,7 +221,7 @@ def test_copy_and_download_give_a_clean_document_and_raw_files_keep_the_stored_c
         raw.value.save_as(raw_target)
         assert raw.value.suggested_filename.endswith(".md") and slug in raw.value.suggested_filename
         assert raw_target.read_text(encoding="utf-8") == _stored(root, slug)
-        assert page.locator(PANEL).is_hidden()
+        expect(page.locator(PANEL)).to_be_hidden()
 
 
 # ── D8 : l'impression ───────────────────────────────────────────────────────
@@ -236,23 +248,22 @@ def test_print_does_not_clip_chains_phases_and_carries_a_header_and_the_open_com
     for page in _open_page(browser, url, slug):
         page.emulate_media(media="print")
         page.evaluate("window.dispatchEvent(new Event('beforeprint'))")
-        # Rien ne déborde à gauche de la feuille (la marge négative des blocs d'écran ne passe pas au papier).
-        spill = page.evaluate(
-            "() => { const s = document.querySelector('.at-sheet').getBoundingClientRect().left; "
-            "return [...document.querySelectorAll('.at-sheet .at-blk, .at-sheet p, .at-sheet li')].filter((n) => n.checkVisibility() && n.getBoundingClientRect().left < s - 0.5).length; }"
-        )
-        assert spill == 0
-        # Les phases s'enchaînent : aucun saut de page forcé avant une phase.
-        forced = page.evaluate("() => [...document.querySelectorAll('.at-sec')].filter((n) => ['page', 'always', 'left', 'right'].includes(getComputedStyle(n).breakBefore)).length")
-        assert forced == 0
-        assert page.locator(".at-print-title").inner_text().strip() == "Impression propre"
-        meta = _flat(page.locator(".at-print-date").inner_text())
-        assert re.search(r"\d{1,2} \S+ 20\d\d", meta), meta
-        # Les commentaires ouverts sont imprimés en fin de document, rien d'orphelin.
+        # Les commentaires ouverts sont imprimés en fin de document : leur présence dit que l'état d'impression est posé.
         notes = page.locator(".at-print-notes")
-        assert notes.is_visible()
-        assert "Une question encore ouverte" in notes.inner_text()
-        assert page.evaluate("() => [...document.querySelectorAll('.at-cm-orphans')].filter((n) => n.checkVisibility()).length") == 0
+        expect(notes).to_be_visible()
+        expect(notes).to_contain_text("Une question encore ouverte", use_inner_text=True)
+        # Rien ne déborde à gauche de la feuille (la marge négative des blocs d'écran ne passe pas au papier).
+        page.wait_for_function(
+            "() => { const s = document.querySelector('.at-sheet').getBoundingClientRect().left; "
+            "return [...document.querySelectorAll('.at-sheet .at-blk, .at-sheet p, .at-sheet li')].filter((n) => n.checkVisibility() && n.getBoundingClientRect().left < s - 0.5).length === 0; }",
+            timeout=APPEAR_MS,
+        )
+        # Les phases s'enchaînent : aucun saut de page forcé avant une phase.
+        page.wait_for_function("() => [...document.querySelectorAll('.at-sec')].filter((n) => ['page', 'always', 'left', 'right'].includes(getComputedStyle(n).breakBefore)).length === 0", timeout=APPEAR_MS)
+        expect(page.locator(".at-print-title")).to_have_text("Impression propre", use_inner_text=True)
+        expect(page.locator(".at-print-date")).to_have_text(re.compile(r"\d{1,2} \S+ 20\d\d"), use_inner_text=True)
+        # Rien d'orphelin.
+        page.wait_for_function("() => [...document.querySelectorAll('.at-cm-orphans')].filter((n) => n.checkVisibility()).length === 0", timeout=APPEAR_MS)
         assert "Passage modifié ou supprimé" not in page.evaluate("document.body.innerText")
         pdf = tmp_path / "atelier.pdf"
         page.pdf(path=str(pdf), format="A4", print_background=True)
@@ -279,13 +290,13 @@ def test_below_900px_the_document_comes_first_and_the_assistant_waits_behind_its
     url, root = project_on
     slug = _chantier(root, "Etroit assistant", long=True)
     for page in _open_page(browser, url, slug, viewport=(480, 900), scripts=_narrow_scripts(slug)):
-        assert page.locator("[data-role='assistant']").is_hidden()
+        expect(page.locator("[data-role='assistant']")).to_be_hidden()
         pill = page.locator("[data-role='assistant-pill']")
-        assert pill.is_visible()
-        top = page.evaluate("document.querySelector('.at-sheet').getBoundingClientRect().top")
+        expect(pill).to_be_visible()
+        top = _box(page, ".at-sheet")["y"]
         assert top < 760, top
         pill.click()
-        assert page.locator("[data-role='assistant']").is_visible()
+        expect(page.locator("[data-role='assistant']")).to_be_visible()
 
 
 def test_below_900px_the_phase_bar_scrolls_without_cutting_a_label_and_targets_are_touchable(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -293,20 +304,21 @@ def test_below_900px_the_phase_bar_scrolls_without_cutting_a_label_and_targets_a
     slug = _chantier(root, "Etroit barre", long=True)
     for page in _open_page(browser, url, slug, viewport=(480, 900)):
         # Le libellé visible (le nœud de texte, pas le mot caché pour les lecteurs d'écran) tient dans sa pastille.
-        cut = page.evaluate(
-            """() => [...document.querySelectorAll('.at-phase')].filter((b) => {
+        # Mesures de mise en page : on attend l'état voulu (la mise en page se pose en place), le test échoue si elle ne s'y pose jamais.
+        page.wait_for_function(
+            """() => [...document.querySelectorAll('.at-phase')].length > 0 && [...document.querySelectorAll('.at-phase')].filter((b) => {
               const text = [...b.childNodes].find((n) => n.nodeType === 3 && n.nodeValue.trim());
               const range = document.createRange(); range.selectNodeContents(text);
               return range.getBoundingClientRect().right > b.getBoundingClientRect().right - 4;
-            }).map((b) => b.dataset.name)"""
+            }).length === 0""",
+            timeout=APPEAR_MS,
         )
-        assert cut == []
-        assert page.evaluate("() => ['auto', 'scroll'].includes(getComputedStyle(document.querySelector('.at-phases')).overflowX)")
-        small = page.evaluate(
+        page.wait_for_function("() => ['auto', 'scroll'].includes(getComputedStyle(document.querySelector('.at-phases')).overflowX)", timeout=APPEAR_MS)
+        page.wait_for_function(
             "() => ['.at-phase', \"[data-role='assistant-pill']\", \"[data-role='document-menu']\", \"[data-role='plan-toggle']\", '.at-cm-add', '.at-ch-add']"
-            ".flatMap((s) => [...document.querySelectorAll(s)].filter((n) => n.checkVisibility()).map((n) => [s, Math.round(n.getBoundingClientRect().height)])).filter(([, h]) => h < 40)"
+            ".flatMap((s) => [...document.querySelectorAll(s)].filter((n) => n.checkVisibility()).map((n) => [s, Math.round(n.getBoundingClientRect().height)])).filter(([, h]) => h < 40).length === 0",
+            timeout=APPEAR_MS,
         )
-        assert small == []
 
 
 def test_below_900px_block_actions_never_cover_the_text_nor_take_its_click(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -315,22 +327,21 @@ def test_below_900px_block_actions_never_cover_the_text_nor_take_its_click(brows
     for page in _open_page(browser, url, slug, viewport=(480, 900)):
         host = page.locator(".at-blk", has_text=PARA_A).first
         host.scroll_into_view_if_needed()
-        covered = page.evaluate(
+        page.wait_for_function(
             """() => {
               const host = [...document.querySelectorAll('.at-blk')].find((b) => b.textContent.includes('Le bouton maintenu'));
               const text = host.querySelector('p').getBoundingClientRect();
               return [...host.querySelectorAll('.at-cm-add, .at-ch-add')].filter((b) => {
                 const r = b.getBoundingClientRect();
                 return r.left < text.right && r.right > text.left && r.top < text.bottom && r.bottom > text.top;
-              }).length;
-            }"""
+              }).length === 0;
+            }""",
+            timeout=APPEAR_MS,
         )
-        assert covered == 0
-        box = page.locator(".at-blk", has_text=PARA_A).first.locator("p").bounding_box()
-        assert box is not None
+        box = _steady_box(page.locator(".at-blk", has_text=PARA_A).first.locator("p"))
         page.mouse.click(box["x"] + box["width"] - 6, box["y"] + 4)
-        assert page.locator("textarea[aria-label^='Modifier le bloc']").is_visible()
-        assert page.locator(".at-ch-menu:not([hidden])").count() == 0
+        expect(page.locator("textarea[aria-label^='Modifier le bloc']")).to_be_visible()
+        expect(page.locator(".at-ch-menu:not([hidden])")).to_have_count(0)
 
 
 # ── D20, D21, D22 ───────────────────────────────────────────────────────────
@@ -341,14 +352,14 @@ def test_full_width_choice_survives_a_reload_on_a_direct_landing(browser: Browse
     slug = _chantier(root, "Largeur rechargee")
     for page in _open_page(browser, url, slug):
         toggle = page.locator("[data-role='atelier-largeur']")
-        assert toggle.get_attribute("aria-pressed") == "true"
+        expect(toggle).to_have_attribute("aria-pressed", "true")
         toggle.click()
-        assert toggle.get_attribute("aria-pressed") == "false"
+        expect(toggle).to_have_attribute("aria-pressed", "false")
         page.reload()
         page.wait_for_selector("body[data-ready='1']", timeout=APPEAR_MS)
         page.locator(".at-sheet").wait_for(timeout=APPEAR_MS)
-        assert page.locator("[data-role='atelier-largeur']").get_attribute("aria-pressed") == "false"
-        assert page.evaluate("document.documentElement.dataset.focus") == "off"
+        expect(page.locator("[data-role='atelier-largeur']")).to_have_attribute("aria-pressed", "false")
+        expect(page.locator("html")).to_have_attribute("data-focus", "off")
 
 
 def test_a_deep_link_scrolls_to_the_phase_and_marks_it(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -359,8 +370,8 @@ def test_a_deep_link_scrolls_to_the_phase_and_marks_it(browser: Browser, project
             "() => { const h = document.querySelector('[data-section=\"exigences\"] h2'); const t = h && h.getBoundingClientRect().top; return t > 0 && t < 260; }",
             timeout=APPEAR_MS,
         )
-        assert page.locator(".at-phase[data-phase='exigences']").get_attribute("aria-current") == "step"
-        assert page.locator(".at-phase[aria-current='step']").count() == 1
+        expect(page.locator(".at-phase[data-phase='exigences']")).to_have_attribute("aria-current", "step")
+        expect(page.locator(".at-phase[aria-current='step']")).to_have_count(1)
 
 
 @pytest.mark.parametrize("start", ["same", "library"])
@@ -376,7 +387,7 @@ def test_a_deep_link_typed_on_a_page_already_open_scrolls_to_the_phase(browser: 
             "() => { const h = document.querySelector('[data-section=\"exigences\"] h2'); const t = h && h.getBoundingClientRect().top; return t > 0 && t < 260; }",
             timeout=APPEAR_MS,
         )
-        assert page.locator(".at-phase[data-phase='exigences']").get_attribute("aria-current") == "step"
+        expect(page.locator(".at-phase[data-phase='exigences']")).to_have_attribute("aria-current", "step")
 
 
 @pytest.fixture(scope="module")
@@ -403,14 +414,15 @@ def test_history_marks_the_phase_whose_diff_is_shown(browser: Browser, project_g
     url, _root, slug = project_git
     for page in _open_page(browser, url, slug):
         page.locator(".at-phase[data-phase='exigences']").click()
-        assert page.locator(".at-phase[aria-current='step']").get_attribute("data-phase") == "exigences"
+        expect(page.locator(".at-phase[aria-current='step']")).to_have_attribute("data-phase", "exigences")
         page.locator("[data-role='atelier-historique-bouton']").click()
         page.locator("[data-version]", has_text="precise le brief").click()
         page.locator("[data-role='hist-comparaison']").wait_for(timeout=APPEAR_MS)
-        assert [s.get_attribute("data-phase") for s in page.locator(".at-cmp-phase").all()] == ["brief"]
-        assert page.locator(".at-phase[aria-current='step']").get_attribute("data-phase") == "brief"
+        expect(page.locator(".at-cmp-phase")).to_have_count(1)
+        expect(page.locator(".at-cmp-phase")).to_have_attribute("data-phase", "brief")
+        expect(page.locator(".at-phase[aria-current='step']")).to_have_attribute("data-phase", "brief")
         page.keyboard.press("Escape")
-        assert page.locator("[data-role='hist-comparaison']").count() == 0
+        expect(page.locator("[data-role='hist-comparaison']")).to_have_count(0)
 
 
 # ── Frictions : lien d'évitement, panneau de conflit ────────────────────────
@@ -421,15 +433,15 @@ def test_a_skip_link_leads_straight_to_the_first_block(browser: Browser, project
     slug = _chantier(root, "Lien evitement", long=True)
     for page in _open_page(browser, url, slug):
         link = page.locator("[data-role='skip-document']")
-        assert link.inner_text().strip() == "Aller au document"
+        expect(link).to_have_text("Aller au document", use_inner_text=True)
         first = page.evaluate("() => document.querySelector('.at-page').querySelector('a[href], button, input, select, textarea, [tabindex=\"0\"]').dataset.role")
         assert first == "skip-document"
         assert link.bounding_box() is not None
         link.focus()
-        box = link.bounding_box()
-        assert box is not None and 0 <= box["x"] < 1440 and 0 <= box["y"] < 900
+        box = _steady_box(link)  # le lien d'évitement se pose à l'écran au focus : on mesure une fois sa position établie
+        assert 0 <= box["x"] < 1440 and 0 <= box["y"] < 900
         page.keyboard.press("Enter")
-        assert page.evaluate("document.activeElement.classList.contains('at-blk')")
+        page.wait_for_function("() => document.activeElement.classList.contains('at-blk')", timeout=APPEAR_MS)
 
 
 def test_the_conflict_panel_scrolls_into_view_and_takes_the_focus(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -444,9 +456,9 @@ def test_the_conflict_panel_scrolls_into_view_and_takes_the_focus(browser: Brows
         area.press("Control+Enter")
         box = page.locator("[data-role='block-conflict']")
         box.wait_for(timeout=APPEAR_MS)
-        assert box.get_attribute("role") == "alert"
+        expect(box).to_have_attribute("role", "alert")
         page.wait_for_function("() => document.querySelector('[data-role=block-conflict]').contains(document.activeElement)", timeout=5000)
-        top = page.evaluate("document.querySelector('[data-role=block-conflict]').getBoundingClientRect().top")
+        top = _box(page, "[data-role='block-conflict']")["y"]
         assert 0 <= top < 900
 
 

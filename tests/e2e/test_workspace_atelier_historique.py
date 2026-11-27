@@ -20,7 +20,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier
@@ -34,6 +34,20 @@ _ENV = {
     "GIT_AUTHOR_NAME": "Ada Lovelace", "GIT_AUTHOR_EMAIL": "ada@example.org",
     "GIT_COMMITTER_NAME": "Ada Lovelace", "GIT_COMMITTER_EMAIL": "ada@example.org",
 }
+
+
+# Résolue quand le contenu du nœud n'a pas changé pendant 30 images d'animation de suite (un redessin en place est fini).
+_QUIET = """(sel) => new Promise((resolve) => {
+    let last = null;
+    let same = 0;
+    const tick = () => {
+        const html = document.querySelector(sel)?.innerHTML ?? null;
+        same = html !== null && html === last ? same + 1 : 0;
+        last = html;
+        if (same >= 30) resolve(true); else requestAnimationFrame(tick);
+    };
+    tick();
+})"""
 
 
 def _git(root: Path, *args: str) -> None:
@@ -107,46 +121,57 @@ def test_three_commits_list_compare_and_return(browser: Browser, project_git: tu
     url, _root, slug = project_git
     for page in _doc(browser, url, slug):
         page.locator(".at-live[data-live='REQ-002']").wait_for(state="attached", timeout=APPEAR_MS)  # la trace du document est lue
-        page.wait_for_timeout(1500)
+        # La feuille se redessine en place quand la trace arrive : on attend qu'elle ne bouge plus (30 images d'animation de suite
+        # identiques) avant d'en prendre l'instantané, au lieu d'une minuterie.
+        page.wait_for_function(_QUIET, arg=".at-sheet", timeout=APPEAR_MS)
         before = page.locator(".at-sheet").inner_html()
         page.locator("[data-role='atelier-historique-bouton']").click()
         panel = page.locator("[data-role='atelier-historique']")
         panel.wait_for(state="visible", timeout=APPEAR_MS)
         rows = panel.locator(".at-hist-row")
-        rows.first.wait_for(timeout=APPEAR_MS)
-        assert rows.count() == 3
-        assert page.locator("[data-role='atelier-historique-bouton']").get_attribute("aria-expanded") == "true"
-        assert "Aujourd" in panel.locator(".at-hist-day-h").first.inner_text()
+        expect(rows).to_have_count(3)
+        expect(page.locator("[data-role='atelier-historique-bouton']")).to_have_attribute("aria-expanded", "true")
+        expect(panel.locator(".at-hist-day-h").first).to_contain_text("Aujourd", use_inner_text=True)
         newest = rows.first
-        assert "fix: précise le brief" in newest.inner_text() and "+2 −1, Brief" in newest.inner_text() and "Ada Lovelace" in newest.inner_text()
-        assert "+" in rows.nth(2).inner_text() and "Brief et Exigences" in rows.nth(2).inner_text()
-        assert page.locator(".at-asst").is_hidden()  # le volet prend la place de l'assistant
+        expect(newest).to_contain_text("fix: précise le brief", use_inner_text=True)
+        expect(newest).to_contain_text("+2 −1, Brief", use_inner_text=True)
+        expect(newest).to_contain_text("Ada Lovelace", use_inner_text=True)
+        expect(rows.nth(2)).to_contain_text("+", use_inner_text=True)
+        expect(rows.nth(2)).to_contain_text("Brief et Exigences", use_inner_text=True)
+        expect(page.locator(".at-asst")).to_be_hidden()  # le volet prend la place de l'assistant
         newest.click()
         banner = page.locator("[data-role='hist-bandeau']")
         banner.wait_for(timeout=APPEAR_MS)
-        assert "Tu regardes la version du" in banner.inner_text() and "Revenir au document" in banner.inner_text()
-        assert page.locator(".at-sheet").is_hidden()
-        assert newest.get_attribute("aria-current") == "true"
+        expect(banner).to_contain_text("Tu regardes la version du", use_inner_text=True)
+        expect(banner).to_contain_text("Revenir au document", use_inner_text=True)
+        expect(page.locator(".at-sheet")).to_be_hidden()
+        expect(newest).to_have_attribute("aria-current", "true")
         added = page.locator(".at-cmp-line.is-add")
         removed = page.locator(".at-cmp-line.is-del")
-        assert added.count() == 2 and removed.count() == 1
-        assert removed.first.locator(".at-cmp-text").inner_text() == "Sans clavier."
-        assert removed.first.locator(".at-cmp-mark").inner_text() == "−" and added.first.locator(".at-cmp-mark").inner_text() == "+"
-        assert "ligne retirée" in (removed.first.text_content() or "")
-        assert page.evaluate("getComputedStyle(document.querySelector('.at-cmp-line.is-del .at-cmp-text')).textDecorationLine") == "line-through"
+        expect(added).to_have_count(2)
+        expect(removed).to_have_count(1)
+        expect(removed.first.locator(".at-cmp-text")).to_have_text("Sans clavier.", use_inner_text=True)
+        expect(removed.first.locator(".at-cmp-mark")).to_have_text("−", use_inner_text=True)
+        expect(added.first.locator(".at-cmp-mark")).to_have_text("+", use_inner_text=True)
+        expect(removed.first).to_contain_text("ligne retirée")
+        expect(removed.first.locator(".at-cmp-text")).to_have_css("text-decoration-line", "line-through")
         # le texte vient du serveur : jamais interprété comme du HTML
-        assert page.locator(".at-cmp img, .at-cmp script").count() == 0
+        expect(page.locator(".at-cmp img, .at-cmp script")).to_have_count(0)
         page.keyboard.press("Escape")
         page.locator("[data-role='hist-comparaison']").wait_for(state="detached", timeout=APPEAR_MS)
-        assert page.locator(".at-sheet").is_visible() and page.locator(".at-sheet").inner_html() == before
+        expect(page.locator(".at-sheet")).to_be_visible()
+        page.wait_for_function("(before) => document.querySelector('.at-sheet').innerHTML === before", arg=before, timeout=APPEAR_MS)
         # la version la plus ancienne : tout est ajouté
         rows.nth(2).click()
         page.locator("[data-role='hist-retour']").wait_for(timeout=APPEAR_MS)
-        assert page.locator(".at-cmp-line.is-del").count() == 0 and page.locator(".at-cmp-phase").count() == 2
+        expect(page.locator(".at-cmp-phase")).to_have_count(2)
+        expect(page.locator(".at-cmp-line.is-del")).to_have_count(0)
         page.locator("[data-role='hist-retour']").click()
-        assert page.locator(".at-sheet").is_visible() and page.locator(".at-sheet").inner_html() == before
+        expect(page.locator(".at-sheet")).to_be_visible()
+        page.wait_for_function("(before) => document.querySelector('.at-sheet').innerHTML === before", arg=before, timeout=APPEAR_MS)
         page.locator("[data-role='hist-fermer']").click()
-        assert panel.is_hidden() and page.locator(".at-doc-grid.has-hist").count() == 0
+        expect(panel).to_be_hidden()
+        expect(page.locator(".at-doc-grid.has-hist")).to_have_count(0)
 
 
 def test_keyboard_navigation(browser: Browser, project_git: tuple[str, Path, str]) -> None:
@@ -159,16 +184,16 @@ def test_keyboard_navigation(browser: Browser, project_git: tuple[str, Path, str
         rows.first.wait_for(timeout=APPEAR_MS)
         rows.first.focus()
         page.keyboard.press("ArrowDown")
-        assert page.evaluate("document.activeElement.getAttribute('data-version')") == rows.nth(1).get_attribute("data-version")
+        expect(rows.nth(1)).to_be_focused()
         page.keyboard.press("Enter")
         page.locator("[data-role='hist-bandeau']").wait_for(timeout=APPEAR_MS)
-        assert page.evaluate("document.activeElement.getAttribute('data-role')") == "hist-retour"
+        expect(page.locator("[data-role='hist-retour']")).to_be_focused()
         page.keyboard.press("Escape")
         page.locator("[data-role='hist-comparaison']").wait_for(state="detached", timeout=APPEAR_MS)
-        assert page.locator(".at-sheet").is_visible()
+        expect(page.locator(".at-sheet")).to_be_visible()
         page.locator("[data-role='atelier-historique-bouton']").focus()
         page.keyboard.press("Enter")  # le bouton referme le volet
-        assert page.locator("[data-role='atelier-historique']").is_hidden()
+        expect(page.locator("[data-role='atelier-historique']")).to_be_hidden()
 
 
 def test_working_tree_entry_and_no_overflow_at_800(browser: Browser, project_git: tuple[str, Path, str]) -> None:
@@ -181,16 +206,15 @@ def test_working_tree_entry_and_no_overflow_at_800(browser: Browser, project_git
             for page in _doc(browser, url, slug, (800, 700), scheme):
                 page.locator("[data-role='atelier-historique-bouton']").click()
                 rows = page.locator(".at-hist-row")
-                rows.first.wait_for(timeout=APPEAR_MS)
-                assert rows.count() == 4 and rows.first.get_attribute("data-kind") == "working"
-                assert "Modifications en cours" in rows.first.inner_text()
+                expect(rows).to_have_count(4)
+                expect(rows.first).to_have_attribute("data-kind", "working")
+                expect(rows.first).to_contain_text("Modifications en cours", use_inner_text=True)
                 rows.first.click()
                 page.locator("[data-role='hist-bandeau']").wait_for(timeout=APPEAR_MS)
-                assert page.locator(".at-cmp-line.is-add").count() == 1
-                overflow = page.evaluate("() => { const e = document.scrollingElement; return e.scrollWidth - e.clientWidth; }")
-                assert overflow <= 1
-                canvas = page.evaluate("() => [...document.querySelectorAll('.at-cmp, .at-hist')].map((n) => n.scrollWidth - n.clientWidth)")
-                assert all(delta <= 1 for delta in canvas)
+                expect(page.locator(".at-cmp-line.is-add")).to_have_count(1)
+                # La mise en page se pose en place : on attend l'état voulu (aucun débordement), le test échoue s'il n'est jamais atteint.
+                page.wait_for_function("() => { const e = document.scrollingElement; return e.scrollWidth - e.clientWidth <= 1; }", timeout=APPEAR_MS)
+                page.wait_for_function("() => [...document.querySelectorAll('.at-cmp, .at-hist')].every((n) => n.scrollWidth - n.clientWidth <= 1)", timeout=APPEAR_MS)
     finally:
         exig.write_text(original, encoding="utf-8")
 
@@ -201,8 +225,8 @@ def test_no_git_says_so(browser: Browser, project_nogit: tuple[str, str]) -> Non
         page.locator("[data-role='atelier-historique-bouton']").click()
         empty = page.locator("[data-role='hist-vide']")
         empty.wait_for(timeout=APPEAR_MS)
-        assert "dépôt git" in empty.inner_text()
-        assert page.locator(".at-hist-row").count() == 0
+        expect(empty).to_contain_text("dépôt git", use_inner_text=True)
+        expect(page.locator(".at-hist-row")).to_have_count(0)
         page.keyboard.press("Escape")
 
 
