@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.cadrage import PHASES, PLACEHOLDER, cadrage_dir
+from grimoire.core.cadrage import DEFAULT_CHANTIER, PHASES, PLACEHOLDER, cadrage_dir
 from grimoire.core.regular_file import open_regular
 from grimoire.missions.request_kind import KIND_PROFILES, RequestKind, parse_kind
 
@@ -376,6 +376,31 @@ def answer(
     return _render(state, "enregistrée")
 
 
+def _phase_file(root: Path, chantier: str | None, phase_id: str) -> Path:
+    """Le fichier de phase d'un chantier, bâti depuis des listes réelles : jamais depuis le nom reçu.
+
+    Le dossier du chantier est celui que la liste des sous-dossiers de ``_grimoire/cadrage/`` rend (le nom reçu ne sert
+    qu'à le retrouver), le fichier vient de la table fixe des phases ; le chemin est résolu puis doit rester sous le
+    dossier de cadrage du projet. Lien symbolique (dossier, chantier ou fichier) : refusé. ``ValueError`` sinon.
+    """
+    phase = next((p for p in PHASES if p.id == phase_id), None)
+    base = cadrage_dir(root, None)
+    if phase is None or base.is_symlink() or not base.is_dir():
+        raise ValueError("dossier de cadrage introuvable ou en lien symbolique : refusé")
+    directory = base
+    if chantier not in (None, DEFAULT_CHANTIER):
+        directory = next((c for c in base.iterdir() if c.name == chantier and c.is_dir() and not c.is_symlink()), base)
+        if directory is base:
+            raise ValueError("chantier inconnu")
+    path = directory / phase.filename
+    if path.is_symlink():
+        raise ValueError(f"{phase.filename} est un lien symbolique : refusé")
+    resolved = path.resolve()
+    if not resolved.is_relative_to(base.resolve()):
+        raise ValueError(f"{phase.filename} sort du dossier de cadrage : refusé")
+    return resolved
+
+
 def _remove_from_section(path: Path, section: str, line: str) -> bool:
     """Retire de la rubrique la ligne exacte *line* ; si la rubrique n'a plus de contenu, le gabarit revient."""
     lines = (read_regular(path) or "").splitlines()
@@ -405,26 +430,26 @@ def retract(root: Path, chantier: str | None, angle_id: str) -> dict[str, Any]:
     angle = _BY_ID.get(angle_id)
     if angle is None:
         raise ValueError(f"angle inconnu : {angle_id!r} — {', '.join(_BY_ID)}")
+    _phase_file(root, chantier, "brief")  # le chantier doit être l'un des vrais dossiers, avant toute lecture
     state = _load(root, chantier)
     rec = (state or {}).get("angles", {}).get(angle.id)
     if state is None or not rec:
         raise ValueError(f"rien à retirer sur l'angle {angle.id!r}")
-    target = cadrage_dir(root, chantier)
     answers: list[str] = rec.setdefault("answers", [])
     if rec.get("state") == "ecarte" and str(rec.get("reason", "")).strip():
         kind, text = "skip", str(rec.pop("reason"))
         removed = _remove_from_section(
-            target / next(p.filename for p in PHASES if p.id == "brainstorm"),
+            _phase_file(root, chantier, "brainstorm"),
             "Écarté (et pourquoi)", f"- Angle « {angle.title} » écarté : {text}")
     elif answers:
         text = str(answers.pop())
         if text.startswith(UNKNOWN_PREFIX):
             kind, removed = "unknown", _remove_from_section(
-                target / next(p.filename for p in PHASES if p.id == "comprehension"), "Hypothèses", f"- {text}")
+                _phase_file(root, chantier, "comprehension"), "Hypothèses", f"- {text}")
             text = text[len(UNKNOWN_PREFIX) + len(angle.title):].lstrip(" —")
         else:
             kind, removed = "answer", _remove_from_section(
-                target / next(p.filename for p in PHASES if p.id == angle.phase), angle.section, f"- {text}")
+                _phase_file(root, chantier, angle.phase), angle.section, f"- {text}")
     else:
         raise ValueError(f"rien à retirer sur l'angle {angle.id!r}")
     rec["state"] = "couvert" if answers else "ouvert"
