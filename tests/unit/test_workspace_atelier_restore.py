@@ -318,7 +318,7 @@ def test_restore_phase_writes_the_exact_bytes_of_the_version(repo: Repo) -> None
     code, out = repo.restore(phase="brief", expected=repo.fp(repo.brief), version=odd)
     assert code == 200 and out["ok"] is True and out["committed"] is False and out["unchanged"] is False
     assert repo.brief.read_bytes() == "# Brief\r\n\r\nÉté 😀 — ligne\r\nsans fin".encode()
-    assert out["phase"]["fingerprint"] == atelier_blocs.fingerprint(repo.brief.read_text(encoding="utf-8", newline=""))
+    assert out["phase"]["fingerprint"] == atelier_blocs.fingerprint(repo.brief.read_bytes().decode("utf-8"))
     assert git(repo.root, "rev-parse", "HEAD") == odd, "rien n'est commité par le kit"
 
 
