@@ -61,12 +61,12 @@ class Probe:
 
 
 def test_un_hote_detecte_par_ses_fichiers_mais_muet_n_est_jamais_le_defaut(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Le cas du poste réel : Copilot détecté (le raccourci ``copilot`` existe) mais muet, opencode répond."""
+    """Copilot détecté (le raccourci ``copilot`` existe) mais muet : le défaut est vide, opencode n'est PAS pris d'office."""
     (project / ".github").mkdir()
     (project / ".github" / "copilot-instructions.md").write_text("x", encoding="utf-8")
     _installed(monkeypatch, "copilot", "opencode")
     probe = Probe("copilot")
-    assert acp_hosts.default_alias(project, probe=probe) == "opencode"
+    assert acp_hosts.default_alias(project, probe=probe) == ""
 
 
 def test_un_seul_hote_utilisable_et_pas_le_premier_de_la_liste(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -75,10 +75,48 @@ def test_un_seul_hote_utilisable_et_pas_le_premier_de_la_liste(project: Path, mo
     assert acp_hosts.default_alias(project, probe=Probe()) == "gemini"
 
 
-def test_un_hote_hors_projet_sert_quand_aucun_hote_du_projet_ne_repond(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _declare(project, "copilot")
-    _installed(monkeypatch, "copilot", "opencode")
-    assert acp_hosts.default_alias(project, probe=Probe("copilot")) == "opencode"
+def test_un_hote_hors_projet_n_est_jamais_pris_d_office_il_est_propose(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """L'hôte du projet (Claude Code) n'a pas d'ACP ; opencode est seulement installé sur la machine : Kanban et proposition."""
+    _declare(project, "claude")
+    _installed(monkeypatch, "opencode")
+    probe = Probe()
+    assert acp_hosts.default_alias(project, probe=probe) == ""
+    assert [p.display_name for p in acp_hosts.other_usable_hosts(project, probe=probe)] == ["opencode"]
+    assert workspace_chat.chat_mode(project)[0] == "kanban"
+    state = workspace_chat.chat_hosts(project, {})
+    assert state["fallback"] is True and state["offers"] == [{"alias": "opencode", "display_name": "opencode"}]
+    assert "Claude Code est l'hôte de ce projet" in state["reason"]
+    assert acp_hosts.INSTALL_HINTS["claude-agent-acp"] in state["reason"]
+
+
+def test_l_assistant_de_l_atelier_suit_la_meme_regle_il_ne_prend_pas_l_hote_d_une_autre_machine(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _declare(project, "claude")
+    _installed(monkeypatch, "opencode")
+    monkeypatch.setattr(acp_hosts, "_probe_initialize", Probe())
+    status = workspace_atelier_assistant.agent_status(project)
+    assert status["available"] is False and status["mode"] == "kanban"
+    assert "Claude Code est l'hôte de ce projet" in status["reason"]
+
+
+def test_l_hote_du_projet_vivant_est_le_defaut_et_aucune_proposition(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare(project, "claude")
+    _installed(monkeypatch, "claude-agent-acp", "opencode")
+    monkeypatch.setattr(acp_hosts, "_probe_initialize", Probe())
+    assert acp_hosts.default_alias(project) == "claude"
+    state = workspace_chat.chat_hosts(project, {})
+    assert state["chosen"] == "claude" and state["fallback"] is False and state["offers"] == []
+
+
+def test_le_choix_explicite_d_un_autre_hote_est_respecte_et_memorise(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare(project, "claude")
+    _installed(monkeypatch, "opencode")
+    monkeypatch.setattr(acp_hosts, "_probe_initialize", Probe())
+    acp_hosts.set_chosen_alias(project, "opencode")
+    state = workspace_chat.chat_hosts(project, {})
+    assert state["chosen"] == "opencode" and state["mode"] == "acp" and state["fallback"] is False
+    assert acp_hosts.chosen_alias(project) == "opencode"  # relu du réglage du projet
 
 
 def test_l_ordre_du_projet_prime_quand_plusieurs_hotes_repondent(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,11 +129,12 @@ def test_aucun_hote_utilisable_le_defaut_est_vide_et_la_raison_donne_la_commande
     _installed(monkeypatch)
     assert acp_hosts.default_alias(project, probe=Probe()) == ""
     reason = acp_hosts.no_host_reason(project)
-    assert "Aucun hôte d'agent n'est utilisable" in reason
+    assert "l'hôte de ce projet" in reason or "aucun hôte d'agent" in reason
     assert acp_hosts.INSTALL_HINTS["claude-agent-acp"] in reason
 
 
-def test_la_raison_nomme_les_hotes_installes_mais_muets(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_la_raison_nomme_l_hote_du_projet_installe_mais_muet(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare(project, "copilot")
     _installed(monkeypatch, "copilot")
     acp_hosts.default_alias(project, probe=Probe("copilot"))
     reason = acp_hosts.no_host_reason(project)
@@ -117,7 +156,7 @@ def test_sans_aucun_choix_explicite_le_defaut_n_est_pas_un_hote_mort(project: Pa
     assert acp_hosts.chosen_alias(project) == ""
     mode, command, reason = workspace_chat.chat_mode(project)
     assert (mode, command) == ("kanban", ()), "aucun agent : repli Kanban, jamais un hôte mort"
-    assert "Aucun hôte d'agent n'est utilisable" in reason
+    assert "l'hôte de ce projet" in reason
 
 
 # ── Les commandes d'installation : seulement celles dont le paquet est vérifié ─
@@ -150,6 +189,7 @@ def test_un_hote_sans_commande_verifiee_dit_voir_sa_documentation_sans_rien_inve
 
 
 def test_la_sonde_n_est_pas_relancee_a_chaque_ouverture(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare(project, "opencode")
     _installed(monkeypatch, "opencode")
     probe = Probe()
     for _ in range(3):
@@ -204,6 +244,7 @@ def test_un_executable_remplace_change_la_cle_donc_refait_la_sonde(project: Path
 
 
 def test_le_selecteur_montre_les_hotes_inutilisables_grises_avec_leur_raison(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare(project, "copilot", "opencode")
     _installed(monkeypatch, "copilot", "opencode")
     monkeypatch.setattr(acp_hosts, "_probe_initialize", Probe("copilot"))
     by_alias = {c.alias: c for c in acp_hosts.host_choices(project)}
