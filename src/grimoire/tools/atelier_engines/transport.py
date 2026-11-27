@@ -16,6 +16,7 @@ la vue montre le NOM de la classe (``EngineDelai``, ``EngineReseau``, ``EngineSo
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -39,6 +40,7 @@ __all__ = [
 
 #: Une réponse plus grosse est hostile ou cassée : refusée.
 MAX_REPONSE = 262_144
+_MORCEAU = 8192
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 Transport = Callable[[str, dict[str, str], bytes, float], tuple[int, bytes]]
@@ -73,24 +75,35 @@ class Backend(Protocol):
 def post_json(transport: Transport, url: str, headers: dict[str, str], payload: dict[str, Any], timeout: float) -> tuple[Any, bytes]:
     """Envoie ``payload`` en JSON, rend ``(JSON décodé, octets)`` ; toute défaillance est une :class:`EngineError` au message fixe."""
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    # Toute erreur est levée HORS du bloc ``except`` : l'exception rendue n'a ni ``__context__`` ni ``__cause__``, donc aucune
+    # référence à l'erreur d'origine (dont le texte pourrait citer un secret) ne survit dans une trace ou un journal.
+    erreur: EngineError | None = None
+    status: Any = None
+    raw: Any = b""
     try:
         status, raw = transport(url, {"content-type": "application/json", **headers}, body, timeout)
-    except EngineError:
-        raise
+    except EngineError as exc:
+        erreur = exc
     except TimeoutError:
-        raise EngineDelai("délai dépassé : aucun nouvel essai") from None
-    except Exception as exc:  # tout autre échec du transport : un refus générique, jamais le texte de l'exception (il pourrait citer une clé)
-        if isinstance(getattr(exc, "reason", None), TimeoutError):
-            raise EngineDelai("délai dépassé : aucun nouvel essai") from None
-        raise EngineReseau("service injoignable : aucun nouvel essai") from None
+        erreur = EngineDelai("délai dépassé : aucun nouvel essai")
+    except Exception as exc:  # tout autre échec du transport : un refus générique, jamais le texte de l'exception
+        late = isinstance(getattr(exc, "reason", None), TimeoutError)
+        erreur = EngineDelai("délai dépassé : aucun nouvel essai") if late else EngineReseau("service injoignable : aucun nouvel essai")
+    if erreur is not None:
+        raise erreur
     if not isinstance(status, int) or status != 200:
         raise EngineReseau(f"le service a répondu {status if isinstance(status, int) else '?'} : appel sans effet")
     if not isinstance(raw, bytes) or len(raw) > MAX_REPONSE:
         raise EngineSortie("réponse du service trop volumineuse ou illisible : ignorée")
+    decode: Any = None
+    illisible = False
     try:
-        return json.loads(raw), raw
+        decode = json.loads(raw)
     except (ValueError, RecursionError):
-        raise EngineSortie("réponse du service illisible : ignorée") from None
+        illisible = True
+    if illisible:
+        raise EngineSortie("réponse du service illisible : ignorée")
+    return decode, raw
 
 
 def is_loopback_url(url: str) -> bool:
@@ -126,20 +139,45 @@ def default_transport(url: str, headers: dict[str, str], body: bytes, timeout: f
         raise EngineRefus("adresse du service refusée : https, ou http vers la machine seulement")
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")  # noqa: S310 — adresse vérifiée ci-dessus
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+    echeance = time.monotonic() + timeout  # l'échéance vaut pour l'appel ENTIER : le délai du socket ne borne qu'une opération
+    erreur: EngineError | None = None
+    status, raw = 0, b""
     try:
         with opener.open(request, timeout=timeout) as response:
-            raw = bytes(response.read(MAX_REPONSE + 1))
             status = int(response.status)
+            raw = _lire(response, echeance)
     except urllib.error.HTTPError as exc:  # inclut une redirection non suivie : le statut dit tout
-        status, raw = int(exc.code), bytes(exc.read(MAX_REPONSE + 1))
+        status = int(exc.code)
+        try:
+            raw = _lire(exc, echeance)
+        except EngineError as inner:
+            inner.__context__ = None
+            erreur = inner
+    except EngineError as exc:
+        erreur = exc
     except TimeoutError:
-        raise EngineDelai("délai dépassé : aucun nouvel essai") from None
+        erreur = EngineDelai("délai dépassé : aucun nouvel essai")
     except urllib.error.URLError as exc:
-        if isinstance(exc.reason, TimeoutError):
-            raise EngineDelai("délai dépassé : aucun nouvel essai") from None
-        raise EngineReseau("service injoignable : aucun nouvel essai") from None
+        late = isinstance(exc.reason, TimeoutError)
+        erreur = EngineDelai("délai dépassé : aucun nouvel essai") if late else EngineReseau("service injoignable : aucun nouvel essai")
     except (OSError, ValueError):
-        raise EngineReseau("service injoignable : aucun nouvel essai") from None
-    if len(raw) > MAX_REPONSE:
-        raise EngineSortie("réponse du service trop volumineuse : ignorée")
+        erreur = EngineReseau("service injoignable : aucun nouvel essai")
+    if erreur is not None:  # levée hors du ``except`` : aucune référence à l'erreur d'origine
+        raise erreur
     return status, raw
+
+
+def _lire(flux: Any, echeance: float) -> bytes:
+    """Lit par morceaux, jamais au-delà de ``MAX_REPONSE`` ni de l'échéance totale ; la connexion est fermée par l'appelant."""
+    morceaux: list[bytes] = []
+    total = 0
+    while True:
+        if time.monotonic() >= echeance:
+            raise EngineDelai("délai dépassé : aucun nouvel essai")
+        bloc = bytes(flux.read(min(_MORCEAU, MAX_REPONSE + 1 - total)))
+        if not bloc:
+            return b"".join(morceaux)
+        total += len(bloc)
+        if total > MAX_REPONSE:
+            raise EngineSortie("réponse du service trop volumineuse : ignorée")
+        morceaux.append(bloc)

@@ -362,11 +362,18 @@ def _record_billed(root: Path, slug: str, model: str, raw: bytes, local_id: str)
     return message
 
 
-def account_response(root: Path, slug: str, model: str, raw: bytes) -> str:
+#: Bornes d'une consommation annoncée : la sortie au plus dix fois le maximum demandé, l'entrée au plus ce plafond.
+MAX_INPUT_ANNONCE = 200_000
+
+
+def account_response(root: Path, slug: str, model: str, raw: bytes, *, max_sortie: int = DEFAULT_MAX_OUTPUT) -> str:
     """Inscrit la consommation déclarée d'une réponse 200 de l'API (compteur du jour, quota du kit) ; rend l'avertissement.
 
     Pour un autre appelant que :func:`run` (la conversation de cadrage, lot B2 de l'épique #1477) : sans cela, le plafond
-    de jetons posé par l'humain ne verrait pas ses appels. Une réponse sans usage lisible n'inscrit rien et le dit.
+    de jetons posé par l'humain ne verrait pas ses appels. Une réponse sans usage lisible n'inscrit rien et le dit. Un
+    service ne fixe pas seul le compteur : une consommation absurde (au-delà de dix fois la sortie demandée ou de
+    ``MAX_INPUT_ANNONCE`` en entrée) ou nulle pour une réponse non vide n'est pas prise telle quelle ; une estimation
+    plancher (un jeton pour quatre octets reçus, au moins un) est comptée, hors quota du kit, et le dit.
     """
     try:
         used = json.loads(raw)["usage"]
@@ -375,6 +382,10 @@ def account_response(root: Path, slug: str, model: str, raw: bytes) -> str:
         return "consommation illisible : non comptée"
     if not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in counts):
         return "consommation illisible : non comptée"
+    if counts[0] + counts[1] == 0 or counts[1] > 10 * max_sortie or counts[0] > MAX_INPUT_ANNONCE:
+        with contextlib.suppress(ModelError):
+            _adjust(root, slug, max(1, len(raw) // 4), cfg=None, now=None)
+        return "consommation non mesurée (annoncée nulle ou incohérente) : estimation plancher comptée"
     tokens = counts[0] + counts[1]
     warning = _record_billed(root, slug, model, raw, uuid.uuid4().hex)
     with contextlib.suppress(ModelError):

@@ -33,7 +33,7 @@ __all__ = [
 MAX_MARQUES = 64
 _MAX_TEXTE = 400
 _LOCK = threading.Lock()
-_MARQUES: dict[tuple[str, str], float] = {}
+_MARQUES: dict[tuple[str, str], tuple[int, float]] = {}  # clé -> (appels en cours, échéance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,16 +84,24 @@ def reflexion(cle: tuple[str, str] | None, duree_s: float) -> Iterator[None]:
         yield
         return
     now = time.monotonic()
+    posee = False
     with _LOCK:
-        for key in [k for k, until in _MARQUES.items() if until <= now]:
+        for key in [k for k, (_n, until) in _MARQUES.items() if until <= now]:
             del _MARQUES[key]
         if len(_MARQUES) < MAX_MARQUES or cle in _MARQUES:  # plein : pas de marque de plus, jamais d'erreur
-            _MARQUES[cle] = now + max(1.0, duree_s)
+            count, until = _MARQUES.get(cle, (0, 0.0))
+            _MARQUES[cle] = (count + 1, max(until, now + max(1.0, duree_s)))  # un compteur par clé : deux appels ne se retirent pas
+            posee = True
     try:
         yield
     finally:
-        with _LOCK:
-            _MARQUES.pop(cle, None)
+        if posee:
+            with _LOCK:
+                count, until = _MARQUES.get(cle, (1, 0.0))
+                if count <= 1:
+                    _MARQUES.pop(cle, None)
+                else:
+                    _MARQUES[cle] = (count - 1, until)
 
 
 def reflechit(cle: tuple[str, str] | None) -> bool:
@@ -101,8 +109,8 @@ def reflechit(cle: tuple[str, str] | None) -> bool:
     if cle is None:
         return False
     with _LOCK:
-        until = _MARQUES.get(cle)
-    return until is not None and until > time.monotonic()
+        entry = _MARQUES.get(cle)
+    return entry is not None and entry[1] > time.monotonic()
 
 
 # ── La vue ──────────────────────────────────────────────────────────────────

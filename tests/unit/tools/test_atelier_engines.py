@@ -673,8 +673,12 @@ def test_le_transport_reel_traduit_les_erreurs_sans_les_citer(monkeypatch: pytes
 
         def __init__(self, n: int) -> None:
             self.n = n
+            self.fini = False
 
         def read(self, _limite: int) -> bytes:
+            if self.fini:
+                return b""
+            self.fini = True
             return b"x" * self.n
 
         def __enter__(self) -> Reponse:
@@ -761,11 +765,11 @@ def test_le_marqueur_de_reflexion_est_borne_perime_et_leve() -> None:
         raise RuntimeError("échec")
     assert not mv.reflechit(("r", "a"))
     for i in range(mv.MAX_MARQUES + 5):  # plein : pas de marque de plus, jamais d'erreur
-        mv._MARQUES[("x", str(i))] = 1e18
+        mv._MARQUES[("x", str(i))] = (1, 1e18)
     with mv.reflexion(("r", "plein"), 5):
         assert mv.reflechit(("r", "plein")) is False
     mv._MARQUES.clear()
-    mv._MARQUES[("r", "vieux")] = 0.0  # périmé : balayé à la prochaine marque
+    mv._MARQUES[("r", "vieux")] = (1, 0.0)  # périmé : balayé à la prochaine marque
     with mv.reflexion(("r", "neuf"), 5):
         assert ("r", "vieux") not in mv._MARQUES
 

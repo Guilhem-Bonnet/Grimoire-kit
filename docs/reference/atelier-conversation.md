@@ -245,6 +245,25 @@ de jetons s'appliquent comme partout.
 - L'agent installé (« Claude Code » et autres hôtes ACP) n'a **pas d'adaptateur** : le kit sait sonder sa connexion, pas lui poser
   une question sans lancer un agent autonome. Il n'est jamais appelé.
 
+**Destination liée à l'autorisation.** La fabrique relit la spec du registre UNE fois par tour, recalcule son empreinte et la
+compare à celle que l'autorisation désigne : si le registre a changé depuis (même dans la fenêtre du cache de détection ou
+entre la décision et la construction du client), rien ne part, ni texte ni clé, le tour retombe sur le moteur sans modèle et
+la vue dit « ce modèle a changé depuis ton autorisation ». L'échéance du délai vaut pour l'appel entier (lecture par morceaux),
+pas seulement pour chaque opération de socket.
+
+**Limites connues.**
+
+- Les plafonds de jetons ne voient que la consommation d'Anthropic (compteur de l'Atelier) : les appels aux passerelles et à
+  Ollama ne sont pas comptés, un plafond posé sur eux n'est pas vérifiable. Une consommation annoncée absurde ou nulle n'est
+  pas prise telle quelle : une estimation plancher est comptée et dite.
+- Le caviardage des secrets couvre les formats de clés connus ; un mot de passe écrit en clair dans un message n'est pas reconnu
+  et part avec le texte vers un modèle distant.
+- Une passerelle ne reçoit la clé du magasin que si son identifiant n'est pas celui d'un fournisseur documenté (l'identifiant
+  `litellm` est admis, comme par la sonde de capacités). La sonde connaît aussi une table d'adresses de fournisseurs qui n'est
+  pas exposée par `providers` : un identifiant que seule cette table reconnaît n'est pas refusé par la fabrique.
+- Un agent installé placé en tête d'une liste n'est jamais appelé : il est écarté de la décision, les autres modèles autorisés
+  parlent à sa place et la vue le dit.
+
 **Un geste, un appel borné.** L'entrée est caviardée des secrets puis bornée (3 000 caractères au plus), citée comme donnée
 entre `<donnee>` (balises neutralisées), sans chemin ni document. La sortie est un objet JSON validé par le schéma du geste :
 champ en trop, type faux, texte hors bornes, JSON invalide, réponse de plus de 256 Kio ou de plus de 20 000 caractères sont
