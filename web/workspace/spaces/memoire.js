@@ -186,6 +186,7 @@ export async function mount(root, ctx) {
     counts: { type: {}, kind: {} },
     filteredOut: 0,
     selectedKey: params.entry ? `${params.of || ''}::${params.entry}` : '',
+    confirming: '',
     status: null,
     loading: false,
     token: 0,
@@ -550,6 +551,8 @@ export async function mount(root, ctx) {
   // ── Détail : l'entrée choisie dans le panneau de droite ───────────────────
 
   const select = (entry, { focus }) => {
+    // Une autre entrée choisie : la confirmation de suppression de la précédente ne la suit pas.
+    if (state.confirming && state.confirming !== keyOf(entry)) state.confirming = '';
     state.selectedKey = keyOf(entry);
     state.status = state.status && state.status.key === state.selectedKey ? state.status : null;
     for (const node of results.querySelectorAll('.kn-res')) {
@@ -571,6 +574,7 @@ export async function mount(root, ctx) {
     const st = STATE[sup.state] || STATE.live;
     const box = el('div', 'kn-detail');
     box.dataset.entry = entry.id;
+    let pendingConfirm = null;
 
     const head = el('div', 'kn-head');
     const badges = el('span', 'kn-badges');
@@ -728,6 +732,7 @@ const gesture = (kind, row) => {
         const remove = el('button', 'btn kn-danger kn-ghost', 'Supprimer…', { type: 'button' });
         remove.addEventListener('click', () => confirmDelete(entry, box, actions));
         actions.append(remove);
+        if (state.confirming === keyOf(entry)) pendingConfirm = () => confirmDelete(entry, box, actions, true);
       }
       box.append(actions);
     } else {
@@ -745,6 +750,7 @@ const gesture = (kind, row) => {
     box.append(equiv);
 
     ctx.inspector.replaceChildren(box);
+    if (pendingConfirm) pendingConfirm();
   };
 
   /** Les autres entrées en vigueur du même projet, déjà chargées : remplaçantes ou doublons possibles. */
@@ -781,7 +787,10 @@ const gesture = (kind, row) => {
     return fix;
   };
 
-  const confirmDelete = (entry, box, actions) => {
+  const confirmDelete = (entry, box, actions, restored = false) => {
+    // Ouverte, la confirmation vit dans le modèle (`state.confirming`) : le détail se dessine deux fois (ligne, puis
+    // `memory/entry`) et le second dessin la rouvre au lieu de la balayer. Elle ne s'exécute jamais seule.
+    state.confirming = keyOf(entry);
     const panel = el('div', 'kn-confirm', null, { role: 'group', 'aria-label': 'Confirmer la suppression' });
     panel.append(el('p', null, `Supprimer définitivement cette entrée de ${entry.projectName || 'ce projet'} ? Le journal des écritures garde la trace de la suppression, pas son texte.`));
     const buttons = el('div', 'kn-actions');
@@ -790,9 +799,10 @@ const gesture = (kind, row) => {
     buttons.append(yes, no);
     panel.append(buttons);
     actions.replaceWith(panel);
-    no.focus();
-    no.addEventListener('click', () => panel.replaceWith(actions));
+    if (!restored) no.focus();
+    no.addEventListener('click', () => { state.confirming = ''; panel.replaceWith(actions); });
     yes.addEventListener('click', async () => {
+      state.confirming = '';
       yes.disabled = true;
       no.disabled = true;
       yes.textContent = 'Suppression…';
