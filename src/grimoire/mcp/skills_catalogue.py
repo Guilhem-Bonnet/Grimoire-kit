@@ -36,14 +36,35 @@ et ``license`` / ``compatibility`` quand ils sont renseignés). Les champs qui
 from __future__ import annotations
 
 import hashlib
-import itertools
 import logging
-import os
-import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+
+# La lecture sûre (fichier régulier, sans lien, bornée, UTF-8 strict) et l'assainissement des textes sont
+# partagés avec les collecteurs de ``hosts.collect`` : un seul code, jamais copié une troisième fois.
+from grimoire.core.safe_sources import (
+    MAX_DIR_ENTRIES as MAX_DIR_ENTRIES,
+)
+from grimoire.core.safe_sources import (
+    MAX_EXAMINED as MAX_EXAMINED,
+)
+from grimoire.core.safe_sources import (
+    NAME_DISPLAY_MAX as NAME_DISPLAY_MAX,
+)
+from grimoire.core.safe_sources import (
+    REASON_DISPLAY_MAX as REASON_DISPLAY_MAX,
+)
+from grimoire.core.safe_sources import (
+    Refused,
+    list_sources,
+    read_source_text,
+    source_dir_issue,
+)
+from grimoire.core.safe_sources import (
+    safe_text as safe_text,
+)
 
 _LOG = logging.getLogger("grimoire.mcp.skills")
 
@@ -60,26 +81,7 @@ SPEC_MAX_BYTES = 16 * 1024 * 1024
 #: Limites de Claude Code (par fichier texte, par skill) : au-delà, l'hôte tronque ou refuse.
 HOST_MAX_FILE_BYTES = 100_000
 HOST_MAX_SKILL_BYTES = 400_000
-#: Entrées lues dans un dossier, et fichiers examinés : le reste est ignoré, et dit.
-MAX_DIR_ENTRIES = 5_000
-MAX_EXAMINED = 500
-#: Longueur d'un nom, d'une raison reprise dans une sortie.
-NAME_DISPLAY_MAX = 80
-REASON_DISPLAY_MAX = 300
-
 _RULES_BLOCKING = ("name.", "description.", "compatibility.")
-
-
-def safe_text(value: object, limit: int = NAME_DISPLAY_MAX) -> str:
-    """Un texte venu d'un fichier, rendu sûr pour un affichage : borné, sans contrôle, sans crochets.
-
-    Les caractères non imprimables (contrôle, mise en forme, retours à la ligne) deviennent des
-    espaces ; les crochets, qui ouvrent le balisage du moteur d'affichage du CLI, deviennent des
-    parenthèses.
-    """
-    text = "".join(ch if ch.isprintable() else " " for ch in str(value))
-    text = " ".join(text.replace("[", "(").replace("]", ")").split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def skill_uri(name: str, path: str = SKILL_FILE) -> str:
@@ -178,69 +180,24 @@ class SkillCatalogue:
 # ── Lecture bornée d'un fichier source ──────────────────────────────────────────
 
 
-class _Refused(Exception):  # noqa: N818 - un refus motivé, pas une erreur
-    """Un fichier source refusé ; le message est la raison, rédigée ici, jamais reprise d'un fichier."""
+_Refused = Refused  # un refus motivé : la raison est rédigée par le module partagé, jamais reprise d'un fichier
 
 
 def _read_source(path: Path) -> str:
-    """Le texte UTF-8 du fichier régulier *path* ; :class:`_Refused` (la raison) sinon.
-
-    ``lstat`` d'abord (ni lien, ni tube, ni périphérique, ni dossier), taille bornée avant la
-    lecture, ouverture sans suivre de lien ni bloquer, lecture bornée à ``limite + 1`` octets.
-    """
-    from grimoire.core.regular_file import open_regular
-
-    try:
-        before = path.lstat()
-    except OSError as exc:
-        raise _Refused(f"fichier source illisible ({exc.__class__.__name__})") from exc
-    if stat.S_ISLNK(before.st_mode):
-        raise _Refused("fichier source en lien symbolique (non suivi)")
-    if not stat.S_ISREG(before.st_mode):
-        raise _Refused("fichier source qui n'est pas un fichier ordinaire")
-    if before.st_size > HOST_MAX_FILE_BYTES:
-        raise _Refused(f"fichier source de {before.st_size} octets, au-delà de {HOST_MAX_FILE_BYTES}")
-    try:
-        with open_regular(path) as handle:
-            data = handle.read(HOST_MAX_FILE_BYTES + 1)
-    except (OSError, ValueError) as exc:
-        raise _Refused(f"fichier source refusé à l'ouverture ({exc.__class__.__name__})") from exc
-    if len(data) > HOST_MAX_FILE_BYTES:
-        raise _Refused(f"fichier source au-delà de {HOST_MAX_FILE_BYTES} octets")
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise _Refused("fichier source qui n'est pas de l'UTF-8") from exc
+    """Le texte UTF-8 du fichier régulier *path* (lecture sûre partagée, borne de l'hôte) ; :class:`Refused` sinon."""
+    return read_source_text(path, max_bytes=HOST_MAX_FILE_BYTES)
 
 
 def _project_dir_issue(directory: Path, project_root: Path) -> str | None:
     """Raison de ne pas lire un dossier de skills du projet : aucun lien ne doit s'y trouver en chemin."""
-    try:
-        expected = project_root.resolve() / directory.relative_to(project_root)
-    except ValueError:
-        return "dossier des skills hors du projet"
-    try:
-        resolved = directory.resolve(strict=True)
-    except OSError:
-        return None  # absent : rien à servir, rien à dire
-    return None if resolved == expected else "dossier des skills hors du projet ou en lien symbolique"
+    return source_dir_issue(directory, project_root, what="skills")
 
 
 def _names(directory: Path, label: str, excluded: list[ExcludedSkill]) -> dict[str, Path]:
     """``slug -> chemin`` des ``*.md`` d'un dossier, au plus :data:`MAX_EXAMINED`, sans rien lire."""
-    try:
-        with os.scandir(directory) as entries:
-            names = [e.name for e in itertools.islice(entries, MAX_DIR_ENTRIES)]
-            more = next(entries, None) is not None
-    except (FileNotFoundError, NotADirectoryError):
-        return {}
-    except OSError as exc:
-        excluded.append(_excluded(label, f"dossier illisible ({exc.__class__.__name__})"))
-        return {}
-    wanted = sorted(n for n in names if n.endswith(".md") and len(n) > 3)
-    if more or len(wanted) > MAX_EXAMINED:
-        excluded.append(_excluded(label, f"dossier trop fourni : {MAX_EXAMINED} fichiers examinés au plus"))
-    return {n[:-3]: directory / n for n in wanted[:MAX_EXAMINED]}
+    found, issues = list_sources(directory, label)
+    excluded.extend(ExcludedSkill(i.name, i.reason) for i in issues)
+    return found
 
 
 # ── Rendu d'un skill ───────────────────────────────────────────────────────────
