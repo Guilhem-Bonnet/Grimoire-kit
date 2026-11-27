@@ -98,7 +98,7 @@ function readSelection(host, block) {
   return best < 0 ? whole : { quote: picked, start: best, whole: false };
 }
 
-export function createComments(ctx, slug, { doc, sheet, reload, drafts }) {
+export function createComments(ctx, slug, { doc, sheet, reload, drafts, ownWrite = (send) => send() }) {
   const ranges = new Map();
   const supported = typeof CSS !== 'undefined' && CSS.highlights && typeof window.Highlight === 'function';
   // « Rattacher ici » : la dernière sélection de l'humain dans un bloc (le clic sur le bouton ne l'efface pas).
@@ -131,7 +131,7 @@ export function createComments(ctx, slug, { doc, sheet, reload, drafts }) {
     error.hidden = true;
     for (const button of box.querySelectorAll('button')) button.disabled = true;
     try {
-      const result = await work();
+      const result = await ownWrite(work); // un pouls qui répond pendant l'écriture ne voit pas là un dépôt extérieur
       if (ctx.signal.aborted) return;
       settle(box);
       await reload(done);

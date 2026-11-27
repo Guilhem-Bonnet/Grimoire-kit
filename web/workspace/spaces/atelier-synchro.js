@@ -23,7 +23,9 @@ export function createSync(ctx, hooks) {
   // le geste, donc une écriture extérieure tombée entre-temps reste détectée).
   const check = async (files, annexes, { force = false, started = Infinity } = {}) => {
     if (ctx.signal.aborted) return;
-    if (!force && hooks.docAt && started < hooks.docAt()) return;
+    // Même pour `force` : un tour qui « change » à cause d'une réponse guidée de cette page (angles couverts) est son propre geste,
+    // dont le rechargement suit ; la fin d'un tour d'agent déposée avant ce geste y est lue aussi.
+    if (hooks.docAt && started < hooks.docAt()) return;
     if (running && force) { await hooks.reload(); return; } // un rechargement est déjà en cours : celui-ci reste dû
     if (running || document.hidden) return;
     const stale = staleFiles(hooks.doc(), files).length > 0;
