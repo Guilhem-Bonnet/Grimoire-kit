@@ -771,7 +771,8 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     const area = el('textarea', null, null, { 'aria-label': `Modifier le bloc : ${blockTitle(block)}`, spellcheck: 'true' });
     // Un gabarit « À compléter » s'ouvre VIDE (le gabarit n'est que l'invite) ; vide ou annulé, le fichier garde le gabarit.
     const template = Boolean(block.placeholder || isTemplateText(block.text));
-    if (template) area.setAttribute('placeholder', templateHint(block.text));
+    const rub = template ? rubricOf(phase, block) : null;
+    if (template) area.setAttribute('placeholder', rub ? invites.placeholder(rub) : 'Écris ici, avec tes mots.'); // une invite humaine, pas le gabarit
     area.value = resumed != null ? resumed : (template ? '' : block.text); // un brouillon n'est remis que sur demande (« Reprendre »)
     drafts.bind(area, 'bloc', block.id, block.text);
     const save = el('button', 'at-btn pri', null, { type: 'button' });
@@ -783,6 +784,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     const bar = el('div', 'at-edit-bar');
     bar.append(save, cancel, hint);
     const form = el('div', 'at-edit', null, { 'data-role': 'block-edit', 'data-block': block.id });
+    if (rub) { form.classList.add('at-edit-invite'); form.append(invites.guide(rub)); } // la consigne reste sous les yeux pendant la saisie
     form.append(area, bar, error);
     host.replaceChildren(form);
     host.classList.add('is-editing');
@@ -1060,7 +1062,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   // Dire ce qui est attendu : l'invite de chaque rubrique vide, et « Ce qu'il me reste à faire » en tête du document.
   const invites = createInvites(ctx, slug, { reload: (message, kind) => reload(message, kind) });
   const rest = createRest({
-    phone: () => root.clientWidth < PHONE_MAX, // sous 900 px, le document d'abord : le résumé est replié sur sa phrase d'en-tête
+    phone: () => root.clientWidth <= PHONE_MAX, // jusqu'à 900 px inclus, le document d'abord : le résumé est replié sur sa phrase d'en-tête
     goTo: (phaseId, section) => goSection(phaseId, section),
     goSplit: () => {
       const split = liveDoc.toolbar.querySelector('[data-act="split"]');

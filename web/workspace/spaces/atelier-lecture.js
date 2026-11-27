@@ -95,7 +95,17 @@ export function createReading(ctx, hooks, params) {
     set,
     sync,
     /** La page entière (le mode s'y pose) ; à appeler une fois qu'elle existe. */
-    attach(node) { page = node; apply(); },
+    attach(node) {
+      page = node;
+      // Lecture pure : le guidage (le bloc « reste à faire » et les invites d'écriture) est masqué ; une ligne discrète le dit.
+      const note = el('p', 'at-read-note', 'Mode lecture : le guidage est masqué. ', { 'data-role': 'lecture-guidage' });
+      const exit = el('button', 'at-link', 'Quitter la lecture', { type: 'button', 'data-act': 'lecture-quitter' });
+      exit.addEventListener('click', () => { set(false); button.focus({ preventScroll: true }); });
+      note.append(exit);
+      const anchor = node.querySelector('.at-reste');
+      if (anchor) anchor.before(note); else hooks.sheet.before(note);
+      apply();
+    },
     /** La pastille d'un fil ouvert, en marge du bloc : discrète, un clic quitte la lecture et mène au fil. */
     dot(count) {
       const dot = el('button', 'at-read-dot', String(count), { type: 'button', 'data-role': 'read-dot', 'aria-label': dotLabel(count) });

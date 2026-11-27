@@ -17,6 +17,20 @@ export function itemLabel(item) {
 }
 
 /**
+ * L'avancement de ce qui est utile, en clair, par phase entamée (« Brief : 2 rubriques utiles sur 4 remplies »), et l'étape
+ * suivante conseillée (la première rubrique utile vide de la phase en cours). Information seulement : rien n'est recalculé ici.
+ */
+export function usefulProgress(reste) {
+  const lines = ((reste && reste.avancement) || []).map((a) => ({
+    phase: a.phase,
+    text: `${PHASE_NAMES[a.phase] || a.phase_title} : ${a.utiles_remplies} ${a.utiles_remplies > 1 ? 'rubriques utiles' : 'rubrique utile'} sur ${a.utiles_total} ${a.utiles_remplies > 1 ? 'remplies' : 'remplie'}`,
+  }));
+  const e = reste && reste.etape;
+  const step = e ? { phase: e.phase, section: e.section, place: `${PHASE_NAMES[e.phase] || e.phase_title} › ${e.section}`, quoi: e.quoi || '' } : null;
+  return { lines, step };
+}
+
+/**
  * Le résumé à afficher : `ready`, la phrase d'en-tête, les choses nécessaires (avec leur lien), la phrase sur le facultatif.
  * Sans donnée (`reste` nul : chargement, ancien serveur), rien n'est affiché.
  */

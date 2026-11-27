@@ -7,7 +7,7 @@
 // Replié d'office sous 900 px (le document passe avant tout) : seule sa phrase d'en-tête reste visible ; déplié, il garde son choix.
 
 import { keepFocus, stable } from './atelier-focus.js';
-import { restSummary } from './atelier-reste-a-faire-logic.js';
+import { restSummary, usefulProgress } from './atelier-reste-a-faire-logic.js';
 
 function el(tag, className, text, attrs) {
   const node = document.createElement(tag);
@@ -38,6 +38,19 @@ export function createRest(hooks) {
       const head = el('summary', 'at-reste-sum');
       head.append(el('span', 'at-reste-h', 'Ce qu’il me reste à faire'), el('span', 'at-reste-head', sum.headline, { 'data-role': 'reste-titre' }));
       element.append(head);
+      const { lines, step } = usefulProgress(reste);
+      if (step) { // d'abord l'étape suivante conseillée, puis où en est ce qui est utile
+        const p = el('p', 'at-reste-step', null, { 'data-role': 'reste-etape' });
+        const go = el('button', 'at-link at-reste-link', step.place, { type: 'button', 'data-act': 'reste-step', 'data-phase': step.phase, 'data-section': step.section });
+        go.addEventListener('click', () => hooks.goTo(step.phase, step.section));
+        p.append('Étape suivante conseillée : ', go);
+        element.append(p);
+      }
+      if (lines.length) {
+        const list = el('ul', 'at-reste-list at-reste-progress', null, { 'data-role': 'reste-avancement' });
+        for (const line of lines) list.append(el('li', null, line.text, { 'data-phase': line.phase }));
+        element.append(list);
+      }
       if (sum.items.length) {
         const list = el('ul', 'at-reste-list', null, { 'data-role': 'reste-necessaire' });
         for (const item of sum.items) {
