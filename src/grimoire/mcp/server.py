@@ -55,6 +55,10 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 # à 2.2.0). Le pont n'a jamais câblé Roots, Sampling ni Logging — les trois
 # fonctionnalités que la révision 2026-07-28 déprécie (retrait possible à
 # partir de 2027-07-28) — donc rien à retirer de ce côté.
+try:  # extension « Skills » (SEP-2640) : son interface n'existe qu'en mcp >= 2 (docs/guides/mcp-skills.md)
+    from grimoire.mcp.skills_extension import SKILLS_EXTENSION as _SKILLS
+except ImportError:  # repli mcp 1.x
+    _SKILLS = None  # type: ignore[assignment]
 _INSTRUCTIONS = (
     "Grimoire Kit — Composable AI agent platform. "
     "Use these tools to inspect and manage Grimoire projects. " + GROUNDING_RULE_EN
@@ -104,7 +108,7 @@ else:
     # basse du SDK dans pyproject.toml.
     from mcp.types import CallToolResult, ToolAnnotations
 
-    mcp = _Server(name="grimoire", instructions=_INSTRUCTIONS)
+    mcp = _Server(name="grimoire", instructions=_INSTRUCTIONS, **({"extensions": [_SKILLS]} if _SKILLS else {}))
 
 
 def _find_config() -> GrimoireConfig:
@@ -1415,6 +1419,8 @@ def _register_surface(project_path: Path | None = None) -> tuple[int, int]:
         _guarded(_register_command, c.slug, c.description, c.body, c.argument_hint) for c in commands
     )
     resources = sum(_guarded(_register_skill, k.slug, k.description, k.body) for k in skills)
+    if _SKILLS is not None:
+        _SKILLS.serve(mcp, root)  # extension « Skills » : skills/list, skills/get, skill://
     return (prompts, resources)
 
 

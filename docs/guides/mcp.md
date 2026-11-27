@@ -270,6 +270,7 @@ Le serveur MCP est un pont entre le protocole MCP (stdin/stdout JSON-RPC) et le 
 
 ## Voir aussi
 
+- [Skills servis par MCP](mcp-skills.md)
 - [Guide SDK](sdk-python.md)
 - [Référence YAML](../reference/grimoire-yaml.md)
 - [Getting Started](../tutoriels/premier-projet.md)

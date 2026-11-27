@@ -7,6 +7,7 @@ serveurs stdio tournent sur le poste.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -63,6 +64,26 @@ def check_mcp_http_entry(server_name: str, url: str) -> EnvCheck:
             else "check the network or the server url; the host skips this entry until it answers"
         ),
     )
+
+
+def check_mcp_skills(target: Path) -> EnvCheck:
+    """Combien de skills le serveur MCP sert par l'extension officielle, et lesquels il écarte.
+
+    Information seulement, jamais bloquante : un skill écarté reste émis en
+    fichier pour les hôtes qui ne lisent pas l'extension. Même catalogue que le
+    serveur (:func:`grimoire.mcp.skills_catalogue.build_catalogue`), sans le SDK.
+    """
+    from grimoire.mcp.skills_catalogue import build_catalogue
+
+    try:
+        catalogue = build_catalogue(target)
+    except Exception as exc:  # une sonde de doctor ne lève jamais
+        return EnvCheck("mcp_skills", passed=True, level="info", detail=f"skills servis par MCP : non mesuré ({exc.__class__.__name__})")
+    detail = f"skills servis par MCP : {len(catalogue.served)} (extension io.modelcontextprotocol/skills)"
+    if catalogue.excluded:
+        skipped = ", ".join(f"{e.slug} ({e.reason})" for e in catalogue.excluded)
+        detail += f" ; non servis : {skipped}"
+    return EnvCheck("mcp_skills", passed=True, level="info", detail=detail)
 
 
 def check_mcp_processes() -> EnvCheck:
