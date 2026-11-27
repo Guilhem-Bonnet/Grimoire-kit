@@ -651,6 +651,10 @@ def get(root: Path, path: str, query: dict[str, list[str]]) -> Any:
 
         # Comparer deux versions (lecture seule) : `from` et `to` sont revérifiés comme `history/<id>`.
         return restore.compare(root, rest[1], (query.get("from") or [""])[0], (query.get("to") or [""])[0])
+    if rest == ["conversations"] or (len(rest) >= 3 and rest[0] == "chantiers" and rest[2] == "conversation"):
+        from grimoire.tools import workspace_atelier_conversation as conversation
+
+        return conversation.get(root, rest)  # épique #1477, lot A : la conversation de cadrage, lecture seule
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
@@ -707,6 +711,10 @@ def _post(root: Path, path: str, body: dict[str, Any]) -> Any:
         from grimoire.tools import workspace_atelier_restore as restore
 
         return restore.apply(root, rest[1], body)  # restaurer une phase : voir ce module (aucune écriture git)
+    if len(rest) >= 3 and rest[0] == "chantiers" and rest[2] == "conversation":
+        from grimoire.tools import workspace_atelier_conversation as conversation
+
+        return conversation.post(root, rest, body)  # épique #1477, lot A : aucune route n'écrit un fichier de phase directement
     raise FileNotFoundError(f"route inconnue : {path}")
 
 

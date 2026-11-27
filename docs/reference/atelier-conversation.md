@@ -1,0 +1,148 @@
+---
+audience: contributeur
+---
+
+# Atelier de spec : le moteur de la conversation de cadrage
+
+Le cadrage de l'Atelier devient une conversation. Le principe d'architecture est simple : **le programme tient le
+cadre, les modèles ne font que des gestes bornés**. Ce document décrit le moteur côté serveur (lot A de l'épique
+#1477) : l'état d'une conversation, la machine qui décide de la suite, les gestes qu'un moteur peut faire, le
+rangement dans le document, l'enregistrement et les routes. Il n'y a ni interface nouvelle ni modèle d'IA : le moteur
+fourni, `MoteurSansModele`, fonctionne par règles.
+
+## Les modules
+
+| Module | Rôle |
+|---|---|
+| `core/cadrage_conversation.py` | L'état (tours, éléments, notes, question en cours), sa validation à la lecture |
+| `core/cadrage_conversation_flow.py` | La machine à états : l'étape suivante, le « pourquoi », le résumé en deux lignes |
+| `core/cadrage_conversation_engine.py` | L'interface `Moteur`, le moteur sans modèle, le gardien `Garde` |
+| `core/cadrage_conversation_document.py` | La seule porte d'écriture dans les fichiers de phase |
+| `core/cadrage_conversation_turn.py` | Les opérations : démarrer, tour, décision, pause, classement, lectures |
+| `core/cadrage_conversation_store.py` | Le fichier `conversation.json` : lecture validée, écriture atomique sous verrou |
+| `core/cadrage_conversation_hygiene.py` | Sommeil, classement doux, réouverture, liste des conversations |
+| `tools/workspace_atelier_conversation.py` | Les routes et le point d'injection du moteur |
+
+## L'état d'une conversation
+
+Une conversation appartient à un chantier et vit dans `_grimoire/cadrage/<chantier>/conversation.json`. Elle porte :
+
+- les **tours** (qui parle, texte, date, geste) ;
+- **ce qui est compris** : des éléments rangés par rubrique, chacun avec sa **source** (le numéro du tour) et son
+  **statut** : `propose`, `confirme`, `corrige` ou `ecarte` ;
+- les **questions ouvertes** et la liste **pour plus tard** (le hors-sujet noté) ;
+- le **mode** : `cadrage`, `brainstorm`, `pause` ou `termine` ;
+- la **question en cours** (genre, texte, rubrique visée, pourquoi on la pose) ;
+- un numéro de version `rev`, qui change à chaque écriture, et un champ de schéma.
+
+Le fichier suit le statut de `comments.json` et `entretien.json` : il est **versionnable** (seuls ses verrous sont
+ignorés par git).
+
+## La machine à états
+
+`prochaine_etape` est une fonction pure de la conversation et de l'avancement réel de l'entretien. Règles, dans cet
+ordre :
+
+1. le mode `termine` ou `pause` l'emporte ;
+2. une demande qui n'appelle pas d'entretien (`rien`) ou une action à rétablir d'abord (`reporte`) ne pose aucune
+   question ;
+3. tant qu'un élément compris attend un oui, le programme **reformule** (`confirmer`) ;
+4. en mode brainstorm, il invite à lister des pistes ;
+5. un angle **obligatoire à cette profondeur** pas encore couvert donne la prochaine question, dans l'ordre des angles
+   du kit ; le programme dit ce qu'il manque (« il ne me manque plus que… ») ;
+6. l'essentiel couvert (ce qui compte pour le gate de l'entretien), il **propose de passer au document** ;
+7. après un refus, il affine (seconde question des angles obligatoires), puis pose les questions facultatives, puis
+   dit qu'il n'a plus de question.
+
+Il ne pose jamais une question sans objet pour ce besoin (les angles non obligatoires viennent après l'essentiel) et
+chaque étape porte son **pourquoi**, en mots simples.
+
+## Les gestes d'un moteur
+
+`Moteur` est le protocole que le lot B implémentera avec de vrais modèles. Une méthode par geste, entrées et sorties
+petites et typées :
+
+| Geste | Entrée | Sortie |
+|---|---|---|
+| `formuler_question` | `EntreeQuestion` | un texte |
+| `classer_reponse` | `EntreeClassement` | une classe de la liste fermée `CLASSES` |
+| `extraire_elements` | `EntreeExtraction` | des `ElementExtrait` (texte, rubrique) |
+| `reformuler` | `EntreeReformulation` | un texte |
+| `proposer_pistes` | `EntreePistes` | une liste de pistes |
+| `repondre_question` | texte, pourquoi | un texte |
+| `est_tour_lourd` | texte, étape | un booléen (l'interface montre la réflexion) |
+| `limites` | rien | ce que le moteur ne sait pas faire, dit honnêtement |
+
+Un moteur ne reçoit **jamais** de chemin, de document ni de moyen d'écrire. `Garde` enveloppe tout moteur : type,
+longueur, classe et rubrique de la liste fermée sont vérifiés ; chaque appel est borné dans le temps ; une exception,
+une lenteur ou une sortie hors cadre est refusée et remplacée par le moteur sans modèle, avec une note que l'interface
+peut montrer.
+
+### Le moteur sans modèle
+
+Questions tirées des amorces du kit, redites au tutoiement et sans jargon ; classement par règles simples (réponse,
+« je ne sais pas », « sans objet », « plus tard », « pause », « on brainstorme », « pourquoi tu me demandes ça ? ») ;
+reformulation par reprise fidèle (« Si je comprends bien : … ») ; aucune piste inventée, la personne liste les siennes
+et le programme les range. Limites, dites à l'écran : pas de reformulation avec ses mots, pas de réponse à une question
+autre que « pourquoi », pas de détection fine d'une contradiction (seulement les tournures explicites).
+
+## Le rangement dans le document
+
+Un élément n'entre dans un fichier de phase qu'une fois **confirmé** (ou corrigé par l'humain), et il y entre par
+`cadrage_interview.answer` : même ligne (`- *question* réponse`), même trace dans `entretien.json`, même refus
+d'écrire dans un document au statut accepté. Retirer ou corriger un élément déjà rangé passe par `retract`, qui retire
+la dernière réponse d'un angle : le programme retire ce qui a été rangé après lui, puis lui, et réécrit ce qui reste.
+Avant de toucher à quoi que ce soit, il vérifie que les dernières réponses de l'angle sont bien celles de la
+conversation ; sinon il ne touche à rien et le dit. Le gate de `cadrage check` n'est jamais modifié.
+
+Un « je ne sais pas » ou un « sans objet » dit par l'humain vaut confirmation : il est rangé aussitôt, comme dans
+l'entretien guidé.
+
+## Enregistrement, pause, reprise, hygiène
+
+La conversation est enregistrée à **chaque** opération, sous le verrou du fichier. La reprise redit où l'on en est en
+deux lignes, calculées par le programme (avancement puis prochaine question). Une conversation sans activité passe
+**en sommeil** (3 jours par défaut), puis **classée** (14 jours) ; classée veut dire conservée, retrouvable, hors de la
+liste active, jamais supprimée. Le statut se déduit de la date et d'une horloge injectée. Au plus 5 conversations sont
+proposées comme actives. Réglages, dans `project-context.yaml` :
+
+```yaml
+cockpit:
+  atelier_conversation:
+    sommeil_jours: 3
+    classee_jours: 14
+    max_actives: 5
+```
+
+## Les routes et leurs gardes
+
+Toutes sont sous `/api/workspace/atelier/`, donc derrière les gardes communes de l'Atelier (drapeau
+`cockpit.test_features.atelier`, jeton de page, origine, JSON, journal des mutations). Le chantier est retrouvé dans la
+liste réelle des chantiers, jamais construit depuis le slug.
+
+| Route | Effet | Garde propre |
+|---|---|---|
+| `GET chantiers/<slug>/conversation` | l'état | lecture seule, fichier hors cadre : `erreur` |
+| `GET chantiers/<slug>/conversation/compris` | ce qui est compris, par rubrique | lecture seule |
+| `GET conversations` | actives, autres, classées, en erreur | lecture seule |
+| `POST …/conversation/demarrer` | démarre ou reprend | corps vide |
+| `POST …/conversation/tour` | un tour de l'humain | `rev`, `texte` ; 409 si `rev` a changé |
+| `POST …/conversation/elements/<id>` | confirmer, corriger, écarter | `rev`, `decision`, `texte` |
+| `POST …/conversation/pause`, `terminer`, `classer`, `rouvrir` | change le mode ou le classement | `rev` |
+
+Aucun corps n'accepte un autre champ que ceux du tableau : pas de phase, de rubrique ni de chemin. Un élément déjà
+tranché ou une conversation en pause, terminée ou classée donne 409 ou 400 sans rien écrire.
+
+## Où brancher les lots suivants
+
+- **Lot B (modèles)** : `workspace_atelier_conversation.set_moteur(fabrique)` est l'unique point d'injection ; la
+  fabrique reçoit la racine et le slug et rend un objet qui respecte `Moteur`. Le gardien reste autour. Les choix
+  d'autorisation et de repli vivent dans la fabrique, pas dans le programme.
+- **Lot C (scène d'appel)** : lit `GET …/conversation` (vue Conversation) et `…/compris` (vue Document) ; `rev` est à
+  renvoyer à chaque écriture.
+- **Lot D (voix)** : la réaction d'un tour porte `accuse` (texte du programme, immédiat), `message` et `lourd` : une
+  interface peut dire l'accusé tout de suite et attendre le message.
+- **Lot E (rédaction finale)** : lit `ranges()` et les sources (numéro de tour) pour relier chaque passage à l'échange ;
+  il n'a pas d'autre porte d'écriture que `cadrage_conversation_document`.
+
+Un essai sans interface : `python scripts/cadrage-converse.py --chantier <slug>`.

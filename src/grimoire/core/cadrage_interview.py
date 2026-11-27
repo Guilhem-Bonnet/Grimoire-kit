@@ -390,11 +390,14 @@ def _append_to_section(path: Path, section: str, line: str) -> None:
 def answer(
     root: Path, chantier: str | None, angle_id: str, text: str,
     *, unknown: bool = False, skip: bool = False, question: str | None = None,
+    rubrique: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Consigne une réponse, un « je ne sais pas » (question ouverte) ou l'écart motivé d'un angle (rubrique « Sans objet »).
 
     ``question`` : la question posée, si elle diffère de l'amorce de l'angle (sinon l'amorce de rang égal au nombre de
-    réponses déjà données). Elle donne la rubrique visée, et reste lisible devant la réponse.
+    réponses déjà données). Elle reste lisible devant la réponse.
+    ``rubrique`` : la rubrique (phase, section) qui reçoit la réponse, si ce n'est pas celle que vise la question d'amorce ;
+    elle doit être l'une de celles que l'angle porte (``ValueError`` sinon). Sans elle, la rubrique visée par la question.
     """
     angle = _BY_ID.get(angle_id)
     if angle is None:
@@ -420,6 +423,10 @@ def answer(
     index = len(rec["answers"])  # la question d'amorce à laquelle on répond : autant de réponses déjà données
     asked = _label(question) if question else (_label(angle.seeds[index]) if index < len(angle.seeds) else "")
     phase_id, section = question_target(angle, index)
+    if rubrique is not None:
+        if rubrique not in {(angle.phase, angle.section), *angle.targets}:
+            raise ValueError(f"rubrique {rubrique[0]}/{rubrique[1]} : l'angle {angle.id!r} ne la porte pas")
+        phase_id, section = rubrique
     if skip:
         # La rubrique de l'angle est marquée « Sans objet » à sa place (le gabarit s'efface), le brainstorm reste net.
         rec.update(state="ecarte", reason=text)
