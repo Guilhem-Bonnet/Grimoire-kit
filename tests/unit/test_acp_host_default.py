@@ -100,6 +100,42 @@ def test_l_assistant_de_l_atelier_suit_la_meme_regle_il_ne_prend_pas_l_hote_d_un
     assert "Claude Code est l'hôte de ce projet" in status["reason"]
 
 
+def test_les_hotes_du_projet_ignorent_les_doublons_et_les_noms_inconnus(project: Path) -> None:
+    _declare(project, "claude", "emacs", "claude")
+    assert [p.host_id for p in acp_hosts._project_hosts(project)] == [HostId.CLAUDE_CODE_CLI]
+
+
+def test_une_liste_vide_de_profils_ne_sonde_rien(project: Path) -> None:
+    assert acp_hosts.usable_map([], project) == {}
+
+
+def test_un_projet_sans_hote_d_agent_le_dit_avec_la_commande_et_propose_les_hotes_qui_repondent(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Aucun hôte déclaré : le bandeau ne nomme aucun hôte du projet, donne la commande vérifiée et propose les autres."""
+    _declare(project)  # `hosts.enabled: []`
+    _installed(monkeypatch, "opencode")
+    monkeypatch.setattr(acp_hosts, "_probe_initialize", Probe())
+    assert acp_hosts.default_alias(project) == ""
+    reason = acp_hosts.no_host_reason(project)
+    assert reason.startswith("Ce projet ne déclare ni ne détecte aucun hôte d'agent compatible ACP.")
+    assert acp_hosts.INSTALL_HINTS["claude-agent-acp"] in reason
+    state = workspace_chat.chat_hosts(project, {})
+    assert state["fallback"] is True and state["mode"] == "kanban"
+    assert state["offers"] == [{"alias": "opencode", "display_name": "opencode"}]
+    selected = [h["alias"] for h in state["hosts"] if h["selected"]]
+    assert selected == ["kanban"]
+
+
+def test_un_agent_de_secours_force_par_l_environnement_n_est_pas_un_repli(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une commande d'agent forcée (``GRIMOIRE_CHAT_AGENT_COMMAND``) : le chat est en mode acp, pas de bandeau ni d'offre."""
+    _declare(project, "claude")
+    _installed(monkeypatch, "opencode")
+    monkeypatch.setenv(workspace_chat.AGENT_COMMAND_ENV, "faux-agent --acp")
+    state = workspace_chat.chat_hosts(project, {})
+    assert state["mode"] == "acp" and state["fallback"] is False and state["offers"] == []
+
+
 def test_l_hote_du_projet_vivant_est_le_defaut_et_aucune_proposition(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _declare(project, "claude")
     _installed(monkeypatch, "claude-agent-acp", "opencode")
