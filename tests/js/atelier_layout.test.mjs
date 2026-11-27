@@ -85,6 +85,9 @@ test('la phase active suit le défilement', () => {
   assert.equal(activePhase(order, new Set(), 'brainstorm'), 'brainstorm', 'rien dans la bande : la phase courante reste');
   assert.equal(activePhase(order, new Set(['brainstorm']), 'brainstorm', true), 'comprehension', 'en bas du document : la dernière');
   assert.equal(activePhase([], new Set(), 'x', true), 'x');
+  assert.equal(activePhase(order, new Set(), 'comprehension', false, true), order[0], 'tout en haut : la première phase');
+  assert.equal(activePhase(order, new Set(['brainstorm']), 'brief', false, true), order[0]);
+  assert.equal(activePhase(order, new Set(), 'brief', true, true), order[order.length - 1], 'document court : la fin l’emporte');
 });
 
 test('l’ancre d’URL d’une phase, relue au chargement', () => {

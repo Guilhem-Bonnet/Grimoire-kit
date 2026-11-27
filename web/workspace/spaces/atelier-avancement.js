@@ -182,6 +182,8 @@ export function createLoopPanel(ctx) {
       const marks = [av.a_confirmer ? `${av.a_confirmer} « je ne sais pas »` : '', av.phases.some((p) => p.sans_objet) ? `${av.phases.reduce((n, p) => n + p.sans_objet, 0)} « sans objet »` : ''].filter(Boolean);
       setText(summary, av.resume + (marks.length && av.etat !== 'complet' ? ` (dont ${marks.join(' et ')}, comptés comme couverts)` : ''));
       summary.setAttribute('data-etat', av.etat);
+      // Cette pastille compte TOUTES les rubriques encore au gabarit, facultatives comprises : le résumé « Ce qu’il me reste à faire » ne compte que le nécessaire.
+      summary.title = 'Toutes les rubriques encore au gabarit, facultatives comprises. « Ce qu’il me reste à faire », en haut du document, ne compte que ce qui est nécessaire pour valider.';
       sections(av);
     }
     taskList(doc.taches || []);

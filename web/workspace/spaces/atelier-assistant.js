@@ -12,6 +12,7 @@ import { createGuided, engineBadge } from './atelier-entretien.js';
 import { avancementText } from './atelier-avancement.js';
 import { keepFocus, setText } from './atelier-focus.js';
 import { initialOpen, pillSummary, readPref, writePref } from './atelier-layout-logic.js';
+import { readBig, writeBig } from './atelier-entretien-logic.js';
 
 const PHASE_NAMES = { brief: 'Brief', brainstorm: 'Brainstorm', comprehension: 'Compréhension', exigences: 'Exigences', 'cahier-des-charges': 'Cahier des charges' };
 const PHASE_ORDER = ['brief', 'brainstorm', 'comprehension', 'exigences', 'cahier-des-charges'];
@@ -47,16 +48,46 @@ export function createAssistant(ctx, slug, hooks) {
   pill.append(icon('i-act-add'), pillText, pillCount);
   const storage = (() => { try { return window.localStorage; } catch { return null; } })();
   let open = true;
+  // « Agrandir » : l'entretien au centre, le document replié à côté (un rail à rouvrir). Le choix est mémorisé par navigateur ;
+  // il ne s'applique que panneau déplié, et se défait de lui-même quand le panneau se replie.
+  let big = readBig(storage);
+  const rail = el('button', 'at-asst-rail', null, { type: 'button', 'data-role': 'document-rail', 'aria-label': 'Déplier le document', title: 'Déplier le document' });
+  rail.append(icon('i-act-back'), el('span', 'at-asst-rail-text', 'Document'));
+  rail.hidden = true;
+  const paintBig = () => {
+    const on = big && open;
+    const grid = bar.parentElement;
+    if (grid) grid.classList.toggle('at-asst-big', on);
+    bar.classList.toggle('is-big', on);
+    rail.hidden = !on;
+    const toggle = bar.querySelector('[data-act="grow"]');
+    if (toggle) {
+      toggle.setAttribute('aria-pressed', String(on));
+      toggle.lastChild.textContent = on ? 'Réduire' : 'Agrandir';
+      toggle.title = on ? 'Rendre au document sa place' : 'Mettre l’entretien au centre, le document replié à côté';
+    }
+  };
+  const setBig = (next, { focus = false } = {}) => {
+    big = next;
+    writeBig(storage, big);
+    paintBig();
+    if (focus) bar.querySelector('[data-act="grow"]')?.focus({ preventScroll: true });
+  };
+  rail.addEventListener('click', () => setBig(false));
   const setOpen = (next, { remember = true, focus = false } = {}) => {
     open = next;
     bar.hidden = !open;
     pill.hidden = open;
     pill.setAttribute('aria-expanded', String(open));
     if (remember) writePref(storage, slug, open);
+    paintBig();
     if (focus) (open ? bar.querySelector('[data-act="fold"]') : pill)?.focus({ preventScroll: true });
   };
   /** Appelée une fois la barre posée dans la page : le choix mémorisé du chantier, sinon la largeur, décide. */
-  const layout = () => setOpen(initialOpen(readPref(storage, slug), hooks.narrow ? !hooks.narrow() : true, hooks.phone ? hooks.phone() : false), { remember: false });
+  const layout = () => {
+    bar.after(rail);
+    setOpen(initialOpen(readPref(storage, slug), hooks.narrow ? !hooks.narrow() : true, hooks.phone ? hooks.phone() : false), { remember: false });
+  };
   pill.addEventListener('click', () => setOpen(true, { focus: true }));
   /** Ce qui attend, dit sur la pastille : question en cours, suggestions, permission. */
   // Sans agent, la question guidée en cours (cadrage joué dans la page) attend la personne comme celle d'un agent.
@@ -87,7 +118,11 @@ export function createAssistant(ctx, slug, hooks) {
   let skippedHidden = false; // le dernier tour n'a rien demandé parce que l'onglet était caché
   let draft = '';
   // Sans agent joignable, le cadrage se joue dans la page avec les questions du kit (voir atelier-entretien.js).
-  const guided = createGuided(ctx, slug, { focus: () => hooks.focus(), reload: (m, k) => hooks.reload(m, k), say: (m, k) => hooks.say(m, k), refresh: () => tick(), drafts: hooks.drafts });
+  const guided = createGuided(ctx, slug, {
+    focus: () => hooks.focus(), reload: (m, k) => hooks.reload(m, k), say: (m, k) => hooks.say(m, k), refresh: () => tick(), drafts: hooks.drafts,
+    // Voir une rubrique dans le document : l'entretien agrandi lui rend d'abord sa place (le document est replié).
+    show: (phaseId, section) => { if (big) setBig(false); if (hooks.showRubrique) hooks.showRubrique(phaseId, section); },
+  });
 
   const call = async (body, done) => {
     try {
@@ -118,7 +153,11 @@ export function createAssistant(ctx, slug, hooks) {
     const fold = el('button', 'at-asst-fold', null, { type: 'button', 'data-act': 'fold', 'aria-label': 'Replier l’assistant', title: 'Replier l’assistant' });
     fold.append(icon('i-act-close'));
     fold.addEventListener('click', () => setOpen(false, { focus: true }));
-    who.append(mark, el('b', null, 'Grimoire'), el('span', 'at-muted', text || ''), fold);
+    const grow = el('button', 'at-asst-grow', null, { type: 'button', 'data-act': 'grow', 'aria-pressed': String(big && open) });
+    grow.append(big && open ? 'Réduire' : 'Agrandir');
+    grow.title = big && open ? 'Rendre au document sa place' : 'Mettre l’entretien au centre, le document replié à côté';
+    grow.addEventListener('click', () => setBig(!big, { focus: true }));
+    who.append(mark, el('b', null, 'Grimoire'), el('span', 'at-muted', text || ''), grow, fold);
     return who;
   };
 
