@@ -63,6 +63,7 @@ function testBanner(ctx) {
     el('strong', null, 'Atelier en test.'),
     " Aucune tâche n'est lancée tant que tu n'as pas validé le découpage.",
   );
+  banner.children[1].className = 'at-test-text';
   return banner;
 }
 
@@ -816,19 +817,22 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     stateBadge = next;
     metaNode.nodeValue = metaText(c);
   };
-  const head = el('div', 'at-head');
-  const left = el('div');
-  left.append(back, title, meta);
-  head.append(left);
+  // En-tête compact : retour, titre et statut, dates, avancement (pastille dépliable) sur une seule ligne.
+  back.classList.add('at-back');
+  const head = el('div', 'at-head at-head-doc');
+  const ident = el('div', 'at-ident');
+  ident.append(title, meta);
+  head.append(back, ident, loop.pill);
   drawAll();
-  // Barre collante des phases (avec la pastille de l'assistant replié), puis le document et l'assistant côte à côte.
-  const phasebar = el('div', 'at-phasebar');
-  phasebar.append(nav, assist.pill);
+  // Une seule barre collante : phases, déroulé en quatre étapes, « Valider et découper » et son état, pastille de l'assistant
+  // replié. L'aide MOA et l'aperçu du découpage s'ouvrent sous elle ; le document et l'assistant viennent ensuite côte à côte.
+  const phasebar = el('div', 'at-phasebar', null, { 'data-role': 'atelier-barre' });
+  phasebar.append(nav, steps, liveDoc.toolbar, assist.pill);
   const main = el('div', 'at-doc-main');
   main.append(status, sheet);
   const grid = el('div', 'at-doc-grid');
   grid.append(main, assist.element);
-  const view = page(ctx, head, loop.element, steps, liveDoc.toolbar, phasebar, grid);
+  const view = page(ctx, head, loop.element, phasebar, liveDoc.panels, grid);
   view.querySelector('.at-body').classList.add('at-body-doc');
   view.append(notifier.element);
   root.replaceChildren(view);

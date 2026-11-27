@@ -112,12 +112,23 @@ export function validationHelp() {
  * `update(doc)` à chaque (re)chargement du document ; `warn(liste)` après l'écriture d'un bloc.
  */
 export function createLoopPanel(ctx) {
-  const element = el('section', 'at-loop', null, { 'aria-label': 'Avancement du chantier', 'data-role': 'loop' });
+  // En-tête compact : l'avancement tient en une pastille (dans la ligne du titre) dont le détail se déplie en bulle ;
+  // les tâches créées et les avertissements, eux, restent sous l'en-tête (`element`), vides tant qu'il n'y en a pas.
+  const pill = el('div', 'at-loop-pill', null, { 'data-role': 'loop' });
   const summary = el('p', 'at-loop-sum', '', { 'data-role': 'avancement', role: 'status' });
   const detail = el('div', 'at-loop-detail');
+  pill.append(summary, detail);
+  pill.addEventListener('keydown', (event) => { // Échap referme la bulle et rend le focus à son bouton
+    const box = detail.querySelector('details[open]');
+    if (event.key !== 'Escape' || !box) return;
+    event.stopPropagation();
+    box.open = false;
+    box.querySelector('summary')?.focus();
+  });
+  const element = el('section', 'at-loop', null, { 'aria-label': 'Tâches du découpage et avertissements', 'data-role': 'loop-extras' });
   const tasks = el('div', 'at-loop-tasks', null, { 'data-role': 'chantier-taches' });
   const warnings = el('div', 'at-loop-warn', null, { 'data-role': 'dup-warnings' });
-  element.append(summary, detail, tasks, warnings);
+  element.append(tasks, warnings);
 
   const sections = (av) => {
     detail.replaceChildren();
@@ -165,5 +176,5 @@ export function createLoopPanel(ctx) {
     taskList(doc.taches || []);
     warn(doc.avertissements);
   };
-  return { element, update, warn };
+  return { element, pill, update, warn };
 }
