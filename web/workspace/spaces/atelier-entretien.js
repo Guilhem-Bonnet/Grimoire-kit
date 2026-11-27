@@ -13,6 +13,7 @@
 
 import { badge, icon } from '../shell.js';
 import { avancementText } from './atelier-avancement.js';
+import { acknowledgement, areaHeight, destination, remainingText } from './atelier-entretien-logic.js';
 
 function el(tag, className, text, attrs) {
   const node = document.createElement(tag);
@@ -72,16 +73,44 @@ export function createGuided(ctx, slug, hooks) {
     return node;
   };
 
+  /** Un lien discret vers une rubrique du document : l'entretien agrandi se replie d'abord (le document doit être visible). */
+  const showLink = (label, phase, section, role) => {
+    const link = el('button', 'at-link', label, { type: 'button', 'data-act': role });
+    link.addEventListener('click', () => hooks.show && hooks.show(phase, section));
+    return link;
+  };
+
+  /** L'accusé de la réponse précédente : où elle a été rangée dans le document. */
+  const acknowledged = (guide) => {
+    const ack = acknowledgement(guide.previous);
+    if (!ack) return null;
+    const node = el('p', 'at-asst-ack', null, { 'data-role': 'guided-ack', role: 'status' });
+    node.append(icon('i-act-approve'), el('span', null, ack.text), showLink('Voir dans le document', ack.phase, ack.section, 'ack-show'));
+    return node;
+  };
+
   const question = (v, guide) => {
     const cur = guide.current;
     const key = `${cur.angle}:${cur.index}`;
     const box = el('div', 'at-asst-q', null, { 'data-role': 'guided-question', 'data-angle': cur.angle });
     const tags = el('div', 'at-asst-tags');
-    tags.append(badge(`${cur.title}, ${cur.phase_title.split(' — ')[0]}`, 'acc'), el('span', 'at-muted', ` Question ${guide.position + 1} sur ${guide.total}`));
-    box.append(tags, el('p', null, cur.question, { 'data-role': 'guided-text' }), el('p', 'at-muted', cur.intent));
-    const area = el('textarea', 'at-asst-area', null, { rows: '2', 'aria-label': 'Ta réponse', placeholder: 'Ta réponse — Entrée envoie, Maj+Entrée saute une ligne', maxlength: '4000' });
+    tags.append(badge(`${cur.title}, ${cur.phase_title.split(' — ')[0]}`, 'acc'), el('span', 'at-muted', remainingText(guide), { 'data-role': 'guided-remaining' }));
+    const dest = destination(cur);
+    const where = el('p', 'at-asst-dest', null, { 'data-role': 'guided-dest' });
+    where.append('Ta réponse ira dans : ', el('strong', null, dest.section), ` (${dest.phase}) `, showLink('Voir', dest.phaseId, dest.section, 'dest-show'));
+    // Une phrase : pourquoi on la pose (l'intention de l'angle) ; puis où la réponse sera rangée.
+    box.append(tags, el('p', 'at-asst-qtext', cur.question, { 'data-role': 'guided-text' }), el('p', 'at-asst-why', cur.intent, { 'data-role': 'guided-why' }), where);
+    const area = el('textarea', 'at-asst-area', null, { rows: '5', 'aria-label': 'Ta réponse', placeholder: 'Écris librement : une ou plusieurs phrases suffisent.', maxlength: '4000' });
     area.value = drafts.get(key) || '';
-    area.addEventListener('input', () => { drafts.set(key, area.value); });
+    // La zone grandit avec le texte (jusqu'à la moitié de la fenêtre, puis elle défile) ; elle ne passe jamais sous cinq lignes.
+    const grow = () => {
+      if (!area.isConnected) return;
+      area.style.height = 'auto';
+      const frame = area.offsetHeight - area.clientHeight;
+      area.style.height = `${areaHeight(area.scrollHeight + frame, area.offsetHeight, Math.round(window.innerHeight * 0.5))}px`;
+    };
+    area.addEventListener('input', () => { drafts.set(key, area.value); grow(); });
+    requestAnimationFrame(grow);
     // Filet de sécurité : la saisie est aussi gardée dans le navigateur (`sessionStorage`) ; après un rechargement de la page,
     // elle est proposée sous la question, jamais remise en silence.
     const store = hooks.drafts;
@@ -114,7 +143,7 @@ export function createGuided(ctx, slug, hooks) {
       previous(guide),
     );
     const form = el('div', 'at-asst-form');
-    form.append(area, row);
+    form.append(area, el('p', 'at-muted at-asst-keys', 'Entrée envoie · Maj+Entrée : nouvelle ligne'), row);
     return [box, form];
   };
 
@@ -156,6 +185,8 @@ export function createGuided(ctx, slug, hooks) {
       body.append(row);
       return body;
     }
+    const ack = acknowledged(guide);
+    if (ack) body.append(ack);
     body.append(...question(v, guide));
     return body;
   };

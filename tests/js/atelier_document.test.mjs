@@ -118,6 +118,8 @@ test('pickCurrent : le premier de la bande, sinon le précédent, en bas de page
   const order = ['a', 'b', 'c'];
   assert.equal(pickCurrent(order, new Set(['b', 'c']), 'a'), 'b');
   assert.equal(pickCurrent(order, new Set(), 'c'), 'c');
+  assert.equal(pickCurrent(order, new Set(), 'c', false, true), 'a', 'tout en haut : le premier');
+  assert.equal(pickCurrent(order, new Set(['b']), 'c', true, true), order[order.length - 1], 'en bas, le dernier l’emporte');
   assert.equal(pickCurrent(order, new Set(), 'zz'), 'a');
   assert.equal(pickCurrent(order, new Set(['a']), 'a', true), 'c');
   assert.equal(pickCurrent([], new Set(), ''), '');

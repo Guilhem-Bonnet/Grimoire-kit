@@ -359,6 +359,22 @@ def _phase_view(root: Path, name: str | None, phase: Any) -> dict[str, Any]:
     return out
 
 
+def _guidance(root: Path, name: str | None, phases: list[dict[str, Any]], avancement: dict[str, Any]) -> dict[str, Any]:
+    """L'invite, le statut et l'état de chaque rubrique (``phase["rubriques"]``), puis le reste à faire. Lecture seule :
+    ni le gate ni l'avancement ne sont touchés, ce module de lecture les consulte."""
+    from grimoire.core import cadrage_guidance as guidance
+    from grimoire.core.cadrage_interview import view as interview_view
+
+    try:
+        interview = interview_view(root, name)
+    except ValueError:  # entretien.json abîmé : `avancement["erreur"]` le dit déjà
+        interview = None
+    by_id = {p["id"]: p for p in avancement["phases"]}
+    for definition, phase in zip(PHASES, phases, strict=True):
+        phase["rubriques"] = guidance.rubriques(definition, phase["markdown"], by_id.get(definition.id), interview)
+    return guidance.reste_a_faire(phases, interview, str(avancement.get("erreur") or ""))
+
+
 def document(root: Path, slug: str) -> dict[str, Any]:
     from grimoire.core.chantiers import list_chantiers
 
@@ -382,10 +398,14 @@ def document(root: Path, slug: str) -> dict[str, Any]:
     from grimoire.core.cadrage_progress import progress
     from grimoire.tools import workspace_atelier_loop as loop
 
+    name = None if found.default else found.slug
+    avancement = progress(root, name)  # le calcul unique, en détail
+    reste = _guidance(root, name, phases, avancement)
     return {
         "chantier": _chantier_row(root, found),
         "phases": phases,
-        "avancement": progress(root, None if found.default else found.slug),  # le calcul unique, en détail
+        "avancement": avancement,
+        "reste_a_faire": reste,  # ce qu'il manque pour valider, d'après le même critère que `cadrage check` (lecture seule)
         "taches": _safe_tasks(root, found.slug),  # ce que « Valider et découper » a créé
         "avertissements": loop.duplicate_requirements(phases),
         "auteur": loop.author(root),  # le nom que porte un commentaire humain (MOA, sinon utilisateur du projet)
@@ -601,10 +621,15 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
 
         # Les fils du bloc le suivent aussitôt (ancien et nouveau connus), le verrou du fichier de phase rendu.
         comments.follow_edit(root, slug, phase.id, *followed)
+    from grimoire.core.cadrage_progress import progress
     from grimoire.tools import workspace_atelier_loop as loop
 
-    view = _phase_view(root, None if slug == "principal" else slug, phase)
-    return {"ok": True, "phase": view, "avertissements": loop.duplicate_requirements([view])}
+    name = None if slug == "principal" else slug
+    every = [_phase_view(root, name, p) for p in PHASES]
+    view = next(v for v in every if v["id"] == phase.id)
+    # Les invites et le reste à faire suivent l'écriture : la page redessine la rubrique sans relire tout le document.
+    reste = _guidance(root, name, every, progress(root, name))
+    return {"ok": True, "phase": view, "avertissements": loop.duplicate_requirements([view]), "reste_a_faire": reste}
 
 
 # ── Branchement des hôtes ───────────────────────────────────────────────────
