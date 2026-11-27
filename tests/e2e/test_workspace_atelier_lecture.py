@@ -148,7 +148,8 @@ def test_a_click_scrolls_to_the_section_and_the_current_item_follows_the_scroll(
         )
         assert heading.inner_text().strip().startswith("Questions")
         page.wait_for_function(current_is, arg=[current, "brainstorm/1"], timeout=APPEAR_MS)
-        assert page.evaluate("() => document.activeElement.classList.contains('at-rub')")
+        # Le focus arrive sur la rubrique à la fin du défilement : on l'attend, on ne le suppose pas déjà posé.
+        page.wait_for_function("() => document.activeElement.classList.contains('at-rub')", timeout=APPEAR_MS)
         # Un clic sur une phase passe par la barre des phases : l'adresse suit.
         page.locator(f"{PLAN} [data-plan='exigences']").click()
         page.wait_for_function("() => location.hash.includes('phase=exigences')", timeout=APPEAR_MS)
