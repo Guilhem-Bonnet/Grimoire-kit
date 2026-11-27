@@ -68,9 +68,12 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # (la machine, ou la CI, n'en a pas forcément un) ; le projet d'essai est un autre dossier de `tmp_path`.
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir()
-    fake = fakebin / "ollama"
-    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    fake.chmod(0o755)
+    # Idem pour la commande `claude` du fournisseur « anthropic » du registre d'essai : sans elle la ligne serait
+    # « non-installé » au lieu de « clé-absente » (c'est le cas en CI, pas sur une machine qui a le CLI).
+    for name in ("ollama", "claude"):
+        fake = fakebin / name
+        fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake.chmod(0o755)
     monkeypatch.setenv("PATH", f"{fakebin}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setattr(av, "_fetch", lambda _u, _t, _l: TAGS)
     av.clear_cache()
