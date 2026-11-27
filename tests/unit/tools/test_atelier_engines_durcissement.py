@@ -151,36 +151,7 @@ def test_une_passerelle_d_identifiant_litellm_est_admise_comme_par_la_sonde(proj
     assert Garde(rendu.moteur, presentation=rendu.presentation).classer_reponse(CLASSER) == "reponse" and faux.appels
 
 
-# ── 2. Échéance totale ──────────────────────────────────────────────────────
-
-
-def test_une_reponse_au_goutte_a_goutte_depasse_l_echeance_totale(monkeypatch: pytest.MonkeyPatch) -> None:
-    horloge = [0.0]
-    monkeypatch.setattr(tr.time, "monotonic", lambda: horloge[0])
-    etat = {"ferme": False, "lus": 0}
-
-    class Goutte:
-        status = 200
-
-        def read(self, _n: int = -1) -> bytes:
-            horloge[0] += 0.4  # chaque morceau arrive juste avant le délai d'une opération, jamais assez tard pour le déclencher
-            etat["lus"] += 1
-            return b"x" if etat["lus"] < 1000 else b""
-
-        def __enter__(self) -> Goutte:
-            return self
-
-        def __exit__(self, *_a: Any) -> None:
-            etat["ferme"] = True
-
-    class Ouvreur:
-        def open(self, _req: Any, timeout: float = 0) -> Goutte:
-            return Goutte()
-
-    monkeypatch.setattr("urllib.request.build_opener", lambda *_a: Ouvreur())
-    with pytest.raises(tr.EngineDelai):
-        tr.default_transport("https://api.exemple.test/v1", {}, b"{}", 1.0)
-    assert etat["ferme"] is True and etat["lus"] <= 4
+# ── 2. Échéance totale : voir test_atelier_engines_echeance.py (vrai serveur local) ──
 
 
 # ── 3. Bornes du comptage ───────────────────────────────────────────────────
@@ -229,14 +200,28 @@ def test_les_erreurs_du_transport_ne_gardent_aucune_reference_a_l_exception_d_or
 
 
 def test_le_transport_reel_ne_garde_aucune_reference_a_l_erreur_d_origine(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Ouvreur:
-        def open(self, _req: Any, timeout: float = 0) -> Any:
+    class Fausse:
+        sock = None
+
+        def connect(self) -> None:
             raise OSError(KEY)
 
-    monkeypatch.setattr("urllib.request.build_opener", lambda *_a: Ouvreur())
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(tr, "_connexion", lambda *_a: Fausse())
     with pytest.raises(tr.EngineReseau) as info:
         tr.default_transport("https://api.exemple.test/v1", {}, b"{}", 1.0)
-    assert info.value.__context__ is None and info.value.__cause__ is None
+    assert info.value.__context__ is None and info.value.__cause__ is None and KEY not in repr(info.value)
+
+
+def test_la_connexion_https_verifie_le_certificat_et_http_n_est_que_local() -> None:
+    import http.client
+    from urllib.parse import urlsplit
+
+    https = tr._connexion(urlsplit("https://api.exemple.test/v1"), 1.0)
+    assert isinstance(https, http.client.HTTPSConnection) and https.timeout == 1.0
+    assert type(tr._connexion(urlsplit("http://127.0.0.1:1/"), 1.0)) is http.client.HTTPConnection
 
 
 # ── 5. Marqueur : un compteur par clé ───────────────────────────────────────

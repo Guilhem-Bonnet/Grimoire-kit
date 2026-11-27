@@ -15,10 +15,13 @@ la vue montre le NOM de la classe (``EngineDelai``, ``EngineReseau``, ``EngineSo
 
 from __future__ import annotations
 
+import contextlib
+import http.client
 import json
+import socket
+import ssl
+import threading
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -128,40 +131,59 @@ def _admise(url: str) -> bool:
     return parts.scheme == "https" or (parts.scheme == "http" and is_loopback_url(url))
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
-        return None
+def _connexion(parts: Any, timeout: float) -> http.client.HTTPConnection:
+    """Une connexion directe : ni proxy d'environnement, ni redirection (``http.client`` n'en suit aucune)."""
+    host, port = parts.hostname, parts.port
+    if parts.scheme == "https":
+        return http.client.HTTPSConnection(host, port, timeout=timeout, context=ssl.create_default_context())
+    return http.client.HTTPConnection(host, port, timeout=timeout)
+
+
+def _couper(conn: http.client.HTTPConnection) -> None:
+    """Le gardien d'échéance : coupe la connexion, ce qui réveille toute lecture bloquée (statut, en-têtes ou corps)."""
+    sock = conn.sock
+    if sock is not None:
+        with contextlib.suppress(OSError):
+            sock.shutdown(socket.SHUT_RDWR)
+        with contextlib.suppress(OSError):
+            sock.close()
 
 
 def default_transport(url: str, headers: dict[str, str], body: bytes, timeout: float) -> tuple[int, bytes]:
-    """``POST`` borné, sans redirection ni proxy ; ``(statut, corps)``. Lève une :class:`EngineError`, jamais autre chose."""
+    """``POST`` borné, sans redirection ni proxy ; ``(statut, corps)``. Lève une :class:`EngineError`, jamais autre chose.
+
+    ``timeout`` vaut pour l'appel ENTIER (connexion, statut, en-têtes, corps) : la connexion est bornée par ce délai, puis un
+    minuteur de surveillance, armé avant toute lecture, coupe le socket à l'échéance ; il est annulé et attendu à la fin,
+    aucun fil ne survit à l'appel. Le délai d'une opération de socket ne suffirait pas : chaque octet reçu le relance.
+    """
     if not _admise(url):
         raise EngineRefus("adresse du service refusée : https, ou http vers la machine seulement")
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")  # noqa: S310 — adresse vérifiée ci-dessus
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
-    echeance = time.monotonic() + timeout  # l'échéance vaut pour l'appel ENTIER : le délai du socket ne borne qu'une opération
+    parts = urlsplit(url)
+    debut = time.monotonic()
+    echeance = debut + timeout
     erreur: EngineError | None = None
     status, raw = 0, b""
+    conn = _connexion(parts, timeout)
+    garde: threading.Timer | None = None
     try:
-        with opener.open(request, timeout=timeout) as response:
-            status = int(response.status)
-            raw = _lire(response, echeance)
-    except urllib.error.HTTPError as exc:  # inclut une redirection non suivie : le statut dit tout
-        status = int(exc.code)
-        try:
-            raw = _lire(exc, echeance)
-        except EngineError as inner:
-            inner.__context__ = None
-            erreur = inner
+        conn.connect()  # bornée par ``timeout`` ; la lecture ne commence qu'une fois le gardien armé
+        garde = threading.Timer(max(0.01, echeance - time.monotonic()), _couper, args=(conn,))
+        garde.daemon = True
+        garde.start()
+        conn.request("POST", parts.path or "/", body=body, headers=headers)
+        reponse = conn.getresponse()
+        status = int(reponse.status)
+        raw = _lire(reponse, echeance)
     except EngineError as exc:
         erreur = exc
-    except TimeoutError:
-        erreur = EngineDelai("délai dépassé : aucun nouvel essai")
-    except urllib.error.URLError as exc:
-        late = isinstance(exc.reason, TimeoutError)
-        erreur = EngineDelai("délai dépassé : aucun nouvel essai") if late else EngineReseau("service injoignable : aucun nouvel essai")
-    except (OSError, ValueError):
-        erreur = EngineReseau("service injoignable : aucun nouvel essai")
+    except (OSError, http.client.HTTPException, ValueError) as exc:
+        tard = isinstance(exc, TimeoutError) or time.monotonic() >= echeance - 0.05
+        erreur = EngineDelai("délai dépassé : aucun nouvel essai") if tard else EngineReseau("service injoignable : aucun nouvel essai")
+    finally:
+        if garde is not None:
+            garde.cancel()
+            garde.join()
+        conn.close()
     if erreur is not None:  # levée hors du ``except`` : aucune référence à l'erreur d'origine
         raise erreur
     return status, raw

@@ -15,7 +15,13 @@ from collections.abc import Callable
 from typing import Any
 
 from grimoire.tools import atelier_model as am
-from grimoire.tools.atelier_engines.transport import EngineRefus, EngineSortie, Transport, post_json
+from grimoire.tools.atelier_engines.transport import (
+    EngineRefus,
+    EngineSortie,
+    Transport,
+    default_transport,
+    post_json,
+)
 
 __all__ = ["AnthropicBackend"]
 
@@ -39,7 +45,7 @@ class AnthropicBackend:
             raise EngineRefus("nom de modèle invalide")
         self.model = model
         self.timeout_s = timeout_s
-        self.transport: Transport = transport or am.default_transport
+        self.transport: Transport = transport or default_transport  # échéance TOTALE ; celui d'atelier_model reste à ses appelants
         self.on_response = on_response
         self._key = key
 

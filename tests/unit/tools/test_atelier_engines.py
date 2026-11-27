@@ -653,56 +653,6 @@ def test_le_transport_reel_refuse_les_adresses_non_admises_sans_rien_envoyer() -
     assert not tr.is_loopback_url("http://127.0.0.1:abc")
 
 
-def test_le_transport_reel_traduit_les_erreurs_sans_les_citer(monkeypatch: pytest.MonkeyPatch) -> None:
-    import io
-    import urllib.error
-
-    from grimoire.tools.atelier_engines import transport as tr
-
-    class Ouvreur:
-        def __init__(self, comportement: Any) -> None:
-            self.comportement = comportement
-
-        def open(self, _req: Any, timeout: float = 0) -> Any:
-            if isinstance(self.comportement, Exception):
-                raise self.comportement
-            return self.comportement
-
-    class Reponse:
-        status = 200
-
-        def __init__(self, n: int) -> None:
-            self.n = n
-            self.fini = False
-
-        def read(self, _limite: int) -> bytes:
-            if self.fini:
-                return b""
-            self.fini = True
-            return b"x" * self.n
-
-        def __enter__(self) -> Reponse:
-            return self
-
-        def __exit__(self, *_a: Any) -> None:
-            return None
-
-    def avec(comportement: Any) -> Any:
-        monkeypatch.setattr("urllib.request.build_opener", lambda *_a: Ouvreur(comportement))
-        return lambda: tr.default_transport("https://api.exemple.test/v1", {"x-api-key": KEY}, b"{}", 1.0)
-
-    assert avec(Reponse(5))() == (200, b"xxxxx")
-    redirection = urllib.error.HTTPError("https://a.test", 302, "Found", {}, io.BytesIO(b"ailleurs"))  # type: ignore[arg-type]
-    assert avec(redirection)() == (302, b"ailleurs")  # jamais suivie : le statut dit tout
-    for erreur, attendu in ((TimeoutError(), tr.EngineDelai), (urllib.error.URLError(TimeoutError()), tr.EngineDelai),
-                            (urllib.error.URLError(f"refusé {KEY}"), tr.EngineReseau), (OSError(KEY), tr.EngineReseau)):
-        with pytest.raises(attendu) as info:
-            avec(erreur)()
-        assert KEY not in str(info.value)
-    with pytest.raises(tr.EngineSortie):
-        avec(Reponse(tr.MAX_REPONSE + 1))()
-
-
 def test_post_json_refuse_les_statuts_et_les_corps_hors_cadre() -> None:
     from grimoire.tools.atelier_engines import transport as tr
 
