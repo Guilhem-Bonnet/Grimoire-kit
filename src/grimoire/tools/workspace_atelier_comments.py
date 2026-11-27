@@ -164,10 +164,13 @@ def _remember(item: Comment, block_id: str, quote: str, start: int) -> None:
 
 def follow_edit(
     root: Path, slug: str, phase_id: str, old_blocks: list[atelier_blocs.Block], block: atelier_blocs.Block, new_text: str,
+    updated: str,
 ) -> None:
-    """La route d'édition vient de réécrire ``block`` (``new_text`` est la plage écrite, ancien et nouveau connus) : les
-    fils posés sur ce bloc le suivent dans la même opération, sous le verrou du magasin. Un fil qui n'était pas
-    rattaché à ce bloc sans ambiguïté (homonyme, orphelin) n'est pas touché. Sans effet sur l'écriture elle-même."""
+    """La route d'édition vient de réécrire ``block`` (``new_text`` est la plage écrite, ``updated`` le fichier écrit,
+    ancien et nouveau connus) : les fils posés sur ce bloc le suivent, sous le verrou du magasin, aussitôt après
+    l'écriture et **hors du verrou du fichier de phase** (rien de coûteux n'y retient une autre écriture). Le diff du
+    bloc est calculé une seule fois pour tous ses fils. Un fil qui n'était pas rattaché à ce bloc sans ambiguïté
+    (homonyme, orphelin) n'est pas touché. Sans effet sur l'écriture elle-même."""
     try:
         chantier = _dir(root, slug)
         if not store.store_path(chantier).is_file():
@@ -177,11 +180,11 @@ def follow_edit(
             if not items:
                 return
             every = _phase_blocks(root, slug)
-            fresh = every.get(phase_id)
+            fresh = atelier_blocs.split(phase_id, updated)  # l'instantané écrit : les décalages sont ceux de l'écriture
             mine = [i for i in items if i.phase == phase_id and not i.orphelin and _anchored_on(old_blocks, i, block.id)]
-            if fresh is not None:
-                for item in mine:
-                    _adopt(item, fresh, block, new_text)
+            rewrite = atelier_anchor.Rewrite(block.text, new_text) if mine else None
+            for item in mine:
+                _adopt(item, fresh, block, new_text, rewrite)
             if _resync(every, items) or mine:
                 _persist(chantier, items, ignored, damaged)
     except (OSError, ValueError, TimeoutError):  # le suivi est un confort : la réécriture du bloc a déjà eu lieu
@@ -192,16 +195,20 @@ def _anchored_on(blocks: list[atelier_blocs.Block], item: Comment, block_id: str
     return atelier_anchor.locate(blocks, item).block_id == block_id
 
 
-def _adopt(item: Comment, fresh: list[atelier_blocs.Block], old: atelier_blocs.Block, new_text: str) -> None:
-    """Pose le fil sur le passage qui correspond à l'ancien dans le bloc réécrit (ou sur le bloc entier)."""
-    begin, end = atelier_anchor.follow(old.text, new_text, item.start, item.start + len(item.quote))
+def _adopt(
+    item: Comment, fresh: list[atelier_blocs.Block], old: atelier_blocs.Block, new_text: str,
+    rewrite: atelier_anchor.Rewrite | None,
+) -> None:
+    """Pose le fil sur le passage qui correspond à l'ancien dans le bloc réécrit (ou sur le bloc entier) ; sans
+    correspondance sûre (bloc trop gros pour un diff, extrait introuvable), le fil n'est pas touché."""
+    placed = atelier_anchor.follow(rewrite, item, new_text)
+    if placed is None:
+        return
+    begin, end = placed
     at = old.start + begin  # le texte réécrit commence là où l'ancien bloc commençait
     target = next((b for b in fresh if b.editable and b.start <= at < b.end), None)
     if target is None:
-        target = next((b for b in fresh if b.editable and b.start >= old.start), None)
-        if target is None:
-            return
-        at = target.start
+        return
     start = at - target.start
     quote = target.text[start : min(old.start + end, target.end) - target.start]
     if not quote.strip():

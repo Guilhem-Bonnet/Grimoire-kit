@@ -172,9 +172,13 @@ def scaffold(
 
 
 def _section_filled(body_lines: list[str]) -> bool:
-    """Une section est remplie si elle contient du contenu hors gabarit."""
+    """Une section est remplie si elle contient du contenu hors gabarit.
+
+    La mention « Sans objet » (écrite par l'entretien) n'est PAS du contenu pour le gate : elle ne le satisfait pas,
+    exactement comme avant qu'elle existe. Qu'un « sans objet » puisse le satisfaire est une décision laissée à l'humain.
+    """
     return any(
-        line.strip() and not line.strip().startswith(PLACEHOLDER)
+        line.strip() and not line.strip().startswith((PLACEHOLDER, NOT_APPLICABLE))
         for line in body_lines
     )
 

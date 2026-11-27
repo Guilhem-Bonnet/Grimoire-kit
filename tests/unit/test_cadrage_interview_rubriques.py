@@ -124,6 +124,21 @@ def test_sans_objet_marks_the_rubric_in_place_and_leaves_the_brainstorm_alone(pr
     assert scope["vides"] == scope["total"] - 1  # traité : plus au gabarit
 
 
+def test_sans_objet_never_satisfies_the_gate(project: Path) -> None:
+    """Le gate du cahier des charges rend les mêmes erreurs avant et après un « sans objet » (question laissée à l'humain)."""
+    from grimoire.core.cadrage import check
+
+    interview.interview_plan(project, "un", depth="standard")
+    before = [e for e in check(project, "un")[0] if "Cahier des charges" in e or "Exigences" in e]
+    assert any("Hors périmètre" in e and "Risques" in e for e in before)
+    for angle in ("hors-perimetre", "risques"):
+        interview.answer(project, "un", angle, "sans objet", skip=True)
+    assert "> Sans objet" in _section(project, "05-cahier-des-charges.md", "Risques")  # visible dans le document
+    after = [e for e in check(project, "un")[0] if "Cahier des charges" in e or "Exigences" in e]
+    assert after == before  # mais le gate ne l'a pas lu comme rempli
+    assert _row(project, "cahier-des-charges")["sections"]["Risques"] == "sans-objet"  # et l'avancement le dit
+
+
 def test_sans_objet_on_a_rubric_that_already_has_content_writes_nothing(project: Path) -> None:
     interview.interview_plan(project, "un", depth="standard")
     interview.answer(project, "un", "hors-perimetre", "Le reste")
@@ -201,6 +216,31 @@ def test_the_trace_is_realigned_when_it_outgrows_the_answers(project: Path) -> N
     assert "Deux" not in _read(project, "01-brief.md") and "Un" in _read(project, "01-brief.md")
 
 
+def test_retract_removes_the_last_identical_line_not_one_copied_above(project: Path) -> None:
+    interview.interview_plan(project, "un", depth="standard")
+    interview.answer(project, "un", "criteres", "Un export")
+    line = f"- *{Q_SUCCESS}* Un export"
+    path = project / "_grimoire/cadrage/un/01-brief.md"
+    path.write_text(path.read_text(encoding="utf-8").replace(line, f"{line}\n- Notes de l'humain\n{line}"), encoding="utf-8")
+    interview.retract(project, "un", "criteres")
+    kept = _section(project, "01-brief.md", "Un succès ressemble à")
+    assert kept.count(line) == 1 and kept.index(line) < kept.index("Notes de l'humain")  # la copie du haut reste...
+    assert "Notes de l'humain" in kept
+
+
+def test_an_accepted_document_is_never_written_or_unwritten_by_the_interview(project: Path) -> None:
+    interview.interview_plan(project, "un", depth="standard")
+    interview.answer(project, "un", "criteres", "Un export")
+    path = project / "_grimoire/cadrage/un/01-brief.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("status: draft", "status: accepted", 1), encoding="utf-8")
+    frozen = path.read_bytes()
+    with pytest.raises(ValueError, match="accepté"):
+        interview.retract(project, "un", "criteres")
+    with pytest.raises(ValueError, match="accepté"):
+        interview.answer(project, "un", "criteres", "Deux")
+    assert path.read_bytes() == frozen
+
+
 def test_the_cockpit_route_and_the_command_write_the_same_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(asst, "agent_status", lambda root: {"available": False, "mode": "kanban", "reason": "", "name": ""})
     page, cli = _project(tmp_path, "page"), _project(tmp_path, "cli")
@@ -228,9 +268,18 @@ def test_the_cockpit_route_and_the_command_write_the_same_files(tmp_path: Path, 
 @pytest.mark.parametrize("bad", [
     {"lines": "x"}, {"lines": [{"phase": "brief"}]}, {"lines": [{"phase": "zzz", "section": "a", "line": "b"}]},
     {"skip": {"phase": "brief"}}, {"skip": "oui"},
+    # une trace éditée à la main ne peut viser ni une exigence, ni une rubrique que l'angle ne vise pas, ni une ligne étrangère
+    {"lines": [{"phase": "exigences", "section": "Fonctionnelles", "line": "- REQ-001 : le système exporte"}]},
+    {"lines": [{"phase": "brief", "section": "Pourquoi maintenant", "line": "- x"}]},
+    {"lines": [{"phase": "brief", "section": "Un succès ressemble à", "line": "REQ-001 : sans puce"}]},
+    {"lines": [{"phase": "brief", "section": "Un succès ressemble à", "line": "- a\n- REQ-001 : deux lignes"}]},
+    {"lines": [{"phase": "brief", "section": "Un succès ressemble à", "line": "- a", "extra": "x"}]},
+    {"lines": [{"phase": "brief", "section": "Un succès ressemble à", "line": "- À préciser : x"}]},
+    {"skip": {"phase": "exigences", "section": "Fonctionnelles", "line": "> Sans objet"}},
+    {"skip": {"phase": "brief", "section": "Un succès ressemble à", "line": "- REQ-001 : x"}},
 ])
 def test_a_malformed_trace_in_the_state_is_refused(project: Path, bad: dict[str, Any]) -> None:
     state = project / "_grimoire/cadrage/un/entretien.json"
-    state.write_text(json.dumps({"depth": "standard", "angles": {"utilisateurs": {"answers": [], **bad}}}), encoding="utf-8")
+    state.write_text(json.dumps({"depth": "standard", "angles": {"criteres": {"answers": [], **bad}}}), encoding="utf-8")
     with pytest.raises(ValueError, match="invalide"):
         interview.view(project, "un")

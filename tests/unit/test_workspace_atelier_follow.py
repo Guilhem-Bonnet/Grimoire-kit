@@ -200,26 +200,83 @@ def test_a_resolved_thread_whose_block_vanished_stays_resolved_in_the_listing(pr
 # ── l'unité : follow() ──────────────────────────────────────────────────────
 
 
-def test_follow_maps_a_span_through_a_rewrite() -> None:
-    old = "Le délai est de deux jours ouvrés."
-    new = "Le délai est de trois jours ouvrés."
-    start = old.index("deux jours")
-    first, last = atelier_anchor.follow(old, new, start, start + len("deux jours"))
-    assert new[first:last] == "trois jours"
+def _item(old: str, quote: str) -> store.Comment:
+    start = old.index(quote)
+    before, after = atelier_anchor.context(old, start, start + len(quote))
+    return store.Comment(
+        id="c", phase="brainstorm", block_id="x", block_fingerprint="y", quote=quote, start=start, before=before,
+        after=after, auteur="humain", date="d", texte="t",
+    )
+
+
+def _followed(old: str, new: str, quote: str) -> str | None:
+    placed = atelier_anchor.follow(atelier_anchor.Rewrite(old, new), _item(old, quote), new)
+    return None if placed is None else new[placed[0] : placed[1]]
+
+
+def test_follow_maps_a_span_through_a_rewrite_on_word_boundaries() -> None:
+    assert _followed("Le délai est de deux jours ouvrés.", "Le délai est de trois jours ouvrés.", "deux jours") == "trois jours"
+    # Une sélection qui coupe un mot est suivie sur des mots entiers, jamais au milieu.
+    assert _followed("Le délai est de deux jours ouvrés.", "Le délai est de trois jours ouvrés.", "eux jou") == "trois jours"
 
 
 def test_follow_falls_back_to_the_whole_text_when_nothing_remains() -> None:
-    assert atelier_anchor.follow("abc def", "xyz", 0, 3) == (0, 3)
-    assert atelier_anchor.follow("", "xyz", 0, 3) == (0, 3)
-    assert atelier_anchor.follow("a" * 30_000, "b", 0, 3) == (0, 1)
+    assert _followed("abc def", "xyz uvw", "abc") == "xyz uvw"
     old = "Début. Le passage cité. Fin."
-    start = old.index("Le passage cité")
-    assert atelier_anchor.follow(old, "Début. Fin.", start, start + len("Le passage cité")) == (0, 11)
+    assert _followed(old, "Début. Fin.", "Le passage cité") == "Début. Fin."
 
 
 def test_follow_keeps_a_whole_block_comment_on_the_whole_block() -> None:
     old = "Un bloc entier commenté."
-    assert atelier_anchor.follow(old, "Le bloc a été réécrit.", 0, len(old)) == (0, len("Le bloc a été réécrit."))
+    assert _followed(old, "Le bloc a été réécrit.", old) == "Le bloc a été réécrit."
+
+
+def test_a_long_whole_text_is_clipped_on_a_word_boundary() -> None:
+    new = "mot " * 200
+    placed = atelier_anchor.follow(atelier_anchor.Rewrite("abc", new), _item("abc def", "abc"), new)
+    assert placed is not None and placed[1] <= store.QUOTE_MAX and not new[placed[0] : placed[1]].endswith("mo")
+
+
+def test_a_block_too_big_for_a_diff_keeps_its_verbatim_quote_or_is_orphaned() -> None:
+    old = "Le délai de deux jours ouvrés. " + "mot " * 5000
+    rewrite = atelier_anchor.Rewrite(old, old.replace("deux", "trois"))
+    assert rewrite.ops is None  # pas de diff : trop gros
+    item = _item(old, "deux jours")
+    assert atelier_anchor.follow(rewrite, item, old) is not None  # l'extrait mot pour mot est retrouvé
+    bracketed = atelier_anchor.follow(rewrite, item, old.replace("deux jours", "trois jours"))
+    assert bracketed is not None and old.replace("deux jours", "trois jours")[bracketed[0] : bracketed[1]] == "trois jours"
+    assert atelier_anchor.follow(rewrite, item, old.replace("Le délai de deux jours ouvrés.", "Un texte sans rapport.")) is None
+
+
+def test_one_diff_serves_every_thread_of_a_big_block_quickly(project: Path) -> None:
+    """Un bloc de 20 000 caractères et 100 fils : l'édition (suivi compris) reste sous quelques secondes."""
+    import time
+
+    big = ("Le délai de livraison est de deux jours ouvrés. " + "mot suivant du paragraphe. " * 700).rstrip()
+    _rewrite(project, PARA, big)
+    block = _block(project, big)
+    folder = project / FOLDER
+    blocks = atelier_blocs.split("brainstorm", _file(project).read_text(encoding="utf-8"))
+    index = next(i for i, b in enumerate(blocks) if b.text == big)
+    rank, prev, after_fp = atelier_anchor.around(blocks, index)
+    rows = []
+    for n in range(100):
+        quote = "deux jours" if n % 2 else "Le délai de livraison"
+        start = big.index(quote)
+        before, after = atelier_anchor.context(big, start, start + len(quote))
+        rows.append(store.new_comment(
+            phase="brainstorm", block_id=block["id"], block_fingerprint=atelier_blocs.fingerprint(big), quote=quote,
+            start=start, before=before, after=after, auteur="humain", texte=f"fil {n}", rank=rank, prev=prev, next=after_fp,
+        ))
+    with store.locked_store(folder):
+        store.save(folder, rows)
+    began = time.monotonic()
+    assert _edit(project, block, big.replace("deux jours", "trois jours", 1)) == 200
+    assert time.monotonic() - began < 6  # large marge CI : mesuré sous la seconde ; 2,65 s pour UN fil avant le diff par mots
+    assert len(store.load(folder)) == 100 and not any(r.orphelin for r in store.load(folder))
+    listed = time.monotonic()
+    _thread(project)
+    assert time.monotonic() - listed < 6  # la lecture ne recalcule pas, n'écrit rien
 
 
 def test_a_comment_store_that_cannot_be_read_does_not_break_the_edit(project: Path) -> None:
@@ -256,11 +313,14 @@ def test_adopting_a_rewrite_without_a_place_or_with_an_empty_span_is_safe(projec
     item = store.load(project / FOLDER)[0]
     block = next(b for b in atelier_blocs.split("brainstorm", _file(project).read_text(encoding="utf-8")) if b.text == PARA)
     held = item.to_dict()
-    com._adopt(item, [], block, "autre")  # aucun bloc où se poser
+    com._adopt(item, [], block, "autre", None)  # aucun bloc où se poser
     assert item.to_dict() == held
     fresh = [b for b in atelier_blocs.split("brainstorm", _file(project).read_text(encoding="utf-8")) if b.editable]
-    monkeypatch.setattr(atelier_anchor, "follow", lambda *_: (len(PARA), len(PARA) + 2))  # un intervalle vide
-    com._adopt(item, fresh, block, PARA)
+    monkeypatch.setattr(atelier_anchor, "follow", lambda *_: None)  # rien de sûr : le fil n'est pas touché
+    com._adopt(item, fresh, block, PARA, None)
+    assert item.to_dict() == held
+    monkeypatch.setattr(atelier_anchor, "follow", lambda *_: (5, 5))  # un intervalle vide
+    com._adopt(item, fresh, block, PARA, None)
     assert item.quote and item.start == 0  # le bloc entier plutôt qu'un extrait vide
 
 
@@ -272,6 +332,41 @@ def test_a_quote_kept_verbatim_in_a_block_whose_neighbours_changed_is_found_by_s
     assert row["anchor"]["state"] == "retrouve" and row["quote"] == QUOTE and row["modifie_depuis"] == ""
 
 
-def test_similarity_is_zero_without_enough_common_letters_or_text() -> None:
-    assert atelier_anchor._similarity("", "texte") == 0.0 and atelier_anchor._similarity("texte", "") == 0.0
-    assert atelier_anchor._similarity("abcdefghij" * 4, "zzzzzzzzzz") == 0.0
+def test_similarity_is_zero_without_text_words_or_with_a_block_too_long() -> None:
+    assert atelier_anchor._fit("", 0, 0, "texte")[0] == 0.0 and atelier_anchor._fit("texte", 0, 5, "")[0] == 0.0
+    assert atelier_anchor._fit("!!! ???", 0, 3, "texte")[0] == 0.0  # aucun mot dans l'ancre
+    assert atelier_anchor._fit("abc def", 0, 3, "zzz " * 2000)[0] == 0.0  # bloc au-delà du plafond
+    assert atelier_anchor._fit("abc def ghi", 0, 3, "abc def ghi")[0] == 1.0
+    assert atelier_anchor._fit("abc def ghi", 0, 3, "abc def ghi") is atelier_anchor._fit("abc def ghi", 0, 3, "abc def ghi")  # mémorisé
+
+
+def _external_replace(project: Path, new: str, next_block: str | None = None) -> dict[str, Any]:
+    _comment(project)
+    _rewrite(project, PARA, new)
+    if next_block is not None:
+        _rewrite(project, NEXT, next_block)
+    return _thread(project)
+
+
+def test_an_unrelated_replacement_between_the_same_neighbours_is_orphaned_not_followed(project: Path) -> None:
+    """Sonde du relecteur : un bloc supprimé puis remplacé entre les mêmes voisins par un texte sans rapport."""
+    row = _external_replace(project, "Thème sombre pour l'éditeur de texte, avec une palette dédiée.")
+    assert row["anchor"]["state"] == "orphelin" and row["quote"] == QUOTE
+    assert store.load(project / FOLDER)[0].orphelin is False  # la lecture n'écrit rien
+    assert _edit(project, _block(project, NEXT), "Autre chose.") == 200  # une écriture le fige, comme sur main
+    saved = store.load(project / FOLDER)[0]
+    assert saved.orphelin is True and saved.quote == QUOTE and saved.historique == []
+
+
+def test_a_light_retouch_between_the_same_neighbours_is_followed_on_whole_words(project: Path) -> None:
+    row = _external_replace(project, PARA.replace("deux jours ouvrés", "trois jours ouvrés"))
+    assert row["anchor"]["state"] == "retrouve" and row["quote"] == "trois jours"
+    assert row["quote"] in PARA.replace("deux", "trois")
+
+
+def test_a_following_never_cuts_a_word(project: Path) -> None:
+    row = _external_replace(project, PARA.replace("livraison est de deux jours", "livraison est de trois semaines"))
+    quote = row["quote"]
+    block = next(b for b in _blocks(project) if quote in b["text"])
+    at = block["text"].index(quote)
+    assert not block["text"][at - 1 : at].isalnum() and not block["text"][at + len(quote) : at + len(quote) + 1].isalnum()

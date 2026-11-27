@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.cadrage import NOT_APPLICABLE, PHASES, phase_report
+from grimoire.core.cadrage import PHASES, phase_report
 
 __all__ = ["ETATS", "progress"]
 
@@ -44,34 +44,13 @@ def _angle_marks(view: dict[str, Any] | None) -> dict[tuple[str, str], str]:
     return marks
 
 
-def _read(root: Path, relative: str) -> str:
-    try:
-        return (root / relative).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
-def _only_not_applicable(text: str, section: str) -> bool:
-    """Le corps de la rubrique ne porte que la mention « Sans objet » (écrite par l'entretien) ?"""
-    lines = text.splitlines()
-    start = next((i for i, ln in enumerate(lines) if ln.strip() == f"## {section}"), None)
-    if start is None:
-        return False
-    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-    body = [ln.strip() for ln in lines[start + 1:end] if ln.strip()]
-    return bool(body) and all(ln.startswith(NOT_APPLICABLE) for ln in body)
-
-
 def _phase(root: Path, phase: Any, chantier: str | None, marks: dict[tuple[str, str], str]) -> dict[str, Any]:
     report = phase_report(root, phase, chantier)
     sections: dict[str, str] = {}
-    text = _read(root, report["file"]) if marks else ""
     for name in phase.sections:
         if report["sections"].get(name) == "rempli":
-            # « Sans objet » écrit à la place du gabarit : couvert, pas rempli (rien d'autre n'y a été ajouté).
-            only_mark = marks.get((phase.id, name)) == "sans-objet" and _only_not_applicable(text, name)
-            sections[name] = "sans-objet" if only_mark else "rempli"
-        else:
+            sections[name] = "rempli"
+        else:  # la mention « Sans objet » n'est pas du contenu (cadrage._section_filled) : la marque de l'angle la dit
             sections[name] = marks.get((phase.id, name), "vide")
     count = {s: sum(1 for v in sections.values() if v == s) for s in ("rempli", "vide", "je-ne-sais-pas", "sans-objet")}
     return {

@@ -158,12 +158,25 @@ def read_regular(path: Path, *, limit: int | None = None) -> str | None:
         return handle.read().decode("utf-8", errors="replace")
 
 
-def _written_ok(entry: Any, *, line_required: bool = True) -> bool:
-    """Une trace d'écriture ``{"phase", "section", "line"[, "text"]}`` : ce que ``answer`` a posé, pour que ``retract`` le retire."""
+def _written_ok(entry: Any, angle: Angle, *, skip: bool = False) -> bool:
+    """Une trace d'écriture ``{"phase", "section", "line"[, "text"]}`` : ce que ``answer`` a posé, pour que ``retract`` le retire.
+
+    N'est acceptée que la trace qu'``answer`` peut produire pour CET angle : une rubrique que l'angle vise (ou les
+    questions ouvertes pour « je ne sais pas »), et une ligne de la forme que l'entretien écrit (une puce d'une seule
+    ligne, ``À préciser`` ou la mention « Sans objet »). Une trace éditée à la main ne peut pas viser une exigence."""
     if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) for k in ("phase", "section", "line")):
         return False
-    known = {p.id for p in PHASES}
-    return entry["phase"] in known and (not line_required or bool(entry["line"])) and isinstance(entry.get("text", ""), str)
+    if not isinstance(entry.get("text", ""), str) or set(entry) - {"phase", "section", "line", "text"}:
+        return False
+    line = entry["line"]
+    if "\n" in line or "\r" in line or len(line) > 5000:
+        return False
+    here = (entry["phase"], entry["section"])
+    if skip:
+        return here == (angle.phase, angle.section) and (line == "" or line.startswith(NOT_APPLICABLE))
+    if line.startswith("- À préciser : "):
+        return here == ("brainstorm", "Questions ouvertes")
+    return line.startswith("- ") and (here == (angle.phase, angle.section) or here in angle.targets)
 
 
 def _load(root: Path, chantier: str | None) -> dict[str, Any] | None:
@@ -194,9 +207,9 @@ def _load(root: Path, chantier: str | None) -> dict[str, Any] | None:
         if not isinstance(rec.get("answers", []), list):
             raise ValueError(f"{STATE_FILE} invalide : « answers » de {aid} doit être une liste")
         written = rec.get("lines", [])
-        if not isinstance(written, list) or not all(w is None or _written_ok(w) for w in written):
+        if not isinstance(written, list) or not all(w is None or _written_ok(w, _BY_ID[aid]) for w in written):
             raise ValueError(f"{STATE_FILE} invalide : « lines » de {aid} mal formé")
-        if "skip" in rec and not _written_ok(rec["skip"], line_required=False):
+        if "skip" in rec and not _written_ok(rec["skip"], _BY_ID[aid], skip=True):
             raise ValueError(f"{STATE_FILE} invalide : « skip » de {aid} mal formé")
     data["angles"] = angles
     return data
@@ -339,7 +352,23 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
     return view
 
 
+def _refuse_accepted(path: Path) -> None:
+    """Un document au front matter ``status`` accepté/validé n'est jamais réécrit par l'entretien."""
+    from grimoire.core.cadrage_requirements import _ACCEPTED_STATUSES, _fold as fold_status
+
+    lines = (read_regular(path) or "").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return
+        key, _, value = line.partition(":")
+        if key.strip() == "status" and fold_status(value).strip().strip("'\"") in _ACCEPTED_STATUSES:
+            raise ValueError(f"{path.name} est au statut accepté : l'entretien n'y écrit ni n'y retire rien")
+
+
 def _append_to_section(path: Path, section: str, line: str) -> None:
+    _refuse_accepted(path)
     lines = (read_regular(path) or "").splitlines()
     head = f"## {section}"
     start = next((i for i, ln in enumerate(lines) if ln.strip() == head), None)
@@ -470,14 +499,18 @@ def _phase_file(root: Path, chantier: str | None, phase_id: str) -> Path:
 
 
 def _remove_from_section(path: Path, section: str, line: str) -> bool:
-    """Retire de la rubrique la ligne exacte *line* ; si la rubrique n'a plus de contenu, le gabarit revient."""
+    """Retire de la rubrique la ligne exacte *line* (la DERNIÈRE si elle y est plusieurs fois : celle que l'entretien a
+    ajoutée en dernier, pas une copie plus haut) ; si la rubrique n'a plus de contenu, le gabarit revient.
+
+    Refuse d'écrire dans un document au statut accepté ou validé (``ValueError``)."""
+    _refuse_accepted(path)
     lines = (read_regular(path) or "").splitlines()
     head = f"## {section}"
     start = next((i for i, ln in enumerate(lines) if ln.strip() == head), None)
     if start is None:
         return False
     end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-    at = next((i for i in range(start + 1, end) if lines[i].strip() == line.strip()), None)
+    at = next((i for i in range(end - 1, start, -1) if lines[i].strip() == line.strip()), None)
     if at is None:
         return False  # la ligne a été retouchée dans le document : on n'y touche pas
     del lines[at]

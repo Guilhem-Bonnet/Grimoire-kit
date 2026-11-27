@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Protocol
@@ -140,8 +141,11 @@ LEXICAL_INDEX_IGNORE_BLOCK = (
     f"{LEXICAL_INDEX_IGNORE}\n"
 )
 # Verrous de fichier (``fsio.locked`` : ``.<nom>.lock``, ``.<nom>.xlock`` en repli) : transitoires, posés à côté de
-# chaque fichier que le kit écrit sous verrou. Seuls les dossiers du kit et le contexte projet sont couverts : jamais
-# un ``*.lock`` du projet (``yarn.lock``, ``Cargo.lock``…). ``comments.json`` et ``suggestions.json`` restent suivis.
+# chaque fichier que le kit écrit sous verrou. La liste n'est pas finie (des dizaines d'appels à ``locked`` : tâches,
+# ledger, cadrage, ``comments.json``, ``suggestions.json``, ``decoupage``, ``project-context.yaml``…), d'où un motif
+# par dossier du kit plutôt qu'un nom par nom. Seuls ``_grimoire/``, ``_grimoire-output/`` et le contexte projet sont
+# couverts : jamais un ``*.lock`` du projet (``yarn.lock``, ``Cargo.lock``…), car le motif exige un nom qui commence par
+# un point. ``comments.json`` et ``suggestions.json`` eux-mêmes restent suivis.
 LOCK_IGNORE = "_grimoire/**/.*.lock"
 LOCK_IGNORE_LINES = (
     ".project-context.yaml.lock", ".project-context.yaml.xlock",
@@ -175,10 +179,20 @@ def ensure_grimoire_gitignore(root: Path) -> Path | None:
     missing ``.gitignore`` line is a git-status annoyance, not a broken gate).
     """
     gitignore = root / ".gitignore"
+    if gitignore.is_symlink():
+        return None  # jamais d'écriture à travers un lien : on ne sait pas ce qu'il vise
     try:
-        existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+        # Octets lus tels quels : un `.gitignore` qui n'est pas de l'UTF-8 n'est ni décodé de force ni modifié.
+        existing = gitignore.read_bytes().decode("utf-8") if gitignore.is_file() else ""
+    except UnicodeDecodeError:
+        logging.getLogger(__name__).warning(
+            ".gitignore n'est pas de l'UTF-8 : le kit n'y ajoute pas ses lignes (verrous, index) ; ajoutez-les à la main."
+        )
+        return None
     except OSError:
         return None
+    crlf = "\r\n" in existing  # les fins de ligne du projet sont gardées
+    existing = existing.replace("\r\n", "\n") if crlf else existing
     if GITIGNORE_MARKER in existing:
         # Section posée avant ces lignes (reçu de lecture, index lexical) : on n'ajoute que celles qui manquent.
         missing = "".join(
@@ -193,7 +207,7 @@ def ensure_grimoire_gitignore(root: Path) -> Path | None:
     else:
         content = existing.rstrip() + "\n\n" + GITIGNORE_SECTION if existing.strip() else GITIGNORE_SECTION
     try:
-        gitignore.write_text(content, encoding="utf-8")
+        gitignore.write_bytes((content.replace("\n", "\r\n") if crlf else content).encode("utf-8"))
     except OSError:
         return None
     return gitignore

@@ -141,7 +141,7 @@ def test_pret_a_valider_exige_des_exigences_et_un_cadrage_complet(project: Path,
     assert read_chantier(project, slug).etat == "pret-a-valider"
 
 
-def test_pret_a_valider_retombe_quand_le_cadrage_se_rouvre(project: Path, clock: list[str]) -> None:
+def test_pret_a_valider_ne_recule_jamais_quand_le_cadrage_se_rouvre(project: Path, clock: list[str]) -> None:
     slug = new_chantier(project, "Dicter une idée").slug
     _fill_everything(project, slug)
     _edit(project, slug, "brief", "Réponse pour Le problème", "Le problème est réel.")
@@ -149,7 +149,16 @@ def test_pret_a_valider_retombe_quand_le_cadrage_se_rouvre(project: Path, clock:
     path = project / "_grimoire/cadrage" / slug / "01-brief.md"
     path.write_text(path.read_text(encoding="utf-8").replace("Réponse pour Pourquoi maintenant.", "> À compléter — pourquoi maintenant."), encoding="utf-8")
     _edit(project, slug, "brief", "Le problème est réel", "Le problème est bien réel.")
-    assert read_chantier(project, slug).etat == "en-discussion"  # un point à préciser est revenu : plus « prêt »
+    assert read_chantier(project, slug).etat == "pret-a-valider"  # l'état ne recule jamais, même si un point revient
+    assert loop.fact_state(project, slug) == "en-discussion"  # les faits, eux, le disent
+
+
+def test_un_pret_a_valider_pose_a_la_main_survit_a_une_ecriture(project: Path, clock: list[str]) -> None:
+    slug = new_chantier(project, "Dicter une idée").slug  # cadrage au gabarit : les faits ne disent pas « prêt »
+    set_state(project, slug, "en-discussion")
+    set_state(project, slug, "pret-a-valider")
+    _edit(project, slug, "brief", "À compléter", "Le problème est réel.")
+    assert read_chantier(project, slug).etat == "pret-a-valider"
 
 
 def test_un_etat_pose_a_la_main_plus_loin_ne_retombe_pas(project: Path, clock: list[str]) -> None:

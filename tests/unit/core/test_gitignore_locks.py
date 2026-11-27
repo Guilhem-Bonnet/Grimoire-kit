@@ -100,6 +100,32 @@ def test_the_update_adds_the_locks_once_to_a_section_installed_before(repo: Path
     assert (repo / ".gitignore").read_text(encoding="utf-8") == text
 
 
+def test_a_gitignore_that_is_not_utf8_is_left_alone_and_reported(repo: Path, caplog: pytest.LogCaptureFixture) -> None:
+    raw = b"# caf\xe9\nnode_modules/\n"
+    (repo / ".gitignore").write_bytes(raw)
+    with caplog.at_level("WARNING"):
+        assert ensure_grimoire_gitignore(repo) is None  # ne lève pas
+    assert (repo / ".gitignore").read_bytes() == raw
+    assert "UTF-8" in caplog.text
+
+
+def test_crlf_line_endings_are_kept(repo: Path) -> None:
+    old = f"node_modules/\r\n\r\n{GITIGNORE_MARKER}\r\n_grimoire-output/.runs/\r\n"
+    (repo / ".gitignore").write_bytes(old.encode())
+    assert ensure_grimoire_gitignore(repo) is not None
+    data = (repo / ".gitignore").read_bytes()
+    assert data.startswith(old.encode()) and data.count(b"\r\n") == data.count(b"\n")  # aucun LF seul
+    assert _ignored(repo, _touch(repo, "_grimoire/cadrage/x/.01-brief.md.lock"))
+
+
+def test_a_symlinked_gitignore_is_never_written_through(repo: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    elsewhere = tmp_path_factory.mktemp("ailleurs") / "shared-ignore"
+    elsewhere.write_text("shared\n", encoding="utf-8")
+    (repo / ".gitignore").symlink_to(elsewhere)
+    assert ensure_grimoire_gitignore(repo) is None
+    assert elsewhere.read_text(encoding="utf-8") == "shared\n"
+
+
 def test_an_install_on_a_project_without_gitignore_writes_the_whole_section(repo: Path) -> None:
     assert ensure_grimoire_gitignore(repo) == repo / ".gitignore"
     assert (repo / ".gitignore").read_text(encoding="utf-8") == GITIGNORE_SECTION

@@ -525,11 +525,9 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
             updated = atelier_blocs.replace_block(current, block, text)
             if updated != current:
                 atomic_write(path, updated.encode("utf-8"))
-                from grimoire.tools import workspace_atelier_comments as comments
-
-                # Les fils du bloc le suivent dans la même opération (ancien et nouveau connus, verrou du fichier tenu).
-                written = updated[block.start : block.start + len(updated) - len(current) + block.end - block.start]
-                comments.follow_edit(root, slug, phase.id, blocks, block, written)
+                followed = (blocks, block, updated[block.start : block.start + len(updated) - len(current) + block.end - block.start], updated)
+            else:
+                followed = None
     except ConflictError as exc:
         args = getattr(exc, "merge_args", None)
         if args is not None:  # la fusion (coûteuse) se calcule ICI, verrou du fichier rendu
@@ -537,6 +535,11 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
 
             exc.payload["merged"] = ac.propose_merge(*args)
         raise
+    if followed is not None:
+        from grimoire.tools import workspace_atelier_comments as comments
+
+        # Les fils du bloc le suivent aussitôt (ancien et nouveau connus), le verrou du fichier de phase rendu.
+        comments.follow_edit(root, slug, phase.id, *followed)
     from grimoire.tools import workspace_atelier_loop as loop
 
     view = _phase_view(root, None if slug == "principal" else slug, phase)
