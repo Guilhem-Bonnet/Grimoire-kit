@@ -210,9 +210,11 @@ def test_le_cockpit_guide_un_projet_non_configure_sans_rien_ecrire(browser: Brow
         for route in ("/api/status", "/api/health", "/api/setup/run", "/api/memory/status", "/api/workspace/setup/guide"):
             assert any(route in url for url in api), (route, api)
         assert not [u for u in api if "/api/memory/status" in u and "probe" in u], "la mémoire est lue sans sonde"
-        # Aucun bouton du guide n'installe.
+        # Aucun bouton du guide n'installe. On juge l'intitulé du bouton (sa première ligne), pas la description du
+        # profil : celle-ci dépend de la machine (« … ou Docker pour le démarrer » quand ni Redis ni Docker ne répondent).
         labels = page.locator(f"{GUIDE} button").all_inner_texts()
-        assert not [t for t in labels if any(w in t.lower() for w in ("installer", "initialiser", "démarrer"))], labels
+        titles = [(t.strip().splitlines() or [""])[0].lower() for t in labels]
+        assert not [t for t in titles if any(w in t for w in ("installer", "initialiser", "démarrer"))], labels
     finally:
         page.context.close()
 

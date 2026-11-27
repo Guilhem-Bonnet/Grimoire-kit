@@ -118,6 +118,33 @@
 .at-blk.is-locked { cursor: default; } .at-blk.is-locked:hover { background: none; }
 .at-rub { margin: var(--sp-4) 0 var(--sp-1); font-size: var(--t-m); font-weight: 600; }
 .at-placeholder { color: var(--ink3); }
+/* ── Rendu des blocs (atelier-rendu.js) : tableaux, cases à cocher, listes, citations, code, emplacement vide ── */
+.at-md { min-width: 0; overflow-wrap: anywhere; }
+.at-md > :first-child { margin-top: 0; } .at-md > :last-child { margin-bottom: 0; }
+.at-md p + p { margin-top: var(--sp-2); }
+.at-md ul, .at-md ol { padding-left: var(--sp-5); margin: var(--sp-1) 0; }
+.at-md li > ul, .at-md li > ol { margin: 0; }
+.at-md-h { margin: var(--sp-3) 0 var(--sp-1); font-size: 1em; font-weight: 600; }
+.at-md-hr { border: 0; border-top: 1px solid var(--line); margin: var(--sp-3) 0; }
+.at-md-quote { margin: var(--sp-2) 0; padding: 0 var(--sp-3); border-left: 3px solid var(--line); color: var(--ink2); }
+.at-md-code { margin: var(--sp-2) 0; padding: var(--sp-2) var(--sp-3); max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); font-family: var(--mono); font-size: var(--t-s); white-space: pre; }
+.at-md-code code { white-space: pre; overflow-wrap: normal; }
+.at-md-tablewrap { max-width: 100%; margin: var(--sp-2) 0; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); }
+.at-md-tablewrap:focus-visible, .at-md-code:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.at-md-table, #canvas .at-md-table { display: table; max-width: none; overflow: visible; border-collapse: collapse; min-width: 100%; width: max-content; font-size: var(--t-s); } /* le cadre défile, pas la table (la règle `#canvas table` de la coque, en étroit, la rendrait bloc) */
+.at-md-table th, .at-md-table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: normal; }
+.at-md-table th { background: var(--hover); font-weight: 600; white-space: nowrap; }
+.at-md-table tbody tr:last-child td { border-bottom: 0; }
+.at-md-table .is-right { text-align: right; } .at-md-table .is-center { text-align: center; } .at-md-table .is-left { text-align: left; }
+.at-md li.at-task { list-style: none; }
+.at-md ul.at-tasks { padding-left: 0; }
+.at-task-label { display: flex; gap: var(--sp-2); align-items: flex-start; cursor: pointer; }
+.at-task-label:has(.at-task-box:disabled) { cursor: default; }
+.at-task-box { flex: none; width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--acc); }
+.at-task-box:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.at-task-text.is-done { color: var(--ink2); text-decoration: line-through; }
+.at-empty-slot { padding: var(--sp-2) var(--sp-3); border: 1px dashed var(--line); border-radius: var(--r); color: var(--ink2); font-style: italic; }
+.at-conflict[hidden] { display: none; }
 .at-q { display: flex; gap: var(--sp-3); align-items: flex-start; }
 .at-q .ico { color: var(--warn); flex: none; width: 18px; height: 18px; margin-top: 2px; }
 .at-gone s { color: var(--ink2); } .at-because { color: var(--ink2); }
