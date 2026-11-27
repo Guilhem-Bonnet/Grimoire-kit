@@ -18,16 +18,17 @@ function el(tag, className, text, attrs) {
 }
 
 /**
- * `hooks` : `reload(message, kind)` relit le document. Rend `{ node(block, rub) }` : le contenu d'un bloc resté au gabarit
+ * `hooks` : `reload(message, kind)` relit le document, `ownWrite(send)` (facultatif) encadre l'écriture. Rend `{ node(block, rub) }` : le contenu d'un bloc resté au gabarit
  * (une invite, ou la ligne repliée d'une rubrique « sans objet »).
  */
 export function createInvites(ctx, slug, hooks) {
+  const ownWrite = hooks.ownWrite || ((send) => send());
   /** Réécrit le bloc de gabarit ; un conflit ou un refus se dit à côté du geste, sans rien perdre. */
   const write = async (block, text, done, error, buttons, form = null) => {
     buttons.forEach((b) => { b.disabled = true; });
     error.hidden = true;
     try {
-      await ctx.api.atelierBloc(slug, block.id, text, block);
+      await ownWrite(() => ctx.api.atelierBloc(slug, block.id, text, block));
       if (ctx.signal.aborted) return;
       if (form) form.remove(); // plus de saisie à garder : le rechargement peut remplacer la rubrique
       await hooks.reload(done, 'ok');
