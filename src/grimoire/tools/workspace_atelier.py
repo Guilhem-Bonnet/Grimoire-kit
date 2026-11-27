@@ -389,6 +389,33 @@ def document(root: Path, slug: str) -> dict[str, Any]:
     }
 
 
+def phase_fingerprints(root: Path, slug: str) -> dict[str, str]:
+    """L'empreinte de chaque fichier de phase d'un chantier (``""`` si le fichier manque), comme ``GET`` du document.
+
+    Le client la compare à celle des phases qu'il affiche : le fichier a changé hors du cockpit si elles diffèrent. Les chemins
+    sont ceux de :func:`_phase_path` (confinés au dossier des cadrages) ; un fichier illisible vaut ``""``.
+    """
+    from grimoire.core.chantiers import list_chantiers, read_chantier
+    from grimoire.tools import atelier_blocs
+
+    slug = _slug(slug)
+    found = next((c for c in list_chantiers(root) if c.slug == slug), None)
+    if found is None and slug == "principal":
+        found = read_chantier(root)
+    if found is None:
+        raise FileNotFoundError(f"chantier inconnu : {slug!r}")
+    name = None if found.default else found.slug
+    out: dict[str, str] = {}
+    for phase in PHASES:
+        try:
+            raw = _phase_path(root, name or "principal", phase.filename).read_bytes()
+        except OSError:  # absent, illisible ou refusé par la garde des liens symboliques
+            out[phase.id] = ""
+            continue
+        out[phase.id] = atelier_blocs.fingerprint(raw.decode("utf-8", errors="replace"))
+    return out
+
+
 def _safe_tasks(root: Path, slug: str) -> list[dict[str, Any]]:
     """Les tâches du chantier ; un ledger illisible ne casse pas la page (liste vide)."""
     from grimoire.tools import workspace_atelier_loop as loop

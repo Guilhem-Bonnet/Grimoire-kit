@@ -30,7 +30,9 @@ function el(tag, className, text, attrs) {
 
 /**
  * `hooks` : `focus()` la phase affichée, `goPhase(id)` la navigation existante, `reload(message)` le rechargement
- * du document, `say(message)` la ligne d'état de la feuille, `drafts` les brouillons locaux (voir `atelier-brouillons.js`).
+ * du document, `say(message)` la ligne d'état de la feuille, `drafts` les brouillons locaux (voir `atelier-brouillons.js`),
+ * `files(fichiers)` (facultatif) reçoit à chaque réponse l'empreinte des fichiers de phase (voir `atelier-synchro.js`).
+ * Onglet caché, le pouls ne fait aucune requête ; il repart dès le retour.
  */
 export function createAssistant(ctx, slug, hooks) {
   // Colonne à droite du document (large) ou tiroir (étroit) ; replié, il ne reste que la pastille de la barre des phases.
@@ -81,6 +83,7 @@ export function createAssistant(ctx, slug, hooks) {
   let wasMine = false;
   let covered = -1;
   let timer = null;
+  let skippedHidden = false; // le dernier tour n'a rien demandé parce que l'onglet était caché
   let draft = '';
   // Sans agent joignable, le cadrage se joue dans la page avec les questions du kit (voir atelier-entretien.js).
   const guided = createGuided(ctx, slug, { focus: () => hooks.focus(), reload: (m, k) => hooks.reload(m, k), say: (m, k) => hooks.say(m, k), refresh: () => tick(), drafts: hooks.drafts });
@@ -288,6 +291,7 @@ export function createAssistant(ctx, slug, hooks) {
   const tick = async () => {
     clearTimeout(timer);
     if (ctx.signal.aborted) return;
+    if (document.hidden) { skippedHidden = true; timer = setTimeout(tick, SLOW_MS); return; } // onglet caché : aucune requête
     let next;
     try {
       next = await ctx.api.atelierEntretien(slug);
@@ -305,6 +309,7 @@ export function createAssistant(ctx, slug, hooks) {
     covered = next.covered;
     wasMine = mine;
     if (changed) await hooks.reload(); // le redessin garde toute saisie en cours : plus besoin d'attendre qu'elle finisse
+    else if (hooks.files) await hooks.files(next.fichiers); // un fichier de phase modifié hors du cockpit : le document le suit
     timer = setTimeout(tick, mine || next.turn.busy ? FAST_MS : SLOW_MS);
   };
 
@@ -387,6 +392,10 @@ export function createAssistant(ctx, slug, hooks) {
   };
 
   ctx.signal.addEventListener('abort', () => clearTimeout(timer));
+  // Revenu sur l'onglet : le pouls repart tout de suite au lieu d'attendre la fin de son attente.
+  const onVisible = () => { if (!document.hidden && skippedHidden) { skippedHidden = false; tick(); } };
+  document.addEventListener('visibilitychange', onVisible);
+  ctx.signal.addEventListener('abort', () => document.removeEventListener('visibilitychange', onVisible));
   tick();
   return { element: bar, pill, layout, challenge, sync: syncMascotte, refresh: () => { signature = ''; return tick(); } };
 }

@@ -528,3 +528,49 @@
   .at-docmenu-item { min-height: 40px; }
   .at-phasebar .at-live-bar .at-btn { height: 40px; }
 }
+
+/* ── Références dans le texte, mode lecture, document qui suit son fichier ── */
+/* Une référence (REQ-001, tâche du kit, [[chantier]]) est un lien discret ; une référence sans cible n'est pas un lien. */
+.at-ref { color: var(--acc); font-weight: 500; text-decoration: underline dotted; text-underline-offset: 3px; }
+a.at-ref:hover { text-decoration-style: solid; }
+a.at-ref:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 2px; }
+.at-ref-task { font-family: var(--mono); font-size: 0.92em; }
+.at-ref-missing { color: var(--ink2); font-weight: 400; text-decoration: underline wavy var(--warn); cursor: help; }
+/* La carte d'une exigence au survol et au focus : posée sous <body> (la toile est un conteneur), jamais interactive. */
+.at-refcard { position: fixed; z-index: 70; max-width: 320px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--card); color: var(--ink); box-shadow: var(--shadow-tip); font-size: var(--t-s); pointer-events: none; }
+.at-refcard[hidden] { display: none; }
+.at-refcard-head { display: flex; align-items: center; gap: var(--sp-2); }
+.at-refcard-id { font-family: var(--mono); font-weight: 600; }
+.at-refcard-prio { padding: 0 var(--sp-2); border-radius: var(--r-pill); background: var(--warn-soft); color: var(--ink); font-size: var(--t-s); }
+.at-refcard-title { margin: var(--sp-1) 0 0; }
+.at-refcard-state { margin: var(--sp-1) 0 0; color: var(--ink2); }
+.at-refcard-state.is-ok { color: var(--ok); }
+/* Le bloc visé par un lien, ou changé par ailleurs : surligné brièvement (un simple fond fixe si le mouvement est réduit). */
+@keyframes at-flash { from { background: var(--acc-soft); box-shadow: 0 0 0 3px var(--acc-soft); } to { background: transparent; box-shadow: 0 0 0 3px transparent; } }
+.at-blk.is-ref-target, .at-blk.is-ext-changed { animation: at-flash 2.2s ease-out; }
+@media (prefers-reduced-motion: reduce) { .at-blk.is-ref-target, .at-blk.is-ext-changed { animation: none; background: var(--acc-soft); } }
+/* Le bouton « Lecture » de la barre, et la pastille d'un fil ouvert (visible en lecture seulement). */
+.at-read-btn[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); }
+.at-read-dot { display: none; }
+/* Mode lecture : ce qui sert à écrire disparaît, la page est centrée et se lit confortablement. */
+.at-page.is-reading :is(.at-cm-add, .at-ch, .at-asst, .at-asst-pill, .at-sugg, .at-live, .at-live-bar, .at-live-panels, .at-steps, .at-cm-margin, .at-blk-err, .at-stale) { display: none !important; }
+.at-page.is-reading .at-doc-grid:has(> .at-asst:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+@container canvas (min-width: 1100px) {
+  .at-page.is-reading .at-doc-grid.at-has-plan:has(> .at-plan:not([hidden])):has(> .at-asst:not([hidden])) { grid-template-columns: 208px minmax(0, 1fr); }
+}
+.at-page.is-reading .at-doc-main { max-width: none; }
+.at-page.is-reading .at-sheet { width: 100%; max-width: 46rem; align-self: center; box-sizing: border-box; box-shadow: none; padding: var(--sp-6) var(--sp-4); font-size: 1.0625rem; line-height: 1.75; gap: var(--sp-5); }
+.at-page.is-reading .at-sec h2 { margin-bottom: var(--sp-3); font-size: calc(var(--t-xl) * 1.1); }
+.at-page.is-reading .at-blk { cursor: default; }
+.at-page.is-reading .at-blk:hover { background: none; }
+.at-page.is-reading .at-blk:focus-visible { outline: none; }
+.at-page.is-reading .at-md p + p { margin-top: var(--sp-3); }
+.at-page.is-reading .at-task-label { cursor: default; }
+.at-page.is-reading .at-cmrow { position: relative; display: block; }
+.at-page.is-reading .at-read-dot { position: absolute; top: var(--sp-2); right: calc(var(--sp-4) * -1); display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 var(--sp-1); box-sizing: border-box; border: 0; border-radius: var(--r-pill); background: var(--acc-soft); color: var(--acc); font-size: var(--t-s); font-weight: 600; line-height: 1; cursor: pointer; opacity: 0.8; }
+.at-page.is-reading .at-read-dot:hover, .at-page.is-reading .at-read-dot:focus-visible { opacity: 1; background: var(--acc); color: var(--on-acc); }
+.at-page.is-reading .at-read-dot:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@container canvas (max-width: 900px) {
+  .at-page.is-reading .at-sheet { padding: var(--sp-4) var(--sp-3); font-size: 1rem; }
+  .at-page.is-reading .at-read-dot { right: 0; top: 0; }
+}

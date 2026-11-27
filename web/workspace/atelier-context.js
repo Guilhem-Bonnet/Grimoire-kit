@@ -12,3 +12,18 @@ export function setAtelierContext(value) {
 export function getAtelierContext() {
   return current ? { ...current } : null;
 }
+
+// Le plan du chantier ouvert, pour la palette ⌘K (« Aller à : Exigences »). Il ne part jamais au chat : un canal à part.
+let outline = null;
+
+/**
+ * `{ slug, outline(): [{ id, title, rubriques: [{ name }] }], go(phase, rub) }` tant qu'un document est affiché ; `null` au
+ * démontage. `outline` est lu à l'ouverture de la palette, jamais en continu ; `go` mène à la phase (`rub` = -1) ou à sa rubrique.
+ */
+export function setAtelierOutline(value) {
+  outline = value && value.slug ? value : null;
+}
+
+export function getAtelierOutline() {
+  return outline;
+}

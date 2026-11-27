@@ -21,8 +21,13 @@ import { createAssistant } from './atelier-assistant.js';
 import { stable } from './atelier-focus.js';
 import { createHistory } from './atelier-historique.js';
 import { createLoopPanel, phaseState, progressCell, waitingBadges } from './atelier-avancement.js';
-import { setAtelierContext } from '../atelier-context.js';
+import { setAtelierContext, setAtelierOutline } from '../atelier-context.js';
 import { createNotifier } from './atelier-notify.js';
+import { createRefs, flash } from './atelier-liens.js';
+import { atelierHash, exigenceBlocks, reqFromParams } from './atelier-liens-logic.js';
+import { createReading } from './atelier-lecture.js';
+import { createSync } from './atelier-synchro.js';
+import { buildOutline } from './atelier-document-logic.js';
 import { createPlan } from './atelier-plan.js';
 import { createFind } from './atelier-recherche.js';
 import { createDocumentMenu } from './atelier-document-menu.js';
@@ -31,7 +36,7 @@ import { reconcileChildren, release, tag } from './atelier-reconcile.js';
 import { SELF, plainKey, sigOf } from './atelier-reconcile-logic.js';
 import {
   INDICATOR_LABEL, PHONE_MAX, WIDE_MIN, activePhase, capitalize, codeSegments, newOrphans, orphanNotice,
-  phaseFromParams, phaseHash, phaseIndicator, stepsOf,
+  phaseFromParams, phaseIndicator, stepsOf,
 } from './atelier-layout-logic.js';
 
 // Un rechargement du document ne redessine pas la feuille d'un bloc : il la réconcilie (voir `atelier-reconcile.js`). Un nœud
@@ -277,8 +282,8 @@ function ideasSection(ctx, ideas) {
 const bare = (text) => text.replace(/^>\s?/gm, '').replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '');
 
 /** Le Markdown d'un bloc en nœuds (jamais de HTML : voir `atelier-rendu.js`) ; `onToggle` rend ses cases cochables. */
-function markdown(text, onToggle = null) {
-  return renderBlockMarkdown(text, { onToggle });
+function markdown(text, onToggle = null, refs = null) {
+  return renderBlockMarkdown(text, { onToggle, refs });
 }
 
 /** Un bloc qui n'est que le gabarit « À compléter » : un emplacement vide, pas un contenu. */
@@ -298,7 +303,7 @@ function renderBlock(block, opts = {}) {
     }
     case 'question': {
       node.className = 'at-q';
-      node.append(icon('i-act-preview'), markdown(bare(block.text)));
+      node.append(icon('i-act-preview'), markdown(bare(block.text), null, opts.refs));
       return node;
     }
     case 'ecartee': {
@@ -311,7 +316,7 @@ function renderBlock(block, opts = {}) {
     }
     case 'decision': {
       node.className = 'at-req-head';
-      node.append(badge('Décision', 'acc'), markdown(bare(block.text)));
+      node.append(badge('Décision', 'acc'), markdown(bare(block.text), null, opts.refs));
       return node;
     }
     case 'exigence': {
@@ -330,7 +335,7 @@ function renderBlock(block, opts = {}) {
     }
     default: {
       if (block.placeholder || isTemplateText(block.text)) return emptySlot(block);
-      node.append(markdown(block.text, opts.onToggle));
+      node.append(markdown(block.text, opts.onToggle, opts.refs));
       return node;
     }
   }
@@ -408,8 +413,8 @@ function suggestionNode(sug, decide) {
   return node;
 }
 
-function documentView(ctx, root, slug, doc, phaseFocus) {
-  const state = { doc };
+function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
+  const state = { doc, chantiers }; // `chantiers` : les lignes de la bibliothèque (pour `[[chantier]]`), nul si illisibles
   const chantier = doc.chantier;
   const sheet = el('article', 'at-sheet', null, { 'aria-label': 'Document du chantier' });
   const nav = el('nav', 'at-phases', null, { 'aria-label': 'Étapes du cadrage' });
@@ -428,9 +433,16 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   // Lot 3 : les commentaires ancrés. `reqBlock` dit quel bloc porte chaque exigence, pour compter ses fils ouverts.
   const reqBlock = new Map();
   const drafts = createDrafts(ctx, slug); // le filet de sécurité : les saisies en cours sont gardées dans le navigateur
+  let liveTrace = null; // la trace du découpage (carte d'une exigence au survol)
+  const params = ctx.params || {};
+  const say = (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; };
+  // Mode lecture (adresse puis navigateur) : l'adresse garde aussi la phase et l'exigence visées (voir `itemParams`).
+  const reading = createReading(ctx, { sheet, say, setItem: () => { if (ctx.setItem) ctx.setItem(itemParams()); } }, params);
+  const itemParams = (extra = {}) => ({ chantier: slug, phase: focusId, ...(reading.on() ? { lecture: '1' } : {}), ...extra });
+  // Les références du texte (REQ-001, tâche du kit, [[chantier]]) : liens vers l'exigence, la tâche ou le chantier.
+  const refs = createRefs(ctx, { slug, doc: () => state.doc, trace: () => liveTrace, chantiers: () => state.chantiers, go: (req) => goReq(req) });
   const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message), drafts });
   const steps = el('ol', 'at-steps', null, { 'aria-label': 'Déroulé du chantier', 'data-role': 'steps' });
-  let liveTrace = null;
   let stepsShown = '';
   const drawSteps = () => {
     const list = stepsOf(state.doc.phases.map((p) => ({ ...p, state: phaseState(state.doc, p) })), liveTrace);
@@ -461,6 +473,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   // Lot 5 : le chat sait quel chantier est ouvert (et quelle phase) ; la barre de l'assistant guide le cadrage.
   setAtelierContext({ slug, phase: focusId });
   ctx.signal.addEventListener('abort', () => setAtelierContext(null));
+  // Le document suit son fichier : l'empreinte que porte chaque réponse du pouls de l'assistant décide (voir `atelier-synchro.js`).
+  const sync = createSync(ctx, { doc: () => state.doc, reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
   const assist = createAssistant(ctx, slug, {
     focus: () => focusId,
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
@@ -478,6 +492,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     narrow,
     phone: () => root.clientWidth < PHONE_MAX, // sous 900 px, le document d'abord : l'assistant reste derrière sa pastille
     drafts,
+    files: (fichiers) => sync.check(fichiers).catch(() => {}), // un fichier de phase modifié hors du cockpit : le document le suit
     // La mascotte de l'assistant : combien de suggestions attendent, et la première mise sous les yeux.
     suggestions: () => state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0),
     showSuggestion: () => {
@@ -510,13 +525,44 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       assist.refresh();
       phaseNav();
     }
-    const hash = phaseHash(slug, id);
+    const hash = atelierHash({ slug, phase: id, lecture: reading.on() });
     if (scroll && location.hash !== hash) history.pushState(null, '', location.pathname + location.search + hash);
-    if (ctx.setItem) ctx.setItem({ chantier: slug, phase: id });
+    if (ctx.setItem) ctx.setItem(itemParams({ phase: id }));
     if (!scroll) return;
     lockUntil = Date.now() + 700;
     const heading = sheet.querySelector(`[data-section="${id}"] h2`);
     if (heading) { heading.scrollIntoView({ block: 'start' }); heading.focus({ preventScroll: true }); }
+  };
+
+  /**
+   * Un lien `REQ-001` du texte : défile jusqu'à la ligne de l'exigence (phase Exigences du même chantier), la surligne
+   * brièvement et garde `&req=` dans l'adresse. Sans rechargement : le document, le focus et les saisies restent.
+   */
+  const goReq = (req, { push = true } = {}) => {
+    const found = exigenceBlocks(state.doc).get(req);
+    const host = found && sheet.querySelector(`.at-blk[data-req="${CSS.escape(req)}"]`);
+    if (!host) return false;
+    lockUntil = Date.now() + 900;
+    setFocus(found.phase);
+    host.scrollIntoView({ block: 'center' });
+    if (!reading.on()) host.focus({ preventScroll: true });
+    flash(ctx, host);
+    const hash = atelierHash({ slug, phase: found.phase, req, lecture: reading.on() });
+    if (push && location.hash !== hash) history.pushState(null, '', location.pathname + location.search + hash);
+    if (ctx.setItem) ctx.setItem(itemParams({ phase: found.phase, req }));
+    return true;
+  };
+
+  /** Un choix de la palette ⌘K : une phase (`rub` = -1) ou une de ses rubriques, sans recharger le document. */
+  const goOutline = (phaseId, rub) => {
+    if (rub < 0) { nav.querySelector(`[data-phase="${CSS.escape(phaseId)}"]`)?.click(); return; }
+    const target = sheet.querySelectorAll(`[data-section="${CSS.escape(phaseId)}"] > .at-rub`)[rub];
+    if (!target) return;
+    lockUntil = Date.now() + 900;
+    setFocus(phaseId);
+    target.setAttribute('tabindex', '-1');
+    target.scrollIntoView({ block: 'start' });
+    target.focus({ preventScroll: true });
   };
 
   // Mise à jour EN PLACE : un bouton de phase qui porte le focus n'est jamais remplacé (le suivi du défilement et le
@@ -832,13 +878,14 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   };
 
   const blockNode = (phase, block) => {
-    if (!block.editable) return renderBlock(block);
+    if (!block.editable) return renderBlock(block, { refs });
     const host = el('div', 'at-blk', null, {
       tabindex: '0', 'data-block': block.id, 'data-kind': block.kind,
       'aria-label': `Modifier le bloc : ${blockTitle(block)}`,
+      ...(block.req ? { 'data-req': block.req } : {}), // la cible d'un lien `REQ-001` du texte
     });
     const onToggle = (line, checked, box) => toggleTask(host, phase, block, line, checked, box);
-    host.append(renderBlock(block, { onToggle }), cm.addButton(phase, block, host, blockTitle(block)), assist.challenge(block));
+    host.append(renderBlock(block, { onToggle, refs }), cm.addButton(phase, block, host, blockTitle(block)), assist.challenge(block));
     tag(host, 'host', sigOf(block));
     const edit = (resumed = null) => { if (!host.classList.contains('is-editing')) editBlock(host, phase, block, resumed); };
     // Une saisie commencée avant un rechargement de la page est PROPOSÉE ici (Reprendre / Jeter), jamais remise en silence.
@@ -847,11 +894,12 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     host.append(...[saved, unsent].filter(Boolean));
     // Sélectionner un passage (pour le commenter) ne doit pas ouvrir l'édition du bloc : seul un clic sans sélection le fait.
     host.addEventListener('click', () => {
+      if (reading.on()) return; // en lecture, un clic sur un bloc n'ouvre pas l'éditeur
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || !host.contains(selection.anchorNode)) edit();
     });
     host.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && event.target === host) { event.preventDefault(); edit(); }
+      if (event.key === 'Enter' && event.target === host && !reading.on()) { event.preventDefault(); edit(); }
     });
     return host;
   };
@@ -862,6 +910,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     // Chaque enfant de la section porte son identité (`data-rk`) et ce qu'il affiche (`data-rs`) : c'est ce qui permet de
     // réconcilier le nouveau dessin avec l'ancien au lieu de le remplacer (voir `atelier-reconcile.js`).
     const plain = new Map();
+    const refsKey = refs.signature(); // une exigence ou un chantier qui apparaît change le rendu des références
     section.append(tag(el('h2', null, PHASE_NAMES[phase.id] || phase.title, { id: `at-h-${phase.id}`, tabindex: '-1' }), 'title', sigOf(PHASE_NAMES[phase.id] || phase.title)));
     if (!phase.blocks.length) {
       const text = phase.readable === false ? 'Ce fichier n’est pas de l’UTF-8 : modifie-le hors du cockpit.' : 'Cette phase n’a pas de fichier.';
@@ -882,10 +931,12 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         // Le bloc et ses fils côte à côte (marge) ou l'un sous l'autre (étroit) : la mise en page décide.
         const row = el('div', 'at-cmrow', null, { 'data-rc': '1' });
         row.append(blockNode(phase, block), cm.margin(block));
-        section.append(tag(row, `blk:${block.id}`, sigOf([block, cm.threadsOf(block).map(cm.threadSig)])));
+        const opened = cm.threadsOf(block).filter((c) => c.etat === 'ouvert').length;
+        if (opened) row.append(tag(reading.dot(opened), 'dot', sigOf(opened))); // la pastille du mode lecture (masquée hors lecture)
+        section.append(tag(row, `blk:${block.id}`, sigOf([block, cm.threadsOf(block).map(cm.threadSig), refsKey])));
         drawn.add(block.id);
       } else {
-        section.append(tag(blockNode(phase, block), plainKey(block.kind, block.text, plain), ''));
+        section.append(tag(blockNode(phase, block), plainKey(block.kind, block.text, plain), refsKey));
       }
       if (block.kind === 'exigence' && block.req) {
         reqBlock.set(block.req, block.id);
@@ -902,6 +953,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       if (spy) spy.observe(section);
     }
     cm.paint();
+    reading.sync(); // en lecture, les nouveaux nœuds sont eux aussi non éditables
   };
 
   /**
@@ -989,7 +1041,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   });
   const find = createFind(ctx, { sheet });
   const plan = createPlan(ctx, { root, sheet, doc: () => state.doc });
-  phasebar.append(nav, steps, liveDoc.toolbar, plan.toggle, docMenu.element, assist.pill);
+  phasebar.append(nav, steps, liveDoc.toolbar, plan.toggle, docMenu.element, reading.button, assist.pill);
   find.attach(phasebar);
   const main = el('div', 'at-doc-main');
   main.append(docMenu.printTitle, status, sheet, docMenu.printNotes);
@@ -1017,6 +1069,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   });
   view.prepend(skip);
   view.append(notifier.element);
+  reading.attach(view); // le mode lecture (adresse, puis dernier choix du navigateur) se pose sur la page
+  refs.mount();
   root.replaceChildren(view);
   assist.layout(); // le choix mémorisé, ou la largeur, décide si le panneau est déplié
   // Le tiroir (écran étroit) recouvre le bas de la fenêtre : la toile garde une marge d'autant, et les notifications le dépassent.
@@ -1039,6 +1093,13 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     lockUntil = Date.now() + 700;
     sheet.querySelector(`[data-section="${focusId}"] h2`)?.scrollIntoView({ block: 'start' });
   }
+  const wantedReq = reqFromParams(params); // `&req=REQ-001` : l'exigence visée par le lien est mise sous les yeux
+  if (wantedReq) goReq(wantedReq, { push: false });
+  if (!wantedReq && reading.on()) ctx.setItem?.(itemParams()); // l'adresse reflète le mode (et reste partageable)
+
+  // Le plan du chantier ouvert, pour la palette ⌘K : « Aller à : Exigences », « Aller à : Brief › Le problème ».
+  setAtelierOutline({ slug, outline: () => buildOutline(state.doc, PHASE_NAMES), go: goOutline });
+  ctx.signal.addEventListener('abort', () => setAtelierOutline(null));
 }
 
 export async function mount(root, ctx) {
@@ -1046,9 +1107,13 @@ export async function mount(root, ctx) {
   const slug = ctx.params && ctx.params.chantier;
   try {
     if (slug) {
-      const doc = await ctx.api.atelierChantier(slug);
+      // La liste des chantiers sert aux références `[[chantier]]` : une seule lecture, en même temps que le document.
+      const [doc, rows] = await Promise.all([
+        ctx.api.atelierChantier(slug),
+        ctx.api.atelierChantiers().then((data) => data.chantiers || []).catch(() => null),
+      ]);
       if (ctx.signal.aborted) return;
-      documentView(ctx, root, slug, doc, ctx.params.phase);
+      documentView(ctx, root, slug, doc, ctx.params.phase, rows);
       return;
     }
     const [data, ideas] = await Promise.all([
