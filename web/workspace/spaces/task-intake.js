@@ -21,7 +21,6 @@
 import { actionStatus, failureText, icon, setActionStatus, undoToast } from '../shell.js';
 import { newTaskBlockedReason } from './task-create.js';
 
-const STYLE_ID = 'ti-styles';
 
 const DRAFT_KEY = 'grimoire.idea.draft';
 const UNDO_MS = 8000;
@@ -50,49 +49,6 @@ const TYPE_LABEL = {
 };
 const STATUS_LABEL = { ready: 'Prête', proposed: 'Proposée' };
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .ti-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line);
-      border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); max-width: 720px; }
-    .ti-card h3 { margin: 0; font-size: var(--t-m); line-height: 20px; font-weight: 600; color: var(--ink); }
-    .ti-sub { margin: 0; color: var(--ink2); font-size: var(--t-s); }
-    .ti-ask { display: flex; gap: var(--sp-2); align-items: flex-end; flex-wrap: wrap; }
-    .ti-ask label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 240px; min-width: 0; }
-    .ti-lbl { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink2); }
-    .ti-card .ti-ask input, .ti-card .ti-cmd input { width: 100%; box-sizing: border-box; min-height: 44px; padding: 6px 9px;
-      border: 1px solid var(--line); border-radius: var(--r); font: inherit; }
-    .ti-ask input:focus, .ti-cmd input:focus { border-color: var(--acc); }
-    .ti-card .btn { min-height: 44px; }
-    .ti-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-    .ti-item { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--line);
-      border-radius: var(--r); }
-    .ti-item[data-risk="critical"] { border-color: var(--bad, var(--line)); }
-    .ti-pick { display: flex; gap: var(--sp-2); align-items: flex-start; min-height: 44px; cursor: pointer; }
-    .ti-pick input { width: 24px; height: 24px; margin: 10px 0 0; flex: none; }
-    .ti-title { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
-    .ti-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0; padding: 0; list-style: none;
-      font-size: var(--t-s); color: var(--ink2); }
-    .ti-meta li { display: inline-flex; gap: 4px; align-items: center; }
-    .ti-crit { margin: 0; color: var(--ink2); font-size: var(--t-s); overflow-wrap: anywhere; }
-    .ti-cmd { display: flex; flex-direction: column; gap: 4px; }
-    .ti-foot { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
-    .ti-res { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-    .ti-res a { color: var(--acc); }
-    .ti-why { color: var(--ink2); font-size: var(--t-s); display: block; }
-    .ti-box { max-width: 720px; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); }
-    .ti-box > summary { min-height: 44px; display: flex; align-items: center; padding: 0 var(--sp-4); cursor: pointer;
-      font-weight: 600; color: var(--ink); }
-    .ti-box .ti-list { padding: 0 var(--sp-4) var(--sp-4); }
-    .ti-idea { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; padding: var(--sp-3);
-      border: 1px solid var(--line); border-radius: var(--r); }
-    .ti-idea-text { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
-    .ti-box .btn { min-height: 44px; }
-  `;
-  document.head.append(style);
-}
 
 function el(tag, className, text, attrs) {
   const node = document.createElement(tag);
@@ -107,7 +63,6 @@ export function requestIdeaFocus() { state.open = true; state.focus = true; }
 
 /** Le bouton « Une idée ? » de la tête du tableau : il ouvre le champ, replié par défaut pour ne pas rogner le tableau. */
 export function ideaButton(ctx, { portfolio, onToggle }) {
-  injectStyles();
   if (newTaskBlockedReason(ctx, portfolio)) return [];
   const button = el('button', 'btn', null, { type: 'button', 'data-role': 'idea-open', 'aria-expanded': String(state.open) });
   button.append(icon('bolt'), el('span', null, 'Une idée ?'));
@@ -377,7 +332,6 @@ function loadIdeas(ctx, onChange) {
  * « Nouvelle tâche ».
  */
 export function ideaBlock(ctx, { portfolio, onCreated, onOpen, onChange }) {
-  injectStyles();
   if (newTaskBlockedReason(ctx, portfolio)) return null;
   const wrap = el('div', null, null, { 'data-role': 'idea-block' });
   wrap.style.display = 'flex';

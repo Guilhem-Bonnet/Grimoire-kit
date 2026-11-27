@@ -128,6 +128,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
   gap: var(--sp-2);
 }
 
+.row-tight {
+  gap: 6px;
+}
+
 .grow {
   flex-grow: 1;
 }
@@ -1521,6 +1525,10 @@ body[data-active-space="source"] {
   margin-left: -2px;
 }
 
+.panel-title {
+  font-weight: 500;
+}
+
 .panel-head {
   height: var(--h-doc);
   display: flex;
@@ -1911,6 +1919,7 @@ body[data-active-space] .panel-head {
    compteur de décisions de la barre du haut. */
 #st-live {
   white-space: nowrap;
+  gap: 6px;
 }
 
 #st-live[data-state="error"],
@@ -2301,6 +2310,14 @@ body[data-active-space] .panel-head {
 
 :root[data-focus="on"] #dock {
   display: none;
+}
+
+/* L'Atelier en pleine largeur : le détail aussi se replie (il survit au plein écran quand les panneaux d'atelier
+ * sont masqués), et le panneau ouvert au survol (`peek`) ne rogne pas la feuille. */
+@media (min-width: 901px) {
+  :root[data-focus="on"] body[data-active-area="atelier"] :is(#panel-inspector, #panel-explorer, #panel-evidence) {
+    display: none;
+  }
 }
 
 /* ── Sous 900 px : une colonne, des tiroirs ────────────────────────────────
@@ -3254,11 +3271,105 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   min-height: 0;
 }
 
-.chat-hostbar {
+.chat-hostbar,
+.chat-targetbar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 12px 0;
+}
+
+/* `display: flex` l'emportait sur l'attribut `hidden` : le sélecteur « Parler au projet », réservé à la vue globale,
+   s'affichait vide dans la vue d'un seul projet. */
+.chat-banner {
+  margin: 6px 12px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn, var(--line));
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chat-banner[hidden],
+.chat-hostbar[hidden],
+.chat-targetbar[hidden] {
+  display: none;
+}
+
+/* Le lanceur de la mascotte (fonction en test) : un petit bouton discret, en bas à droite au-dessus de la barre d'état, sur
+   toutes les pages ; il porte le libellé d'état et ouvre le chat. Pas de cadre travaillé, pas de canevas : la présence de la
+   mascotte sur l'interface est en cours de refonte. */
+.mascotte-launcher {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: calc(var(--h-status) + var(--sp-3));
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: min(280px, calc(100vw - 2 * var(--sp-4)));
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-s);
+  cursor: pointer;
+}
+
+.mascotte-launcher[hidden] {
+  display: none;
+}
+
+.mascotte-launcher:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.mascotte-launcher-pip {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--mascotte-night-1);
+  box-shadow: 0 0 0 2px var(--line);
+}
+
+.mascotte-launcher[data-tone='wait'] .mascotte-launcher-pip {
+  background: var(--acc);
+}
+
+.mascotte-launcher[data-tone='error'] .mascotte-launcher-pip {
+  background: var(--bad);
+}
+
+.mascotte-launcher-count {
+  min-width: 20px;
+  padding: 0 var(--sp-1);
+  box-sizing: border-box;
+  border-radius: 10px;
+  background: var(--acc);
+  color: var(--on-acc);
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+
+.mascotte-launcher-count[hidden] {
+  display: none;
+}
+
+.mascotte-launcher[data-tone='wait'] {
+  border-color: var(--acc);
+}
+
+.mascotte-launcher[data-tone='error'] {
+  border-color: var(--bad);
+  color: var(--bad);
 }
 
 .chat-host-label {
@@ -3266,7 +3377,8 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   font-size: 12px;
 }
 
-.chat-host {
+.chat-host,
+.chat-target {
   flex: 1;
   min-width: 0;
   font: inherit;
@@ -3514,6 +3626,180 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   display: flex;
   gap: var(--sp-2);
   flex: none;
+}
+
+.chat-mic[hidden] {
+  display: none;
+}
+
+.chat-mic[aria-pressed='true'] {
+  border-color: var(--bad-mark);
+  color: var(--bad-mark);
+}
+
+/* Le mode conversation (chat et Atelier) : un bouton, l'indicateur du micro et l'état annoncé. */
+.conv {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.conv[hidden],
+.conv-mic[hidden] {
+  display: none;
+}
+
+.conv-toggle {
+  min-height: var(--hit);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.conv-toggle:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.conv-toggle[aria-pressed='true'] {
+  border-color: var(--bad-mark);
+  color: var(--bad-mark);
+}
+
+.conv-mic {
+  padding: 0 var(--sp-2);
+  border-radius: var(--r);
+  background: var(--bad-mark);
+  color: var(--onfill);
+  font-size: var(--t-s);
+  font-weight: 600;
+}
+
+.conv-status {
+  font-size: var(--t-s);
+}
+
+.conv-note {
+  flex-basis: 100%;
+  font-size: var(--t-s);
+}
+
+.conv-note[hidden] {
+  display: none;
+}
+
+.conv-toggle[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chat-voice-out {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-top: 1px solid var(--line, currentColor);
+}
+
+.chat-voice-out[hidden] {
+  display: none;
+}
+
+.chat-voice-msg {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-1) var(--sp-2);
+  align-items: center;
+}
+
+.chat-voice-msg[data-played='true'] {
+  opacity: 0.7;
+}
+
+.chat-voice-text {
+  margin: 0;
+  grid-column: 1 / -1;
+}
+
+.chat-voice-play[aria-pressed='true'] {
+  border-color: var(--bad-mark);
+  color: var(--bad-mark);
+}
+
+.chat-voice-msg[data-kind='question'][data-answered='false'] {
+  border-left: 3px solid var(--termink);
+  padding-left: var(--sp-2);
+}
+
+.chat-voice-msg[data-answered='true'] {
+  opacity: 0.7;
+}
+
+.chat-voice-option,
+.chat-voice-text {
+  unicode-bidi: isolate;
+}
+
+.chat-voice-options-note[hidden] {
+  display: none;
+}
+
+.chat-voice-text.is-folded:not(.is-open) {
+  max-height: 6em;
+  overflow: hidden;
+}
+
+.chat-voice-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-voice-fold[hidden],
+.chat-voice-older[hidden] {
+  display: none;
+}
+
+.chat-voice-badge {
+  grid-column: 1 / -1;
+  color: var(--termink);
+}
+
+.chat-voice-options {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.chat-voice-badge[hidden],
+.chat-voice-options[hidden],
+.chat-voice-reply[hidden],
+.chat-voice-interview[hidden] {
+  display: none;
+}
+
+.chat-voice-interview {
+  padding: var(--sp-2);
+  border-top: 1px solid var(--line, currentColor);
+}
+
+.chat-voice-interview-title {
+  font-weight: 600;
+}
+
+.chat-voice-angles {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-3, 1.25rem);
+}
+
+.chat-voice-angles li[data-state='couvert'] {
+  opacity: 0.7;
 }
 
 .chat-stop[hidden] {

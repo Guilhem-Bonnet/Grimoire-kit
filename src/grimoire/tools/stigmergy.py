@@ -226,7 +226,7 @@ def log_event(project_root: Path, action: str, *, source: str = "cli",
                  "ts": datetime.now(tz=UTC).isoformat(),
                  "action": action, "source": source, **fields}
         line = json.dumps(entry, ensure_ascii=False)
-        existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        existing = [ln for ln in path.read_text(encoding="utf-8").split("\n") if ln] if path.is_file() else []
         existing.append(line)
         if len(existing) > EVENTS_MAX_LINES:
             existing = existing[-EVENTS_MAX_LINES:]
@@ -245,7 +245,7 @@ def read_events(project_root: Path) -> list[dict[str, Any]]:
         return []
     entries: list[dict[str, Any]] = []
     try:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in path.read_text(encoding="utf-8", errors="replace").split("\n"):
             line = line.strip()
             if not line:
                 continue

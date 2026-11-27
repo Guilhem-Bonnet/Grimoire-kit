@@ -82,6 +82,11 @@
   --term: #0e1013;
   --termink: #c9ced6;
   --line: #2a2f38;
+  /* La lueur nocturne derrière la mascotte vocale (le slime d'encre est une encre sombre, faite pour la nuit du
+   * prototype) : la même dans les deux thèmes, comme le fil du chat reste sombre. Utilisée par mascotte.css. */
+  --mascotte-night-1: #161b52;
+  --mascotte-night-2: #0a0c2c;
+  --mascotte-night-3: #05061a;
 
   /* ── Encre ────────────────────────────────────────────────────────────── */
   /* --ink2 reste la couleur des chips (fond --e2) et des infobulles

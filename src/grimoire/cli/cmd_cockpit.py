@@ -41,7 +41,7 @@ from grimoire.cli.cockpit_http import (
     gzip_body,
     send_json,
     serve_asset,
-    warm_sheet,
+    start_warm,
 )
 from grimoire.cli.cockpit_memory import (
     ALLOWED_ACTIONS,
@@ -61,6 +61,7 @@ from grimoire.cli.cockpit_write_target import (
 )
 from grimoire.data import site_script, web_path
 from grimoire.tools.cockpit_registry_routes import REGISTRY_ROUTES, registry_post
+from grimoire.tools.page_security import SecureHandlerMixin, html_page, serve_session_script
 from grimoire.tools.project_registry import (
     browse,
     classify_registry,
@@ -86,12 +87,12 @@ from grimoire.tools.request_guard import (
     check_host,
     drain_body,
     has_body,
-    inject_session_token,
     new_session_token,
 )
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 from grimoire.tools.workspace_read_cache import cacheable_read
-from grimoire.tools.workspace_write_guard import cockpit_journal_path, guard_write
+from grimoire.tools.workspace_write_guard import cockpit_journal_path, declares_global_scope, guard_write
+from grimoire.voice.stt_service import MAX_BODY_BYTES, declared_length, discard_body
 
 cockpit_app = typer.Typer(
     help="Local multi-project governance cockpit (serves the bundled site).",
@@ -258,7 +259,7 @@ def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
         pool.shutdown(wait=False)
 
 
-class _CockpitHandler(SimpleHTTPRequestHandler):
+class _CockpitHandler(SecureHandlerMixin, SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
     #: Vrai le temps d'une écriture (``do_POST``/``do_PUT``) : :meth:`send_response` vide alors le cache des lectures.
@@ -394,6 +395,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
 
     def _serve_static(self) -> None:
         """Fichier statique ; une page HTML reçoit le jeton de session."""
+        if serve_session_script(self, self.path):
+            return
         target = Path(self.translate_path(self.path))
         if target.is_dir():
             target = target / "index.html"
@@ -401,10 +404,12 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             super().do_GET()
             return
         if target.suffix.lower() == ".html":
-            body = inject_session_token(target.read_bytes())
+            body, security = html_page(target.read_bytes())
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
+            for name, value in security:
+                self.send_header(name, value)
             body = gzip_body(self, body)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -690,10 +695,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # registre seul. Depuis le lot 5 (2026-11-12), tout projet enrôlé se
             # pilote comme le projet d'ouverture : plus de confirmation nommée
             # pour `file/write`, `file/override` et `command`.
-            from grimoire.tools.workspace_routes import (
-                WORKSPACE_UNHANDLED,
-                workspace_post,
-            )
+            from grimoire.tools import workspace_atelier
+            from grimoire.tools.workspace_routes import WORKSPACE_UNHANDLED, workspace_post
 
             # Un slug d'URL non enrôlé est un 404, un corps qui contredit l'URL
             # un 400 ; une écriture sans slug garde le 403 « lecture seule »
@@ -703,6 +706,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 code, error = write_refusal_status(self.path)
                 self._send_json(code, {"ok": False, "error": error})
                 return
+            declared = declared_length(self.headers)
+            if declared > MAX_BODY_BYTES and path.endswith("/voice/transcribe"):
+                discard_body(self.rfile, declared)
+                self._send_json(413, {"ok": False, "error": "audio trop volumineux"})
+                return
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length) or b"{}") if length else {}
@@ -710,7 +718,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "bad json"})
                 return
             if not self._body_confirms_slug(body):
-                self._send_json(body_mismatch_status(path), {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"})
+                self._send_json(
+                    body_mismatch_status(path), {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"}
+                )
                 return
 
             # Même traduction que l'atelier (``forge_http.py::do_POST``) : sans
@@ -718,6 +728,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # hors étage éditable) remontait comme une exception non attrapée
             # jusqu'à ``http.server``, qui coupe la connexion sans réponse JSON
             # au lieu du 400/403/404 explicable que l'atelier rend déjà.
+            if path.startswith(workspace_atelier.ATELIER):  # Atelier en test : 404 drapeau, 409 bloc changé
+                self._send_json(*workspace_atelier.post_http(proot, path, body))
+                return
             try:
                 result = workspace_post(proot, path, body)
             except FileNotFoundError as exc:
@@ -824,7 +837,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self._send_json(403, {"ok": False, "error": "confirmation explicite requise"})
             return
         project_slug = str(data.get("project", "")).strip()
-        proot = _resolve_project_path(project_slug or None)
+        scoped = declares_global_scope(self.headers) and not project_slug  # portée globale : jamais le repli par défaut
+        proot = None if scoped else _resolve_project_path(project_slug or None)
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
@@ -903,12 +917,19 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def _do_put(self) -> None:
         """Le corps de ``do_PUT``, appelé une fois la garde d'écriture passée."""
         path = urlparse(self.path).path
-        if not path.startswith("/api/blueprints/"):
+        from grimoire.tools import workspace_atelier
+
+        atelier = workspace_atelier.handles(path)
+        if not atelier and not path.startswith("/api/blueprints/"):
             self._send_json(404, {"ok": False, "error": "route inconnue"})
             return
         proot = self._enrolled_write_root()
         if proot is None:
             self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+            return
+        if atelier:  # Atelier en test : écriture d'un bloc, 409 si le fichier a changé depuis la lecture
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            self._send_json(*workspace_atelier.put_http(proot, path, raw, self._body_confirms_slug))
             return
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -1299,15 +1320,15 @@ def serve(
     console.print(f"[bold green]Cockpit[/bold green] → [link]{url}[/link]  [dim](Ctrl-C pour arrêter)[/dim]")
     if open_browser:
         webbrowser.open(url)
-    if _OPENING_PATH is not None:
-        # P94 : la première lecture de la fiche paie imports et caches froids ;
-        # elle se fait ici, avant que la page ne la demande.
-        threading.Thread(target=warm_sheet, args=(_OPENING_PATH,), daemon=True).start()
+    # P94 : le premier parcours du journal des traces, les imports et les caches froids se paient ici,
+    # avant que la page ne les demande ; l'arrêt du serveur annule la suite de la chauffe.
+    warm_stop = start_warm(_OPENING_PATH)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         console.print("\n[dim]Cockpit arrêté.[/dim]")
     finally:
+        warm_stop.set()
         httpd.server_close()
 
 

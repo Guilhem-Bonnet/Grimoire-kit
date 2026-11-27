@@ -35,148 +35,12 @@
 
 import { renderMarkdown, truncateMarkdown } from '../markdown.js';
 import { renderCapacityPanel } from './capacite.js';
+import { renderFleetPilotage, renderPilotagePanel } from './pilotage.js';
 import {
   actionStatus, badge, copyText, failureText, icon, kpiRow, listNav, rowActions, setActionStatus, spaceHead, STATE_ICON,
 } from '../shell.js';
 
-const STYLE_ID = 'pl-styles';
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .pl-sheet { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .pl-fleet { padding: var(--sp-6); max-width: 1400px; width: 100%; box-sizing: border-box; margin: 0 auto; }
-    .pl-formula { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); white-space: nowrap; }
-    .pl-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
-    .pl-filterbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
-    .pl-search { width: 260px; max-width: 100%; box-sizing: border-box; border-radius: var(--r-pill); }
-    .pl-filterbar .seg { height: 32px; border-radius: var(--r-pill); }
-    .pl-titlerow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
-    .pl-seg-n { margin-left: 6px; color: var(--ink3); }
-    .seg > button[aria-pressed="true"] .pl-seg-n { color: inherit; }
-    .pl-fleet .tbl td { padding-top: 10px; padding-bottom: 10px; }
-    .pl-name { font-weight: 500; }
-    .pl-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
-    .pl-badges { display: flex; flex-wrap: wrap; gap: 6px; }
-    .pl-fleet .tbl { table-layout: fixed; }
-    .pl-fleet .tbl th:nth-child(2) { width: 30%; }
-    .pl-fleet .tbl th:nth-child(3) { width: 170px; }
-    .pl-fleet .tbl th:nth-child(4) { width: 100px; }
-    .pl-fleet .tbl th:nth-child(5) { width: 120px; }
-    /* Actions de ligne (P56) puis ouverture : trois boutons de 28 px, 36 px au doigt. */
-    .pl-fleet .tbl th:nth-child(6) { width: 136px; }
-    @media (hover: none), (pointer: coarse) { .pl-fleet .tbl th:nth-child(6) { width: 168px; } }
-    .pl-none { margin: 0; }
-    @container canvas (max-width: 720px) {
-      .pl-sheet, .pl-wrap, .pl-fleet { padding: var(--sp-3); }
-    }
-    .pl-section h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
-    .pl-cards { display: none; flex-direction: column; gap: var(--sp-2); }
-    .pl-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); padding: var(--sp-3) var(--sp-4); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
-    .pl-card-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
-    .pl-open-cell { width: 1%; white-space: nowrap; text-align: right; }
-    .pl-open-cell > .row-actions { margin-right: 4px; vertical-align: middle; }
-    .pl-card > .row-actions { align-self: flex-end; }
-    @container canvas (max-width: 760px) {
-      .pl-desktop { display: none; }
-      .pl-cards { display: flex; }
-    }
-    .pl-insp-block { margin-bottom: var(--sp-4); }
-    .pl-insp-block h4 { font-size: var(--t-min); text-transform: none; color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
-    .pl-insp-row { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 4px 0; font-size: var(--t-s); }
-    .pl-actions { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
-    .pl-preview, .pl-review-preview { margin-top: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: var(--r); font-size: var(--t-min); color: var(--ink2); }
-    .pl-nodes { margin: 8px 0; }
-    /* Un bloc de code garde sa largeur propre et défile horizontalement —
-       jamais pre-wrap, qui casse l'alignement d'une sortie CLI/Rich à
-       chaque redimensionnement. */
-    .pl-markdown { font-size: var(--t-s); }
-    .pl-markdown h1, .pl-markdown h2, .pl-markdown h3 { font-size: var(--t-m); font-weight: 500; margin: 10px 0 4px; color: var(--ink); }
-    .pl-markdown p { margin: 4px 0; }
-    .pl-markdown pre { font-family: var(--mono); font-size: var(--t-min); background: var(--e2); border-radius: var(--r); padding: 8px; overflow-x: auto; white-space: pre; margin: 4px 0; }
-    .pl-markdown code { font-family: var(--mono); }
-    .pl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-    .pl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--e2); font-size: var(--t-min); }
-    .pl-chip button { border: 0; background: none; color: var(--ink3); cursor: pointer; padding: 0; font-size: var(--t-min); line-height: 1; }
-    .pl-chip button:hover { color: var(--ink); }
-    .pl-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--sp-2); }
-    .pl-field label { font-size: var(--t-min); color: var(--ink3); }
-    .pl-field textarea, .pl-field input[type="text"] { font: inherit; font-size: var(--t-s); padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); color: var(--ink); resize: vertical; }
-    .pl-tool-opts { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--t-s); }
-    .pl-tool-opts label { display: flex; align-items: center; gap: 4px; }
-    /* Propositions : une carte, une ligne par proposition (artboards Douce,
-       liste d'À traiter) — type et nom, puis les faits en texte secondaire,
-       puis les actions et leur retour. Jamais trois colonnes serrées. */
-    .pl-props { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); overflow: hidden; }
-    .pl-prop-row { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); min-width: 0; }
-    .pl-prop-row:first-child { border-top: 0; }
-    .pl-prop-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
-    .pl-prop-head .chip { flex: none; }
-    .pl-prop-name { font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
-    .pl-prop-facts { margin: 0; color: var(--ink2); font-size: var(--t-s); overflow-wrap: anywhere; }
-    .pl-prop-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-top: 2px; }
-    .pl-prop-manual { display: flex; align-items: flex-start; gap: 6px; min-width: 0; margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r); background: var(--e1); color: var(--ink2); font-size: var(--t-s); }
-    .pl-prop-manual .ico { flex: none; margin-top: 1px; }
-    .pl-prop-manual > span { min-width: 0; overflow-wrap: anywhere; }
-    .pl-prop-manual b { color: var(--ink); font-weight: 600; }
-    .pl-prop-manual code { font-family: var(--mono); font-size: var(--t-min); }
-    /* Un display d auteur l emporte sur l attribut hidden : on le rend explicite. */
-    .pl-sheet[hidden], .pl-wrap[hidden], .pl-cat-files[hidden], .pl-up-foot[hidden] { display: none; }
-    .pl-update { max-width: 1360px; width: 100%; box-sizing: border-box; margin: 0 auto; }
-    .pl-update .pl-preview { margin: 0; padding: 0; border: 0; font-size: var(--t-s); color: var(--ink); display: flex; flex-direction: column; gap: var(--sp-4); }
-    .pl-up-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
-    .pl-up-head > div { display: flex; flex-direction: column; gap: 4px; }
-    .pl-up-head h2 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); display: flex; align-items: center; gap: var(--sp-3); }
-    .pl-up-delta { font-weight: 500; color: var(--ink2); }
-    .pl-up-crumb, .pl-up-sub { color: var(--ink3); font-size: var(--t-min); }
-    .pl-up-sub { color: var(--ink2); font-size: var(--t-s); }
-    .pl-up-aside { display: flex; align-items: center; gap: var(--sp-2); }
-    .pl-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 6px; }
-    .pl-steps li { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-    .pl-step-bar { height: 4px; border-radius: 2px; background: var(--line); }
-    .pl-step-bar[data-tone="ok"] { background: var(--ok); }
-    .pl-step-bar[data-tone="warn"] { background: var(--warn); }
-    .pl-step-bar[data-tone="bad"] { background: var(--bad); }
-    .pl-step-bar[data-tone="acc"] { background: var(--acc); }
-    .pl-step-name { font-size: var(--t-min); font-weight: 500; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .pl-up-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
-    /* Le volet des rubriques ampute la toile de 200 px dès que l'espace en a
-       plusieurs (Flotte depuis « En direct ») : à 1440 la toile fait ~794 px.
-       Le seuil passe sous cette largeur pour garder les deux colonnes de
-       l'artboard, et s'aligne sur les autres paliers de l'écran (760 px). */
-    @container canvas (max-width: 760px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
-    .pl-upcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; min-width: 0; }
-    .pl-upcard-h { padding: 12px 16px; display: flex; align-items: center; gap: var(--sp-2); background: var(--e1); }
-    .pl-upcard-h h3 { margin: 0; font-size: var(--t-s); font-weight: 600; color: var(--ink); }
-    .pl-upcard-h .lbl { margin-left: auto; }
-    .pl-upcard .tbl-wrap { border: 0; border-radius: 0; background: transparent; }
-    .pl-upcard h4 { margin: 0; padding: 10px 16px 4px; font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
-    .pl-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3); padding: 12px 16px; border-top: 1px solid var(--line); }
-    .pl-cat-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .pl-cat-title b { font-weight: 500; }
-    .pl-cat-title span { color: var(--ink3); font-size: var(--t-min); }
-    .pl-cat-diff { background: transparent; border-color: transparent; color: var(--ink2); }
-    .pl-cat-diff:hover { background: var(--hover); }
-    .pl-cat-files { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 12px; }
-    .pl-file-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; font: inherit; font-size: var(--t-s); color: var(--ink); background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); padding: 8px var(--sp-3); cursor: pointer; }
-    .pl-file-head:hover { background: var(--hover); }
-    .pl-file-head .lbl, .pl-file-head .badge { flex: none; white-space: nowrap; }
-    .pl-file-head .mono { min-width: 0; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pl-diff { font-family: var(--mono); font-size: var(--t-min); background: var(--e2); border-radius: var(--r); padding: 8px; overflow-x: auto; margin: 4px 0 0; }
-    .pl-diff span { display: block; white-space: pre; }
-    .pl-diff .add { background: var(--ok-soft); color: var(--ok); }
-    .pl-diff .del { background: var(--bad-soft); color: var(--bad); }
-    .pl-diff .hunk { color: var(--ink3); }
-    .pl-up-foot { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: 12px 16px; background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); color: var(--ink2); }
-    .pl-up-formula { margin-left: auto; font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); white-space: nowrap; }
-    .pl-up-formula b { color: var(--rub); font-weight: 500; }
-    [data-focused="true"] { border-radius: var(--r); background: var(--acc-soft); box-shadow: 0 0 0 2px var(--acc); }
-  `;
-  document.head.append(style);
-}
 
 const fmtInt = (n) => (typeof n === 'number' ? n.toLocaleString('fr-FR') : '—');
 
@@ -746,13 +610,34 @@ async function loadSheet(ctx, slug) {
   // la demande, jamais au premier rendu. `slug` explicite (jamais
   // `host.project` implicite) : cette fiche peut être celle d'un AUTRE
   // projet que celui déjà résolu par l'hôte (navigation Flotte → Projet).
-  const sheet = await ctx.api.sheet(slug).catch(() => null);
-  return (
-    sheet || {
-      health: null, memory: null, doctor: null, agents: null,
-      proposals: null, setupRun: null, upgradeRuns: null, flowRuns: null, name: null, capacity: null,
-    }
-  );
+  //
+  // #1243 : la fiche entière attendait sa sous-vue la plus lente (agents et
+  // propositions lisent le journal des traces, capacité le registre de
+  // fournisseurs : ~4 s à froid sur un vrai poste). Les requêtes partent donc
+  // TOUTES ensemble, mais la fiche se peint dès que les sous-vues rapides sont
+  // là ; agents et propositions suivent, chacune à son arrivée (`slow`), et la
+  // capacité se charge par son propre panneau (`GET /api/workspace/capacity`).
+  const section = (name) => ctx.api.sheet(slug, [name]).then((part) => part[name] ?? null).catch(() => null);
+  const slow = { agents: section('agents'), proposals: section('proposals') };
+  const fast = await ctx.api.sheet(slug, FAST_SHEET_SECTIONS).catch(() => null);
+  return {
+    sheet: fast || {
+      health: null, memory: null, setupRun: null, upgradeRuns: null, flowRuns: null, name: null,
+    },
+    slow,
+  };
+}
+
+// Les sous-vues de la fiche qui ne lisent ni le journal des traces ni le registre de fournisseurs.
+const FAST_SHEET_SECTIONS = ['health', 'memory', 'setupRun', 'upgradeRuns', 'flowRuns', 'name'];
+
+// État de chargement d'une section lente : le titre, puis une ligne sobre (même encre que les états vides).
+function loadingSection(title, label) {
+  const section = document.createElement('div');
+  section.className = 'pl-section';
+  section.setAttribute('aria-busy', 'true');
+  section.append(text('h3', null, title), text('p', 'soft', label));
+  return section;
 }
 
 // ── Propositions d'artefact (#395) : à la répétition d'un non-choix ────────
@@ -1866,7 +1751,10 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   // la coque via `options.onCapacity` — jamais de boucle de sondage dédiée.
   const capacity = renderCapacityPanel(ctx, { project: slug, initial: sheet.capacity });
   wrap.append(capacity.node);
-  if (options.onCapacity) options.onCapacity(capacity.refresh);
+  // Pilotage (pause, reprise, disjoncteur) : même pouls que la capacité.
+  const pilotage = renderPilotagePanel(ctx, { slug, name: name || slug });
+  wrap.insertBefore(pilotage.node, capacity.node);
+  if (options.onCapacity) options.onCapacity(() => { capacity.refresh(); pilotage.refresh(); });
 
   root.append(wrap);
 
@@ -2238,7 +2126,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   reviewBtn.className = 'btn';
   reviewBtn.textContent = "Revoir dans l'IDE";
   const reviewPreview = document.createElement('div');
-  // Classe distincte de `.pl-preview` (même style, `injectStyles` ci-dessus) :
+  // Classe distincte de `.pl-preview` (même style, voir piloter.css) :
   // le bouton « Mettre à jour » a déjà son propre `.pl-preview` dans le même
   // bloc d'actions — un sélecteur `.pl-preview` unique doit continuer à n'en
   // trouver qu'un (tests e2e existants, `test_workspace_cockpit_upgrade_
@@ -2332,7 +2220,11 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     renderAgentBlock();
   };
 
-  agentsSection = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
+  // #1243 : tant que `options.slow` n'a pas livré les agents, un état de chargement tient leur place.
+  const slow = options.slow || null;
+  agentsSection = slow
+    ? loadingSection('Agents', 'Chargement des agents…')
+    : renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
   wrap.append(agentsSection);
 
   // ── Propositions (#395) : section agents, sous la table ────────────────
@@ -2359,8 +2251,31 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     agentsSection = freshAgentsSection;
   };
 
-  proposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
+  proposalsSection = slow
+    ? loadingSection('Propositions', 'Chargement des propositions…')
+    : renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
   wrap.append(proposalsSection);
+
+  // Chaque section lente se pose à son arrivée, sans redessiner le reste de la fiche. Une fiche déjà remplacée
+  // (rafraîchissement, changement de portée) n'est plus touchée : `signal` annulé, ou section détachée.
+  if (slow) {
+    slow.agents.then((payload) => {
+      if (ctx.signal.aborted) return;
+      agentsPayload = payload;
+      const fresh = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
+      agentsSection.replaceWith(fresh);
+      agentsSection = fresh;
+    });
+    slow.proposals.then((payload) => {
+      if (ctx.signal.aborted) return;
+      proposalsPayload = payload;
+      updateReviewButton(proposalsPayload);
+      const fresh = renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
+      proposalsSection.replaceWith(fresh);
+      proposalsSection = fresh;
+      if (options.onProposals) options.onProposals();
+    });
+  }
 }
 
 // À traiter (P32) ouvre la fiche sur ce qui attend : `#flotte?focus=kit`,
@@ -2380,7 +2295,6 @@ function revealFocus(root, ctx) {
 }
 
 export async function mount(root, ctx) {
-  injectStyles();
   const cockpit = ctx.host.kind === 'cockpit';
   // La portée de la coque décide seule (P31) : « Tous les projets » montre la
   // table de la Flotte, un projet montre sa fiche. Plus de zoom Flotte/Projet
@@ -2497,19 +2411,28 @@ export async function mount(root, ctx) {
       const attention = await ctx.api.attention(true).catch(() => null);
       // Un autre rendu (zoom sur un projet, rafraîchissement) a pris la main : on ne l'écrase pas.
       if (ctx.signal.aborted || root.firstElementChild !== painted) return;
-      paintFleet(attention, false);
+      const fleet = paintFleet(attention, false);
+      // Pilotage : une ligne par projet et le bouton de la machine, relus au pouls (lu seulement quand l'hôte les sert).
+      if (cockpit && fleet) {
+        const pilotage = renderFleetPilotage(ctx);
+        fleet.insertBefore(pilotage.node, fleet.children[2] || null);
+        capacityLive.refresh = pilotage.refresh;
+      }
     } else {
       // #548 : `loadSheet()` porte désormais le nom du projet aussi (fiche
       // `sheet.name`, résolue côté serveur depuis le registre) — plus de
       // second tour réseau via `projects()` pour l'obtenir côté cockpit
       // (restes #541 point 2, où les deux appels partaient déjà au moins en
       // parallèle plutôt qu'en série ; ici il n'y en a plus qu'un).
-      const sheet = await loadSheet(ctx, selected);
+      const { sheet, slow } = await loadSheet(ctx, selected);
       const name = cockpit ? sheet.name || null : ctx.host.status?.slug || null;
       if (ctx.signal.aborted) return;
       root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderSheet(root, ctx, selected, name, sheet, {
         refresh: draw,
+        slow,
+        // Une proposition visée (`focus=proposal`) n'existe qu'une fois la section arrivée : on la révèle alors.
+        onProposals: () => { if (ctx.params?.focus === 'proposal') revealFocus(root, ctx); },
         onCapacity: (fn) => { capacityLive.refresh = fn; },
       });
       revealFocus(root, ctx);

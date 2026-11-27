@@ -53,7 +53,6 @@ seule.
 from __future__ import annotations
 
 import copy
-import json
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -62,6 +61,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.missions.liveness import INCONNU, TERMINE, VIVANT, SessionProbe
 from grimoire.tools import workspace_reviews
 from grimoire.tools.memory_setup import SERVICE_FAILED, SERVICE_ONLINE, SERVICE_STOPPED, service_state
@@ -72,6 +72,7 @@ from grimoire.tools.workspace_portfolio import (
     DEFAULT_LIVE_MINUTES,
     RUNS_RELPATH,
     annotate_cards,
+    journal_fields,
     unread_directives,
 )
 
@@ -103,6 +104,11 @@ KIT_BEHIND = "kit_behind"
 SERVICE_RESOLVED = "service_resolved"
 #: Une option que le pilote a appliquée sans jugement assumé : hors des sections, dans le bloc « Décisions à revoir ».
 REVIEW_DECISION = "review_decision"
+#: #1342 (M3) : des tâches passées ``ready`` sans exigence validée par la MOA (mode ``warn``), ou des incidents exemptés
+#: dont l'exigence reste à poser au post-mortem — un item par projet qui déclare une MOA.
+REQUIREMENT_UNVALIDATED = "requirement_unvalidated"
+#: #1342 (M4) : des exigences validées dont toutes les tâches sont livrées, qui attendent la recette de la MOA.
+REQUIREMENT_RECETTE = "requirement_recette"
 REVIEW_DECISIONS_LABEL = "Décisions à revoir"
 #: Le bloc montre ces décisions récentes et non reprises, jamais un historique sans fin (le journal « Décidé par le
 #: pilote » les garde toutes).
@@ -116,11 +122,11 @@ MAX_ARBITRATIONS = 20
 #: Les sections, de la plus urgente à la moins urgente, et les types de chacune
 #: dans leur ordre. Un type n'apparaît que dans une section.
 SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("decide", "À décider", (BREAKER, CHECKPOINT, QUESTION, PROPOSAL)),
+    ("decide", "À décider", (BREAKER, CHECKPOINT, QUESTION, REQUIREMENT_RECETTE, PROPOSAL)),
     ("review", "PR à revoir", (PR_REVIEW,)),
     ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
-    ("maintain", "À entretenir", (DIRECTIVE_UNACKED, *HYGIENE_KINDS, KIT_BEHIND)),
+    ("maintain", "À entretenir", (DIRECTIVE_UNACKED, REQUIREMENT_UNVALIDATED, *HYGIENE_KINDS, KIT_BEHIND)),
     ("resolved", "Résolu automatiquement", (SERVICE_RESOLVED,)),
 )
 #: Un type que :data:`SECTIONS` ne connaît pas tombe ici : jamais perdu.
@@ -317,6 +323,7 @@ def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any], list[Any]]:
     from grimoire.missions.arbiter import ARBITRATED_EVENT
     from grimoire.missions.autopilot import DECIDED_EVENT
     from grimoire.missions.autopilot_view import REVERTED_EVENT
+    from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
 
     last: dict[str, str] = {}
     pilot: list[Any] = []
@@ -324,7 +331,9 @@ def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any], list[Any]]:
     for event in ledger.list_events():
         if event.created_at and event.created_at > last.get(event.entity_id, ""):
             last[event.entity_id] = event.created_at
-        if event.event_type in (DECIDED_EVENT, REVERTED_EVENT):
+        if event.event_type in (DECIDED_EVENT, REVERTED_EVENT) or (
+            event.event_type == HUMAN_ANSWERED_EVENT and event.payload.get("origin") == "orchestrator"
+        ):  # les réponses du pilote : une reprise « sans réponse » ne couvre pas une décision déjà suivie de la sienne
             pilot.append(event)
         elif event.event_type == ARBITRATED_EVENT:
             arbitrated.append(event)
@@ -383,14 +392,16 @@ def _review_decisions(read: _ProjectRead, pilot_events: list[Any], now: datetime
     def key(event: Any) -> tuple[str, str]:
         return str(event.payload.get("task_id") or event.entity_id or ""), str(event.payload.get("question_id") or "")
 
-    reverted = {key(event) for event in pilot_events if event.event_type != DECIDED_EVENT}
+    from grimoire.missions.autopilot_view import reverted_decisions
+
+    reverted = reverted_decisions(pilot_events)
     found: dict[tuple[str, str], dict[str, Any]] = {}
     for event in pilot_events:
         payload = event.payload
         source = payload.get("recommendation_source")
         if event.event_type != DECIDED_EVENT or source not in (DEFAULT_SOURCE, "recommended", PRECEDENT_SOURCE):
             continue
-        if key(event) in reverted:
+        if event.id in reverted:
             continue
         try:
             at = datetime.fromisoformat(str(event.created_at))
@@ -438,6 +449,86 @@ def _orphan_reason(task: Any, card: dict[str, Any], now: datetime) -> str:
     return ""
 
 
+def _cited_keys(tasks: list[Any], task_ids: list[str]) -> list[str]:
+    """Les exigences que citent les tâches listées (clés normalisées), pour afficher la commande de validation."""
+    from grimoire.core.exceptions import GrimoireMissionError
+    from grimoire.missions.requirement_gate import normalize_key, requirement_of
+
+    wanted, keys = set(task_ids), set()
+    for task in tasks:
+        raw = requirement_of(task) if task.id in wanted else ""
+        if raw:
+            try:
+                keys.add(normalize_key(raw))
+            except GrimoireMissionError:
+                continue
+    return sorted(keys)
+
+
+def _requirement_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> None:
+    """Les items « exigence à faire valider » (#1342, M3) et « exigence à recetter » (M4) ; une lecture qui échoue
+    n'efface pas le reste de la vue.
+
+    Le mode se lit d'abord : un projet sans MOA déclarée ne paie ni la lecture de tous les événements du ledger, ni
+    celle du journal d'autorité.
+    """
+    from grimoire.missions.requirement_gate import gate_mode, pending_review
+
+    try:
+        if not gate_mode(service.home_root).declared:
+            return
+    except Exception:
+        return
+    _recette_item(read, service, tasks)
+    try:
+        pending = pending_review(service.home_root, tasks, service.ledger.list_events())
+    except Exception:
+        return
+    unvalidated, questions, postmortem = pending["unvalidated"], pending["questions"], pending["postmortem"]
+    if not (unvalidated or questions or postmortem):
+        return
+    parts = []
+    if unvalidated:
+        parts.append(f"{len(unvalidated)} tâche(s) passée(s) `ready` sans exigence validée par la MOA")
+    if questions:
+        parts.append(f"{len(questions)} question(s) exemptée(s)")
+    if postmortem:
+        parts.append(f"{len(postmortem)} incident(s) exempté(s), post-mortem dû (aucune exigence rattachée)")
+    _item(
+        read, REQUIREMENT_UNVALIDATED, "requirements", " ; ".join(parts),
+        "`grimoire cadrage interview`, puis la MOA valide depuis son terminal : `grimoire cadrage approve <exigence>`",
+        stage="validation", task_ids=unvalidated, questions=questions, postmortem=postmortem,
+        requirement_keys=_cited_keys(tasks, unvalidated),
+    )
+
+
+def _recette_item(read: _ProjectRead, service: Any, tasks: list[Any]) -> None:
+    """Les exigences livrées en attente de la recette de la MOA (#1342, M4) : un item par projet."""
+    from grimoire.missions.moa_acceptance import pending_acceptance, pending_follow_up
+
+    try:
+        keys = pending_acceptance(service.home_root, tasks)
+        follow_ups = pending_follow_up(service.home_root, tasks)
+    except Exception:
+        return
+    if follow_ups:
+        _item(
+            read, REQUIREMENT_RECETTE, "suite",
+            f"{len(follow_ups)} exigence(s) recettée(s) dont la tâche de suite est à créer : "
+            + ", ".join(key for key, _ in follow_ups),
+            f"la MOE crée la suite : `{follow_ups[0][1]}`",
+            stage="suite", requirements=[key for key, _ in follow_ups], commands=[cmd for _, cmd in follow_ups],
+        )
+    if not keys:
+        return
+    _item(
+        read, REQUIREMENT_RECETTE, "recette",
+        f"{len(keys)} exigence(s) livrée(s) en attente de recette : {', '.join(keys)}",
+        f"la MOA recette depuis son terminal : `grimoire cadrage recette {keys[0]}`",
+        stage="recette", requirements=keys,
+    )
+
+
 def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe | None) -> None:
     from grimoire.missions.autopilot_view import partition
     from grimoire.missions.decisions import pending_decisions
@@ -479,6 +570,7 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
         read.items[-1].update(_question_v2(service.ledger, decision.task_id, decision.question))
         if pilot is not None:
             read.items[-1]['pilot'] = pilot.to_dict()
+    _requirement_item(read, service, tasks)
     for task, card in zip(tasks, cards, strict=True):
         since = last.get(task.id) or str(task.created_at)
         session = card.get("session")
@@ -491,7 +583,8 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
                 _item(read, CLAIM_ORPHANED, task.id, task.title, orphan, since=since, task_id=task.id)
         if task.status is TaskState.NEEDS_VERIFICATION:
             try:
-                verdict = service.gate(task, TaskState.CLOSED)
+                with file_memo.view_scope():  # affichage seul : preuves et verdicts relus une fois par fichier immobile
+                    verdict = service.gate(task, TaskState.CLOSED)
             except Exception as exc:  # un gate illisible ne laisse pas passer la revue en silence
                 _item(read, REVIEW_BLOCKED, task.id, task.title, f"verdict du gate illisible : {exc}",
                       since=since, task_id=task.id)
@@ -652,7 +745,9 @@ def _live_journal(root: Path, now: datetime) -> bool:
     window = timedelta(minutes=DEFAULT_LIVE_MINUTES)
     for path in runs.glob("session-*.json"):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = journal_fields(path)
+            if data is None:
+                continue
             moment = datetime.fromisoformat(str(data.get("updated_at") or data.get("started_at")))
         except (OSError, ValueError, AttributeError, TypeError):
             continue

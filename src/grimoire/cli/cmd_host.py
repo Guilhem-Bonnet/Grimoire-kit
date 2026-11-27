@@ -32,6 +32,7 @@ from grimoire.hosts.capabilities import (
     profile_for,
     resolve_host,
 )
+from grimoire.hosts.capability_matrix import build_capability_matrix, session_logs_status
 from grimoire.hosts.capability_probe import local_probes_for
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.detection import alias_for_host, enabled_host_ids
@@ -129,6 +130,11 @@ class _HostStatus:
     #: Dernières sondes de capacités locales (#1281, L7) : date, version, verdict. Informatif :
     #: seule une capture versée sous ``tests/fixtures/hosts/`` change une annonce.
     local_probes: list[dict[str, Any]] = field(default_factory=list)
+    #: Matrice de capacités système par système et surface par surface (C4), dérivée du code :
+    #: ``proven`` / ``unverified`` / ``degraded`` / ``unsupported``, rien de promu.
+    capability_matrix: dict[str, Any] = field(default_factory=dict)
+    #: Emplacement des journaux de session Copilot (Copilot seulement) : configuré ou non, jamais deviné.
+    session_logs: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -150,7 +156,31 @@ class _HostStatus:
             "brake_proof": self.brake_proof,
             "hook_approval": self.hook_approval,
             "local_probes": self.local_probes,
+            "capability_matrix": self.capability_matrix,
+            "session_logs": self.session_logs,
         }
+
+
+_STATE_STYLE = {"proven": "green", "unverified": "yellow", "degraded": "yellow", "unsupported": "red"}
+
+
+def _matrix_lines(matrix: dict[str, Any]) -> list[str]:
+    """La matrice de capacités en lignes Rich : un système, puis son état sur chaque surface."""
+    if not matrix:
+        return []
+    labels = {s["id"]: s["label"] for s in matrix["surfaces"]}
+    lines = ["  [bold]Capacités par système[/bold] (dérivées du code ; « prouvé » exige une capture, rien n'est promu) :"]
+    for system in matrix["systems"]:
+        lines.append(f"  {escape(system['label'])}")
+        for surface_id, cell in system["cells"].items():
+            style = _STATE_STYLE[cell["state"]]
+            tail = f" — repli : {escape(cell['fallback'])}" if cell["fallback"] else ""
+            lines.append(
+                f"    [dim]{escape(labels[surface_id])}[/dim] [{style}]{cell['label']}[/{style}] — {escape(cell['detail'])}{tail}"
+            )
+    for problem in matrix["problems"]:
+        lines.append(f"  [red]incohérence[/red] : {escape(problem)}")
+    return lines
 
 
 def _brake_status(host_id: HostId, *, probe: bool, project_root: Path | None = None) -> tuple[str, dict[str, Any]]:
@@ -405,6 +435,8 @@ def host_status(
                 brake_proof=brake_proof,
                 hook_approval=profile.hook_approval if plan.merges and surface.hooks else "",
                 local_probes=local_probes_for(project_root, host_id),
+                capability_matrix=build_capability_matrix(host_id, degradations=plan.degradations).to_dict(),
+                session_logs=session_logs_status(project_root, host_id),
             )
         )
 
@@ -459,6 +491,11 @@ def host_status(
             console.print(f"  frein PreToolUse {label} pour la version {proof['version']}{when}")
         for probe_line in _local_probe_lines(item.local_probes):
             console.print(f"  {probe_line}")
+        if item.session_logs:
+            console.print(f"  {escape(item.session_logs['message'])}")
+        if len(payload) == 1:
+            for matrix_line in _matrix_lines(item.capability_matrix):
+                console.print(matrix_line)
         if item.hook_approval:
             console.print(f"  [yellow]hooks non exécutés sans approbation[/yellow] — {item.hook_approval} (non vérifiable par le kit)")
         if item.blocking_hooks:

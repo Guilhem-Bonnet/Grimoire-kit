@@ -526,18 +526,31 @@ def _proposal_path(project_root: Path, slug: str) -> Path:
 def _load_proposal(path: Path) -> Proposal | None:
     if not path.is_file():
         return None
-    try:
-        from grimoire.tools._common import load_yaml
+    from grimoire.core import file_memo
 
-        data = load_yaml(path)
-    except Exception:
-        return None
-    if not isinstance(data, dict) or data.get("status") not in _STATUSES:
-        return None
     try:
-        return Proposal.from_dict(data)
-    except Exception:
+        # Gardée tant que (date, taille, inode) du fichier tient — voir ``file_memo`` : une réécriture se voit.
+        return file_memo.derived(path, "proposal", _parse_proposal)
+    except (OSError, _UnreadableError):
         return None
+
+
+class _UnreadableError(Exception):
+    """Proposition illisible : levée pour que ``file_memo`` ne garde jamais ce résultat."""
+
+
+def _parse_proposal(raw: bytes) -> Proposal:
+    try:
+        from grimoire.tools._common import load_yaml_text
+
+        data = load_yaml_text(raw)
+        if not isinstance(data, dict) or data.get("status") not in _STATUSES:
+            raise _UnreadableError
+        return Proposal.from_dict(data)
+    except _UnreadableError:
+        raise
+    except Exception as exc:
+        raise _UnreadableError from exc
 
 
 def _save_proposal(path: Path, proposal: Proposal) -> None:

@@ -20,35 +20,9 @@
 
 import { actionStatus, failureText, icon, setActionStatus } from '../shell.js';
 
-const STYLE_ID = 'tc-styles';
 
 const state = { open: false, title: '', acceptance: '', description: '', created: null, busy: false };
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .tc-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line);
-      border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); max-width: 720px; }
-    .tc-card h3 { margin: 0; font-size: var(--t-m); line-height: 20px; font-weight: 600; color: var(--ink); }
-    .tc-sub { margin: 0; color: var(--ink2); font-size: var(--t-s); }
-    .tc-form { display: flex; flex-direction: column; gap: var(--sp-3); }
-    .tc-form label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    .tc-lbl { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink2); }
-    .tc-lbl small { font-weight: 400; color: var(--ink2); }
-    .tc-form input[type="text"], .tc-form textarea { width: 100%; box-sizing: border-box; min-height: var(--h-ctl);
-      padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--r); font: inherit; }
-    .tc-form input[type="text"]:focus, .tc-form textarea:focus { border-color: var(--acc); }
-    .tc-form textarea { min-height: 72px; resize: vertical; }
-    .tc-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
-    .tc-done { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
-    .tc-done .action-status { flex: 1 1 260px; }
-    .tc-reason { color: var(--ink2); font-size: var(--t-s); max-width: 280px; }
-    .tc-done a.btn { text-decoration: none; }
-  `;
-  document.head.append(style);
-}
 
 function el(tag, className, text, attrs) {
   const node = document.createElement(tag);
@@ -67,7 +41,6 @@ export function newTaskBlockedReason(ctx, portfolio) {
 
 /** Le bouton de tête « Nouvelle tâche », et la raison écrite quand il est désactivé. */
 export function newTaskButton(ctx, { portfolio, onToggle }) {
-  injectStyles();
   const button = el('button', 'btn pri', null, { type: 'button', 'data-role': 'new-task' });
   button.append(icon('plus'), el('span', null, 'Nouvelle tâche'));
   const reason = newTaskBlockedReason(ctx, portfolio);
@@ -191,7 +164,6 @@ function form(ctx, onCreated, onChange, columnLabel) {
  * `portfolio` ferme le formulaire (P02) sans perdre la saisie.
  */
 export function newTaskBlock(ctx, { portfolio, onCreated, onOpen, onChange, columnLabel = (b) => b }) {
-  injectStyles();
   const parts = [];
   if (state.created) parts.push(confirmation(onOpen, onChange));
   if (state.open && !newTaskBlockedReason(ctx, portfolio)) parts.push(form(ctx, onCreated, onChange, columnLabel));

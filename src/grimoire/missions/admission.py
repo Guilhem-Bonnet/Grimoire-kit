@@ -49,6 +49,18 @@ from grimoire.missions.ledger_rules import unclosed_blockers
 from grimoire.missions.liveness import Attention
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState
 from grimoire.missions.schemas import MissionTask, TaskState
+from grimoire.missions.usage_rules import (
+    KIT_KEY_PREFIX,
+    RuleStatus,
+    UsageRule,
+    describe,
+    evaluate,
+    event_day,
+    next_midnight,
+    parse_rules,
+    unknown_counts_today,
+)
+from grimoire.missions.usage_rules import QUOTA_CONSUMED_EVENT as _QUOTA_CONSUMED
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import MissionLedger
@@ -91,6 +103,11 @@ ORCHESTRATION_FILE = STANDARD_DIR / "orchestration-policy.yaml"
 UNLIMITED = "unlimited"
 _UNLIMITED_WORDS = frozenset({UNLIMITED, "illimité", "illimite"})
 
+#: ``quota.on_unknown`` : que faire d'une consommation du jour que le kit n'a pas pu lire en entier.
+ON_UNKNOWN_REFUSE = "refuse"
+ON_UNKNOWN_COUNT_KNOWN = "count_known"
+ON_UNKNOWN_VALUES = (ON_UNKNOWN_REFUSE, ON_UNKNOWN_COUNT_KNOWN)
+
 DEFAULT_CI_RUNNERS = 3
 DEFAULT_CI_EXEMPT: tuple[str, ...] = ("analysis", "architecture")
 DEFAULT_AGING_HOURS = 24
@@ -103,7 +120,7 @@ CI_FINISHED_EVENT = "task.ci_finished"
 #: Un humain libère un créneau dont l'observation est impossible (``pool`` dans le payload).
 CAPACITY_RELEASED_EVENT = "capacity.released"
 #: Des tokens consommés (``tokens`` entier dans le payload) : la seule source de la consommation du jour.
-QUOTA_CONSUMED_EVENT = "quota.consumed"
+QUOTA_CONSUMED_EVENT = _QUOTA_CONSUMED  # défini dans usage_rules (la source commune des règles et du plafond)
 
 _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
 #: Les états où une réservation de créneau CI tient encore : une tâche garée (vérification, attente)
@@ -111,7 +128,7 @@ _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
 _CI_HELD = (*_HELD, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
 _POOL_SECTIONS = frozenset({"ci", "host", "llm"})
 _KNOWN_POOLS = ("ci",)
-_TOP_KEYS = frozenset({"version", "quota", "pools", "wip", "queue"})
+_TOP_KEYS = frozenset({"version", "quota", "pools", "wip", "queue", "usage_rules"})
 
 
 class CapacityError(ValueError):
@@ -139,11 +156,16 @@ class Capacity:
     llm_sessions: Mapping[str, int] = field(default_factory=dict)
     #: ``UNLIMITED`` (défaut) ou un entier strictement positif.
     tokens_per_day: int | str = UNLIMITED
+    #: Une consommation du jour partiellement inconnue sous un plafond fini : ``refuse`` (défaut, sens fermé) ou ``count_known``.
+    on_unknown: str = ON_UNKNOWN_REFUSE
     wip_global: int | None = None
     wip_per_role: int | None = None
     aging_hours: int = DEFAULT_AGING_HOURS
     famine_hours: int = DEFAULT_FAMINE_HOURS
     errors: Mapping[str, str] = field(default_factory=dict)
+    #: Les règles d'usage valides (:mod:`.usage_rules`) ; une règle invalide est dans ``rule_issues``, ignorée.
+    usage_rules: tuple[UsageRule, ...] = ()
+    rule_issues: tuple[str, ...] = ()
 
     @property
     def unlimited(self) -> bool:
@@ -186,11 +208,15 @@ def _mapping(value: Any, where: str, allowed: frozenset[str]) -> dict[str, Any]:
     return value
 
 
-def _parse_quota(raw: Any) -> int | str:
-    value = _mapping(raw, "quota", frozenset({"tokens_per_day"})).get("tokens_per_day", UNLIMITED)
+def _parse_quota(raw: Any) -> dict[str, Any]:
+    table = _mapping(raw, "quota", frozenset({"tokens_per_day", "on_unknown"}))
+    on_unknown = table.get("on_unknown", ON_UNKNOWN_REFUSE)
+    if on_unknown not in ON_UNKNOWN_VALUES:
+        raise CapacityError(f"quota.on_unknown doit valoir {' ou '.join(ON_UNKNOWN_VALUES)}, pas {on_unknown!r}")
+    value = table.get("tokens_per_day", UNLIMITED)
     if isinstance(value, str) and value.strip().lower() in _UNLIMITED_WORDS:
-        return UNLIMITED
-    return _positive_int(value, "quota.tokens_per_day (ou « unlimited »)")
+        return {"tokens_per_day": UNLIMITED, "on_unknown": on_unknown}
+    return {"tokens_per_day": _positive_int(value, "quota.tokens_per_day (ou « unlimited »)"), "on_unknown": on_unknown}
 
 
 def _parse_wip(raw: Any, where: str) -> tuple[int | None, int | None]:
@@ -236,7 +262,7 @@ def _parse_llm(raw: Any) -> dict[str, Any]:
     return {"llm_sessions": sessions}
 
 
-def _parse_queue(raw: Any) -> dict[str, int]:
+def _parse_queue(raw: Any) -> dict[str, Any]:
     queue = _mapping(raw, "queue", frozenset({"aging_hours", "famine_hours"}))
     return {k: _positive_int(v, f"queue.{k}") for k, v in queue.items()}
 
@@ -276,9 +302,9 @@ def load_capacity(root: Path) -> Capacity:
             errors["pools"] = f"pools : table de ci, host, llm attendue, pas {pools!r}"
             pools = {}
         sections.update({name: (pools[name], parse) for name, parse in (("ci", _parse_ci), ("host", _parse_host), ("llm", _parse_llm)) if name in pools})
-        for name, parse in (("quota", lambda r: {"tokens_per_day": _parse_quota(r)}), ("queue", _parse_queue)):
-            if name in data:
-                sections[name] = (data[name], parse)
+        for table, reader in (("quota", _parse_quota), ("queue", _parse_queue)):
+            if table in data:
+                sections[table] = (data[table], reader)
         if "wip" in data:
             sections["wip"] = (data["wip"], lambda r: dict(zip(("wip_global", "wip_per_role"), _parse_wip(r, "wip"), strict=True)))
     for name, (raw, parse) in sections.items():
@@ -288,6 +314,8 @@ def load_capacity(root: Path) -> Capacity:
             fields.update(parse(raw))
         except CapacityError as exc:
             errors[name] = str(exc)
+    if isinstance(data, dict) and "*" not in errors:
+        fields["usage_rules"], fields["rule_issues"] = parse_rules(data.get("usage_rules"))
     if "wip" not in sections and "*" not in errors:
         try:
             fields.update(_orchestration_wip(root))
@@ -361,9 +389,14 @@ class TokenUse:
 
     tokens: int | None
     status: str
+    #: Les sessions du jour dont le kit n'a pas pu lire la consommation (``status: partial`` : ``tokens`` est ce qui est connu).
+    unknown_sessions: int = 0
 
     def to_dict(self) -> dict[str, Any]:
-        return {"tokens": self.tokens, "status": self.status}
+        out: dict[str, Any] = {"tokens": self.tokens, "status": self.status}
+        if self.unknown_sessions:
+            out["unknown_sessions"] = self.unknown_sessions
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,21 +422,36 @@ def _today(now: datetime) -> str:
 def _consumed_today(events: list[Any], now: datetime) -> TokenUse:
     today = _today(now)
     summed, dispatched = 0, 0
+    kit, kit_seen = 0, set[str]()  # les appels de modèle du kit : ils s'ajoutent, sans jamais être la mesure d'une session
     measured = False
+    latest: dict[str, bool] = {}  # session -> son dernier état connu pèse-t-il « inconnu » sur aujourd'hui ?
     for event in events:
         stamp = parse_instant(event.created_at)
-        if stamp is None or _today(stamp) != today:
+        if stamp is None:
             continue
         if event.event_type == QUOTA_CONSUMED_EVENT:
             tokens = event.payload.get("tokens")
-            if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
-                summed, measured = summed + tokens, True
-        elif event.event_type == "task.dispatched":
+            key = str(event.payload.get("session") or event.id)
+            if event.payload.get("status") == "unknown":
+                latest[key] = unknown_counts_today(event.payload, stamp, now)
+            elif isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0 and key.startswith(KIT_KEY_PREFIX):
+                if key not in kit_seen:  # un doublon d'une clé du kit ne compte jamais deux fois
+                    kit_seen.add(key)
+                    if event_day(event.payload, _today(stamp)) == today:
+                        kit += tokens
+            elif isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
+                latest[key] = False  # un état connu défait l'inconnu qui le précède
+                if event_day(event.payload, _today(stamp)) == today:
+                    summed, measured = summed + tokens, True
+        elif event.event_type == "task.dispatched" and _today(stamp) == today:
             dispatched += 1
+    unknown = {key for key, weighs in latest.items() if weighs}
     if measured:
-        return TokenUse(summed, "lower_bound")
+        return TokenUse(summed + kit, "partial" if unknown else "lower_bound", len(unknown))
     # Des appels ont eu lieu aujourd'hui sans qu'aucun chiffre de tokens n'existe : on ne sait pas.
-    return TokenUse(None, "unknown") if dispatched else TokenUse(0, "lower_bound")
+    if dispatched or unknown:  # le statut d'avant est conservé ; les jetons du kit s'ajoutent à ce qui est connu
+        return TokenUse(kit or None, "unknown", len(unknown))
+    return TokenUse(kit, "lower_bound")
 
 
 def derive_view(ledger: MissionLedger, capacity: Capacity, *, now: datetime, host: HostReading | None = None) -> LedgerView:
@@ -639,10 +687,13 @@ def _quota_refusal(
         return None
     limit = int(capacity.tokens_per_day)
     used = view.tokens
-    if used.tokens is None:
-        return defer("unknown", "consommation du jour inconnue sous un quota fini") if autonomous else None
-    if used.tokens >= limit:
+    if used.tokens is not None and used.tokens >= limit:  # atteint sur le connu seul : l'inconnu ne l'infirme pas
         return defer("quota", f"quota du jour atteint (>= {used.tokens}/{limit} tokens)", _next_midnight(view.now))
+    if used.tokens is None or used.status in ("unknown", "partial"):
+        if capacity.on_unknown == ON_UNKNOWN_COUNT_KNOWN or not autonomous:
+            return None  # ``count_known`` : le connu seul compte, réglage explicite du projet
+        what = "inconnue" if used.tokens is None or used.status == "unknown" else f"partiellement inconnue ({used.unknown_sessions} session(s) sans chiffre)"
+        return defer("unknown", f"consommation du jour {what} sous un quota fini")
     return None
 
 
@@ -670,8 +721,20 @@ class QueuePlan:
     capacity: Capacity
     order: tuple[tuple[str, str, str], ...] = ()
     pause: PauseState = field(default_factory=PauseState)
+    #: Les règles d'usage face à la consommation (:mod:`.usage_rules`), mesurées à ce plan.
+    rules: tuple[RuleStatus, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
+        out = self._to_dict()
+        if self.capacity.usage_rules or self.capacity.rule_issues:  # un projet sans règle garde la sortie d'avant
+            out["usage_rules"] = [
+                {"id": s.rule.id, "state": s.state, "value": s.value, "complete": s.complete, "scope_key": s.scope_key}
+                for s in self.rules
+            ]
+            out["usage_rule_issues"] = list(self.capacity.rule_issues)
+        return out
+
+    def _to_dict(self) -> dict[str, Any]:
         return {
             "now": self.now.isoformat(),
             "admitted": [a.to_dict() for a in self.admitted],
@@ -707,14 +770,18 @@ def build_plan(
     autonomous: bool = False,
     mission_id: str | None = None,
     pause: PauseState | None = None,
+    refuse_of: Callable[[MissionTask], str] | None = None,
 ) -> QueuePlan:
     """La file triée, passée une fois à l'admission ; chaque tâche admise réserve son créneau pour la suivante.
 
     *pause* (K11) est l'union des drapeaux du projet et de la machine : une tâche qu'un drapeau couvre est
     différée (``Defer(pause)``), les autres suivent leur chemin. *paused* force la pause pour toutes.
+    *refuse_of* (#1342, M3) : la raison qui interdit le claim d'une tâche (gate d'exigence en mode bloquant) ; une
+    tâche refusée est écartée de la file (``excluded``), jamais admise puis refusée au lancement à chaque tick.
     """
     pause = pause or PauseState()
     view = derive_view(ledger, capacity, now=now, host=host)
+    rules = evaluate(capacity.usage_rules, ledger.list_events(), now) if capacity.usage_rules else ()
     tasks = {t.id: t for t in ledger.list_tasks()}
     since = ready_since(ledger)
     admitted: list[Admit] = []
@@ -726,6 +793,8 @@ def build_plan(
             excluded.append((task.id, f"dépend de {'; '.join(waiting)}"))
         elif (backoff := ledger.backoff_until(task.id)) is not None and backoff > now:
             excluded.append((task.id, f"backoff jusqu'à {backoff.isoformat()}"))
+        elif refuse_of is not None and (refused := refuse_of(task)):
+            excluded.append((task.id, refused))
         else:
             candidates.append(task)
     ordered = queue_order(candidates, since, now=now, aging_hours=capacity.aging_hours)
@@ -737,6 +806,8 @@ def build_plan(
             entry.task, route, capacity, view, paused=held_back, autonomous=autonomous,
             pause_detail=pause.reason_for(entry.task.id),
         )
+        if isinstance(decision, Admit) and (held := _rule_hold(entry.task.id, route, rules, now)) is not None:
+            decision = held
         if isinstance(decision, Admit):
             admitted.append(decision)
             view = view.reserve(entry.task, route, consumes_ci=_consumes_ci(entry.task, capacity))
@@ -744,7 +815,24 @@ def build_plan(
             deferred.append(decision)
     famine = tuple(_famine(d, by_id[d.task_id], capacity.famine_hours) for d in deferred if by_id[d.task_id].waited_hours >= capacity.famine_hours)
     order = tuple((e.task.id, e.base, e.effective) for e in ordered)
-    return QueuePlan(now, tuple(admitted), tuple(deferred), tuple(excluded), famine, view, capacity, order, pause)
+    return QueuePlan(now, tuple(admitted), tuple(deferred), tuple(excluded), famine, view, capacity, order, pause, rules)
+
+
+def _rule_hold(task_id: str, route: RouteRef | None, rules: tuple[RuleStatus, ...], now: datetime) -> Defer | None:
+    """``Defer(usage_rule)`` si une règle ``hold`` ou ``pause`` franchie couvre cette tâche ; ``None`` sinon.
+
+    Une règle de portée ``task`` ne couvre que sa tâche ; ``project`` et ``day`` couvrent toutes les tâches. ``warn``
+    ne retient rien : elle parle dans la liste d'attention.
+    """
+    for status in rules:
+        rule = status.rule
+        if rule.action == "warn" or not status.crossed or not rule.enabled:
+            continue
+        if rule.scope == "task" and status.scope_key != task_id:
+            continue
+        retry = next_midnight(now) if rule.scope == "day" else "unknown"
+        return Defer(task_id, "usage_rule", describe(status), retry, route)
+    return None
 
 
 def _famine(defer: Defer, entry: QueueEntry, famine_hours: int) -> Famine:

@@ -79,7 +79,7 @@ def _read_events(path: Path) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     if not path.exists():
         return events
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").split("\n"):
         line = line.strip()
         if not line:
             continue

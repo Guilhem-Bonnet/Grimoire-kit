@@ -106,6 +106,8 @@ _VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini
 # Known keys per section for unknown-key detection
 _KNOWN_TOP_KEYS = frozenset({
     "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "proposals", "source",
+    "cockpit",
+    "governance",
 })
 
 _KNOWN_PROJECT_KEYS = frozenset({
@@ -131,7 +133,7 @@ _KNOWN_AGENTS_KEYS = frozenset({
 })
 
 _KNOWN_HOSTS_KEYS = frozenset({
-    "enabled", "preserve",
+    "enabled", "preserve", "copilot_session_logs",
 })
 
 _VALID_EXECUTION_NEED_IDS = frozenset({
@@ -347,6 +349,9 @@ def _validate_config_python(
     if "source" in data:
         _validate_source(data["source"], errors)
 
+    if "governance" in data:
+        _validate_governance(data["governance"], errors)
+
     # Unknown top-level keys
     _check_unknown_keys(data, _KNOWN_TOP_KEYS, "", errors)
 
@@ -534,6 +539,50 @@ def _validate_agents(section: Any, errors: list[ValidationError]) -> None:
         ))
 
     _check_unknown_keys(section, _KNOWN_AGENTS_KEYS, "agents", errors)
+
+
+def _validate_governance(section: Any, errors: list[ValidationError]) -> None:
+    """``governance.roles`` — MOA (humain, obligatoire dès que la section existe) et MOE (défaut : orchestrateur)."""
+    if section is None:
+        return
+    if not isinstance(section, dict):
+        errors.append(ValidationError(path="governance", message="'governance' must be a mapping."))
+        return
+    from grimoire.core.config import REQUIREMENT_GATE_MODES, moa_name_problem
+
+    gate = section.get("requirement_gate")
+    if gate is not None and gate not in REQUIREMENT_GATE_MODES:
+        errors.append(ValidationError(
+            path="governance.requirement_gate",
+            message=f"'governance.requirement_gate' must be one of {', '.join(REQUIREMENT_GATE_MODES)}.",
+            suggestion="requirement_gate: warn",
+        ))
+    known = frozenset({"roles", "requirement_gate"})
+    roles = section.get("roles")
+    if roles is None:
+        _check_unknown_keys(section, known, "governance", errors)
+        return
+    if not isinstance(roles, dict):
+        errors.append(ValidationError(path="governance.roles", message="'governance.roles' must be a mapping."))
+        return
+    for role, required in (("moa", True), ("moe", False)):
+        value = roles.get(role)
+        path = f"governance.roles.{role}"
+        if value is None:
+            if required:
+                errors.append(ValidationError(
+                    path=path,
+                    message="'governance.roles.moa' is required: name the human who owns the need.",
+                    suggestion='moa: "Prénom Nom"',
+                ))
+        elif not isinstance(value, str):
+            errors.append(ValidationError(path=path, message=f"'{path}' must be a string (a name)."))
+        elif not value.strip():
+            errors.append(ValidationError(path=path, message=f"'{path}' must not be empty."))
+        elif role == "moa" and (problem := moa_name_problem(value)):
+            errors.append(ValidationError(path=path, message=f"'{path}' {problem}."))
+    _check_unknown_keys(roles, frozenset({"moa", "moe"}), "governance.roles", errors)
+    _check_unknown_keys(section, known, "governance", errors)
 
 
 def _validate_hosts(section: Any, errors: list[ValidationError]) -> None:

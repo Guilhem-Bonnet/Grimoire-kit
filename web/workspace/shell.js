@@ -60,6 +60,9 @@ import { agoText, createLive, refreshSince } from './live.js';
 import { createChat } from './chat.js';
 import { createNotify } from './notify.js';
 import { createAutopilot } from './autopilot.js';
+import { focusForPref, focusStep, readWidthPref, writeWidthPref } from './spaces/atelier-layout-logic.js';
+import { CHANTIER_SECTION, OUTLINE_SECTION, chantierEntries, outlineEntries } from './spaces/atelier-palette-logic.js';
+import { getAtelierOutline } from './atelier-context.js';
 
 // Fin du premier montage d'espace : la première lecture du compteur d'attention
 // l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
@@ -117,8 +120,69 @@ const SPACES = [
       // sur l'onglet : il serait lu une fois par portée, donc faux dès le premier retrait.
       { id: 'projets', module: 'registre', label: 'Projets', skeleton: 'table' },
       { id: 'preferences', module: null, label: 'Préférences' },
+      // Les fonctions en test (drapeaux de projet `cockpit.test_features.*`) : s'allument ici, une par une.
+      { id: 'fonctions-test', module: 'fonctions-test', label: 'Fonctions en test' },
     ] },
 ];
+
+// L'Atelier de spec (en test) : absent de SPACES tant que le drapeau du projet est éteint. Il s'insère entre
+// Savoir et Configuration quand `GET features` répond `atelier: true` (voir `applyFeatures`).
+const ATELIER_SPACE = {
+  id: 'atelier', label: 'Atelier', icon: 'i-space-atelier', test: true,
+  sections: [{ id: 'atelier', module: 'atelier', label: 'Atelier', skeleton: 'table' }],
+};
+
+// La mascotte permanente (fonction en test, préférence de cockpit de la machine) : un point d'ancrage fixe, sur toutes les
+// pages. Le module n'est chargé que si la fonction est allumée. La réponse de `GET features` est celle que la coque lit
+// déjà au démarrage : aucune requête de plus au premier rendu.
+let mascotteAnchor = null;
+let mascotteMounting = false;
+
+async function applyMascotteAnchor(on) {
+  if (!on) {
+    if (mascotteAnchor) { mascotteAnchor.destroy(); mascotteAnchor = null; }
+    return;
+  }
+  if (mascotteAnchor || mascotteMounting) return;
+  mascotteMounting = true;
+  try {
+    const { mountMascotteAnchor } = await import('./mascotte_anchor.js');
+    mascotteAnchor = await mountMascotteAnchor({
+      openChat: () => {
+        if (root.dataset.atelier !== 'on') setAtelier(true); // hors atelier, le dock n'existe pas à l'écran : on l'y amène
+        if ($('dock').dataset.state === 'collapsed') setDock('pinned');
+        selectDockTab('orchestrateur');
+        const input = document.querySelector('.chat-input');
+        if (input) input.focus({ preventScroll: true });
+      },
+      openAtelier: (slug) => goto('atelier', slug ? { chantier: slug } : undefined),
+      watchChat: () => chatInstance().watch(),
+    });
+  } catch { /* sans mascotte, le cockpit reste tel quel */ } finally { mascotteMounting = false; }
+}
+
+// La fonction peut être allumée ou éteinte depuis « Fonctions en test » sans recharger la page.
+document.addEventListener('grimoire:features', (event) => {
+  if (event.detail && typeof event.detail.mascotte === 'boolean') applyMascotteAnchor(event.detail.mascotte);
+});
+
+async function applyFeatures() {
+  let on = false;
+  try {
+    const features = await api.testFeatures();
+    on = features.atelier === true;
+    applyMascotteAnchor(features.mascotte === true);
+  } catch { /* hôte sans la route : fonction éteinte */ }
+  const present = SPACES.includes(ATELIER_SPACE);
+  if (on === present) return;
+  if (on) SPACES.splice(SPACES.findIndex((sp) => sp.id === 'configuration'), 0, ATELIER_SPACE);
+  else SPACES.splice(SPACES.indexOf(ATELIER_SPACE), 1);
+  SECTIONS.clear();
+  for (const space of SPACES) {
+    for (const section of space.sections) SECTIONS.set(section.id, Object.assign(section, { space }));
+  }
+  buildSpaces();
+}
 
 const SECTIONS = new Map();
 for (const space of SPACES) {
@@ -837,6 +901,38 @@ function toggleFocus() {
   applyPreferences();
 }
 
+// L'Atelier de spec prend la toile : à l'arrivée il pose le plein écran (`data-focus`, le même que ⇧⌘F, qui replie
+// panneaux et dock sans toucher à leur état mémorisé), au départ il rend celui d'avant. Le choix « rouvrir les
+// panneaux » fait dans l'Atelier est mémorisé par navigateur et respecté aux arrivées suivantes.
+let focusHeld = null;
+
+function setFocus(value) {
+  if (root.dataset.focus === value) return;
+  root.dataset.focus = value;
+  applyPreferences();
+}
+
+function syncAtelierFocus() {
+  const inAtelier = (SECTIONS.get(current)?.space.id ?? null) === 'atelier';
+  let pref = null;
+  try { pref = readWidthPref(localStorage); } catch { /* sans stockage : pleine largeur */ }
+  const step = focusStep({ inAtelier, pref, held: focusHeld, focus: root.dataset.focus });
+  focusHeld = step.held;
+  setFocus(step.focus);
+}
+
+/** Vrai tant que l'Atelier est en pleine largeur (panneaux repliés). */
+export function atelierIsWide() {
+  return root.dataset.focus === 'on';
+}
+
+/** Bouton de l'Atelier : replie (`wide`) ou rouvre (`panels`) les panneaux, et s'en souvient. */
+export function setAtelierWide(wide) {
+  try { writeWidthPref(localStorage, wide ? 'wide' : 'panels'); } catch { /* sans stockage */ }
+  if (focusHeld === null) syncAtelierFocus();
+  setFocus(focusForPref(wide ? 'wide' : 'panels'));
+}
+
 // ── Panneaux à trois états : collapsed, peek, pinned ────────────────────────
 //
 // L'état (et la largeur) est mémorisé par ESPACE et par PROJET (spec §3.1) :
@@ -1534,12 +1630,17 @@ function selectDockTab(id) {
 // Le chat de l'orchestrateur (ACP2) : monté une fois, son DOM et son flux survivent aux changements d'onglet.
 let orchestratorChat = null;
 
+function chatInstance() {
+  orchestratorChat ||= createChat({ readOnly: () => host.readOnly });
+  return orchestratorChat;
+}
+
 function renderDock() {
   const body = $('dock-body');
   body.replaceChildren();
   body.classList.toggle('is-chat', dockTab === 'orchestrateur');
   if (dockTab === 'orchestrateur') {
-    orchestratorChat ||= createChat({ readOnly: () => host.readOnly });
+    chatInstance();
     body.append(orchestratorChat.element);
     orchestratorChat.open();
     return;
@@ -2051,6 +2152,7 @@ function buildSpaces() {
     button.setAttribute('aria-label', space.label);
     button.title = `${space.label} — ⌘${index + 1}`;
     button.addEventListener('click', () => goto(space.id));
+    if (space.test) button.append(badge('Test', 'warn', 'Fonction en test'));
     if (space.id === 'a-traiter') {
       // Le compteur de décisions vit sur l'onglet (maquette Douce), pas dans une pastille à part.
       const count = badge('0', 'warn');
@@ -2186,6 +2288,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   if (openMenu) openMenu.setOpen(false);
   live.clear();
   restorePanelsForSpace();
+  syncAtelierFocus();
   // Une navigation venue de l'URL ne la réécrit qu'à l'identique (forme
   // canonique d'un ancien `#piloter`) ; un clic, lui, crée une entrée
   // d'historique — « Précédent » ramène à l'espace d'avant.
@@ -2613,7 +2716,7 @@ let paletteOnly = false;
 
 // Ordre par défaut des sections titrées ; ne pas fusionner en une liste
 // plate (30+ entrées sans repère) comme avant.
-const PALETTE_SECTION_ORDER = ['Espaces', 'Affichage', 'Commandes', 'Projets', 'Tâches', 'Workflows', 'Fichiers'];
+const PALETTE_SECTION_ORDER = ['Espaces', 'Affichage', OUTLINE_SECTION, 'Commandes', 'Projets', 'Tâches', CHANTIER_SECTION, 'Workflows', 'Fichiers'];
 const PALETTE_SECTION_CAP = 12;
 // Le sélecteur de portée n'a pas de plafond : un projet que l'on ne voit pas
 // sans le taper n'est pas choisissable (M6, 4 projets sur 16 cachés).
@@ -2705,7 +2808,7 @@ async function buildPalette() {
   // l'affectation ci-dessus vient de remplacer.
   if (paletteFiles) paletteItems = [...paletteItems, ...paletteFiles];
   // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
-  if ($('palette').open) renderPalette($('palette-input').value);
+  if ($('palette').open) renderPalette($('palette-input').value, { keepSelection: true });
 }
 
 /** Les entrées « Fichiers » d'une réponse de `api.files()`, bornées comme avant. */
@@ -2729,7 +2832,7 @@ function ensurePaletteFiles() {
       .then((tree) => {
         paletteFiles = filesPaletteItems(tree);
         paletteItems = [...paletteItems, ...paletteFiles];
-        if ($('palette').open) renderPalette($('palette-input').value);
+        if ($('palette').open) renderPalette($('palette-input').value, { keepSelection: true });
       })
       .catch(() => {
         // Route en erreur : l'ouverture suivante réessaiera, sans vider les
@@ -2738,6 +2841,41 @@ function ensurePaletteFiles() {
       });
   }
   return paletteFilesLoading;
+}
+
+// Chantiers de l'Atelier (fonction en test) : la liste est lue à l'ouverture de la palette (au plus une fois par minute), puis
+// filtrée localement à chaque frappe, sans requête. Le plan du chantier ouvert (« Aller à : … ») vient de l'espace lui-même.
+const CHANTIERS_FRESH_MS = 60000;
+let paletteChantiers = [];
+let paletteChantiersAt = 0;
+let paletteChantiersLoading = false;
+
+function ensurePaletteChantiers() {
+  if (paletteChantiersLoading || !SPACES.includes(ATELIER_SPACE) || Date.now() - paletteChantiersAt < CHANTIERS_FRESH_MS) return;
+  paletteChantiersLoading = true;
+  api.atelierChantiers()
+    .then((data) => {
+      paletteChantiers = chantierEntries(data.chantiers).map((entry) => ({
+        section: CHANTIER_SECTION, label: entry.label, hint: entry.hint,
+        command: `grimoire cockpit serve # atelier?chantier=${entry.slug}`,
+        run: () => goto('atelier', { chantier: entry.slug }),
+      }));
+      paletteChantiersAt = Date.now();
+      if ($('palette').open) renderPalette($('palette-input').value, { keepSelection: true });
+    })
+    .catch(() => { /* route absente ou en erreur : la section reste vide, la prochaine ouverture réessaiera */ })
+    .finally(() => { paletteChantiersLoading = false; });
+}
+
+/** Les entrées de l'Atelier : les chantiers lus, et (chantier ouvert) ses phases et rubriques. */
+function atelierPaletteItems() {
+  const open = getAtelierOutline();
+  const outline = open ? outlineEntries(open.outline()).map((entry) => ({
+    section: OUTLINE_SECTION, label: entry.label, hint: entry.hint,
+    command: `grimoire cockpit serve # atelier?chantier=${open.slug}&phase=${entry.phase}`,
+    run: () => open.go(entry.phase, entry.rub),
+  })) : [];
+  return [...outline, ...paletteChantiers];
 }
 
 /** Pastille d'un projet : suivi par Grimoire, dossier sans Grimoire, ou disparu. */
@@ -2807,6 +2945,7 @@ function openPalette(sectionFirst = null, { only = false } = {}) {
   // Première ouverture : les fichiers de Source arrivent après coup et sont
   // ajoutés à la liste, sans bloquer l'ouverture ni les autres sections.
   void ensurePaletteFiles();
+  if (!paletteOnly) ensurePaletteChantiers();
 }
 
 function closePalette() {
@@ -2919,14 +3058,22 @@ function paletteSectionOrder() {
 // commandes, projets, workflows, tâches, fichiers concaténés) : on la
 // regroupe désormais par section titrée, plafonnée par section pour qu'une
 // section bavarde (Commandes) n'évince pas les autres (Projets, Tâches…).
-function renderPalette(query) {
+//
+// `keepSelection` : la liste est redessinée parce que des entrées sont arrivées
+// (projets, tâches, fichiers), pas parce que la personne a tapé. La sélection
+// qu'elle vient de déplacer au clavier reste alors sur la même entrée, au lieu
+// de revenir en tête de liste sous ses doigts.
+const paletteKey = (item) => `${item.section}\u0000${item.label}`;
+
+function renderPalette(query, { keepSelection = false } = {}) {
   const words = fold(query).split(/\s+/).filter(Boolean);
   const list = $('palette-list');
+  const kept = keepSelection && list._matches ? list._matches[paletteIndex] : null;
   list.replaceChildren();
   list.scrollTop = 0;
 
   const bySection = new Map();
-  for (const item of [...paletteItems, ...displayItems()]) {
+  for (const item of [...paletteItems, ...atelierPaletteItems(), ...displayItems()]) {
     if (!paletteMatches(item, words)) continue;
     if (!bySection.has(item.section)) bySection.set(item.section, []);
     bySection.get(item.section).push(item);
@@ -2964,7 +3111,8 @@ function renderPalette(query) {
     list.append(empty);
   }
   list._matches = matches;
-  selectPaletteIndex(0, { scroll: false });
+  const keptAt = kept ? matches.findIndex((item) => paletteKey(item) === paletteKey(kept)) : -1;
+  selectPaletteIndex(Math.max(keptAt, 0), { scroll: keptAt > 0 });
 }
 
 function movePalette(delta) {
@@ -3012,6 +3160,7 @@ const SHORTCUTS = [
   ['1 à 5', 'Ouvrir ou fermer un panneau'],
   ['⇧⌘F', 'Plein écran'],
   ['⇧⌘L', "Afficher ou masquer les panneaux d'atelier"],
+  ['Alt+Maj+V', "Mode conversation vocal (chat, assistant de l'Atelier) : ouvrir ou arrêter ; Échap l'arrête"],
   ['?', "Afficher cette aide"],
   ['Échap', 'Fermer la palette, un tiroir ou cette aide'],
 ];
@@ -3056,7 +3205,7 @@ function bindShortcuts() {
     if (meta && event.key.toLowerCase() === 'k') { event.preventDefault(); openPalette(); return; }
     if (meta && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); toggleFocus(); return; }
     if (meta && event.shiftKey && event.key.toLowerCase() === 'l') { event.preventDefault(); toggleAtelier(); return; }
-    if (meta && /^[1-5]$/.test(event.key)) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
+    if (meta && /^[1-6]$/.test(event.key) && SPACES[Number(event.key) - 1]) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
 
     if (!$('palette').open && event.key === 'Escape' && isNarrow() && leaveDrawer()) {
       event.preventDefault();
@@ -3161,6 +3310,7 @@ async function main() {
 
   hostKnown = true;
   if (status) {
+    await applyFeatures();
     // `applyPreferences()` a déjà tourné une fois plus haut, avant que
     // `host.project` ne soit connu (pour éviter un flash de mauvais thème
     // pendant l'aller-retour réseau) — avec la clé de repli `atelier`. Tant

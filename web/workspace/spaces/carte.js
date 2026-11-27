@@ -26,36 +26,6 @@
 
 import { failureText, spaceHead } from '../shell.js';
 
-const STYLE_ID = 'sc-styles';
-const STYLES = `
-.sc-wrap { display: flex; flex-direction: column; gap: 10px; padding: 20px 24px; min-width: 0; height: 100%; box-sizing: border-box; }
-.sc-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.sc-bar input[type="search"] { height: var(--h-ctl); min-width: 240px; padding: 0 9px; border: 1px solid var(--line);
-  border-radius: var(--r); background: var(--card); color: var(--ink); }
-.sc-kinds { display: flex; gap: 10px; border: 0; margin: 0; padding: 0; }
-.sc-kinds label { display: inline-flex; align-items: center; gap: 4px; color: var(--ink2); }
-.sc-status { color: var(--ink2); font-size: 12px; margin-left: auto; }
-.sc-stage { position: relative; flex: 1; min-height: 420px; border: 1px solid var(--line); border-radius: var(--r-l);
-  background: var(--bg); overflow: hidden; }
-.sc-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-.sc-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.sc-label { position: absolute; transform: translate(8px, -50%); padding: 1px 5px; border-radius: var(--r); font-size: 12px;
-  background: var(--card); color: var(--ink); border: 1px solid var(--line); white-space: nowrap; max-width: 280px;
-  overflow: hidden; text-overflow: ellipsis; }
-.sc-label[data-hover="1"] { border-color: var(--acc); }
-.sc-results { position: absolute; left: 10px; top: 10px; z-index: 2; margin: 0; padding: 4px; list-style: none; max-width: 360px;
-  background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
-.sc-results[hidden] { display: none; }
-.sc-results button { appearance: none; font: inherit; display: block; width: 100%; text-align: left; padding: 4px 8px;
-  background: transparent; border: 0; color: var(--ink); cursor: pointer; border-radius: var(--r); overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
-.sc-results button:hover, .sc-results button:focus-visible { background: var(--acc-soft); outline: none; }
-.sc-note { padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); font-size: 12px; background: var(--card); }
-.sc-detail { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
-.sc-detail h3 { margin: 0; font-size: 15px; line-height: 20px; overflow-wrap: anywhere; }
-.sc-detail p { margin: 0; color: var(--ink2); overflow-wrap: anywhere; }
-.sc-detail .sc-meta { font-size: 12px; }
-`;
 
 const KIND_LABEL = { souvenir: 'Souvenirs', code: 'Code', tache: 'Tâches' };
 const POINT_SIZE = { souvenir: 5, code: 3, tache: 7 };
@@ -68,13 +38,6 @@ function el(tag, cls, text, attrs) {
   return node;
 }
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = STYLES;
-  document.head.append(style);
-}
 
 // ── Décodage des colonnes ───────────────────────────────────────────────────
 
@@ -592,7 +555,6 @@ function radiusOf(pos) {
 }
 
 export async function mount(root, ctx) {
-  injectStyles();
   ctx.docbar.setBreadcrumb([]);
   ctx.docbar.setViews([], null);
   ctx.inspector.replaceChildren();

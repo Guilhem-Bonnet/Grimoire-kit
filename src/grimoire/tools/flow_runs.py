@@ -27,6 +27,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
+
 #: Miroir du chemin que ``cmd_upgrade_flow.py``/``project_update.py``
 #: passent à ``FlowEngine(flows_root=...)`` — jamais réimporté depuis là pour
 #: éviter de charger le moteur entier juste pour une lecture.
@@ -63,14 +65,15 @@ def _attach_live_status(project_root: Path, runs: list[dict[str, Any]]) -> None:
         flows_root=_flows_dir(project_root),
         project_root=project_root,
     )
-    for run in runs:
-        try:
-            view = engine.status(str(run["runId"]), include_contract=False)
-            status, current_node = view.status, view.current_node
-        except Exception:  # lecture annexe : ne doit jamais masquer la liste des runs
-            status, current_node = None, None
-        run["status"] = status
-        run["currentNode"] = current_node
+    with file_memo.view_scope():  # affichage seul : le journal d'événements du kernel est parsé une fois pour tous les runs
+        for run in runs:
+            try:
+                view = engine.status(str(run["runId"]), include_contract=False)
+                status, current_node = view.status, view.current_node
+            except Exception:  # lecture annexe : ne doit jamais masquer la liste des runs
+                status, current_node = None, None
+            run["status"] = status
+            run["currentNode"] = current_node
 
 
 def _known_runs(project_root: Path, blueprint_id: str | None) -> list[dict[str, Any]]:

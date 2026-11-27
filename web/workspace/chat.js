@@ -14,10 +14,13 @@
 // clavier — Entrée envoie, Maj+Entrée saute une ligne — et les boutons de permission
 // reçoivent le focus quand la demande apparaît.
 
-import { api, host, projectName } from './api.js';
+import { api, currentChatTarget, host, projectName, setChatTarget } from './api.js';
 import { renderMarkdown } from './markdown.js';
-
-const SAFE_HREF = /^(https?:|mailto:|#)/i;
+import { getAtelierContext } from './atelier-context.js';
+import { publish } from './mascotte_bus.js';
+import { createMascotteLink } from './mascotte_lazy.js';
+import { createVoiceInput } from './voice.js';
+import { createVoiceOutbox, liveTarget, withoutSpokenTag } from './voice_outbox.js';
 
 function mk(tag, attrs, ...children) {
   const node = document.createElement(tag);
@@ -30,13 +33,10 @@ function mk(tag, attrs, ...children) {
   return node;
 }
 
-/** Du markdown de l'agent vers le DOM : le texte est échappé d'abord, les liens non sûrs perdent leur cible. */
+/** Du markdown de l'agent vers le DOM : le texte est échappé d'abord, les liens à schéma non sûr perdent leur cible (liste blanche dans markdown.js). */
 function markdownInto(node, source) {
   node.innerHTML = renderMarkdown(source);
-  for (const link of node.querySelectorAll('a')) {
-    if (!SAFE_HREF.test(link.getAttribute('href') || '')) link.removeAttribute('href');
-    else link.setAttribute('target', '_blank');
-  }
+  for (const link of node.querySelectorAll('a')) link.setAttribute('target', '_blank');
 }
 
 const STATUS_LABEL = {
@@ -90,13 +90,43 @@ export function createChat({ readOnly = () => false } = {}) {
   const form = mk('form', { class: 'chat-form', 'aria-label': 'Message à l’orchestrateur' },
     mk('label', { for: 'chat-input', class: 'sr-only', text: 'Message à l’orchestrateur' }),
     input, mk('div', { class: 'chat-actions' }, send, stop));
+  // La mascotte vocale (en test, éteinte par défaut) : elle observe la dictée, les tours et la lecture, sans rien ouvrir.
+  const mascotte = createMascotteLink({ api, place: (node) => element.insertBefore(node, form) });
+  // Le mode conversation (vocal actif seulement, chargé à la demande) : il pilote la dictée et la lecture existantes.
+  let conversation = null;
+  const voice = createVoiceInput({
+    api, input, slot: form.querySelector('.chat-actions'), readOnly,
+    note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text),
+    onMic: {
+      open: (session) => { mascotte.micOpened(session); if (conversation) conversation.micOpened(session); },
+      close: () => { mascotte.micClosed(); if (conversation) conversation.micClosed(); },
+    },
+    onText: (text) => { if (conversation) conversation.text(text); },
+  });
+  const voiceOut = createVoiceOutbox({
+    onPlay: (audio) => mascotte.playing(audio),
+    onStop: () => { mascotte.stopped(); if (conversation) conversation.event({ type: 'play-ended' }); },
+    note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text), api,
+    onReply: (message) => replyToVoiceQuestion(message),
+    onOption: (message, option) => answerVoiceQuestion(message, option),
+  });
   const hostSelect = mk('select', { class: 'chat-host', id: 'chat-host', 'aria-label': 'Hôte de l’orchestrateur' });
   const hostBar = mk('div', { class: 'chat-hostbar' },
     mk('label', { for: 'chat-host', class: 'chat-host-label', text: 'Hôte' }), hostSelect);
-  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, form);
+  // Vue « Tous les projets » : le chat n'a pas de projet par défaut. Le sélecteur est OBLIGATOIRE : tant qu'aucun projet
+  // n'est choisi, rien n'est connecté ni envoyé ; le choix est la seule cible des routes de chat (`setChatTarget`).
+  const targetSelect = mk('select', { class: 'chat-target', id: 'chat-target', 'aria-label': 'Projet à qui vous parlez' });
+  const targetBar = mk('div', { class: 'chat-targetbar', 'data-role': 'chat-target-bar' },
+    mk('label', { for: 'chat-target', class: 'chat-host-label', text: 'Parler au projet' }), targetSelect);
+  targetBar.hidden = true;
+  // Aucun agent utilisable : le chat se replie sur le Kanban et le dit ici (jamais en silence).
+  const banner = mk('div', { class: 'chat-banner', role: 'status', 'data-role': 'chat-no-agent' });
+  banner.hidden = true;
+  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, targetBar, hostBar, banner, status, log, voiceOut.interview, voiceOut.element, form);
 
   let stream = null;
   let lastSeq = 0;
+  let replayUntil = 0; // dernier numéro de l'historique annoncé par `hello` : ce qui le précède est rejoué, pas vécu
   let busy = false;
   let opened = false;
   /** Ce que le fil est en train d'accumuler : un message d'agent / de la personne / une réflexion. */
@@ -117,8 +147,17 @@ export function createChat({ readOnly = () => false } = {}) {
   };
   const scrollDown = () => { log.scrollTop = log.scrollHeight; };
 
+  // Ce que la mascotte permanente du cockpit sait de l'orchestrateur (aucune requête : des faits du fil déjà reçus).
+  let waitingCount = 0;
+  let failed = false;
+  let noAgent = false; // aucun agent d'hôte utilisable : le chat est en repli Kanban (« sans agent », pas une erreur)
+  function announce() { publish('orchestrator', { busy, waiting: waitingCount, error: failed, noAgent }); }
+
   function setBusy(value) {
     busy = value;
+    if (value) failed = false;
+    announce();
+    mascotte.setBusy(value);
     stop.hidden = !value;
     send.disabled = value || readOnly();
     element.setAttribute('aria-busy', String(value));
@@ -134,6 +173,8 @@ export function createChat({ readOnly = () => false } = {}) {
   }
 
   // ── Messages : le texte arrive par morceaux, le markdown se rend sur le tout ─
+  let spokenToken = null; // jeton de la balise parlée du tour en cours (donné par le serveur)
+
   function addText(role, text) {
     const follow = nearBottom();
     if (!current || current.role !== role) {
@@ -151,7 +192,7 @@ export function createChat({ readOnly = () => false } = {}) {
     current.text += text;
     if (role === 'agent') current.text = current.text.replace(/\[\[pilote:(on|off)\]\]/g, '');
     if (role === 'user') current.body.textContent = current.text;
-    else markdownInto(current.body, current.text);
+    else markdownInto(current.body, role === 'agent' ? withoutSpokenTag(current.text, spokenToken) : current.text);
     if (follow) scrollDown();
   }
 
@@ -217,6 +258,15 @@ export function createChat({ readOnly = () => false } = {}) {
     }
   }
 
+  /** Ce qui attend la personne (questions et permissions non tranchées) : la mascotte y reste « en attente ». */
+  function refreshWaiting() {
+    let count = 0;
+    for (const entry of [...permissions.values(), ...questions.values()]) if (!entry.box.classList.contains('is-done')) count += 1;
+    mascotte.setWaiting(count);
+    waitingCount = count;
+    announce();
+  }
+
   // ── Permissions ─────────────────────────────────────────────────────────
   function permission(event) {
     current = null;
@@ -247,6 +297,7 @@ export function createChat({ readOnly = () => false } = {}) {
     permissions.set(String(event.request_id), { box, buttons, result });
     append(box);
     buttons[0].focus({ preventScroll: true });
+    refreshWaiting();
   }
 
   function permissionResolved(event) {
@@ -256,6 +307,7 @@ export function createChat({ readOnly = () => false } = {}) {
     const chosen = event.option_id ? event.option_id : null;
     entry.result.textContent = event.outcome === 'cancelled' ? 'Annulée : rien n’a été accordé.' : `Réponse envoyée à l’agent (${chosen}).`;
     entry.box.classList.add('is-done');
+    refreshWaiting();
   }
 
   // ── Le pilote automatique (ACP4) ─────────────────────────────────────────
@@ -303,6 +355,27 @@ export function createChat({ readOnly = () => false } = {}) {
     questions.set(key, entry);
     reply.addEventListener('click', () => setTarget(target === entry ? null : entry));
     append(box);
+    refreshWaiting();
+  }
+
+  /** « Répondre » sur une question vocale : la saisie vise cette question (dictée ou texte, relue avant l'envoi). */
+  function replyToVoiceQuestion(message) {
+    if (!message.ref) { input.focus({ preventScroll: true }); return true; } // question d'entretien : la saisie suffit
+    const entry = liveTarget(message, questions);
+    if (!entry) { // la carte n'existe plus dans le fil : aucune cible gardée, rien de prérempli
+      setTarget(null);
+      note('Cette question n’est plus posée dans le fil.', 'error');
+      return false;
+    }
+    setTarget(entry);
+    return true;
+  }
+
+  /** Un clic sur une option d'une question vocale ne répond pas : il cible la question et préremplit la saisie. L'envoi reste un geste explicite. */
+  function answerVoiceQuestion(message, option) {
+    if (!replyToVoiceQuestion(message)) return;
+    input.value = option;
+    input.focus({ preventScroll: true });
   }
 
   function questionResolved(event) {
@@ -312,6 +385,7 @@ export function createChat({ readOnly = () => false } = {}) {
     entry.reply.disabled = true;
     entry.state.textContent = 'Tranchée.';
     if (target === entry) setTarget(null);
+    refreshWaiting();
   }
 
   function gesture(event) {
@@ -326,13 +400,14 @@ export function createChat({ readOnly = () => false } = {}) {
     // Lot 3 : le geste vise le projet de la portée (le corps le nomme aussi).
     // Le nom du projet s'affiche AVANT le champ de la clé de contrôle.
     const targetLine = mk('div', { class: 'chat-gesture-target' });
-    if (host.project) {
-      projectName(host.project).then((name) => { targetLine.textContent = `Cible : ${name}.`; });
+    const aimed = host.scopeAll ? currentChatTarget() : host.project;
+    if (aimed) {
+      projectName(aimed).then((name) => { targetLine.textContent = `Cible : ${name}.`; });
     }
     button.addEventListener('click', async () => {
       button.disabled = true;
       try {
-        await api.autopilotSet(event.on, keyField.value);
+        await api.autopilotSet(event.on, keyField.value, host.scopeAll ? aimed : undefined);
         keyField.value = '';
         result.textContent = event.on ? 'Pilote activé.' : 'Pilote coupé.';
       } catch (error) {
@@ -347,9 +422,20 @@ export function createChat({ readOnly = () => false } = {}) {
   }
 
   // ── L'hôte (ACP3) : réglage du projet, hôte détecté par défaut ───────────
+  // Vue « Tous les projets » sans projet cible choisi : les hôtes sont ceux d'un projet, il n'y en a pas encore, donc
+  // rien n'est lu (la lecture retomberait sur un projet implicite) et la saisie reste fermée par `lockForTarget`.
+  const needsTarget = () => host.scopeAll && !currentChatTarget();
+
   async function loadHosts() {
+    if (needsTarget()) return;
+    // La première lecture attend les sondes des hôtes installés (au plus quelques secondes, ensuite gardées) : le
+    // sélecteur est là tout de suite, « vérification… », et la saisie n'est fermée par RIEN tant que la réponse n'est pas
+    // là — seul un « aucun hôte utilisable » confirmé la ferme.
+    hostBar.hidden = false;
+    hostSelect.replaceChildren(mk('option', { value: '', text: 'Vérification des hôtes…' }));
     let state;
     try { state = await api.chatHosts(); } catch { hostBar.hidden = true; return; }
+    if (needsTarget()) return; // la cible a été retirée pendant la lecture : cette réponse n'est plus la bonne
     hostBar.hidden = false;
     hostSelect.replaceChildren();
     for (const host of state.hosts) {
@@ -362,6 +448,37 @@ export function createChat({ readOnly = () => false } = {}) {
       if (host.note) option.title = host.note;
       hostSelect.append(option);
     }
+    // Aucun agent utilisable : le chat se replie tout seul sur le Kanban (la saisie reste ouverte), mais le dit — un
+    // bandeau en tête du fil, le sélecteur sur « Kanban », la mascotte « sans agent ».
+    noAgent = Boolean(state.fallback);
+    banner.hidden = !noAgent;
+    banner.replaceChildren();
+    if (noAgent) {
+      banner.append(
+        mk('strong', { text: 'Aucun agent n’est disponible : le chat est en mode Kanban. ' }),
+        mk('span', { text: 'Ce mode dépose votre message en consigne sur une tâche vivante ; les sessions y répondent par leurs notes, en différé. ' }),
+        mk('span', { text: state.reason || '' }),
+      );
+      // Les autres hôtes de la machine qui répondent : PROPOSÉS sur une ligne à part, jamais pris d'office.
+      for (const offer of state.offers || []) {
+        const choose = mk('button', {
+          type: 'button', class: 'btn chat-offer-btn', 'data-offer': offer.alias, text: 'Le choisir pour ce projet',
+        });
+        choose.addEventListener('click', async () => {
+          choose.disabled = true;
+          try {
+            await api.chatHost(offer.alias);
+            note(`Hôte changé : ${offer.display_name} pour ce projet.`);
+          } catch (error) {
+            note(`Hôte non changé : ${error.message}`, 'error');
+          }
+          loadHosts();
+        });
+        banner.append(mk('div', { class: 'chat-offer', 'data-role': 'chat-offer' },
+          mk('span', { text: `${offer.display_name} est installé et répond : ` }), choose));
+      }
+    }
+    announce();
     if (state.mode === 'kanban') {
       setStatus(`Mode différé : ${state.reason || 'le chat écrit dans le kanban'}. Les réponses arrivent par les notes des sessions.`);
     }
@@ -405,6 +522,7 @@ export function createChat({ readOnly = () => false } = {}) {
     if (event.seq) lastSeq = event.seq;
     switch (event.type) {
       case 'hello':
+        replayUntil = Number((event.state && event.state.seq) || 0);
         setBusy(Boolean(event.state && event.state.busy));
         setStatus(event.state && event.state.running ? 'Orchestrateur connecté.' : 'Orchestrateur au repos : le premier message le lance.');
         break;
@@ -418,19 +536,26 @@ export function createChat({ readOnly = () => false } = {}) {
       case 'user':
         current = null;
         addText('user', event.text);
+        if (event.chantier && event.chantier.titre) { // message envoyé depuis l'Atelier : le chantier visé
+          const boxes = log.querySelectorAll('.chat-msg.is-user');
+          boxes[boxes.length - 1]?.append(mk('div', { class: 'chat-chantier', 'data-chantier': event.chantier.slug, text: `Chantier : ${event.chantier.titre}` }));
+        }
         current = null;
         break;
       case 'turn_started':
-        setBusy(true);
+        spokenToken = event.spoken_token || null; // jeton du message parlé de ce tour
+        // Un tour rejoué est déjà fini ou déjà compté par `hello` : l'allumer ferait clignoter Stop et ignorerait la saisie.
+        if (!(event.seq && event.seq <= replayUntil)) setBusy(true);
         break;
       case 'update': {
         const update = event.update || {};
         const kind = update.sessionUpdate;
         const text = update.content && update.content.type === 'text' ? update.content.text : null;
-        if (kind === 'agent_message_chunk' && text != null) addText('agent', text);
+        const lived = !(event.seq && event.seq <= replayUntil); // un rejeu n'est pas vécu : la mascotte l'ignore
+        if (kind === 'agent_message_chunk' && text != null) { addText('agent', text); if (lived) mascotte.wrote(); }
         else if (kind === 'agent_thought_chunk' && text != null) addText('thought', text);
         else if (kind === 'user_message_chunk' && text != null) addText('user', text);
-        else if (kind === 'tool_call' || kind === 'tool_call_update') toolCall(update);
+        else if (kind === 'tool_call' || kind === 'tool_call_update') { toolCall(update); if (lived) mascotte.toolCall(update); }
         else if (kind === 'plan') plan(update.entries);
         break;
       }
@@ -443,11 +568,16 @@ export function createChat({ readOnly = () => false } = {}) {
       case 'question_resolved':
         questionResolved(event);
         break;
+      case 'voice_message':
+        voiceOut.receive(event.message);
+        if (conversation && !(event.seq && event.seq <= replayUntil)) conversation.event({ type: 'voice', id: event.message.id });
+        break;
       case 'pilot_gesture':
         gesture(event);
         break;
       case 'permission':
         permission(event);
+        if (conversation) conversation.event({ type: 'permission' }); // seul un clic tranche : le micro se ferme
         break;
       case 'permission_resolved':
         permissionResolved(event);
@@ -455,7 +585,13 @@ export function createChat({ readOnly = () => false } = {}) {
       case 'turn_ended': {
         current = null;
         planBox = null;
-        setBusy(false);
+        if (!(event.seq && event.seq <= replayUntil)) setBusy(false);
+        if (event.stop_reason === 'error' && !(event.seq && event.seq <= replayUntil)) { failed = true; announce(); }
+        mascotte.turnEnded(event.stop_reason, Boolean(event.seq && event.seq <= replayUntil));
+        if (conversation && !(event.seq && event.seq <= replayUntil)) {
+          conversation.event(event.stop_reason === 'end_turn' ? { type: 'turn-ended' } : { type: 'stop', reason: 'stop' });
+        }
+        voiceOut.refreshInterview();
         const label = STOP_LABEL[event.stop_reason];
         if (label) note(label, event.stop_reason === 'error' ? 'error' : 'info');
         element.dispatchEvent(new CustomEvent('chat:turn-ended', { bubbles: true, detail: { stopReason: event.stop_reason } }));
@@ -463,6 +599,8 @@ export function createChat({ readOnly = () => false } = {}) {
       }
       case 'error':
         note(event.message || 'Erreur de l’agent.', 'error');
+        failed = true;
+        announce();
         break;
       default:
         break;
@@ -470,6 +608,7 @@ export function createChat({ readOnly = () => false } = {}) {
   }
 
   function connect() {
+    if (stream) return; // déjà branché (la veille de la mascotte permanente, puis l'ouverture de l'onglet)
     if (typeof EventSource !== 'function') {
       setStatus('Ce navigateur ne sait pas lire le flux : le chat est indisponible.');
       return;
@@ -489,13 +628,18 @@ export function createChat({ readOnly = () => false } = {}) {
   async function submit() {
     const text = input.value.trim();
     if (!text || busy || readOnly()) return;
-    input.value = '';
+    if (host.scopeAll && !currentChatTarget()) { note('Choisissez d’abord le projet à qui vous parlez.', 'error'); return; }
     const answering = target;
+    const dictation = voice.dictationPending(text); // consommée après un envoi réussi seulement
+    const tokens = voice.dictationTokens(text); // jetons de transcription : le serveur reconnaît la dictée sans se fier au seul marqueur
+    input.value = '';
     if (answering) {
       try {
-        await api.chatSend(text, { task_id: answering.task_id, question_id: answering.question_id });
+        await api.chatSend(text, { task_id: answering.task_id, question_id: answering.question_id }, { dictation, tokens });
+        voice.commitDictation();
         answering.state.textContent = 'Réponse transmise : tranchée par vous.';
         setTarget(null);
+        if (conversation) { conversation.event({ type: 'sent' }); conversation.event({ type: 'turn-ended' }); } // répondre à une question n'ouvre pas de tour
       } catch (error) {
         input.value = text;
         note(`Réponse non transmise : ${error.message}`, 'error');
@@ -504,12 +648,36 @@ export function createChat({ readOnly = () => false } = {}) {
     }
     setBusy(true);
     try {
-      await api.chatSend(text);
+      await api.chatSend(text, null, { dictation, tokens, chantier: getAtelierContext() });
+      voice.commitDictation();
+      if (conversation) conversation.event({ type: 'sent' });
     } catch (error) {
       setBusy(false);
       input.value = text;
       note(`Message non transmis : ${error.message}`, 'error');
     }
+  }
+
+  /** Le mode conversation, seulement si le vocal est actif ; sinon le module n'est même pas demandé. */
+  async function setupConversation() {
+    if (conversation || !opened || !voice.known()) return; // vocal inconnu (vue globale, lecture seule) : rien à montrer
+    const { createConversation } = await import('./conversation.js');
+    if (conversation || !opened) return;
+    conversation = createConversation({
+      recorder: voice,
+      // La réponse lue : le message parlé de l'orchestrateur, par la synthèse de la boîte vocale. Une question se cible
+      // comme avec « Répondre » : la dictée la vise, mais l'envoi reste un geste de la personne.
+      read: async (id) => {
+        const started = await voiceOut.play(id);
+        const message = voiceOut.message(id);
+        if (started && message && message.kind === 'question' && !message.answered) replyToVoiceQuestion(message);
+        return started;
+      },
+      stopReading: () => voiceOut.abort(),
+      unavailableReason: () => voice.unavailableReason(),
+    });
+    element.insertBefore(conversation.element, form);
+    conversation.sync();
   }
 
   form.addEventListener('submit', (event) => { event.preventDefault(); submit(); });
@@ -524,10 +692,71 @@ export function createChat({ readOnly = () => false } = {}) {
     try { await api.chatCancel(); } catch (error) { note(`Arrêt non transmis : ${error.message}`, 'error'); } finally { stop.disabled = false; }
   });
 
+  // ── La cible en vue globale ─────────────────────────────────────────────
+  function lockForTarget(chosen) {
+    input.disabled = !chosen;
+    if (!chosen) { hostBar.hidden = true; banner.hidden = true; noAgent = false; announce(); } // l'état du projet précédent
+    send.disabled = !chosen || busy || readOnly();
+    if (!chosen) setStatus('Choisissez le projet à qui vous parlez : le chat n’a pas de projet par défaut dans cette vue.');
+  }
+
+  /** Change de projet cible : le fil et le flux du précédent sont fermés, ceux du nouveau s'ouvrent. */
+  function pickTarget(slug) {
+    if (stream) stream.close();
+    stream = null;
+    setChatTarget(slug);
+    log.replaceChildren();
+    lastSeq = 0;
+    replayUntil = 0;
+    current = null;
+    tools.clear();
+    permissions.clear();
+    questions.clear();
+    gestures.clear();
+    target = null;
+    setBusy(false);
+    lockForTarget(slug);
+    if (!slug) return;
+    projectName(slug).then((name) => setStatus(`Connexion à l’orchestrateur de « ${name} »…`));
+    loadHosts();
+    connect();
+  }
+
+  async function loadTargets() {
+    targetBar.hidden = false;
+    let projects = [];
+    try { projects = (await api.projects()).projects || []; } catch { /* registre illisible : aucune cible, rien n'est deviné */ }
+    const chosen = currentChatTarget();
+    targetSelect.replaceChildren(mk('option', { value: '', text: 'Choisir un projet…' }));
+    for (const entry of projects) {
+      const option = mk('option', { value: entry.slug, text: entry.name || entry.slug });
+      option.selected = entry.slug === chosen;
+      targetSelect.append(option);
+    }
+    if (chosen && !projects.some((p) => p.slug === chosen)) setChatTarget(null);
+  }
+
+  targetSelect.addEventListener('change', () => pickTarget(targetSelect.value));
+
   return {
     element,
     /** À l'affichage de l'onglet : ouvre le flux la première fois, remet le focus dans la saisie. */
+    /**
+     * La veille de la mascotte permanente : branche le flux du fil (une seule fois, sans rien afficher ni prendre le focus)
+     * pour que la mascotte sache si l'orchestrateur réfléchit ou attend la personne, même chat jamais ouvert.
+     * Pas en lecture seule ni en vue « Tous les projets » (le projet visé s'y choisit dans le chat).
+     */
+    watch() {
+      if (opened || stream || readOnly() || host.scopeAll) return;
+      connect();
+    },
     open() {
+      if (!opened && host.scopeAll && !readOnly()) {
+        opened = true;
+        loadTargets().then(() => pickTarget(currentChatTarget()));
+        scrollDown();
+        return;
+      }
       if (!opened) {
         opened = true;
         if (readOnly()) {
@@ -535,9 +764,14 @@ export function createChat({ readOnly = () => false } = {}) {
           send.disabled = true;
           setStatus('Lecture seule : ce projet n’est que consulté. Ouvrez le cockpit depuis lui pour parler à son orchestrateur.');
         } else {
-          setBusy(false);
-          setStatus('Connexion à l’orchestrateur…');
+          if (!stream) { // déjà branché par la veille : l'état reçu (tour en cours) n'est pas remis à zéro
+            setBusy(false);
+            setStatus('Connexion à l’orchestrateur…');
+          }
           loadHosts();
+          voice.refresh().then(setupConversation);
+          voiceOut.refresh();
+          mascotte.refresh();
           connect();
         }
       }
@@ -545,6 +779,10 @@ export function createChat({ readOnly = () => false } = {}) {
       scrollDown();
     },
     close() {
+      if (conversation) { conversation.destroy(); conversation = null; }
+      voice.abort();
+      voiceOut.abort();
+      mascotte.destroy();
       if (stream) stream.close();
       stream = null;
       opened = false;

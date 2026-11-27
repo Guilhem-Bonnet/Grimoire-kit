@@ -50,7 +50,7 @@ export const host = {
 /** Clé de session du projet retenu par cet onglet. */
 const PROJECT_KEY = 'grimoire.workspace.project';
 
-function storedProject() {
+export function storedProject() {
   try { return sessionStorage.getItem(PROJECT_KEY) || null; } catch { return null; }
 }
 
@@ -71,7 +71,28 @@ class ApiError extends Error {
 }
 export { ApiError };
 
+// Le chat en portée « Tous les projets » : la seule cible ambiante tolérée est celle que la personne a CHOISIE dans
+// le sélecteur du chat (`setChatTarget`), et elle ne vaut que pour les routes `chat/…` — jamais pour une autre
+// écriture. Sans choix, aucune route de chat ne reçoit de projet et les écritures sont refusées plus bas.
+let chatTarget = null;
+
+/** Fixe (ou efface, `null`) le projet que le chat de la vue globale vise. Sans effet hors portée globale. */
+export function setChatTarget(slug) { chatTarget = slug || null; }
+export function currentChatTarget() { return chatTarget; }
+
+function withChatTarget(path) {
+  const [base, query = ''] = path.split('?');
+  if (!chatTarget || !base.startsWith(WS + 'chat/')) return path;
+  const params = new URLSearchParams(query);
+  if (!params.has('project')) params.set('project', chatTarget);
+  return `${base}?${params.toString()}`;
+}
+
 function withProject(path) {
+  // Portée « Tous les projets » : le projet servi n'est la cible de rien. Une
+  // requête qui veut un projet le nomme elle-même ; sinon elle part sans (une
+  // lecture retombe sur le repli du serveur, une écriture est refusée plus bas).
+  if (host.scopeAll) return withChatTarget(path);
   if (!host.project) return path;
   // N'ajoute `project` que s'il est absent : un appel qui cible déjà un AUTRE
   // projet explicitement (`agents(project)`, `proposals(project)`, la Flotte
@@ -116,12 +137,63 @@ function liveMark(path, options) {
   return `${base}?${params.toString()}`;
 }
 
+// ── Cible explicite des écritures en portée « Tous les projets » ────────────
+//
+// Dans cette portée il n'existe pas de « projet courant » : chaque écriture
+// nomme le projet de la ligne ou de l'élément affiché, dans l'URL
+// (`?project=<slug>`) — ou, pour `/api/memory`, dans le corps, comme le lit
+// l'hôte. Sans cible, le client refuse avant d'envoyer quoi que ce soit : il ne
+// devine pas. L'entretien du registre (`/api/projects/…`) n'écrit dans aucun
+// dépôt visé par une page : il reste ouvert.
+const REGISTRY_WRITES = '/api/projects/';
+const MEMORY_WRITES = '/api/memory';
+// Liste FERMÉE des calculs envoyés en POST : valider et simuler un blueprint n'écrivent sur aucun
+// projet (`postOpen`). Rien d'autre n'y entre — `/compile` écrit et reste soumis à la cible.
+const COMPUTE_ROUTES = /^\/api\/blueprints\/[^/]+\/(validate|simulate)$/;
+const SCOPE_HEADER = 'X-Grimoire-Scope';
+
+function writeIsUntargeted(path, options) {
+  if (!host.scopeAll || host.kind !== 'cockpit') return false;
+  if (!options.method || options.method === 'GET') return false;
+  const [base, query = ''] = path.split('?');
+  if (base.startsWith(REGISTRY_WRITES)) return false;
+  if (COMPUTE_ROUTES.test(base)) return false;
+  if (new URLSearchParams(query).get('project')) return false;
+  if (base === MEMORY_WRITES) {
+    try { return !JSON.parse(options.body || '{}').project; } catch { return true; }
+  }
+  return true;
+}
+
+function untargetedError() {
+  return new ApiError(
+    'Portée « Tous les projets » : aucun projet cible pour ce geste — rien n’a été envoyé. '
+      + 'Ouvrez le projet concerné, ou lancez le geste depuis sa ligne.',
+    400,
+    { noTarget: true },
+  );
+}
+
 async function request(path, options = {}) {
+  // La cible est jugée sur l'URL FINALE : celle du chat choisi dans le sélecteur y est déjà posée.
+  const target = withProject(liveMark(path, options));
+  // La voix n'a pas de cible : le chat de la vue globale est texte seul, aucun appel `voice/…` n'y part (lecture ou écriture).
+  if (host.scopeAll && host.kind === 'cockpit' && path.split('?')[0].startsWith(WS + 'voice/')) {
+    throw new ApiError('Voix indisponible dans la vue « Tous les projets » : ouvrez un projet.', 400, { noTarget: true });
+  }
+  if (writeIsUntargeted(target, options)) throw untargetedError();
   let response;
   try {
-    response = await fetch(withProject(liveMark(path, options)), {
-      headers: { 'Content-Type': 'application/json' },
+    const writing = options.method && options.method !== 'GET';
+    response = await fetch(target, {
       ...options,
+      // L'hôte sait ainsi que la page se déclare en portée globale et refuse
+      // toute écriture sans projet explicite, même si ce client se trompait.
+      headers: {
+        'Content-Type': 'application/json',
+        ...(writing && host.scopeAll ? { [SCOPE_HEADER]: 'all' } : {}),
+        ...(options.headers || {}),
+      },
     });
   } catch (cause) {
     // Une requête annulée par l'appelant (onglet masqué) n'est pas une panne.
@@ -283,13 +355,30 @@ export const api = {
   // l'URL vit ici, avec la même cible que toute lecture. Un message est un tour humain : le
   // cockpit le relaie à l'agent et n'écrit rien lui-même (ADR-007).
   chatStreamUrl: (resume) => withProject(WS + 'chat/stream' + (resume ? '?resume=1' : '')),
-  chatSend: (text, answerTo) => post(WS + 'chat/send', answerTo ? { text, answer_to: answerTo } : { text }),
+  chatSend: (text, answerTo, { dictation = false, tokens = [], chantier = null } = {}) =>
+    post(WS + 'chat/send', {
+      text,
+      ...(chantier ? { chantier } : {}), // chantier ouvert dans l'Atelier (revalidé par le serveur)
+      ...(answerTo ? { answer_to: answerTo } : {}),
+      ...(dictation ? { dictation: true } : {}),
+      ...(tokens.length ? { dictation_tokens: tokens } : {}),
+    }),
+  // Lot V2 : le message vocal. Le serveur local transcrit un WAV 16 kHz mono (base64) ; sans l'extra
+  // `voice`, `voiceConfig` le dit (`available: false`, avec la raison) et le bouton n'existe pas.
+  voiceConfig: () => get(WS + 'voice/config'),
+  // Lot V3 : le message parlé de l'orchestrateur. La synthèse n'a lieu qu'à la lecture (`play`).
+  voiceOutbox: () => get(WS + 'voice/outbox'),
+  voiceInterview: () => get(WS + 'voice/interview'),
+  voiceOutboxPlay: (id) => post(WS + 'voice/outbox/play', { id, ...projectBody() }),
+  voiceTranscribe: (audio) => post(WS + 'voice/transcribe', { audio, ...projectBody() }),
   // ACP4 : le geste du pilote automatique. Un bouton que la personne clique, avec la clé de contrôle
   // qu'elle saisit — la page ne la garde pas ; l'agent du chat n'a ni la route ni la clé. Lot 3 : le
   // corps nomme aussi le projet visé, pour que l'hôte vérifie l'URL et le corps ensemble.
   autopilot: () => get(WS + 'autonomy/autopilot'),
-  autopilotSet: (on, controlKey) =>
-    post(WS + 'autonomy/autopilot', { on, control_key: controlKey, ...projectBody() }),
+  // `project` : en vue globale, le projet NOMMÉ du geste (URL et corps) ; sans lui, le projet ouvert.
+  autopilotSet: (on, controlKey, project) =>
+    post(WS + 'autonomy/autopilot' + (project ? '?project=' + encodeURIComponent(project) : ''),
+      { on, control_key: controlKey, ...(project ? { project } : projectBody()) }),
   // Lot 3 : le mandat de n'importe quel projet enrôlé. Octroyer et couper le pilote
   // passent par la clé de contrôle ; révoquer reste permis derrière le jeton (retirer
   // une autorité n'en demande aucune).
@@ -462,13 +551,27 @@ export const api = {
   // mémoire (mode rapide), agents, propositions, dernier run du wizard,
   // dernier run de flow `project-upgrade`, nom du projet. `project` cible un
   // AUTRE projet que celui déjà résolu — même convention que `health()`.
-  sheet: (project) => get(WS + 'sheet', project ? { project } : undefined),
+  // `sections` (#1243) : ne demander que ces sous-vues (`['agents']`) ; omis, toute la fiche.
+  sheet: (project, sections) => {
+    const params = {};
+    if (project) params.project = project;
+    if (sections && sections.length) params.sections = sections.join(',');
+    return get(WS + 'sheet', Object.keys(params).length ? params : undefined);
+  },
   // Capacité (P71) : WIP, réservoirs d'admission, quota et file des tâches
   // prêtes avec la raison de chaque report — le même plan à blanc que
   // `grimoire queue plan`, côté serveur (workspace_capacity.py), lecture
   // seule. `project` cible un AUTRE projet que celui déjà résolu par l'hôte —
   // même convention que `sheet()` juste au-dessus.
   capacity: (project) => get(WS + 'capacity', project ? { project } : undefined),
+  // Pilotage de l'orchestrateur (pause, reprise, disjoncteur) : l'état d'un projet, ou de tous (`portfolio`). Les
+  // gestes sont des gestes d'humain : clé de contrôle, projet nommé dans l'URL ET dans le corps (jamais le projet
+  // ambiant, même en portée « Tous les projets »), rien n'est exposé à un agent.
+  pilotage: (project) => get(WS + 'pilotage', project ? { project } : undefined),
+  pilotagePortfolio: () => get(WS + 'pilotage', { scope: 'portfolio' }),
+  pilotageGesture: (route, project, body, controlKey) =>
+    post(WS + 'pilotage/' + route + (project ? '?project=' + encodeURIComponent(project) : ''),
+      { ...body, ...(project ? { project } : {}), control_key: controlKey }),
   // Agrégation mémoire multi-projets (#172, dernier volet de « du générateur
   // statique au portefeuille actif ») : `projects` vaut 'all', une liste
   // 'slug1,slug2', ou est omis pour « ce projet » seul — jamais toute la
@@ -565,8 +668,13 @@ export const api = {
   costModel: (model) => get('/api/cost-model', model ? { model } : undefined),
 
   // ── Écritures : atelier seulement, refusées côté cockpit ──────────────────
-  taskAction: (id, action, body) =>
-    post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body),
+  // `project` : le projet de la ligne affichée quand elle n'est pas celui que l'hôte sert (portée
+  // « Tous les projets ») — le geste prend alors la route du portefeuille, cible explicite dans
+  // l'URL et dans le corps. Sans lui, le geste vise le projet ouvert ; en portée globale il est refusé.
+  taskAction: (id, action, body, project) =>
+    (project
+      ? api.portfolioTaskAction(id, action, body, project)
+      : post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body)),
   // GAO-cockpit-tout-001 : « Tout accepter » — les tâches qu'une PR fusionnée a laissées en revue,
   // relues READY par le relecteur du tick. La lecture alimente le compteur du bouton ; l'écriture
   // exige la clé de contrôle, saisie par la personne (le jeton de session ne suffit pas à fermer
@@ -576,8 +684,10 @@ export const api = {
   // Apply d'assignation (P47 lot 3) : lance LA session que le plan a montrée —
   // l'empreinte du plan voyage dans le corps, le serveur refuse si l'état a
   // changé depuis (ADR-008). `post` : garde d'écriture commune comprise.
-  taskLaunch: (id, empreinte) =>
-    post(WS + 'tasks/' + encodeURIComponent(id) + '/launch', { empreinte }),
+  // `project` : le projet de la ligne en vue globale (URL et corps) ; la route est celle du projet ouvert.
+  taskLaunch: (id, empreinte, project) =>
+    post(WS + 'tasks/' + encodeURIComponent(id) + '/launch' + (project ? '?project=' + encodeURIComponent(project) : ''),
+      { empreinte, ...(project ? { project } : {}) }),
   // « Nouvelle tâche » (P35) : `TaskService.add` du projet servi, comme
   // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
   taskAdd: ({ title, acceptance, description }) =>
@@ -589,7 +699,54 @@ export const api = {
   // « Une idée ? » (I2) : propositions de l'intake déterministe (aucune écriture), puis création des cochées.
   taskIntake: (text) => post(WS + 'tasks/intake', { text }),
   taskIntakeCreate: (tasks) => post(WS + 'tasks/intake/create', { tasks }),
+  // Fonctions en test : `GET features` lit les drapeaux du projet, `POST features` allume l'Atelier de spec.
+  testFeatures: () => get(WS + 'features'),
+  setFeature: (name, on) => post(WS + 'features', { [name]: on }),
+  // Atelier de spec (en test) : 404 tant que le drapeau est éteint. L'écriture d'un bloc envoie l'empreinte du
+  // fichier de phase lue avec le chantier ; un fichier changé depuis répond 409.
+  atelierChantiers: () => get(WS + 'atelier/chantiers'),
+  atelierNouveau: (titre) => post(WS + 'atelier/chantiers', { titre }),
+  atelierChantier: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug)),
+  // Contrôle par bloc : `mark` = { fp, prev, next, twins, text } du bloc tel qu'il a été lu (le document les porte) ; un autre
+  // bloc modifié entre-temps ne gêne pas, le même bloc modifié répond 409 avec `current`, `submitted`, `merged`.
+  atelierBloc: (slug, id, text, mark) =>
+    put(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/blocs/' + encodeURIComponent(id),
+      { text, block_fp: mark.fp, prev: mark.prev, next: mark.next, twins: mark.twins, base: mark.text }),
+  // Suggestions (lot 2) : l'agent dépose, l'humain tranche ici. `decision` : 'accept' | 'reject' ; un bloc changé
+  // depuis le dépôt répond 409 (suggestion périmée, rien n'est écrit).
+  atelierDecision: (slug, id, decision, motif) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/suggestions/' + encodeURIComponent(id), { decision, motif }),
+  // Commentaires ancrés (lot 3) : l'humain commente un passage (`quote` : le texte cité, `start` : sa position dans le
+  // bloc, que le serveur vérifie), puis répond, résout, rouvre ou supprime (`action`). L'auteur est « humain » : aucun
+  // champ ne le dit. Les fils d'un chantier arrivent avec le document (`phase.comments`), chacun avec son ancre du jour.
+  atelierCommenter: (slug, blockId, quote, start, texte) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/comments', { block_id: blockId, quote, start, texte }),
+  atelierFil: (slug, id, action, texte) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/comments/' + encodeURIComponent(id), { action, texte }),
+  // « Rattacher ici » : ancre un fil orphelin au passage cité (`quote` vide : le bloc entier) ; le serveur revérifie.
+  atelierRattacher: (slug, id, blockId, quote, start) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/comments/' + encodeURIComponent(id), { action: 'attach', block_id: blockId, quote, start }),
+  // Document vivant (lot 4) : l'état réel de ce qui sert chaque exigence (lecture), puis « Valider et découper » :
+  // l'aperçu (lecture), puis l'écriture confirmée (`digest` : l'empreinte de l'aperçu confirmé ; 409 si le plan a
+  // changé ou si une exigence Must n'est pas validée). Aucune route ne valide une exigence : la MOA le fait au terminal.
+  // `req` : le détail complet d'une exigence quand le chantier en compte trop pour que chaque ligne le porte.
+  atelierTrace: (slug, req) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/trace', req ? { req } : undefined),
+  atelierDecoupage: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/decoupage'),
+  atelierDecouper: (slug, digest) =>
+    post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/decoupage', { confirm: true, digest }),
   // Boîte à idées (I13) : garder sans trier ; « annuler » d'un écart est `undo: true`, un événement de plus.
+  // Assistant du cadrage (lot 5) : l'état de l'entretien (lecture), puis un geste de la liste fermée du serveur
+  // (`geste` : un identifiant, jamais le texte d'une consigne ; `text` seulement pour `repondre`, la réponse de l'humain).
+  atelierEntretien: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/entretien'),
+  atelierAssistant: (slug, body) => post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/assistant', body),
+  // Historique des versions d'un chantier (git, lecture seule) : la liste paginée, puis le diff d'une version (`working` : non commité).
+  atelierHistory: (slug, page) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/history', page > 1 ? { page } : undefined),
+  atelierVersion: (slug, id) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/history/' + encodeURIComponent(id)),
+  // Comparer deux versions (lecture seule ; `from`, `to` : un identifiant de la liste, ou `working`), puis restaurer une phase :
+  // `{ phase, expected, version }` (l'empreinte du fichier lue ; 409 si le fichier a changé) ou `{ phase, expected, undo }`
+  // (le jeton rendu par la restauration). Le contenu vient du serveur (git en lecture), jamais d'ici. Rien n'est commité.
+  atelierCompare: (slug, from, to) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/compare', { from, to }),
+  atelierRestore: (slug, body) => post(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/restore', body),
   ideas: () => get(WS + 'ideas'),
   ideaAdd: (text) => post(WS + 'ideas/add', { text }),
   ideaDrop: (id, undo = false) => post(WS + 'ideas/drop', { id, undo }),

@@ -1395,7 +1395,7 @@ class MissionLedger:
         updated = Incident.from_dict({**inc.to_dict(), "status": IncidentStatus.RESOLVED.value})
         # Re-write the incidents file: replace matching line
         if self._incidents_path.exists():
-            lines = self._incidents_path.read_text(encoding="utf-8").splitlines()
+            lines = self._incidents_path.read_text(encoding="utf-8").split("\n")
             new_lines = []
             for line in lines:
                 if not line.strip():
@@ -1482,7 +1482,7 @@ class MissionLedger:
     def import_jsonl(self, path: Path) -> int:
         """Append events from an external JSONL file into this ledger."""
         count = 0
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue

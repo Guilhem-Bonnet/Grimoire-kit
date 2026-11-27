@@ -322,7 +322,9 @@ class AuthorityJournal:
 
     def append(self, entry: Mapping[str, Any]) -> dict[str, Any]:
         with locked(self.path):
-            entries = self.read()  # un journal rompu ou tronqué n'est jamais prolongé
+            # Lecture complète de la classe mère, jamais celle d'une sous-classe : un journal rompu ou tronqué n'est
+            # jamais prolongé, quelle que soit la lecture que la sous-classe sert à ses lecteurs.
+            entries = AuthorityJournal.read(self)
             prev = str(entries[-1]["hash"]) if entries else _GENESIS
             body = {**entry, "seq": len(entries), "prev": prev}
             full = {**body, "hash": _link(prev, body)}

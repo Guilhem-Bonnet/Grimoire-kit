@@ -17,10 +17,15 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
+import time
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from grimoire.bridges.schemas import HostId
 from grimoire.hosts.capabilities import HostProfile, all_profiles, profile_for, resolve_host
 from grimoire.hosts.detection import alias_for_host, resolve_enabled_hosts
 
@@ -29,9 +34,17 @@ __all__ = [
     "KANBAN",
     "AcpHostChoice",
     "acp_availability",
+    "acp_usable",
     "chosen_alias",
+    "clear_probe_cache",
+    "default_alias",
     "host_choices",
+    "install_hint",
+    "no_host_reason",
+    "other_usable_hosts",
     "set_chosen_alias",
+    "start_failure_remedy",
+    "usable_map",
 ]
 
 #: Hôte forcé par l'environnement (``grimoire chat --host`` et les tests) ; passe avant le réglage.
@@ -87,6 +100,115 @@ def acp_availability(profile: HostProfile) -> tuple[bool, str]:
     return True, ""
 
 
+#: Ce qu'il faut lancer pour installer l'hôte (clé : l'exécutable que le chat cherche dans le PATH). Une commande n'entre
+#: ici que si le paquet npm existe au registre public ET que son champ ``bin`` déclare cet exécutable (`npm view <paquet>
+#: bin`, lu le 2026-11-26) ; sinon l'hôte n'a pas de commande et le cockpit dit « voir sa documentation », sans inventer.
+#: Cursor (``agent``) et Kimi (``kimi``) ne sont pas des paquets npm vérifiables ici : ils n'ont pas de commande.
+INSTALL_HINTS: dict[str, str] = {
+    "claude-agent-acp": "npm install -g @agentclientprotocol/claude-agent-acp",
+    "copilot": "npm install -g @github/copilot",
+    "codex": "npm install -g @openai/codex",
+    "gemini": "npm install -g @google/gemini-cli",
+    "opencode": "npm install -g opencode-ai",
+}
+
+#: Délai de la sonde ``initialize`` : un hôte qui ne répond pas dans ce temps n'est pas utilisable pour un chat.
+PROBE_TIMEOUT_SECONDS = 8.0
+#: Un hôte qui répond reste « utilisable » ce temps-là sans être resondé ; un hôte muet est resondé plus tôt, pour
+#: que l'installation ou la réparation soit vue sans redémarrer le cockpit.
+OK_TTL_SECONDS = 6 * 3600.0
+FAIL_TTL_SECONDS = 120.0
+
+#: ``(commande, dossier) -> None`` ; lève :class:`AcpError` si ``initialize`` ne répond pas (même contrat que ``doctor``).
+Probe = Callable[[tuple[str, ...], Path], None]
+
+# ``(commande, exécutable résolu, date de l'exécutable) -> (instant, utilisable, raison)`` : un exécutable remplacé ou
+# réinstallé change la clé, donc la sonde est refaite. Gardé en mémoire du processus : jamais écrit sur disque.
+_PROBES: dict[tuple[object, ...], tuple[float, bool, str]] = {}
+_PROBES_LOCK = threading.Lock()
+
+
+def clear_probe_cache() -> None:
+    """Oublie les sondes gardées (tests, et « Réessayer » du cockpit)."""
+    with _PROBES_LOCK:
+        _PROBES.clear()
+
+
+def install_hint(profile: HostProfile) -> str:
+    """La commande d'installation de l'hôte, ou ``""`` si on n'en connaît pas."""
+    key = profile.acp_binary or (profile.acp_command[0] if profile.acp_command else "")
+    return INSTALL_HINTS.get(key, "")
+
+
+def _probe_initialize(command: tuple[str, ...], cwd: Path) -> None:
+    from grimoire.acp import AcpClient
+
+    with AcpClient(command, cwd, request_timeout=PROBE_TIMEOUT_SECONDS):
+        pass
+
+
+def _short(exc: BaseException) -> str:
+    text = " ".join(str(exc).split())
+    return text if len(text) <= 160 else text[:159] + "…"
+
+
+def acp_usable(
+    profile: HostProfile, root: Path, *, probe: Probe | None = None, clock: Callable[[], float] = time.monotonic
+) -> tuple[bool, str]:
+    """``(utilisable, raison)`` : l'exécutable est là ET l'agent répond à ``initialize``.
+
+    La recherche dans le ``PATH`` ne suffit pas : un exécutable homonyme (le raccourci ``copilot`` de VS Code, un
+    paquet à moitié installé) passe ``shutil.which`` sans parler ACP. ``initialize`` est la sonde de ``grimoire
+    doctor`` : rien d'autre n'est envoyé, aucune session, aucun prompt, donc aucun coût de modèle. Le verdict est
+    gardé (:data:`OK_TTL_SECONDS` / :data:`FAIL_TTL_SECONDS`) : ouvrir le chat n'en relance pas une à chaque fois.
+    Un hôte lancé par ``npx`` n'est jamais sondé (il téléchargerait un paquet) : on s'en tient à son exécutable.
+    """
+    available, reason = acp_availability(profile)
+    if not available:
+        return False, _with_hint(profile, reason)
+    if profile.acp_command[0] == "npx":
+        return True, ""
+    launcher = shutil.which(profile.acp_command[0]) or profile.acp_command[0]
+    try:
+        stamp = Path(launcher).stat().st_mtime_ns
+    except OSError:
+        stamp = 0
+    key = (profile.acp_command, launcher, stamp)
+    now = clock()
+    with _PROBES_LOCK:
+        hit = _PROBES.get(key)
+    if hit is not None and now - hit[0] < (OK_TTL_SECONDS if hit[1] else FAIL_TTL_SECONDS):
+        return hit[1], hit[2]
+    from grimoire.acp import AcpError
+
+    try:
+        (probe or _probe_initialize)(profile.acp_command, root)
+        verdict = (True, "")
+    except (AcpError, OSError) as exc:
+        verdict = (False, _with_hint(profile, f"le mode ACP ne répond pas à initialize — {_short(exc)}"))
+    with _PROBES_LOCK:
+        _PROBES[key] = (now, *verdict)
+    return verdict
+
+
+def _with_hint(profile: HostProfile, reason: str) -> str:
+    hint = install_hint(profile)
+    if hint:
+        return f"{reason} ; installer ou réparer : `{hint}`"
+    return f"{reason} ; installez l'adaptateur ACP de {profile.display_name} (voir sa documentation)"
+
+
+def usable_map(
+    profiles: Sequence[HostProfile], root: Path, *, probe: Probe | None = None
+) -> dict[HostId, tuple[bool, str]]:
+    """:func:`acp_usable` de plusieurs hôtes, les sondes manquantes en parallèle (le plus lent fixe la durée)."""
+    if not profiles:
+        return {}
+    with ThreadPoolExecutor(max_workers=len(profiles)) as pool:
+        results = list(pool.map(lambda p: acp_usable(p, root, probe=probe), profiles))
+    return {p.host_id: r for p, r in zip(profiles, results, strict=True)}
+
+
 def _stored_alias(root: Path) -> str | None:
     try:
         data = json.loads((root / SETTING_RELPATH).read_text(encoding="utf-8"))
@@ -100,22 +222,83 @@ def _valid(alias: str) -> bool:
     return alias == KANBAN or resolve_host(alias) is not None
 
 
-def _detected_alias(root: Path) -> str:
-    """Le premier hôte activé du projet dont le mode ACP répond au PATH, sinon le premier hôte activé."""
-    enabled = resolve_enabled_hosts(root)
-    for alias in enabled:
+def _project_hosts(root: Path) -> list[HostProfile]:
+    """Les hôtes DU PROJET (``hosts.enabled`` déclaré, sinon détectés) qui déclarent un mode ACP, dans l'ordre."""
+    ordered: list[HostProfile] = []
+    seen: set[HostId] = set()
+    for alias in resolve_enabled_hosts(root):
         host_id = resolve_host(alias)
-        if host_id is not None and acp_availability(profile_for(host_id))[0]:
-            return alias
-    return enabled[0] if enabled else "claude"
+        if host_id is not None and host_id not in seen and profile_for(host_id).acp_command:
+            seen.add(host_id)
+            ordered.append(profile_for(host_id))
+    return ordered
+
+
+def default_alias(root: Path, *, probe: Probe | None = None) -> str:
+    """L'hôte par défaut du chat : le premier hôte DU PROJET dont l'ACP est réellement utilisable, ``""`` sinon.
+
+    Le défaut ne sort jamais des hôtes du projet : un agent seulement installé sur la machine (qu'on n'a pas choisi,
+    peut-être jamais configuré) n'est pas pris d'office ; il est PROPOSÉ (:func:`other_usable_hosts`), la personne le
+    choisit elle-même. Un hôte « détecté » par ses seuls fichiers mais sans exécutable, ou dont l'exécutable ne parle
+    pas ACP, n'est pas utilisable. « Utilisable » : exécutable présent et réponse à ``initialize`` (:func:`acp_usable`),
+    verdicts gardés.
+    """
+    candidates = _project_hosts(root)
+    verdicts = usable_map(candidates, root, probe=probe)
+    for profile in candidates:
+        if verdicts[profile.host_id][0]:
+            return alias_for_host(profile.host_id)
+    return ""
+
+
+def _detected_alias(root: Path) -> str:
+    return default_alias(root)
+
+
+def other_usable_hosts(root: Path, *, probe: Probe | None = None) -> list[HostProfile]:
+    """Les hôtes de la machine qui ne sont PAS ceux du projet mais dont l'ACP répond : des choix à proposer, jamais pris."""
+    mine = {p.host_id for p in _project_hosts(root)}
+    others = [p for p in all_profiles() if p.acp_command and p.host_id not in mine]
+    verdicts = usable_map(others, root, probe=probe)
+    return [p for p in others if verdicts[p.host_id][0]]
+
+
+def no_host_reason(root: Path) -> str:
+    """Pourquoi aucun hôte DU PROJET n'est utilisable et quoi faire (phrase du bandeau du chat et de l'assistant)."""
+    mine = _project_hosts(root)
+    verdicts = usable_map(mine, root)
+    if mine:
+        return " ".join(f"{p.display_name} est l'hôte de ce projet, mais {verdicts[p.host_id][1]}." for p in mine)
+    first = next((p for p in all_profiles() if p.acp_command and install_hint(p)), None)
+    hint = f" Pour en installer un : `{install_hint(first)}` ({first.display_name})." if first else ""
+    return "Ce projet ne déclare ni ne détecte aucun hôte d'agent compatible ACP." + hint
+
+
+def start_failure_remedy(root: Path) -> str:
+    """Le geste de réparation à écrire après l'échec du démarrage de l'agent de l'hôte choisi (jamais un chemin)."""
+    alias = chosen_alias(root)
+    host_id = resolve_host(alias) if alias else None
+    if host_id is None:
+        return " Choisissez un hôte dans le sélecteur « Hôte »."
+    profile = profile_for(host_id)
+    hint = install_hint(profile)
+    fix = (
+        f"installez ou réparez-le : `{hint}`"
+        if hint
+        else f"installez ou réparez l'adaptateur ACP de {profile.display_name} (voir sa documentation)"
+    )
+    return f" L'hôte « {profile.display_name} » ne démarre pas : {fix}, ou choisissez un autre hôte dans le sélecteur « Hôte »."
 
 
 def chosen_alias(root: Path) -> str:
-    """L'hôte du chat de *root* : l'environnement, puis le réglage du projet, puis l'hôte détecté."""
+    """L'hôte du chat de *root* : l'environnement, puis le réglage du projet, puis le premier hôte utilisable.
+
+    ``""`` : aucun choix explicite et aucun hôte utilisable (le chat le dit, il ne démarre pas sur un hôte mort).
+    """
     forced = os.environ.get(HOST_ENV, "").strip()
     if forced:
         return KANBAN if forced.lower() == KANBAN else forced
-    return _stored_alias(root) or _detected_alias(root)
+    return _stored_alias(root) or default_alias(root)
 
 
 def set_chosen_alias(root: Path, alias: str) -> str:
@@ -136,13 +319,16 @@ def set_chosen_alias(root: Path, alias: str) -> str:
 
 def host_choices(root: Path) -> list[AcpHostChoice]:
     """Tous les hôtes que le chat sait parler, plus le repli kanban ; les absents portent leur raison."""
-    current = chosen_alias(root)
-    detected = _detected_alias(root)
-    current_id = resolve_host(current)
+    profiles = all_profiles()
+    verdicts = usable_map(profiles, root)  # une sonde par hôte installé, en parallèle, gardée ensuite
+    detected = default_alias(root)
+    forced = os.environ.get(HOST_ENV, "").strip()
+    current = (KANBAN if forced.lower() == KANBAN else forced) if forced else (_stored_alias(root) or detected)
+    current_id = resolve_host(current) if current else None
     choices: list[AcpHostChoice] = []
-    for profile in all_profiles():
+    for profile in profiles:
         alias = alias_for_host(profile.host_id)
-        available, reason = acp_availability(profile)
+        available, reason = verdicts[profile.host_id]
         choices.append(
             AcpHostChoice(
                 alias=alias,
@@ -168,7 +354,7 @@ def host_choices(root: Path) -> list[AcpHostChoice]:
             preview=False,
             note="Sans interface externe (Copilot dans VS Code) : le chat dépose une consigne sur une tâche "
             "et affiche les réponses que ses sessions y déposent.",
-            selected=current == KANBAN,
+            selected=current in (KANBAN, ""),  # aucun hôte utilisable : le chat se replie sur le Kanban, et le montre
             detected=detected == KANBAN,
         )
     )

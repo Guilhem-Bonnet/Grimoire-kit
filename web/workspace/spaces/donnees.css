@@ -1,0 +1,66 @@
+.dn-wrap { display: flex; flex-direction: column; gap: 14px; }
+.dn-docker { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 14px; border-radius: var(--r);
+  background: var(--warn-soft); color: var(--ink); overflow-wrap: anywhere; }
+.dn-docker .ico { flex: none; margin-top: 2px; color: var(--warn); }
+.dn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.dn-svc { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow);
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dn-svc[data-state="absent"], .dn-svc[data-state="arrete"] { background: transparent; box-shadow: none; }
+.dn-svc[data-state="absent"] { border-style: dashed; }
+.dn-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.dn-name { font-weight: 600; color: var(--ink); }
+.dn-role { color: var(--ink2); font-size: 12px; }
+.dn-mark { width: 10px; height: 10px; flex: none; border-radius: 5px; box-sizing: border-box; }
+.dn-svc[data-state="en_ligne"] .dn-mark { background: var(--ok-mark); }
+.dn-svc[data-state="demarrage"] .dn-mark { background: transparent; border: 2px solid var(--acc); }
+.dn-svc[data-state="incomplet"] .dn-mark,
+.dn-svc[data-state="emprunte"] .dn-mark { background: var(--warn-mark); }
+.dn-svc[data-state="en_echec"] .dn-mark { background: var(--bad-mark); border-radius: 2px; }
+.dn-svc[data-state="arrete"] .dn-mark { background: var(--ink3); border-radius: 2px; }
+.dn-svc[data-state="absent"] .dn-mark { border: 1.5px dashed var(--ink3); }
+.dn-svc[data-state="inconnu"] .dn-mark { border: 1.5px solid var(--ink3); }
+.dn-svc > .badge { align-self: flex-start; }
+.dn-reason { margin: 0; color: var(--ink2); font-size: 12.5px; overflow-wrap: anywhere; }
+.dn-facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; font-size: 12px; }
+.dn-facts dt { color: var(--ink2); }
+.dn-facts dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.dn-facts .mono { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dn-shares { display: flex; flex-wrap: wrap; gap: 6px; }
+.dn-console { display: inline-flex; align-items: center; gap: 6px; color: var(--acc); font-size: 12.5px; font-weight: 500;
+  text-decoration: none; align-self: flex-start; }
+.dn-console:hover { text-decoration: underline; }
+.dn-cmd { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); margin-top: auto; }
+.dn-cmd-label { color: var(--ink2); font-size: 12px; }
+.dn-cmd code { font-family: var(--mono); font-size: 11.5px; padding: 4px 8px; border-radius: var(--r); background: var(--hover);
+  color: var(--ink); overflow-wrap: anywhere; }
+.dn-cmd .btn { align-self: flex-start; }
+.dn-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow);
+  overflow: hidden; min-width: 0; }
+.dn-cardhead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; padding: 14px 16px 10px; }
+.dn-cardhead h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; }
+.dn-hint { margin-left: auto; color: var(--ink2); font-size: 12px; }
+.dn-card .tbl-wrap { border: 0; border-radius: 0; box-shadow: none; }
+/* Maquette « Flotte — données » : la colonne projet un peu plus large (1,4fr),
+ * puis une colonne égale par service — jamais une colonne écrasée ni un
+ * en-tête coupé ; sous ~700px le cadre défile, le tableau ne s'écrase pas.
+ * :nth-child(n) rend la règle plus spécifique que les largeurs par colonne
+ * du tableau Projets (piloter.js, .pl-fleet .tbl th:nth-child(…)) : la vue
+ * Données vit dans le même .pl-fleet et hériterait de ses colonnes. */
+.dn-card .tbl { table-layout: fixed; min-width: 700px; }
+.dn-wrap .dn-card .tbl th:nth-child(n) { width: auto; }
+.dn-wrap .dn-card .tbl th:nth-child(1) { width: 18%; }
+.dn-card .tbl th { white-space: normal; overflow-wrap: anywhere; }
+.dn-card .tbl td { overflow-wrap: anywhere; }
+.dn-cell { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.dn-pip { width: 8px; height: 8px; flex: none; border-radius: 2px; background: var(--acc); }
+.dn-cell[data-tone="warn"] { color: var(--warn); }
+.dn-cell[data-tone="warn"] .dn-pip { background: var(--warn-mark); }
+.dn-cell[data-tone="bad"] { color: var(--bad); }
+.dn-cell[data-tone="bad"] .dn-pip { background: var(--bad-mark); }
+.dn-cell[data-tone="none"] { color: var(--ink2); }
+.dn-cell[data-tone="none"] .dn-pip { background: var(--line); }
+.dn-env { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 16px 14px; }
+.dn-env-label { color: var(--ink2); font-size: 12.5px; }
+@container canvas (max-width: 760px) {
+  .dn-hint { margin-left: 0; flex-basis: 100%; }
+}

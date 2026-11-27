@@ -21,7 +21,9 @@ from typing import Any
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import locked
 from grimoire.costs import Cost
+from grimoire.traces.blockcount import count_occurrences
 from grimoire.traces.intervals import ratio_interval95, wilson_interval95
+from grimoire.traces.journal_cache import load_trace_journal
 from grimoire.traces.otel_conventions import (
     ATTR_AGENT_NAME,
     ATTR_CONVERSATION_ID,
@@ -777,16 +779,8 @@ class TraceLedger:
             fh.write(line)
 
     def _load_all(self) -> list[TraceRecord]:
-        records: list[TraceRecord] = []
-        if not self._traces_path.exists():
-            return records
-        for line in self._traces_path.read_text(encoding="utf-8").split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            with contextlib.suppress(json.JSONDecodeError, KeyError):
-                records.append(TraceRecord.from_dict(json.loads(line)))
-        return records
+        # Relu seulement depuis ce qui s'y est ajouté (#1243) : voir grimoire.traces.journal_cache.
+        return load_trace_journal(self._traces_path)
 
     def _next_id(self, run_id: str) -> str:
         """Prochain identifiant de *run_id*, compté sans désérialiser le journal.
@@ -802,8 +796,7 @@ class TraceLedger:
         if not self._traces_path.exists():
             return f"TRC-{run_id}-001"
         needle = f'"run_id": {json.dumps(run_id, ensure_ascii=False)}'.encode()
-        count = self._traces_path.read_bytes().count(needle)
-        return f"TRC-{run_id}-{count + 1:03d}"
+        return f"TRC-{run_id}-{count_occurrences(self._traces_path, needle) + 1:03d}"
 
     # ── Public write API ───────────────────────────────────────────────────
 

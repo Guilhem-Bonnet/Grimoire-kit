@@ -13,6 +13,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from grimoire.cli.cmd_standard_claims import claims_command
+from grimoire.cli.standard_score_view import print_score
 from grimoire.cli.updater import extras_install_hint
 from grimoire.core.agentic_standard import (
     InstallPlan,
@@ -1441,22 +1442,7 @@ def score(
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         raise typer.Exit(0 if result.ok else 1)
-    status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
-    console.print(f"{status} compliance score {result.score}/{result.threshold} written to {result.output_path}")
-    console.print(f"rules: {result.rules.get('rules_enforced')} enforced, {result.rules.get('rules_advisory')} advisory")
-    table = Table(title="Compliance dimensions")
-    table.add_column("Dimension")
-    table.add_column("Score")
-    table.add_column("Weight")
-    table.add_column("Issues")
-    for dimension, values in result.dimensions.items():
-        table.add_row(
-            dimension,
-            f"{values['percentage']}%",
-            str(values["weight"]),
-            f"{values['errors']} error(s), {values['warnings']} warning(s)",
-        )
-    console.print(table)
+    print_score(console, result)
     raise typer.Exit(0 if result.ok else 1)
 
 

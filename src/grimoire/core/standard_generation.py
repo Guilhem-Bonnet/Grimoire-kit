@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Protocol
@@ -134,6 +135,26 @@ MEMORY_READS_IGNORE_BLOCK = (
     "# Memory read receipts — one line per memory read served to agents (no content)\n"
     f"{MEMORY_READS_IGNORE}\n"
 )
+LEXICAL_INDEX_IGNORE = "_grimoire/_memory/*_lexical.sqlite3*"
+LEXICAL_INDEX_IGNORE_BLOCK = (
+    "# Lexical memory index — local state the first task or memory command creates\n"
+    f"{LEXICAL_INDEX_IGNORE}\n"
+)
+# Verrous de fichier (``fsio.locked`` : ``.<nom>.lock``, ``.<nom>.xlock`` en repli) : transitoires, posés à côté de
+# chaque fichier que le kit écrit sous verrou. La liste n'est pas finie (des dizaines d'appels à ``locked`` : tâches,
+# ledger, cadrage, ``comments.json``, ``suggestions.json``, ``decoupage``, ``project-context.yaml``…), d'où un motif
+# par dossier du kit plutôt qu'un nom par nom. Seuls ``_grimoire/``, ``_grimoire-output/`` et le contexte projet sont
+# couverts : jamais un ``*.lock`` du projet (``yarn.lock``, ``Cargo.lock``…), car le motif exige un nom qui commence par
+# un point. ``comments.json`` et ``suggestions.json`` eux-mêmes restent suivis.
+LOCK_IGNORE = "_grimoire/**/.*.lock"
+LOCK_IGNORE_LINES = (
+    ".project-context.yaml.lock", ".project-context.yaml.xlock",
+    LOCK_IGNORE, "_grimoire/**/.*.xlock", "_grimoire-output/**/.*.lock", "_grimoire-output/**/.*.xlock",
+)
+LOCK_IGNORE_BLOCK = (
+    "# File locks — transient, created beside each file the kit writes under lock\n"
+    + "".join(f"{line}\n" for line in LOCK_IGNORE_LINES)
+)
 GITIGNORE_SECTION = (
     f"{GITIGNORE_MARKER}\n"
     "# Session runs — ephemeral runtime data\n"
@@ -141,6 +162,8 @@ GITIGNORE_SECTION = (
     "# Memory archives — compressed old sessions\n"
     "_grimoire/_memory/archives/\n"
     + MEMORY_READS_IGNORE_BLOCK
+    + LEXICAL_INDEX_IGNORE_BLOCK
+    + LOCK_IGNORE_BLOCK
 )
 
 
@@ -156,19 +179,35 @@ def ensure_grimoire_gitignore(root: Path) -> Path | None:
     missing ``.gitignore`` line is a git-status annoyance, not a broken gate).
     """
     gitignore = root / ".gitignore"
+    if gitignore.is_symlink():
+        return None  # jamais d'écriture à travers un lien : on ne sait pas ce qu'il vise
     try:
-        existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+        # Octets lus tels quels : un `.gitignore` qui n'est pas de l'UTF-8 n'est ni décodé de force ni modifié.
+        existing = gitignore.read_bytes().decode("utf-8") if gitignore.is_file() else ""
+    except UnicodeDecodeError:
+        logging.getLogger(__name__).warning(
+            ".gitignore n'est pas de l'UTF-8 : le kit n'y ajoute pas ses lignes (verrous, index) ; ajoutez-les à la main."
+        )
+        return None
     except OSError:
         return None
+    crlf = "\r\n" in existing  # les fins de ligne du projet sont gardées
+    existing = existing.replace("\r\n", "\n") if crlf else existing
     if GITIGNORE_MARKER in existing:
-        if MEMORY_READS_IGNORE in existing:
+        # Section posée avant ces lignes (reçu de lecture, index lexical) : on n'ajoute que celles qui manquent.
+        missing = "".join(
+            block for line, block in (
+                (MEMORY_READS_IGNORE, MEMORY_READS_IGNORE_BLOCK), (LEXICAL_INDEX_IGNORE, LEXICAL_INDEX_IGNORE_BLOCK),
+                (LOCK_IGNORE, LOCK_IGNORE_BLOCK),
+            ) if line not in existing
+        )
+        if not missing:
             return None
-        # Section posée avant le reçu de lecture mémoire : on n'y ajoute que sa ligne.
-        content = existing.rstrip() + "\n" + MEMORY_READS_IGNORE_BLOCK
+        content = existing.rstrip() + "\n" + missing
     else:
         content = existing.rstrip() + "\n\n" + GITIGNORE_SECTION if existing.strip() else GITIGNORE_SECTION
     try:
-        gitignore.write_text(content, encoding="utf-8")
+        gitignore.write_bytes((content.replace("\n", "\r\n") if crlf else content).encode("utf-8"))
     except OSError:
         return None
     return gitignore

@@ -48,21 +48,26 @@ import fnmatch
 import hashlib
 import json
 import re
+import stat as stat_mod
 import threading
 from collections import OrderedDict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
+from grimoire.bridges.schemas import HostId
 from grimoire.core.ansi import strip_ansi
+from grimoire.core.regular_file import open_regular
 from grimoire.memory.validation import redact_secrets
 from grimoire.missions.lease import parse_instant
 from grimoire.missions.liveness import DEFAULT_ACTIVE_WINDOW, TERMINE, VIVANT, liveness
 from grimoire.missions.session_link import resume_command
 from grimoire.tools.project_registry import load_registry
+from grimoire.tools.workspace_fleet_copilot import assemble_copilot, journals_by_root
 from grimoire.tools.workspace_work import claude_projects_dir, model_tier
+from grimoire.traces.copilot_usage import copilot_logs_location
 
 __all__ = [
     "DEFAULT_WINDOW_MINUTES",
@@ -90,6 +95,9 @@ EXCERPT_CHARS = 240
 #: Au-delà, les marqueurs et changements de modèle les plus anciens sont oubliés.
 _MAX_MARKERS = 200
 _MAX_CHANGES = 200
+#: Les lanes (suites d'appels de même modèle et même effort) les plus anciennes sont oubliées au-delà ; le nombre
+#: oublié est rendu (``lanes_dropped``) pour que la liste tronquée se dise.
+_MAX_LANES = 200
 
 #: Bloc lu au plus en une passe : un journal de session de 195 Mo ne se charge jamais d'un coup. Seuls les
 #: octets complets (terminés par un saut de ligne) sont consommés ; le reliquat attend la passe suivante.
@@ -106,6 +114,12 @@ MAX_FILE_STATES = 512
 #: Identifiants d'outils gardés (anti-doublon du fil) et outils encore ouverts, par session.
 _MAX_SEEN_TOOLS = 8192
 _MAX_OPEN_TOOLS = 256
+#: Un résumé ou un extrait n'est caviardé qu'au rendu (les 20 derniers appels seulement). Le texte brut attendu
+#: est borné à cette taille : au-delà, il est caviardé tout de suite, pour ne retenir ni un gros texte brut ni
+#: changer une sortie (le caviardage voit toujours le texte entier, jamais un morceau).
+_LAZY_MAX_CHARS = 64 * 1024
+#: Octets consommés juste avant le point de reprise, relus pour reconnaître le même fichier (comme ``journal_cache``).
+_GUARD_BYTES = 64
 
 SCHEMA_VERSION = "grimoire-workspace-fleet-live/v1"
 
@@ -163,6 +177,11 @@ def _clean(text: str) -> str:
 
 def _summary(tool: str, payload: Any) -> str:
     """Le résumé d'un appel d'outil : la commande Bash, sinon le premier champ parlant."""
+    return _clip(_clean(_summary_text(tool, payload)), SUMMARY_CHARS)
+
+
+def _summary_text(tool: str, payload: Any) -> str:
+    """Le texte brut (non caviardé) dont :func:`_summary` tire le résumé."""
     if not isinstance(payload, dict):
         return ""
     lowered = tool.lower()
@@ -177,11 +196,16 @@ def _summary(tool: str, payload: Any) -> str:
             ),
             "",
         )
-    return _clip(_clean(_text(raw)), SUMMARY_CHARS)
+    return _text(raw)
 
 
 def _excerpt(content: Any) -> str:
     """L'extrait d'un ``tool_result`` : texte seulement, ANSI retiré, secrets masqués, tronqué."""
+    return _clip(_clean(_excerpt_text(content)), EXCERPT_CHARS)
+
+
+def _excerpt_text(content: Any) -> str:
+    """Le texte brut (non caviardé) d'un ``tool_result``."""
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
@@ -189,7 +213,7 @@ def _excerpt(content: Any) -> str:
         text = " ".join(part for part in parts if part)
     else:
         text = ""
-    return _clip(_clean(text), EXCERPT_CHARS)
+    return text
 
 
 def _parse(value: Any) -> datetime | None:
@@ -247,16 +271,57 @@ class _Call:
     counters: tuple[int, int, int, int]
 
 
+class _Raw:
+    """Un texte pas encore caviardé, qui ne se montre ni par ``repr`` ni par une sérialisation générique.
+
+    ``dataclasses.asdict`` copie (``deepcopy``) ce qu'il ne connaît pas : la copie est vide.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def __repr__(self) -> str:
+        return "<brut>"
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> _Raw:
+        return _Raw(type(self.value)())
+
+    def __copy__(self) -> _Raw:
+        return _Raw(type(self.value)())
+
+
 @dataclass(slots=True)
 class _Tool:
     id: str
     at: str
     tool: str
-    summary: str
+    summary: str = ""
     status: str = "running"
     excerpt: str = ""
+    #: Faux dès que l'appel sort des :data:`TAIL_CALLS` derniers : son texte n'est plus jamais rendu.
+    in_tail: bool = True
+    #: Texte brut en attente de caviardage : il n'est jamais rendu tel quel, seulement par :meth:`settle`.
+    raw_summary: _Raw | None = field(default=None, repr=False)
+    raw_excerpt: _Raw | None = field(default=None, repr=False)
+
+    def settle(self) -> None:
+        """Caviarde, tronque et garde le texte rendu ; le brut est oublié (un seul caviardage par texte)."""
+        if self.raw_summary is not None:
+            self.summary = _clip(_clean(self.raw_summary.value), SUMMARY_CHARS)
+            self.raw_summary = None
+        if self.raw_excerpt is not None:
+            self.excerpt = _clip(_clean(self.raw_excerpt.value), EXCERPT_CHARS)
+            self.raw_excerpt = None
+
+    def leave_tail(self) -> None:
+        """Sorti du fil rendu : son résumé brut ne sera jamais caviardé, donc plus gardé."""
+        self.in_tail = False
+        self.raw_summary = None
 
     def to_dict(self) -> dict[str, Any]:
+        self.settle()
         return {
             "at": self.at or None,
             "tool": self.tool or None,
@@ -280,7 +345,11 @@ class _FileState:
 
     signature: tuple[int, int] | None = None
     file_id: tuple[int, int] | None = None
+    refused: bool = False
     offset: int = 0
+    #: Les derniers octets consommés (avant ``offset``) : le même fichier les porte encore à la reprise.
+    #: Du texte de journal, donc tenu dans un :class:`_Raw` (ni ``repr`` ni ``asdict`` ne le montrent).
+    _guard: _Raw = field(default_factory=lambda: _Raw(b""), repr=False)
     session_id: str = ""
     entrypoint: str = ""
     cwd: str = ""
@@ -296,12 +365,21 @@ class _FileState:
     usage_by_model: dict[str, _UsageGroup] = field(default_factory=dict)
     lanes: list[dict[str, Any]] = field(default_factory=list)
     lane: dict[str, Any] | None = None
+    lanes_dropped: int = 0
     changes: list[dict[str, Any]] = field(default_factory=list)
     markers: list[dict[str, Any]] = field(default_factory=list)
     tools: deque[_Tool] = field(default_factory=lambda: deque(maxlen=TAIL_CALLS))
     open_tools: dict[str, _Tool] = field(default_factory=dict)
     seen_tools: dict[str, None] = field(default_factory=dict)
     pr: dict[str, Any] | None = None
+
+    @property
+    def guard(self) -> bytes:
+        return bytes(self._guard.value)
+
+    @guard.setter
+    def guard(self, value: bytes) -> None:
+        self._guard = _Raw(value)
 
 
 @dataclass(slots=True)
@@ -356,6 +434,9 @@ _LOCK = threading.RLock()
 _FILES: OrderedDict[str, _FileState] = OrderedDict()
 _METAS: dict[str, _MetaState] = {}
 _STATS = {"opens": 0, "lines": 0}
+#: Registre et tarifs par projet, valables tant que la signature du fichier ne change pas (au plus 16 projets).
+_REGISTRIES: dict[str, tuple[tuple[int, int, int, int], _Registry, dict[str, Any]]] = {}
+_MAX_REGISTRIES = 16
 
 
 def stats() -> dict[str, int]:
@@ -373,6 +454,7 @@ def reset_cache() -> None:
     with _LOCK:
         _FILES.clear()
         _METAS.clear()
+        _REGISTRIES.clear()
         _STATS["opens"] = 0
         _STATS["lines"] = 0
 
@@ -382,6 +464,7 @@ def _reset_state(state: _FileState) -> None:
     state.signature = None
     state.file_id = None
     state.offset = 0
+    state.guard = b""
     state.session_id = ""
     state.entrypoint = ""
     state.cwd = ""
@@ -397,6 +480,7 @@ def _reset_state(state: _FileState) -> None:
     state.usage_by_model.clear()
     state.lanes.clear()
     state.lane = None
+    state.lanes_dropped = 0
     state.changes.clear()
     state.markers.clear()
     state.tools.clear()
@@ -415,9 +499,15 @@ def _add_usage(state: _FileState, model: str, counters: tuple[int, int, int, int
 
 def _note_lane(state: _FileState, call: _Call) -> None:
     lane = state.lane
-    if lane is None or lane["model"] != call.model or lane["effort"] != call.effort:
+    # La lane garde ``None`` pour un modèle ou un effort absent : comparer à la valeur normalisée, pas à ``""``
+    # (sinon un journal sans champ ``effort`` ouvrait une lane par appel, sans borne).
+    if lane is None or lane["model"] != (call.model or None) or lane["effort"] != (call.effort or None):
         if lane is not None:
             state.lanes.append(lane)
+            if len(state.lanes) > _MAX_LANES:
+                excess = len(state.lanes) - _MAX_LANES
+                del state.lanes[:excess]
+                state.lanes_dropped += excess
         state.lane = {
             "from": call.at or None,
             "to": call.at or None,
@@ -568,15 +658,27 @@ def _fold_assistant(state: _FileState, line: dict[str, Any]) -> None:
         if tool_id and tool_id in state.seen_tools:
             continue
         name = _text(block.get("name")) or "outil"
-        tool = _Tool(id=tool_id, at=stamp, tool=name, summary=_summary(name, block.get("input")))
+        tool = _Tool(id=tool_id, at=stamp, tool=name)
+        _defer_summary(tool, _summary_text(name, block.get("input")))
+        if len(state.tools) >= TAIL_CALLS:
+            state.tools[0].leave_tail()
         state.tools.append(tool)
         if name in _QUESTION_TOOLS:
+            tool.settle()
             _note_marker(state, stamp, "question", tool.summary or name)
         if tool_id:
             _remember_tool(state, tool_id)
             state.open_tools[tool_id] = tool
             while len(state.open_tools) > _MAX_OPEN_TOOLS:
                 state.open_tools.pop(next(iter(state.open_tools)))
+
+
+def _defer_summary(tool: _Tool, text: str) -> None:
+    """Garde le résumé brut jusqu'à son rendu, sauf s'il est démesuré (caviardé tout de suite, sans changer d'un octet)."""
+    if len(text) > _LAZY_MAX_CHARS:
+        tool.summary = _clip(_clean(text), SUMMARY_CHARS)
+    else:
+        tool.raw_summary = _Raw(text)
 
 
 def _remember_tool(state: _FileState, tool_id: str) -> None:
@@ -605,7 +707,14 @@ def _fold_user(state: _FileState, line: dict[str, Any]) -> None:
             continue
         failed = block.get("is_error") is True
         tool.status = "error" if failed else "ok"
-        tool.excerpt = _excerpt(block.get("content"))
+        if not tool.in_tail and not failed:
+            continue  # sorti du fil : cet extrait ne serait jamais rendu, inutile de le caviarder
+        text = _excerpt_text(block.get("content"))
+        if failed or len(text) > _LAZY_MAX_CHARS:
+            tool.excerpt = _clip(_clean(text), EXCERPT_CHARS)
+            tool.raw_excerpt = None
+        else:
+            tool.raw_excerpt = _Raw(text)
         if failed:
             _note_marker(state, tool.at or stamp, "error", tool.excerpt or tool.tool)
 
@@ -637,6 +746,12 @@ def _fold_line(state: _FileState, raw: bytes) -> None:
             }
 
 
+def _same_prefix(handle: BinaryIO, state: _FileState) -> bool:
+    """Vrai si les octets juste avant ``state.offset`` sont encore ceux qu'on a consommés."""
+    handle.seek(state.offset - len(state.guard))
+    return handle.read(len(state.guard)) == state.guard
+
+
 def _consume(state: _FileState, path: Path) -> None:
     """Consomme les octets complets ajoutés depuis le dernier décalage.
 
@@ -649,20 +764,35 @@ def _consume(state: _FileState, path: Path) -> None:
     le reliquat (écriture en cours) attend la passe suivante.
     """
     try:
-        stat = path.stat()
+        stat = path.lstat()
     except OSError:
+        return
+    if not stat_mod.S_ISREG(stat.st_mode):
+        # Lien (sortant ou non), tube nommé, périphérique : jamais ouvert, la session est ignorée.
+        _reset_state(state)
+        state.refused = True
         return
     signature = (stat.st_size, stat.st_mtime_ns)
     file_id = (stat.st_dev, stat.st_ino)
-    if state.signature == signature and state.file_id == file_id:
+    if state.signature == signature and state.file_id == file_id and not state.refused:
         return
+    state.refused = False
     if state.file_id is not None and (state.file_id != file_id or stat.st_size < state.offset):
         _reset_state(state)
     _STATS["opens"] += 1
-    consumed = state.offset
     pending = b""
-    with path.open("rb") as handle:
-        handle.seek(state.offset)
+    try:
+        handle = open_regular(path)
+    except (OSError, ValueError):
+        # Devenu illisible ou non ordinaire entre le contrôle et l'ouverture : ignoré, sans exception.
+        _reset_state(state)
+        state.refused = True
+        return
+    with handle:
+        if state.offset and not _same_prefix(handle, state):
+            _reset_state(state)  # même inode et plus grand, mais réécrit : relu depuis zéro
+        consumed = state.offset
+        handle.seek(consumed)
         while chunk := handle.read(READ_CHUNK_BYTES):
             data = pending + chunk
             cut = data.rfind(b"\n")
@@ -672,6 +802,7 @@ def _consume(state: _FileState, path: Path) -> None:
                     # Ligne démesurée : ses octets déjà lus sont sautés jusqu'au prochain saut.
                     consumed += len(pending)
                     state.offset = consumed
+                    state.guard = (state.guard + pending)[-_GUARD_BYTES:]
                     pending = b""
                 continue
             for raw in data[:cut].split(b"\n"):
@@ -679,10 +810,12 @@ def _consume(state: _FileState, path: Path) -> None:
                     _fold_line(state, raw)
             consumed += cut + 1
             state.offset = consumed
+            state.guard = (state.guard + data[max(0, cut + 1 - _GUARD_BYTES) : cut + 1])[-_GUARD_BYTES:]
             pending = data[cut + 1 :]
             if len(pending) > _MAX_LINE_BYTES:
                 consumed += len(pending)
                 state.offset = consumed
+                state.guard = (state.guard + pending)[-_GUARD_BYTES:]
                 pending = b""
     state.signature = signature
     state.file_id = file_id
@@ -705,8 +838,10 @@ def _state_for(path: Path) -> _FileState:
 def _meta_for(path: Path) -> _MetaState:
     key = str(path)
     try:
-        stat = path.stat()
+        stat = path.lstat()
     except OSError:
+        return _MetaState()
+    if not stat_mod.S_ISREG(stat.st_mode):
         return _MetaState()
     signature = (stat.st_size, stat.st_mtime_ns)
     meta = _METAS.get(key)
@@ -715,13 +850,15 @@ def _meta_for(path: Path) -> _MetaState:
     meta = _MetaState(signature=signature)
     try:
         _STATS["opens"] += 1
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        with open_regular(path) as handle:
+            data = json.loads(handle.read().decode("utf-8", errors="replace"))
     except (OSError, ValueError):
         return meta
     if not isinstance(data, dict):
         return meta
     meta.agent_type = _text(data.get("agentType"))
-    meta.description = _text(data.get("description"))
+    # Caviardée avant la troncature du rendu (``_clip`` à l'assemblage) : jamais un fragment de secret.
+    meta.description = _clean(_text(data.get("description")))
     meta.model = _text(data.get("model"))
     meta.picked = _text(data.get("pickedEffortModel"))
     depth = data.get("spawnDepth")
@@ -975,9 +1112,10 @@ def _assemble(
     lanes = [dict(lane) for lane in state.lanes]
     if state.lane is not None:
         lanes.append(dict(state.lane))
-    return {
+    payload: dict[str, Any] = {
         "id": session_id,
         "project": root.slug,
+        "host": HostId.CLAUDE_CODE_CLI.value,
         "role": role,
         "parent_id": parent_id,
         "task_id": getattr(task, "id", None),
@@ -1022,6 +1160,9 @@ def _assemble(
             "transcript": str(path),
         },
     }
+    if state.lanes_dropped:
+        payload["lanes_dropped"] = state.lanes_dropped  # les plus anciennes lanes ont été oubliées (borne)
+    return payload
 
 
 # ── Découverte des journaux ─────────────────────────────────────────────────
@@ -1073,9 +1214,18 @@ def _project_dirs(base: Path, root: _Root, listing: list[Path]) -> list[Path]:
     return [directory for directory in found if directory.is_dir()]
 
 
-def _mtime(path: Path) -> float | None:
+def _real_dir(path: Path) -> bool:
+    """Vrai pour un vrai dossier ; un lien (sortant ou non) n'est jamais parcouru."""
     try:
-        return path.stat().st_mtime
+        return stat_mod.S_ISDIR(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _mtime(path: Path) -> float | None:
+    """La date de modification du fichier lui-même (``lstat`` : un lien n'est jamais suivi)."""
+    try:
+        return path.lstat().st_mtime
     except OSError:
         return None
 
@@ -1099,8 +1249,8 @@ def fleet_live_route(project_root: Path, query: Mapping[str, list[str]]) -> Any:
     from grimoire.tools.workspace_routes import _host_entries
 
     windows = query.get("window") or []
-    raw = windows[0] if windows else None
-    if raw in (None, ""):
+    raw = windows[0] if windows else ""
+    if not raw:
         window = DEFAULT_WINDOW_MINUTES
     else:
         try:
@@ -1152,13 +1302,13 @@ def fleet_live_view(
 
         sessions: list[dict[str, Any]] = []
         edges: list[dict[str, Any]] = []
+        ignored = [0]
         per_root: dict[str, tuple[_Root, list[Path]]] = {}
         for directory, root in owner.items():
             per_root.setdefault(str(root.path), (root, []))[1].append(directory)
         for root, directories in per_root.values():
             ledger = _Ledger(root.path)
-            registry = _registry_for(root.path)
-            pricing = _pricing_for(root.path)
+            registry, pricing = _registry_and_pricing(root.path)
             for directory in directories:
                 for journal in sorted(directory.glob("*.jsonl")):
                     modified = _mtime(journal)
@@ -1166,6 +1316,9 @@ def fleet_live_view(
                         continue
                     session_id = journal.stem
                     state = _state_for(journal)
+                    if state.refused:
+                        ignored[0] += 1
+                        continue
                     payload = _assemble(
                         state,
                         session_id=session_id,
@@ -1185,6 +1338,7 @@ def fleet_live_view(
                         parent=payload,
                         parent_state=state,
                         directory=directory / session_id,
+                        ignored=ignored,
                         root=root,
                         ledger=ledger,
                         registry=registry,
@@ -1194,11 +1348,33 @@ def fleet_live_view(
                         probe=probes,
                     )
 
+        # Sessions GitHub Copilot (non vérifié) : lues seulement si l'emplacement des journaux est configuré.
+        copilot_location = copilot_logs_location(project_root)
+        copilot_found, copilot_ignored = journals_by_root(copilot_location, [r.path for r in roots], cutoff=cutoff)
+        ignored[0] += copilot_ignored
+        for index, found in copilot_found.items():
+            copilot_root = roots[index]
+            copilot_ledger = _Ledger(copilot_root.path)
+            copilot_registry = _registry_for(copilot_root.path)
+            for copilot_session, modified in found:
+                rows = assemble_copilot(
+                    copilot_session,
+                    modified,
+                    project=copilot_root.slug,
+                    now=moment,
+                    ledger=copilot_ledger,
+                    lookup=copilot_registry.lookup,
+                    probe=probes,
+                )
+                sessions.extend(rows)
+                edges.extend({"from": row["parent_id"], "to": row["id"], "kind": "spawned"} for row in rows[1:])
+
         # Les vivantes d'abord, puis les silencieuses et les terminées ; à état égal,
         # le dernier signe le plus récent d'abord (tri stable en deux passes).
         sessions.sort(key=lambda row: row["last_at"] or "", reverse=True)
         sessions.sort(key=lambda row: _LIVENESS_ORDER.get(row["liveness"], 9))
         totals = _totals(sessions)
+        totals["ignored"] = ignored[0]
         return {
             "schemaVersion": SCHEMA_VERSION,
             "generated_at": moment.isoformat(),
@@ -1207,7 +1383,27 @@ def fleet_live_view(
             "sessions": sessions,
             "edges": edges,
             "totals": totals,
+            "copilot_logs": copilot_location.to_dict(),
         }
+
+
+def _registry_and_pricing(root: Path) -> tuple[_Registry, dict[str, Any]]:
+    """Le registre et les tarifs du projet, relus (YAML, ~35 ms) seulement si le fichier a changé."""
+    try:
+        info = (root / _REGISTRY_RELPATH).stat()
+    except OSError:
+        return _registry_for(root), _pricing_for(root)  # pas de registre : rien à lire ni à garder
+    signature = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+    key = str(root)
+    cached = _REGISTRIES.get(key)
+    if cached is not None and cached[0] == signature:
+        return cached[1], cached[2]
+    registry, pricing = _registry_for(root), _pricing_for(root)
+    _REGISTRIES.pop(key, None)
+    _REGISTRIES[key] = (signature, registry, pricing)
+    while len(_REGISTRIES) > _MAX_REGISTRIES:
+        _REGISTRIES.pop(next(iter(_REGISTRIES)))
+    return registry, pricing
 
 
 def _pricing_for(root: Path) -> dict[str, Any]:
@@ -1232,10 +1428,14 @@ def _attach_subagents(
     now: datetime,
     cutoff: float,
     probe: Mapping[str, Mapping[str, Any]],
+    ignored: list[int],
 ) -> None:
     """Ajoute les sous-agents du dossier ``<session>/subagents`` et les arêtes ``spawned``."""
     subdir = directory / "subagents"
-    if not subdir.is_dir():
+    if not _real_dir(directory) or not _real_dir(subdir):
+        # Un lien (sortant ou non) à la place du dossier de session ou de ``subagents/`` n'est pas parcouru.
+        if directory.is_symlink() or subdir.is_symlink():
+            ignored[0] += 1
         return
     for journal in sorted(subdir.glob("agent-*.jsonl")):
         meta_path = journal.with_suffix(".meta.json")
@@ -1246,6 +1446,9 @@ def _attach_subagents(
         meta = _meta_for(meta_path)
         agent_id = journal.stem.removeprefix("agent-")
         state = _state_for(journal)
+        if state.refused:
+            ignored[0] += 1
+            continue
         payload = _assemble(
             state,
             session_id=agent_id,

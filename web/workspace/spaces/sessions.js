@@ -22,7 +22,6 @@ import { actionStatus, badge, icon, kpiRow, monogram, setActionStatus } from '..
 import { agoText } from '../live.js';
 import { activityBlockAsync } from '../activity.js';
 
-const STYLE_ID = 'ss-styles';
 
 // Libellé, ton du badge et glyphe de chaque état (une forme par état, jamais la couleur seule).
 export const STATE = {
@@ -46,52 +45,6 @@ function el(tag, className, value) {
   return node;
 }
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .ss-kpi .kpi-item[data-tone="warn"] { background: var(--warn-soft); border-color: transparent; }
-    .ss-kpi .kpi-item[data-tone="warn"] .kpi-val { color: var(--warn); }
-    .ss-table td { white-space: nowrap; }
-    .ss-table tbody tr:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
-    .ss-table tbody tr[aria-current="true"] { box-shadow: inset 0 0 0 1px var(--acc); }
-    .ss-state { display: inline-flex; align-items: center; gap: 5px; }
-    .ss-state .ico { width: 14px; height: 14px; flex: none; }
-    .ss-id { font-family: var(--mono); font-size: var(--t-s); font-weight: 500; color: var(--ink); }
-    /* La colonne de la tâche prend la place qui reste et s'ellipse : le signe reste visible. */
-    .ss-table td.ss-task-cell { width: 100%; max-width: 0; }
-    .ss-task { display: flex; flex-direction: column; min-width: 0; }
-    .ss-task-title { font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ss-task-project { font-size: var(--t-min); color: var(--ink3); display: flex; align-items: center; gap: 6px; }
-    .ss-act { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
-    .ss-act i { width: 7px; border-radius: 1px; background: var(--acc); }
-    .ss-act i.zero { background: var(--line); }
-    .ss-sign { color: var(--ink3); font-size: var(--t-min); text-align: right; }
-    .ss-muted { color: var(--ink3); font-size: var(--t-min); }
-    .ss-notice { display: flex; flex-direction: column; gap: 4px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); font-size: var(--t-s); color: var(--ink2); }
-    .ss-insp { display: flex; flex-direction: column; gap: var(--sp-4); min-height: 100%; }
-    .ss-insp-head { display: flex; flex-direction: column; gap: 6px; }
-    .ss-insp-head h3 { margin: 0; font-size: var(--t-l); line-height: 1.35; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .ss-insp-head h3 .ss-id { font-size: var(--t-m, var(--t-s)); }
-    .ss-why { margin: 0; color: var(--ink2); font-size: var(--t-s); line-height: 1.45; }
-    .ss-kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
-    .ss-kv > :first-child { color: var(--ink3); font-size: var(--t-min); font-weight: 500; }
-    .ss-kv ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-    .ss-actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-    .ss-actions .row { display: flex; gap: var(--sp-2); }
-    .ss-actions .row > .btn { flex: 1 1 0; justify-content: center; }
-    .ss-form { display: flex; flex-direction: column; gap: 6px; }
-    .ss-form textarea { min-height: 56px; font: inherit; font-size: var(--t-s); }
-    .ss-resume { display: flex; flex-direction: column; gap: 6px; margin-top: auto; }
-    .ss-resume-box { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); padding: 6px 10px; min-width: 0; }
-    .ss-cmd { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-    .ss-copy { height: 24px; padding: 0 8px; flex: none; background: transparent; border-color: transparent; color: var(--ink2); }
-    .ss-copy .ico { width: 14px; height: 14px; }
-    .ss-cmd b { color: var(--rub); font-weight: 500; margin-right: 6px; }
-  `;
-  document.head.append(style);
-}
 
 function sinceNode(iso) {
   const node = document.createElement('time');
@@ -210,7 +163,6 @@ function kpis(summary) {
 
 /** Le tableau et ses tuiles. `data` : la réponse de `api.sessions` ; `error` : sa lecture ratée. */
 export function renderSessions(root, ctx, { data, error, selectedId, onSelect }) {
-  injectStyles();
   const box = el('div', 'ss-view');
   box.dataset.role = 'sessions';
   box.style.display = 'flex';
@@ -295,7 +247,6 @@ function kv(label, value) {
 
 /** Le panneau de détail d'une session. `go` : `{ decisions(task), task(task) }` — les vues de Travail. */
 export function renderSessionInspector(ctx, session, { portfolio, go, onWritten, notice = '' }) {
-  injectStyles();
   const panel = ctx.inspector;
   panel.replaceChildren();
   panel.dataset.owner = 'sessions';

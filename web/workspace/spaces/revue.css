@@ -1,0 +1,52 @@
+.rv-wrap { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); min-height: 100%; }
+.rv-list { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-width: 0; }
+.rv-list-head { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-4) var(--sp-4) var(--sp-2); }
+.rv-list-head h2 { margin: 0; font-size: var(--t-s); font-weight: 600; }
+.rv-n { color: var(--rub); font-weight: 600; }
+.rv-hint { margin-left: auto; color: var(--ink3); font-size: var(--t-min); }
+.rv-items { list-style: none; margin: 0; padding: 0 var(--sp-2) var(--sp-3); display: flex; flex-direction: column; gap: 2px; }
+.rv-pr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: var(--sp-2) var(--sp-3);
+  border-radius: 12px; cursor: pointer; text-decoration: none; color: var(--ink); }
+.rv-pr:hover { background: var(--hover); }
+.rv-pr[aria-current="true"] { background: var(--acc-soft); }
+.rv-pr:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+.rv-pr-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-pr-sub { color: var(--ink2); font-size: var(--t-min); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-pr-sub .mono { font-family: var(--mono); }
+.rv-main { display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-6); min-width: 0; max-width: 1040px; }
+.rv-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); text-decoration: none; font-size: var(--t-s); }
+.rv-back:hover { color: var(--ink); }
+.rv-back .ico { transform: rotate(180deg); }
+.rv-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rv-eyebrow { margin: 0; font-size: var(--t-min); font-weight: 500; color: var(--ink3); overflow-wrap: anywhere; }
+.rv-head h1 { margin: 0; font-size: 21px; line-height: 1.25; font-weight: 600; overflow-wrap: anywhere; }
+.rv-lead { margin: 0; color: var(--ink2); }
+.rv-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow);
+  padding: var(--sp-3) var(--sp-4); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); }
+.rv-card h2 { margin: 0 0 6px; font-size: var(--t-s); font-weight: 600; }
+.rv-fg { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line);
+  font-size: var(--t-s); align-items: center; }
+.rv-fg > :last-child { text-align: right; color: var(--ink2); overflow-wrap: anywhere; }
+.rv-fg .mono { font-family: var(--mono); font-size: var(--t-min); }
+.rv-fails { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-1); }
+.rv-fails li { display: flex; gap: var(--sp-2); align-items: center; font-size: var(--t-s); }
+.rv-fails .rv-link, .rv-fails .rv-link:visited { color: var(--acc); }
+.rv-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+.rv-actions .btn { text-decoration: none; }
+.rv-note { margin: 0; color: var(--ink2); font-size: var(--t-s); }
+.rv-unknown { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); padding: var(--sp-2) var(--sp-4);
+  border: 1px dashed var(--line); border-radius: var(--r); color: var(--ink2); }
+.rv-unknown strong { color: var(--ink); font-weight: 600; }
+.rv-unknown .btn { margin-left: auto; }
+.rv-aside { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+.rv-aside h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.rv-kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; padding: var(--sp-2) 0; border-top: 1px solid var(--line); font-size: var(--t-s); }
+.rv-kv > :first-child { color: var(--ink3); font-weight: 500; }
+.rv-formula { margin-top: auto; font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); overflow-wrap: anywhere; }
+.rv-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
+@container canvas (max-width: 860px) {
+  .rv-wrap { grid-template-columns: minmax(0, 1fr); }
+  .rv-list { border-right: 0; border-bottom: 1px solid var(--line); }
+  .rv-card { grid-template-columns: minmax(0, 1fr); }
+  .rv-main { padding: var(--sp-4); }
+}

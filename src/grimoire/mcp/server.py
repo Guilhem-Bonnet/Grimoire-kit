@@ -33,6 +33,8 @@ from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 from grimoire.core.grounding import GROUNDING_RULE_EN
 from grimoire.mcp.project import project_scoped
+from grimoire.mcp.skills_serving import serve as serve_skills
+from grimoire.mcp.skills_serving import skill_tool_result
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
@@ -55,6 +57,10 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 # à 2.2.0). Le pont n'a jamais câblé Roots, Sampling ni Logging — les trois
 # fonctionnalités que la révision 2026-07-28 déprécie (retrait possible à
 # partir de 2027-07-28) — donc rien à retirer de ce côté.
+try:  # extension « Skills » (SEP-2640) : son interface n'existe qu'en mcp >= 2 (docs/guides/mcp-skills.md)
+    from grimoire.mcp.skills_extension import SKILLS_EXTENSION as _SKILLS
+except ImportError:  # repli mcp 1.x
+    _SKILLS = None  # type: ignore[assignment]
 _INSTRUCTIONS = (
     "Grimoire Kit — Composable AI agent platform. "
     "Use these tools to inspect and manage Grimoire projects. " + GROUNDING_RULE_EN
@@ -104,7 +110,7 @@ else:
     # basse du SDK dans pyproject.toml.
     from mcp.types import CallToolResult, ToolAnnotations
 
-    mcp = _Server(name="grimoire", instructions=_INSTRUCTIONS)
+    mcp = _Server(name="grimoire", instructions=_INSTRUCTIONS, **({"extensions": [_SKILLS]} if _SKILLS else {}))
 
 
 def _find_config() -> GrimoireConfig:
@@ -789,7 +795,7 @@ def task_add(
     actor: str = "mcp-agent",
     ready: bool = False,
     description: str = "",
-    finition: str = "", data_class: str = "",
+    finition: str = "", data_class: str = "", requirement: str = "", nature: str = "",
     project_path: str = ".",
     ledger_root: str = "_grimoire-runtime-output/ledger",
 ) -> str:
@@ -810,6 +816,8 @@ def task_add(
         description: Context, rationale and leads for whoever claims the task — plain text, at most 4000 characters (#714). Shown by `task_show`, `task_context` and the cockpit card.
         finition: `maquette` or `peaufine`. Empty string inherits the project phase declared in project-context.yaml (exploration → maquette, construction/exploitation → peaufine), or stays undeclared.
         data_class: Class of the data the task reads. Empty string uses `routing.default_data_class` of the provider registry; with neither, no external provider receives the task (#1133).
+        requirement: The requirement the task serves (`REQ-001`, or `<chantier>/REQ-001`). A project whose requirement gate is `block` refuses `ready` until the MOA (a human, from their terminal) has validated it (#1342).
+        nature: Nature of the request (`anomalie`, `incident`, `question`…); `question` and `incident` are exempt from the requirement gate.
         project_path: Path to project root (default: current directory).
         ledger_root: Mission Ledger directory, relative to the project root.
     """
@@ -824,7 +832,7 @@ def task_add(
             origin="mcp",
             ready=ready,
             description=description,
-            finition=finition, data_class=data_class,
+            finition=finition, data_class=data_class, requirement=requirement, nature=nature,
         )
         return json.dumps(added.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
@@ -1217,6 +1225,7 @@ def grimoire_host_status(project_path: str = ".") -> str:
         project_path: Path to project root (default: current directory).
     """
     from grimoire.hosts.capabilities import gaps_for, profile_for
+    from grimoire.hosts.capability_matrix import build_capability_matrix, session_logs_status
     from grimoire.hosts.collect import build_surface
     from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
 
@@ -1245,6 +1254,9 @@ def grimoire_host_status(project_path: str = ".") -> str:
             "conflict_causes": pending.conflicts,
             "degradations": [d.to_dict() for d in plan.degradations],
             "capability_gaps": [g.surface for g in gaps_for(profile)],
+            # Système par système et surface par surface, dérivé du code (jamais promu) ; lecture seule.
+            "capability_matrix": build_capability_matrix(host_id, degradations=plan.degradations).to_dict(),
+            "session_logs": session_logs_status(target, host_id),
         })
     return json.dumps({"surface": surface.to_dict(), "hosts": hosts}, indent=2, ensure_ascii=False)
 
@@ -1302,18 +1314,7 @@ def grimoire_skill(slug: str, project_path: str = ".") -> str:
         slug: Skill identifier, as listed by grimoire_host_status.
         project_path: Path to project root (default: current directory).
     """
-    from grimoire.hosts.collect import collect_skills
-
-    target = Path(project_path).resolve()
-    skills = collect_skills(target)
-    for skill in skills:
-        if skill.slug == slug:
-            return json.dumps(
-                {"slug": skill.slug, "description": skill.description, "body": skill.body},
-                indent=2,
-                ensure_ascii=False,
-            )
-    return _tool_error({"error": f"Unknown skill: {slug}", "available": [s.slug for s in skills]})
+    return skill_tool_result(slug, Path(project_path).resolve(), _tool_error)
 
 
 @_tool(_reads())
@@ -1359,9 +1360,6 @@ def grimoire_command(slug: str, project_path: str = ".") -> str:
 # Failure is never fatal: a server that cannot read a project still serves its
 # tools.
 
-_SKILL_URI = "grimoire://skill/{slug}"
-
-
 def _register_command(slug: str, description: str, body: str, argument_hint: str) -> None:
     """Expose one Grimoire command as an MCP prompt."""
 
@@ -1376,17 +1374,6 @@ def _register_command(slug: str, description: str, body: str, argument_hint: str
     mcp.prompt(name=slug, description=label)(handler)
 
 
-def _register_skill(slug: str, description: str, body: str) -> None:
-    """Expose one Grimoire skill as an MCP resource."""
-
-    def handler() -> str:
-        return body
-
-    handler.__name__ = f"skill_{slug.replace('-', '_')}"
-    handler.__doc__ = description
-    mcp.resource(_SKILL_URI.format(slug=slug), name=slug, description=description)(handler)
-
-
 def _register_surface(project_path: Path | None = None) -> tuple[int, int]:
     """Register the project's commands and skills; return how many of each.
 
@@ -1395,11 +1382,10 @@ def _register_surface(project_path: Path | None = None) -> tuple[int, int]:
     worse failure than serving fewer prompts.
     """
     try:
-        from grimoire.hosts.collect import collect_commands, collect_skills
+        from grimoire.hosts.collect import collect_commands
 
         root = (project_path or Path.cwd()).resolve()
         commands = collect_commands(root)
-        skills = collect_skills(root)
     # Same reasoning: a server that cannot read a project is still a useful
     # MCP server, and refusing to start would be the worse failure.
     except Exception:
@@ -1408,8 +1394,8 @@ def _register_surface(project_path: Path | None = None) -> tuple[int, int]:
     prompts = sum(
         _guarded(_register_command, c.slug, c.description, c.body, c.argument_hint) for c in commands
     )
-    resources = sum(_guarded(_register_skill, k.slug, k.description, k.body) for k in skills)
-    return (prompts, resources)
+    # Skills : un seul catalogue (skills_catalogue) pour skill://, grimoire://skill/ et l'outil.
+    return (prompts, serve_skills(mcp, root, _SKILLS))
 
 
 def _guarded(register: Callable[..., None], *args: Any) -> int:

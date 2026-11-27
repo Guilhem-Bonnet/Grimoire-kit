@@ -62,6 +62,7 @@ def build_next_steps(
     backend: str,
     no_cockpit: bool = False,
     layer_profile: str = "",
+    standard_follows: bool = False,
 ) -> NextStepsPanel:
     """Build the panel body for one freshly initialised (or refreshed) project.
 
@@ -69,6 +70,11 @@ def build_next_steps(
     has it — ``grimoire init`` does, right after its Memory step) drives
     whether "upgrade the memory" is offered: below what this machine can
     serve, not just "still lexical" (2026-09-18 onboarding decision, PR2).
+
+    ``standard_follows`` is set by ``grimoire up``: its next step installs the
+    agentic standard right after this panel is printed, so "governance not
+    started" would contradict the summary table printed a moment later. The
+    standard hints are then left out, and the standard counts as used.
     """
     # One sentence, no nested parentheses: the reason already carries its own.
     info_reason = resolved.reason.rstrip(".")
@@ -81,6 +87,8 @@ def build_next_steps(
         no_cockpit=no_cockpit,
         layer_profile=layer_profile,
     )
+    if standard_follows:
+        hints = [h for h in hints if not h.command.startswith("grimoire standard")]
     hint_by_command = {h.command: h for h in hints}
 
     candidates: list[str] = []

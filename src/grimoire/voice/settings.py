@@ -1,0 +1,227 @@
+"""Réglages ``interaction`` et ``voice`` de ``project-context.yaml``.
+
+.. code-block:: yaml
+
+    interaction:
+      mode: text            # text | voice — défaut text
+    voice:
+      stt: faster-whisper   # ou une table : {engine: faster-whisper, model: small}
+      tts: qwen3-tts-clone  # défaut : qwen3-tts-clone si qwen_tts est installé, sinon pocket-tts, sinon navigateur
+                            # ou {engine: qwen3-tts-clone, voice: /chemin/voix.wav, threads: 4}
+                            # (voix = WAV local avec un .txt voisin ; sinon la voix livrée)
+      idle_unload_seconds: 300
+      language: fr
+      max_record_seconds: 120 # plafond d'un enregistrement (1 à 300)
+      spoken_max_seconds: 45  # durée plafond du message parlé (5 à 300)
+      incoming_ttl_seconds: 300 # délai de purge d'un enregistrement orphelin (30 à 86400)
+      allow_download: false # true = l'utilisateur accepte le téléchargement des modèles
+                            # (le seul interrupteur : il prime sur toute option d'un moteur)
+
+Un réglage illisible ne casse rien : il retombe sur son défaut et le problème est
+rapporté dans :attr:`VoiceSettings.problems`, que ``grimoire doctor`` affiche.
+Ce module n'importe aucune bibliothèque audio.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+__all__ = [
+    "DEFAULT_IDLE_UNLOAD_S",
+    "INTERACTION_MODES",
+    "EngineChoice",
+    "VoiceSettings",
+    "load_voice_settings",
+    "settings_from_mapping",
+]
+
+INTERACTION_MODES = ("text", "voice")
+#: Cinq minutes : assez pour enchaîner deux messages sans recharger le modèle,
+#: assez court pour rendre la mémoire quand la conversation est finie.
+DEFAULT_IDLE_UNLOAD_S = 300.0
+DEFAULT_STT = "faster-whisper"
+QWEN_TTS = "qwen3-tts-clone"
+POCKET_TTS = "pocket-tts"
+BROWSER_TTS = "browser"
+
+
+def default_tts() -> str:
+    """Moteur de synthèse par défaut selon les paquets présents : qwen3-tts-clone, pocket-tts, sinon navigateur.
+
+    Lu par ``find_spec`` : aucun paquet n'est importé. Un ``voice.tts`` explicite garde la priorité.
+    """
+    from grimoire.voice.engines import ENGINES, installed
+
+    for name in (QWEN_TTS, POCKET_TTS):  # sans le message d'installation : il lance des sous-processus
+        spec = ENGINES.get(("tts", name))
+        if spec is not None and installed(spec):
+            return name
+    return BROWSER_TTS
+
+
+#: Plafond d'un enregistrement : deux minutes tiennent dans un message, et bornent le poids de l'audio.
+DEFAULT_MAX_RECORD_S = 120.0
+#: Cinq minutes au plus : 300 s de WAV 16 kHz mono 16 bits, en base64, tiennent sous le plafond du corps HTTP
+#: de la transcription (16 Mio, ``stt_service.MAX_BODY_BYTES``) ; 600 s ne tenaient pas (~25,6 Mo).
+MAX_RECORD_CEILING_S = 300.0
+#: Un enregistrement entrant laissé par un arrêt brutal est purgé passé ce délai (il n'en reste aucun sinon).
+DEFAULT_INCOMING_TTL_S = 300.0
+INCOMING_TTL_RANGE_S = (30.0, 86_400.0)
+#: Durée cible du message parlé de l'orchestrateur : au-delà, on n'écoute plus, on lit.
+DEFAULT_SPOKEN_MAX_S = 45.0
+SPOKEN_MAX_RANGE_S = (5.0, 300.0)
+
+
+@dataclass(frozen=True, slots=True)
+class EngineChoice:
+    """Un moteur choisi et ses options (modèle, voix…), passées telles quelles au moteur."""
+
+    engine: str
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceSettings:
+    """Les réglages vocaux résolus, défauts compris."""
+
+    mode: str = "text"
+    stt: EngineChoice = field(default_factory=lambda: EngineChoice(DEFAULT_STT))
+    tts: EngineChoice = field(default_factory=lambda: EngineChoice(default_tts()))
+    idle_unload_s: float = DEFAULT_IDLE_UNLOAD_S
+    language: str = "fr"
+    allow_download: bool = False
+    max_record_s: float = DEFAULT_MAX_RECORD_S
+    spoken_max_s: float = DEFAULT_SPOKEN_MAX_S
+    incoming_ttl_s: float = DEFAULT_INCOMING_TTL_S
+    problems: tuple[str, ...] = ()
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode == "voice"
+
+
+def _engine_choice(raw: Any, key: str, default: str, problems: list[str]) -> EngineChoice:
+    if raw is None:
+        return EngineChoice(default)
+    if isinstance(raw, str) and raw.strip():
+        return EngineChoice(raw.strip())
+    if isinstance(raw, dict):
+        name = raw.get("engine")
+        if isinstance(name, str) and name.strip():
+            return EngineChoice(name.strip(), {str(k): v for k, v in raw.items() if k != "engine"})
+    problems.append(f"voice.{key} illisible (attendu un nom de moteur ou une table avec `engine`) : {default} retenu")
+    return EngineChoice(default)
+
+
+def _check_known(kind: str, choice: EngineChoice, problems: list[str]) -> None:
+    """Un moteur hors registre est rapporté ; le choix reste, la charge dira « inconnu » le moment venu."""
+    from grimoire.voice.engines import engine_names
+
+    known = engine_names(kind)  # type: ignore[arg-type]
+    if choice.engine not in known:
+        problems.append(f"voice.{kind}={choice.engine!r} inconnu (connus : {', '.join(known)})")
+
+
+def settings_from_mapping(data: Any) -> VoiceSettings:
+    """Résout les réglages depuis le contenu de ``project-context.yaml`` (ou ``GrimoireConfig.extra``)."""
+    problems: list[str] = []
+    data = data if isinstance(data, dict) else {}
+
+    interaction = data.get("interaction")
+    if interaction is not None and not isinstance(interaction, dict):
+        problems.append(
+            f"interaction={interaction!r} doit être une table (`interaction: {{mode: voice}}`) : text retenu"
+        )
+    raw_mode = interaction.get("mode") if isinstance(interaction, dict) else None
+    mode = "text"
+    if raw_mode is not None:
+        if isinstance(raw_mode, str) and raw_mode.strip().lower() in INTERACTION_MODES:
+            mode = raw_mode.strip().lower()
+        else:
+            problems.append(f"interaction.mode={raw_mode!r} inconnu (attendu text ou voice) : text retenu")
+
+    voice = data.get("voice")
+    if voice is not None and not isinstance(voice, dict):
+        problems.append("voice doit être une table : réglages par défaut retenus")
+        voice = {}
+    voice = voice or {}
+
+    idle = voice.get("idle_unload_seconds", DEFAULT_IDLE_UNLOAD_S)
+    if isinstance(idle, bool) or not isinstance(idle, (int, float)) or idle < 0:
+        problems.append(
+            f"voice.idle_unload_seconds={idle!r} invalide (nombre ≥ 0, 0 = jamais) : {DEFAULT_IDLE_UNLOAD_S:g} retenu"
+        )
+        idle = DEFAULT_IDLE_UNLOAD_S
+
+    language = voice.get("language", "fr")
+    if not isinstance(language, str) or not language.strip():
+        problems.append(f"voice.language={language!r} invalide : fr retenu")
+        language = "fr"
+
+    allow = voice.get("allow_download", False)
+    if not isinstance(allow, bool):
+        problems.append(f"voice.allow_download={allow!r} invalide (true ou false) : false retenu")
+        allow = False
+
+    stt = _engine_choice(voice.get("stt"), "stt", DEFAULT_STT, problems)
+    tts = _engine_choice(voice.get("tts"), "tts", default_tts(), problems)
+    _check_known("stt", stt, problems)
+    _check_known("tts", tts, problems)
+
+    max_record = voice.get("max_record_seconds", DEFAULT_MAX_RECORD_S)
+    if (
+        isinstance(max_record, bool)
+        or not isinstance(max_record, (int, float))
+        or not 1 <= max_record <= MAX_RECORD_CEILING_S
+    ):
+        problems.append(
+            f"voice.max_record_seconds={max_record!r} invalide (entre 1 et {MAX_RECORD_CEILING_S:g}) : "
+            f"{DEFAULT_MAX_RECORD_S:g} retenu"
+        )
+        max_record = DEFAULT_MAX_RECORD_S
+
+    spoken = voice.get("spoken_max_seconds", DEFAULT_SPOKEN_MAX_S)
+    low, high = SPOKEN_MAX_RANGE_S
+    if isinstance(spoken, bool) or not isinstance(spoken, (int, float)) or not low <= spoken <= high:
+        problems.append(
+            f"voice.spoken_max_seconds={spoken!r} invalide (entre {low:g} et {high:g}) : {DEFAULT_SPOKEN_MAX_S:g} retenu"
+        )
+        spoken = DEFAULT_SPOKEN_MAX_S
+
+    ttl = voice.get("incoming_ttl_seconds", DEFAULT_INCOMING_TTL_S)
+    low, high = INCOMING_TTL_RANGE_S
+    if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not low <= ttl <= high:
+        problems.append(
+            f"voice.incoming_ttl_seconds={ttl!r} invalide (entre {low:g} et {high:g}) : "
+            f"{DEFAULT_INCOMING_TTL_S:g} retenu"
+        )
+        ttl = DEFAULT_INCOMING_TTL_S
+
+    return VoiceSettings(
+        mode=mode,
+        stt=stt,
+        tts=tts,
+        idle_unload_s=float(idle),
+        language=language.strip(),
+        allow_download=allow,
+        max_record_s=float(max_record),
+        spoken_max_s=float(spoken),
+        incoming_ttl_s=float(ttl),
+        problems=tuple(problems),
+    )
+
+
+def load_voice_settings(project_root: Path) -> VoiceSettings:
+    """Lit ``project-context.yaml`` à la racine du projet ; absent ou illisible, les défauts."""
+    path = project_root / "project-context.yaml"
+    if not path.is_file():
+        return VoiceSettings()
+    try:
+        from ruamel.yaml import YAML
+
+        data = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return VoiceSettings(problems=(f"project-context.yaml illisible ({type(exc).__name__}) : défauts retenus",))
+    return settings_from_mapping(data)

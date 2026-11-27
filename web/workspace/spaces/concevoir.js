@@ -60,78 +60,6 @@ const RANK_ROW = 118;
 
 // ── Styles scopés : injectés une fois, jamais dans shell.css (règle du lot) ─
 
-function injectStyles() {
-  if (document.getElementById('cv-style')) return;
-  const style = document.createElement('style');
-  style.id = 'cv-style';
-  style.textContent = `
-    .cv-projet { padding: var(--sp-4); }
-    .cv-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3); }
-    .cv-card {
-      text-align: left; border: 1px solid var(--line); border-radius: var(--r);
-      background: var(--e1); padding: var(--sp-3); cursor: pointer; display: flex;
-      flex-direction: column; gap: 6px; color: var(--ink);
-    }
-    .cv-card:hover { background: var(--e2); }
-    .cv-card[aria-selected="true"] { outline: 2px solid var(--acc); outline-offset: -2px; }
-    .cv-card h3 { margin: 0; font-size: var(--t-s); font-weight: 500; }
-    .cv-board { display: flex; gap: var(--sp-4); align-items: flex-start; }
-    .cv-board-col { flex: 1; min-width: 220px; }
-    .cv-board-col h3 { font-size: var(--t-min); color: var(--ink2); font-weight: 500; margin: 0 0 var(--sp-2); }
-    .cv-board-col .cv-cards { grid-template-columns: 1fr; }
-    .cv-graph { position: relative; min-height: 100%; padding: var(--sp-4); }
-    .cv-toolbar { position: sticky; top: 0; z-index: 6; display: flex; align-items: center;
-      gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bar);
-      border: 1px solid var(--line); border-radius: var(--r); margin-bottom: var(--sp-3); }
-    .cv-stage { position: relative; }
-    .cv-graph > .action-status:not(:empty) { margin-bottom: var(--sp-3); }
-    .cv-svg { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
-    .cv-node {
-      position: absolute; width: 190px; border: 1px solid var(--line); border-radius: var(--r);
-      background: var(--e2); padding: 8px 10px; cursor: pointer; box-shadow: var(--shadow);
-    }
-    .cv-node:hover { background: var(--e3); }
-    .cv-node[aria-selected="true"] { outline: 2px solid var(--acc); outline-offset: 1px; }
-    /* --ink2, pas --ink3 (revue 2026-09) : ce texte se pose aussi sur --e3 au
-       survol (.cv-node:hover juste au-dessus), la surface la plus claire des
-       quatre — seul --ink2 y tient 4,5:1 (voir tokens.css). */
-    .cv-node .kind { font-size: var(--t-min); text-transform: uppercase; letter-spacing: .04em; color: var(--ink2); }
-    .cv-node .label { font-size: var(--t-s); color: var(--ink); margin-top: 2px; }
-    .cv-node .ref { font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); margin-top: 2px; }
-    .cv-node.dim { opacity: .45; }
-    /* Dans la scène, sous la barre et le retour d'action : posée sur la toile,
-       elle masquait Valider, Simuler et Compiler dès qu'on l'ouvrait. */
-    .cv-palette {
-      position: absolute; top: 0; right: 0; z-index: 7; width: 220px;
-      background: var(--e1); border: 1px solid var(--line); border-radius: var(--r);
-      box-shadow: var(--shadow-tip); max-height: 70vh; display: flex; flex-direction: column;
-    }
-    .cv-palette[data-open="0"] { display: none; }
-    .cv-palette-head { display: flex; align-items: center; justify-content: space-between;
-      padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); }
-    .cv-palette-body { overflow: auto; padding: var(--sp-2); display: flex; flex-direction: column; gap: 4px; }
-    .cv-prim { text-align: left; border: 1px solid var(--line); border-radius: var(--r); background: var(--e2);
-      padding: 7px 9px; cursor: pointer; }
-    .cv-prim:hover { background: var(--e3); }
-    .cv-prim .n { font-size: var(--t-s); color: var(--ink); }
-    /* --ink2, même raison que .cv-node .kind ci-dessus : posé sur --e3 au survol. */
-    .cv-prim .d { font-size: var(--t-min); color: var(--ink2); margin-top: 2px; }
-    .cv-noeud { padding: var(--sp-4); display: flex; flex-direction: column; align-items: center; }
-    .cv-noeud .cv-graph { width: 100%; min-height: 260px; }
-    .cv-tabs { display: flex; border-bottom: 1px solid var(--line); margin-bottom: var(--sp-3); }
-    .cv-tab { padding: 0 var(--sp-2); height: 32px; background: none; border: 0; color: var(--ink2);
-      border-bottom: 2px solid transparent; cursor: pointer; font-size: var(--t-s); }
-    .cv-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--acc); font-weight: 500; }
-    .cv-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px var(--sp-2); font-size: var(--t-s); }
-    .cv-kv dt { color: var(--ink3); }
-    .cv-kv dd { margin: 0; color: var(--ink); word-break: break-word; }
-    .cv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .cv-msg { color: var(--ink2); font-size: var(--t-s); padding: var(--sp-2) 0; }
-    .cv-json { font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap;
-      background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2); }
-  `;
-  document.head.append(style);
-}
 
 // ── Petits utilitaires de rendu ─────────────────────────────────────────────
 
@@ -257,7 +185,6 @@ function renderEdgesSvg(nodes, edges, pos) {
 // ── Mount ────────────────────────────────────────────────────────────────
 
 export async function mount(root, ctx) {
-  injectStyles();
 
   // La portée de la coque (P31) : un projet ouvre directement ses blueprints,
   // « Tous les projets » la liste des projets à choisir.
@@ -536,9 +463,9 @@ export async function mount(root, ctx) {
     const open = el('button', { type: 'button', class: 'btn pri' }, 'Ouvrir le workflow →');
     open.addEventListener('click', () => zoomToWorkflow(container.id));
     ctx.inspector.replaceChildren(
-      el('h3', { style: 'margin:0 0 8px' }, container.name),
+      el('h3', { class: 'cv-ins-h' }, container.name),
       kv,
-      el('div', { style: 'margin-top:12px' }, open),
+      el('div', { class: 'cv-ins-after' }, open),
     );
   }
 
@@ -842,7 +769,7 @@ export async function mount(root, ctx) {
     if (state.dirty) {
       toolbar.append(dotWord('warn', 'modifié — non enregistré'));
     }
-    toolbar.append(el('span', { style: 'margin-right:auto' }));
+    toolbar.append(el('span', { class: 'cv-grow' }));
     const btnSave = el('button', {
       type: 'button', class: 'btn pri', 'data-action': 'save',
       text: state.dirty ? 'Enregistrer (modifié)' : 'Enregistrer',
@@ -864,7 +791,8 @@ export async function mount(root, ctx) {
     // Les nœuds sont placés en absolu : la scène qui les porte suit la barre
     // et le retour d'action dans le flux, qu'aucun message ne recouvre un nœud.
     const svg = renderEdgesSvg(bp.nodes || [], bp.edges || [], pos);
-    const stage = el('div', { class: 'cv-stage', style: `height:${svg.getAttribute('height')}px` }, svg);
+    const stage = el('div', { class: 'cv-stage' }, svg);
+    stage.style.height = `${svg.getAttribute('height')}px`;
     graph.append(stage);
     for (const node of bp.nodes || []) {
       const p = pos.get(node.id) || { x: 0, y: 0 };
@@ -873,13 +801,14 @@ export async function mount(root, ctx) {
         'div',
         {
           class: 'cv-node', tabindex: '0', 'aria-selected': String(node.id === state.selectedNodeId),
-          style: `left:${p.x}px; top:${p.y}px`,
         },
         el('div', { class: 'kind' }, term('noeud', node.role || node.kind || 'nœud')),
         el('div', { class: 'label', text: node.label || node.id }),
         el('div', { class: 'ref mono', text: node.ref || '(sans référence)' }),
         nodeLint.errors.length ? el('div', {}, dotWord('bad', `${nodeLint.errors.length} erreur(s)`)) : null,
       );
+      box.style.left = `${p.x}px`;
+      box.style.top = `${p.y}px`;
       box.addEventListener('click', () => { state.selectedNodeId = node.id; render(); });
       box.addEventListener('dblclick', () => zoomToNode(node.id));
       box.addEventListener('keydown', (event) => { if (event.key === 'Enter') zoomToNode(node.id); });
@@ -908,8 +837,8 @@ export async function mount(root, ctx) {
         const open = el('button', { type: 'button', class: 'btn pri' }, 'Ouvrir le nœud →');
         open.addEventListener('click', () => zoomToNode(node.id));
         ctx.inspector.replaceChildren(
-          el('h3', { style: 'margin:0 0 8px', text: node.label || node.id }),
-          el('div', { style: 'margin-bottom:10px' }, open),
+          el('h3', { class: 'cv-ins-h', text: node.label || node.id }),
+          el('div', { class: 'cv-ins-open' }, open),
         );
         return;
       }
@@ -924,7 +853,7 @@ export async function mount(root, ctx) {
         : '—'),
     );
     ctx.inspector.replaceChildren(
-      el('h3', { style: 'margin:0 0 8px', text: bp.name || bp.id }),
+      el('h3', { class: 'cv-ins-h', text: bp.name || bp.id }),
       el('p', { class: 'cv-msg', text: bp.description || '' }),
       kv,
     );
@@ -958,13 +887,16 @@ export async function mount(root, ctx) {
     graph.append(renderEdgesSvg(neighbors, neighborEdges, pos));
     for (const n of neighbors) {
       const p = pos.get(n.id) || { x: 0, y: 0 };
-      graph.append(el(
+      const box = el(
         'div',
-        { class: 'cv-node' + (n.id === node.id ? '' : ' dim'), 'aria-selected': String(n.id === node.id), style: `left:${p.x}px; top:${p.y}px` },
+        { class: 'cv-node' + (n.id === node.id ? '' : ' dim'), 'aria-selected': String(n.id === node.id) },
         el('div', { class: 'kind' }, n.role || n.kind || 'nœud'),
         el('div', { class: 'label', text: n.label || n.id }),
         el('div', { class: 'ref mono', text: n.ref || '(sans référence)' }),
-      ));
+      );
+      box.style.left = `${p.x}px`;
+      box.style.top = `${p.y}px`;
+      graph.append(box);
     }
     root.replaceChildren(el('div', { class: 'cv-noeud' }, graph));
     renderNodeInspector(node);
@@ -1023,7 +955,7 @@ export async function mount(root, ctx) {
     }
 
     ctx.inspector.replaceChildren(
-      el('h3', { style: 'margin:0 0 8px', text: node.label || node.id }),
+      el('h3', { class: 'cv-ins-h', text: node.label || node.id }),
       tabsRow, body,
     );
   }

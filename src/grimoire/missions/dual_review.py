@@ -129,6 +129,10 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/breaker.py", "src/grimoire/missions/launcher.py", "src/grimoire/missions/arbiter.py",
     "src/grimoire/missions/orchestrator_policy.py", "src/grimoire/hosts/decisions/*",
     "src/grimoire/flows/attestation.py",
+    # le gate d'exigence de la MOA (#1342, M3) : le lanceur le consulte, et un worker ne réécrit pas ce qui l'oppose
+    "src/grimoire/missions/requirement_gate.py", "src/grimoire/missions/requirement_gate/*",
+    # … et le module que le gate importe au chargement (le texte validé, affichage seulement)
+    "src/grimoire/missions/requirement_text.py",
     # … et ce qui le remplacerait sans le toucher : un paquet du même nom l'emporte sur le module à l'import, et
     # ``missions/__init__.py`` s'exécute avant chacun d'eux
     "src/grimoire/missions/__init__.py",
@@ -155,9 +159,15 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/provider_failure.py", "src/grimoire/missions/questions.py",
     "src/grimoire/missions/verifiability.py", "src/grimoire/missions/waiting.py",
     "src/grimoire/missions/worker_provider.py", "src/grimoire/missions/sensitive_route.py",
+    "src/grimoire/missions/model_routing.py",
     "src/grimoire/missions/worker_host.py", "src/grimoire/missions/worker_lifecycle.py",
     "src/grimoire/missions/worker_guard.py", "src/grimoire/missions/gemini_host.py",
     "src/grimoire/missions/gemini_lifecycle.py",
+    # … le plafond de sessions par jour du relecteur et du merger : un worker ne réécrit pas la borne qui le contient
+    "src/grimoire/missions/session_cap.py",
+    # … et la consommation et les règles d'usage : le tick lève une pause par ``lift_day_pauses`` et l'admission dépend
+    # de ``quota_usage`` ; un worker ne réécrit pas ce qui borne ses propres lancements
+    "src/grimoire/missions/usage_rules.py", "src/grimoire/missions/quota_usage.py",
     # … hors de missions/ : les flows d'autonomie, la preuve, l'hôte, les schémas de pont, le transcript de session
     "src/grimoire/flows/autonomy.py", "src/grimoire/evidence/service.py", "src/grimoire/hosts/host_version.py",
     "src/grimoire/hosts/sync.py", "src/grimoire/hosts/model_table.py", "src/grimoire/bridges/schemas.py",
@@ -166,6 +176,18 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/__init__.py", "src/grimoire/core/__init__.py", "src/grimoire/flows/__init__.py",
     "src/grimoire/evidence/__init__.py", "src/grimoire/hosts/__init__.py", "src/grimoire/bridges/__init__.py",
     "src/grimoire/tools/__init__.py",
+    # les gestes d'autorité : la recette de la MOA, et les routes du cockpit qui exigent la clé de contrôle (mandat,
+    # pilote automatique, fournisseurs, acceptation en lot) avec leur point de passage commun (clé, pas de dictée)
+    "src/grimoire/missions/moa_acceptance.py", "src/grimoire/tools/human_gesture.py",
+    "src/grimoire/tools/workspace_routes.py", "src/grimoire/tools/workspace_pilotage.py",
+    "src/grimoire/tools/workspace_providers_write.py", "src/grimoire/tools/workspace_accept_merged.py",
+    "src/grimoire/cli/cockpit_write_target.py", "src/grimoire/voice/dictation.py",
+    # … le jeton de session et ce qui le sert, l'exige ou le pose : la garde d'écriture, les serveurs du cockpit
+    "src/grimoire/tools/request_guard.py", "src/grimoire/tools/workspace_write_guard.py",
+    "src/grimoire/tools/page_security.py", "src/grimoire/tools/forge_http.py", "src/grimoire/cli/cmd_cockpit.py",
+    # … les commandes de validation et de recette de la MOA, la lecture des exigences qu'elles scellent, et la sécurité
+    # de la voix (ce qui décide qu'un texte est dicté)
+    "src/grimoire/cli/cmd_cadrage.py", "src/grimoire/core/cadrage_requirements.py", "src/grimoire/voice/safety.py",
 )
 
 #: Les chemins réservés qu'une double relecture peut juger : le reste de

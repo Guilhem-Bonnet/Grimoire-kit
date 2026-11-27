@@ -1,0 +1,13 @@
+.pj { margin-top: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-3); }
+.pj-h { margin: 0; font-size: var(--t-s); font-weight: 600; }
+.pj-empty { margin: 0; color: var(--ink2); }
+.pj-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.pj-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); padding: var(--sp-3) var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-2); }
+.pj-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.pj-time { color: var(--ink3); font-size: var(--t-min); white-space: nowrap; }
+.pj-kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); margin: 0; }
+.pj-kv dt, .pj-kv dd { margin: 0; padding: var(--sp-1) 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
+.pj-kv dt { color: var(--ink3); }
+.pj-foot { display: flex; align-items: center; gap: var(--sp-3); }
+.pj-done, .pj-status { color: var(--ink2); font-size: var(--t-min); }

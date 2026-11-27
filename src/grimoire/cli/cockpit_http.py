@@ -10,6 +10,9 @@ import contextlib
 import gzip
 import hashlib
 import json
+import os
+import sys
+import threading
 from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
@@ -104,13 +107,53 @@ def send_json(handler: Any, code: int, payload: dict[str, object], *, etag: bool
     handler.wfile.flush()
 
 
-def warm_sheet(root: Path) -> None:
-    """Chauffe les caches de ``sheet`` et de ``tasks`` ; un échec ne coûte que la chauffe."""
-    with contextlib.suppress(Exception):
-        from grimoire.tools import workspace_api
+#: Priorité du fil de chauffe (Linux seulement : le « nice » y est propre à chaque fil) : les requêtes passent avant.
+_WARM_NICE = 5
 
-        workspace_api.sheet_view(root)
-        workspace_api.tasks_view(root)
+
+def _lower_priority() -> None:
+    """Rend ce fil moins prioritaire quand la plate-forme sait le faire fil par fil ; sinon, ne fait rien."""
+    if sys.platform.startswith("linux"):
+        with contextlib.suppress(OSError, AttributeError):
+            os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), _WARM_NICE)
+
+
+def warm_sheet(root: Path, stop: threading.Event | None = None) -> None:
+    """Chauffe le journal des traces, puis les caches de ``sheet`` et de ``tasks`` ; un échec ne coûte que la chauffe.
+
+    Le premier parcours complet du journal (97 Mo, ~3 s) se paie ici, en premier, plutôt qu'à la première
+    requête : ``attention``, ``agents`` et ``propositions`` s'y disputent le même verrou
+    (``journal_cache``), donc une requête qui arrive pendant le parcours attend celui-ci au lieu d'en lancer
+    un second. Vient ensuite la Flotte (``cockpit_warm.warm_fleet`` : projet courant, puis vue globale), pour que
+    sa première ouverture soit servie à chaud. *stop* annule la suite entre deux étapes (l'étape en cours, elle,
+    se termine) ; l'échec d'une étape n'empêche pas les suivantes.
+    """
+    cancelled = stop.is_set if stop is not None else (lambda: False)
+    with contextlib.suppress(Exception):
+        _lower_priority()
+        from grimoire.cli.cockpit_warm import warm_fleet
+        from grimoire.tools import workspace_api
+        from grimoire.tools.workspace_pulse import TRACES_RELPATH
+        from grimoire.traces.journal_cache import load_trace_journal
+
+        for step in (
+            lambda: load_trace_journal(root / TRACES_RELPATH),
+            lambda: workspace_api.sheet_view(root),
+            lambda: workspace_api.tasks_view(root),
+            lambda: warm_fleet(root, stop),
+        ):
+            if cancelled():
+                return
+            with contextlib.suppress(Exception):
+                step()
+
+
+def start_warm(root: Path | None) -> threading.Event:
+    """Lance une seule chauffe en arrière-plan pour *root* (rien si ``None``) ; l'événement rendu l'annule."""
+    stop = threading.Event()
+    if root is not None:
+        threading.Thread(target=warm_sheet, args=(root, stop), name="cockpit-warm", daemon=True).start()
+    return stop
 
 
 def serve_asset(self: Any, target: Path) -> None:

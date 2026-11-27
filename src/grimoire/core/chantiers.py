@@ -42,6 +42,7 @@ __all__ = [
     "new_chantier",
     "reachable_states",
     "read_chantier",
+    "record_write",
     "set_state",
     "slugify",
 ]
@@ -83,9 +84,19 @@ def _now() -> str:
 
 
 def slugify(titre: str) -> str:
-    """Minuscules ASCII, chiffres et tirets, au plus :data:`MAX_SLUG` caractères."""
+    """Minuscules ASCII, chiffres et tirets, au plus :data:`MAX_SLUG` caractères, coupé à une limite de mot.
+
+    Un titre trop long n'est pas tranché au milieu d'un mot : on s'arrête au dernier tiret qui tient (un seul mot plus
+    long que la limite est tranché net, faute de mieux).
+    """
     folded = unicodedata.normalize("NFKD", titre).encode("ascii", "ignore").decode("ascii").lower()
-    return re.sub(r"[^a-z0-9]+", "-", folded).strip("-")[:MAX_SLUG].strip("-")
+    slug = re.sub(r"[^a-z0-9]+", "-", folded).strip("-")
+    if len(slug) <= MAX_SLUG:
+        return slug
+    if slug[MAX_SLUG] == "-":  # la coupure tombe déjà entre deux mots
+        return slug[:MAX_SLUG]
+    head = slug[:MAX_SLUG]
+    return head.rpartition("-")[0] or head
 
 
 def _check_slug(slug: str) -> str:
@@ -140,12 +151,14 @@ def read_chantier(root: Path, slug: str | None = None) -> Chantier:
     progress = _progress(root, None if default else slug)
     path = directory / CHANTIER_FILE
     if not path.is_file():
-        if not default:
+        if not default and not _listed_without_yaml(root, name):
             raise GrimoireValidationError(f"chantier inconnu : {name!r}")
-        report = status(root)
+        # Défaut, ou chantier nommé créé par ``cadrage init -c`` : pas de chantier.yaml, l'état se déduit des phases.
+        report = status(root, None if default else name)
         started = any(r["state"] in ("partiel", "rempli") for r in report["phases"])
         return Chantier(
-            DEFAULT_CHANTIER, "Principal", "en-discussion" if started else "idee", progress=progress, default=True,
+            DEFAULT_CHANTIER if default else name, "Principal" if default else name,
+            "en-discussion" if started else "idee", progress=progress, default=default,
         )
     try:
         data = _read_yaml(path)
@@ -166,10 +179,38 @@ def has_only_named_chantiers(root: Path) -> bool:
     base = root / CADRAGE_DIR
     if not base.is_dir() or any((base / p.filename).is_file() for p in PHASES):
         return False
-    return any(child.is_dir() and (child / CHANTIER_FILE).is_file() for child in base.iterdir())
+    return any(_is_named_chantier(child) for child in base.iterdir())
 
 
-def _mtime(path: Path) -> float:
+def _has_phase_file(directory: Path) -> bool:
+    """Vrai si *directory*, sous-dossier réel de ``_grimoire/cadrage/`` au slug valide et qui n'est pas un lien
+    symbolique, porte au moins un fichier de phase (``cadrage init -c``)."""
+    name = directory.name
+    if name == DEFAULT_CHANTIER or not _SLUG_RE.match(name) or len(name) > MAX_SLUG or directory.is_symlink():
+        return False
+    return directory.is_dir() and any((directory / p.filename).is_file() for p in PHASES)
+
+
+def _listed_without_yaml(root: Path, name: str) -> bool:
+    """Le nom vient de la liste réelle des sous-dossiers, jamais de l'entrée : un slug hostile ne forme aucun chemin."""
+    base = root / CADRAGE_DIR
+    return base.is_dir() and any(child.name == name and _has_phase_file(child) for child in base.iterdir())
+
+
+def _is_named_chantier(directory: Path) -> bool:
+    """Un chantier nommé existe par son ``chantier.yaml`` (``new``) ou, à défaut, par un fichier de phase
+    (``init -c``, versions publiées jusqu'à 3.122.0) : la lecture ne l'écrit pas."""
+    return directory.is_dir() and ((directory / CHANTIER_FILE).is_file() or _has_phase_file(directory))
+
+
+def _mtime(directory: Path) -> float:
+    """La date du ``chantier.yaml`` ; sans lui, celle du fichier de phase le plus récent."""
+    if (directory / CHANTIER_FILE).is_file():
+        return _stamp(directory / CHANTIER_FILE)
+    return max((_stamp(directory / p.filename) for p in PHASES), default=0.0)
+
+
+def _stamp(path: Path) -> float:
     try:
         return path.stat().st_mtime
     except OSError:
@@ -185,8 +226,8 @@ def list_chantiers(root: Path) -> list[Chantier]:
         out.append(read_chantier(root))
     if not base.is_dir():
         return out
-    named = [c for c in base.iterdir() if c.is_dir() and (c / CHANTIER_FILE).is_file()]
-    named.sort(key=lambda c: (-_mtime(c / CHANTIER_FILE), c.name))
+    named = [c for c in base.iterdir() if _is_named_chantier(c)]
+    named.sort(key=lambda c: (-_mtime(c), c.name))
     out.extend(read_chantier(root, c.name) for c in named)
     return out
 
@@ -200,6 +241,28 @@ def _write(root: Path, slug: str | None, current: Chantier, **changes: str) -> C
     data.update(changes)
     (directory / CHANTIER_FILE).write_text(_dump(data), encoding="utf-8")
     return read_chantier(root, slug)
+
+
+def record_write(root: Path, slug: str, etat: str | None = None) -> Chantier | None:
+    """Note qu'une écriture de l'Atelier a touché le chantier : ``modifie`` est remis à maintenant.
+
+    ``etat`` ne fait qu'AVANCER (jamais reculer, jamais depuis ``livre`` ou ``archive``, jamais vers l'un d'eux) : l'état
+    suit les faits, un état posé à la main plus loin est respecté. ``principal`` sans ``chantier.yaml`` n'en reçoit pas ici
+    (on ne lui en crée un que par une action explicite) ; rend ``None`` dans ce cas, et si le chantier est illisible.
+    Ne se lit jamais d'une lecture : l'appelant est une écriture réussie.
+    """
+    name = None if slug == DEFAULT_CHANTIER else _check_slug(slug)
+    try:
+        current = read_chantier(root, name)
+    except GrimoireValidationError:
+        return None
+    if current.error or (current.default and not (cadrage_dir(root, None) / CHANTIER_FILE).is_file()):
+        return None
+    changes: dict[str, str] = {}
+    if etat in ETATS and current.etat in ETATS and ETATS.index(etat) > ETATS.index(current.etat) \
+            and current.etat not in ("livre", "archive") and etat not in ("livre", "archive"):
+        changes["etat"] = etat
+    return _write(root, name, current, **changes)
 
 
 def new_chantier(root: Path, titre: str, *, slug: str | None = None, mission: str = "") -> Chantier:

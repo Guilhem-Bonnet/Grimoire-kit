@@ -122,6 +122,208 @@ Code de sortie 1 quand une exigence reste sans critère vérifiable ou en confli
 Corriger le fichier suffit à rendre une question caduque, sans réponse
 fabriquée.
 
+## De l'exigence au code, et retour : `grimoire cadrage trace`
+
+`grimoire cadrage trace [REQ-001] [--json]` rend, pour chaque exigence, la chaîne
+entière : validation par la MOA, tâches rattachées (`task add --requirement`),
+commits et PR, fichiers touchés (dont les tests), preuves, recette. Lecture
+seule, rien n'est stocké : tout est dérivé du cadrage, du journal d'autorité, du
+ledger (`task.worktree_created`, `task.merged`, `task.merged_externally`) et de
+git. Une exigence est *proposée*, *validée*, *en cours*, *livrée* ou *recette
+prononcée*. Trois trous sont dits : exigence validée sans tâche, tâche livrée
+sans preuve, exigence sans critère.
+
+```text
+$ grimoire cadrage trace
+REQ-001 — Camille reçoit un rappel par mail la veille de l'arrosage proposée
+  modifiée depuis la validation — formulation : « … le jour d'arrosage » → « … la veille de l'arrosage »
+    tâches concernées : GAO-req-001-rapp-001
+    fichiers concernés : src/rappel.py, tests/test_rappel.py
+  tâche GAO-req-001-rapp-001 (proposed) — 1 commit(s), 2 fichier(s)
+REQ-002 — export CSV des plantes validée
+  trou : exigence validée sans tâche — REQ-002 est validée par la MOA mais aucune tâche ne la sert
+```
+
+Le sens inverse : `grimoire cadrage trace --file src/rappel.py` rend les
+exigences servies par ce fichier, via les commits des tâches rattachées ; un
+fichier qu'aucune de ces tâches n'a touché est dit sans exigence.
+
+**Dérive.** La validation scelle l'empreinte du texte validé (formulation,
+priorité, critères, périmètre) et son titre. Si l'exigence a changé depuis,
+la trace la signale « modifiée depuis la validation », avec ses tâches et
+fichiers, et dit si c'est la formulation.
+
+Pour montrer *quoi* a changé, la validation range aussi le texte validé lui-même
+(priorité, formulation, critères ; 2 000 caractères au plus) dans la même entrée
+du journal d'autorité. Il ne sert qu'à l'affichage : l'empreinte reste la seule
+référence de la validation, et ce rangement ne change pas qui peut valider.
+`grimoire cadrage trace` (et sa sortie `--json`, champs `detail`, `diff` et
+`note` de `drift`) montre alors un diff court « validé → courant » (12 lignes
+au plus, `-` pour le validé, `+` pour le courant), et l'Atelier l'affiche sur
+l'exigence concernée. Une exigence validée avant cette conservation reste
+signalée en dérive sans détail, avec la phrase « validée avant la conservation
+du texte validé : la dérive est signalée sans détail » ; il suffit de la
+revalider pour que le diff apparaisse à la prochaine modification.
+
+**Rattacher un commentaire orphelin (Atelier, en test).** Quand le texte change
+et que le passage cité ne se retrouve plus, le commentaire devient orphelin et
+reste lisible avec son extrait d'origine. Sélectionne un passage du document
+(ou clique dans un bloc), puis « Rattacher ici » sur le fil : il s'ancre à la
+sélection, ou au bloc entier sans sélection, dans la même phase. Le serveur
+revérifie le passage contre le texte réel du bloc ; le fil garde dans son
+historique l'ancienne ancre, la nouvelle et la date. C'est un geste de l'écran
+(`POST …/comments/<id>` avec `action: attach`, jeton de session, refusé s'il
+vient d'une dictée) : l'agent ne peut pas rattacher, et rien ne rattache un fil
+de soi-même.
+
+Limites : un fichier « touché » par une tâche n'est pas forcément « servi » au
+sens fonctionnel ; les preuves sont celles que la MOE déclare ; un commit ou une
+branche absents du dépôt local sont signalés, jamais devinés ; une PR fusionnée
+en rebase ne remonte que son dernier commit.
+
+## L'entretien de cadrage : `grimoire cadrage interview`
+
+Le kit n'appelle aucun modèle : il tient la structure de l'entretien, l'agent
+formule les questions. `grimoire cadrage interview --chantier <nom>` (`--json`
+disponible) rend sept angles — utilisateurs et usage réel, existant à
+réutiliser, critères de réussite, hors périmètre, contraintes, risques et
+pré-mortem, alternatives plus simples — chacun *ouvert*, *couvert* ou *écarté
+avec raison*, avec son intention et deux questions d'amorce à adapter.
+
+La profondeur vient de l'intake déterministe (type, risque, périmètre) et se
+fige au premier appel : `express` (1 question par angle, 3 angles obligatoires),
+`standard` (2 questions, 5 obligatoires), `approfondi` (les 7). `--depth` la force.
+
+```bash
+grimoire cadrage interview answer utilisateurs "Les mainteneurs du kit"
+grimoire cadrage interview answer criteres --unknown   # inscrit une hypothèse à valider
+grimoire cadrage interview answer alternatives --skip "Raison de l'écart"
+```
+
+Une réponse est repliée sur une ligne (un retour à la ligne ne peut pas créer de
+titre) ; la même réponse redonnée n'est pas dupliquée. `grimoire cadrage check`
+refuse un angle obligatoire resté ouvert, écarté sans raison, d'état inconnu, ou
+un `entretien.json` illisible, invalide ou en lien symbolique.
+
+## Ce qui est déjà au dossier : `grimoire cadrage recall`
+
+`grimoire cadrage recall "<texte>" [--chantier <nom>] [--limit N] [--json]` rend
+au plus N rappels classés pour une demande, une question d'entretien ou une
+exigence en cours de rédaction, de trois sources : la **mémoire du projet**
+(décisions, incidents, conventions, par la recherche hybride lexical + vectoriel),
+les **exigences des chantiers** avec leur état (proposée, validée, livrée, recette
+prononcée) et, quand la trace les connaît, leurs tâches et fichiers, et les
+**pistes écartées et questions ouvertes** des brainstorms. Les deux dernières
+sources sont lues par une recherche lexicale simple, sans index. `--chantier`
+désigne le chantier en cours : ses propres lignes ne sont pas rappelées.
+
+`grimoire cadrage interview` ajoute à sa sortie un champ `recalls` (3 au plus,
+vide sans bruit). Un rappel est une donnée : son texte est caviardé des secrets
+et borné, il informe et ne valide rien. Si le backend vectoriel est absent ou en
+panne, le lexical répond seul et `issues` le dit. Lecture seule.
+
+```text
+$ grimoire cadrage recall "connexion par lien magique"
+  exigence (proposée) : REQ-001 l'utilisateur se connecte par lien magique — connexion:04-exigences.md
+  question ouverte (idee) : Faut-il garder une session de 30 jours après la connexion par lien magique ? — connexion:02-brainstorm.md
+  piste écartée (idee) : Authentification par mot de passe écartée : le lien magique suffit — connexion:02-brainstorm.md
+dégradé : mémoire indisponible : [GR001] No 'project-context.yaml' found in …
+```
+
+Ici le projet n'a pas de mémoire configurée : la dernière ligne le dit, les
+deux autres sources répondent. Une exigence tracée jusqu'au code ajoute une
+ligne `code : tâches … ; fichiers …`.
+
+## Sortir le cadrage du projet : `grimoire cadrage export`
+
+`grimoire cadrage export [--chantier <nom>] --out <dossier> [--json]` écrit un
+chantier en **lot portable**, lisible sans Grimoire : des fichiers Markdown à
+en-tête YAML (`name`, `description`, `type`), reliés par des liens relatifs et un
+`index.md`, dans la forme de l'Open Knowledge Format v0.1. C'est un format
+d'**échange** : le lot se montre, se transmet, se vérifie ; il ne se réimporte pas
+et ne remplace ni le cadrage ni la mémoire.
+
+- `index.md` : titre, état du chantier, date, version du kit, sommaire lié ;
+- `phases/<phase>.md` : les cinq phases (corps tel quel, en-tête remplacé) ;
+- `requirements/REQ-nnn.md` : une fiche par exigence : priorité, état, validation
+  MOA (qui, quand), « modifiée depuis la validation » le cas échéant, critères,
+  tâches liées, fichiers touchés, recette, liens vers les phases et les fiches citées ;
+- `decisions.md` : pistes écartées et questions ouvertes du brainstorm, suggestions
+  acceptées et refusées avec leur motif (si le magasin existe) ;
+- `manifest.json` (`grimoire-cadrage-export/v1`) : l'empreinte SHA-256 de chaque
+  fichier et l'empreinte globale du lot.
+
+`grimoire cadrage export --verify <dossier>` relit le manifeste et rend le code 1
+si un fichier est altéré, manquant, ou ajouté après coup. Lecture seule sur le
+projet : rien n'est écrit au ledger, au journal d'autorité ni au cadrage. Le lot
+est caviardé des secrets, sans chemin absolu ni nom d'utilisateur de la machine,
+et ses noms de fichiers viennent d'identifiants (`REQ-001`), jamais d'un titre.
+Le dossier de sortie doit être neuf ou vide (`--force` n'écrase que les fichiers du
+lot et ne supprime rien) ; deux exports du même état donnent le même lot, hors la
+date (`--date AAAA-MM-JJ` la fixe).
+
+```text
+$ grimoire cadrage export --out lot --date 2026-11-25
+lot exporté — 10 fichier(s) et le manifeste dans lot, empreinte ef757eeb…f757
+$ grimoire cadrage export --verify lot
+lot intact — 10 fichier(s) vérifiés, empreinte ef757eeb…f757
+$ find lot -type f | sort
+lot/decisions.md
+lot/index.md
+lot/manifest.json
+lot/phases/brainstorm.md
+lot/phases/brief.md
+lot/phases/cahier-des-charges.md
+lot/phases/comprehension.md
+lot/phases/exigences.md
+lot/requirements/REQ-001.md
+lot/requirements/REQ-002.md
+lot/requirements/REQ-003.md
+```
+
+Et `lot/requirements/REQ-002.md`, produite par cette commande sur un cadrage sans
+MOA déclarée :
+
+```markdown
+---
+name: "REQ-002"
+description: "le client exporte ses commandes en CSV, comme la connexion de REQ-001"
+type: "requirement"
+chantier: "principal"
+priorite: "should"
+etat: "proposée"
+validation_moa: "non validée"
+---
+
+# REQ-002 — le client exporte ses commandes en CSV, comme la connexion de REQ-001
+
+Phases : [exigences](../phases/exigences.md) · [cahier-des-charges](../phases/cahier-des-charges.md)
+
+## Critères d'acceptation
+
+- le fichier s'ouvre dans un tableur
+
+## Validation MOA
+
+Non validée : aucune MOA déclarée : aucune exigence ne peut être validée ni recettée.
+
+## Tâches liées
+
+_aucune tâche ne sert cette exigence_
+
+## Fichiers touchés
+
+_aucun fichier connu_
+
+## Recette
+
+Aucune recette prononcée (état : proposée (non validée)).
+
+## Fiches liées
+
+- [REQ-001](REQ-001.md)
+```
+
 ## Le gate, dans `standard verify`
 
 `cadrage check` (la commande) et le gate du standard (`grimoire standard
@@ -174,3 +376,18 @@ Les identifiants émis, `cadrage.gate_incomplete` et
 - [Référence CLI — Cadrage produit](../reference/cli/projet.md#cadrage-produit)
 - [Standard agentique gouverné](rendre-la-preuve-bloquante.md)
 - [Installer par needs](installer-par-besoins.md)
+
+### La nature de la demande (`--kind`)
+
+L'intake propose, avec sa raison, l'une des douze natures (nouveau projet, nouvelle
+fonctionnalité, évolution, anomalie, incident, investigation, analyse, recherche,
+maintenance, migration, sécurité, question), en français comme en anglais, sans modèle.
+`grimoire cadrage interview --kind <nature>` la corrige et rend les questions propres,
+le livrable attendu et la recette de la MOA. Une question ne déclenche aucun entretien
+et n'efface jamais un entretien déjà entamé, qui reste contrôlé. Un incident rend trois
+questions au plus et ne bloque jamais l'action immédiate : le cadrage complet est reporté
+au post-mortem, que `grimoire cadrage check` signale comme dû (« Post-mortem dû ») tant
+que les angles obligatoires restent ouverts. Une demande interrogative ou étiquetée qui
+porte un verbe d'action (« Comment ajouter un export CSV ? », « incident: ajouter… »)
+reste classée par ce verbe. Changer de nature en cours conserve les réponses déjà
+consignées.

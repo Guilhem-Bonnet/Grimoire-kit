@@ -158,6 +158,7 @@ nav:
       - Rendre la preuve bloquante: guides/rendre-la-preuve-bloquante.md
       - VS Code: guides/vscode.md
       - Serveur MCP: guides/mcp.md
+      - Skills servis par MCP: guides/mcp-skills.md
       - SDK Python: guides/sdk-python.md
       - Extensions: guides/extensions.md
       - Développer un plugin: guides/developper-un-plugin.md
@@ -165,6 +166,7 @@ nav:
       - Choisir un archétype: guides/choisir-un-archetype.md
       - Catalogue d'expertises: guides/expertises.md
       - Cadrage produit: guides/cadrage-produit.md
+      - Du besoin à la recette: guides/du-besoin-a-la-recette.md
       - Travail en équipe: guides/travail-en-equipe.md
       - L'atelier de blueprints: guides/atelier-blueprints.md
       - Évaluer un flow: guides/evaluer-un-flow.md
@@ -190,6 +192,7 @@ nav:
       - API Python: reference/api.md
       - API de l'observatoire: reference/observatoire.md
       - Surfaces hôtes: reference/hotes.md
+      - Atelier de spec, modèle du kit: reference/atelier-modele.md
       - Contrôles gouvernés: standard/controles-gouvernes.md
       - Flows (généré): nodal/reference/
       - Glossaire: glossaire.md
@@ -198,6 +201,7 @@ nav:
       - explications/index.md
       - Le tableau de bord: explications/le-tableau-de-bord.md
       - Les tâches et les sessions: explications/les-taches-et-sessions.md
+      - MOA et MOE, les rôles du projet: explications/moa-moe.md
       - La mémoire du projet: explications/memoire.md
       - Le contrôle des preuves:
           - standard/index.md

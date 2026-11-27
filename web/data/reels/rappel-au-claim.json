@@ -14,9 +14,9 @@
     "grimoire task add \"Ecrire la doc du CLI\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
     "grimoire task recall GAO-ecrire-la-do-002"
   ],
-  "kit_version": "3.104.0",
-  "recorded_at": "2026-11-23T18:52:42Z",
-  "output_sha256": "bb5733b464881e775e701d937b50abcfb6ccbbc95057c931cc87cb4b455d69ba",
+  "kit_version": "3.122.0",
+  "recorded_at": "2026-11-26T19:36:07Z",
+  "output_sha256": "93a64f4c4b562a0866d3ce5779422da2916eca8c6b863c8515898d6c359d0432",
   "frames": [
     {
       "kind": "run",
@@ -28,19 +28,19 @@
       "kind": "run",
       "command": "grimoire task claim GAO-ecrire-la-do-001",
       "exit_code": 0,
-      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (ready → claimed) · V0 → haiku"
+      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (ready → claimed) · V0 → modèle de sous-agent :\nhaiku"
     },
     {
       "kind": "run",
       "command": "grimoire task move GAO-ecrire-la-do-001 --to running",
       "exit_code": 0,
-      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (claimed → running) · V0 → haiku"
+      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (claimed → running) · V0 → modèle de sous-agent :\nhaiku"
     },
     {
       "kind": "run",
       "command": "grimoire task move GAO-ecrire-la-do-001 --to needs_verification",
       "exit_code": 0,
-      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (running → needs_verification) · V0 → haiku"
+      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (running → needs_verification) · V0 → modèle de\nsous-agent : haiku"
     },
     {
       "kind": "write",
@@ -58,7 +58,7 @@
       "kind": "run",
       "command": "grimoire task close GAO-ecrire-la-do-001",
       "exit_code": 0,
-      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (needs_verification → closed) · V0 → haiku"
+      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (needs_verification → closed) · V0 → modèle de\nsous-agent : haiku"
     },
     {
       "kind": "run",

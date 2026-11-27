@@ -1,0 +1,44 @@
+---
+audience: utilisateur
+---
+
+# Mode vocal : ce que la voix peut faire, et ce qu'elle ne fait jamais
+
+Le mode vocal (`interaction: {mode: voice}` dans `project-context.yaml`) ajoute au chat du cockpit un bouton « Dicter » et des messages parlés. Il sert à saisir et à écouter, pas à décider.
+
+## Ce que la voix fait
+
+- **Dicter un message** : l'enregistrement est transcrit localement, le texte s'affiche dans la saisie, corrigeable, puis part à l'orchestrateur avec la mention « dictée vocale, erreurs de reconnaissance possibles ». La mention n'est ajoutée que si le texte envoyé contient encore la dictée : un texte entièrement retapé au clavier part sans elle. Un envoi refusé rend le texte à la saisie avec sa mention.
+- **Répondre à une question que le pilote a reportée** : la réponse dictée part telle quelle, sans mention collée, pour que l'option soit reconnue.
+- **Écouter un résumé** : l'orchestrateur termine sa réponse par un message parlé court ; le détail reste à l'écran.
+
+## Ce que la voix ne fait jamais
+
+- **Aucune approbation.** Une demande de permission de l'agent (outil, fichier, commande, fusion, suppression) se tranche par un clic à l'écran, et seulement ainsi. Tant qu'une demande attend, un message dicté est refusé, même « oui », « autorise » ou « approve ». Une question de nature permission ou fusion, ou d'une catégorie réservée à l'humain (identifiants, secrets, dépense, données utilisateur, mandat, réglages du dépôt, fusion, publication, déploiement, autorisation), ne se tranche pas non plus par une dictée : répondez au clavier ou par un clic.
+- Le message parlé d'une permission suit un gabarit fixe : « la confirmation se fait à l'écran », la nature de l'outil, le nom du programme lancé (seulement s'il figure dans la liste fermée `KNOWN_PROGRAMS` de `voice/safety.py` : git, gh, uv, pip, python, node, npm, make, docker, ls, rm, grimoire…, sinon « un programme » ; une enveloppe comme `sudo`, `doas`, `env`, `timeout`, `nice`, `exec`, un shell avec un drapeau court contenant `c` (`bash -c`, `zsh -lc`) ou un interpréteur avec code en ligne (`python -c`, `node -e`, `perl -e`, `ruby -e`) est dite « par l'intermédiaire de sudo », sans lire la suite ; le drapeau de code en ligne est cherché dans toute la suite d'options (`bash --norc -c`, `node --eval`, `node -p`) ; une commande qui enchaîne hors guillemets (`|`, `;`, `&&`, `||`, `$(`, apostrophe inverse) est dite « une suite de commandes », sans nom de programme) et l'extension du fichier visé (liste fermée `KNOWN_EXTENSIONS` : .py, .js, .json, .md…, sinon « un fichier »), puis « cliquez à l'écran ». Ni le titre, ni les explications, ni la commande complète, ni le nom du fichier, tous rédigés par l'agent, ne sont lus : le détail est à l'écran.
+- **Le serveur reconnaît lui-même une dictée.** `voice/transcribe` rend, avec le texte, un jeton opaque (`dictation_token`) ; le serveur retient en mémoire seulement le texte transcrit, lié au projet (chemin résolu) et à la session du cockpit, 5 minutes, 16 transcriptions au plus par projet et session (256 au total) ; l'expiration est appliquée par toute lecture et à l'ouverture du service vocal. Le texte est normalisé : caractères de format Unicode invisibles retirés (espace sans chasse, marques bidi), NFKC, minuscules, mots seuls ; casse et ponctuation ne comptent pas. À l'envoi (`chat/send`, réponse à une question, `chat/permission`), un texte est traité comme dicté si la page envoie le marqueur `dictation`, ou un jeton vivant de la session (`dictation_tokens`, dictée corrigée ou non), ou si, sans marqueur ni jeton, il égale une transcription récente de la session ou en contient une d'au moins 12 caractères normalisés (« oui » ou « ok » dictés ne sont donc reconnus que par égalité exacte) ; un texte de plus de 200 000 caractères normalisés n'est pas fouillé et est traité comme dicté dès qu'une transcription vivante existe. Il reçoit alors la mention de dictée, et il est refusé pour une question réservée ou une permission. **Seul un envoi accepté consomme la transcription et son jeton** : après un refus, renvoyer le même texte (ou le même jeton) reste refusé jusqu'à l'expiration des 5 minutes ; pour répondre à une question réservée, cliquez, formulez la réponse autrement, ou attendez (le message de refus le dit). Limites : une dictée entièrement réécrite au clavier est une saisie au clavier ; les homoglyphes (un « o » cyrillique pour un « o » latin) ne sont pas ramenés à leur lettre ; passé les 5 minutes, ou dans une autre session ou un autre projet, la transcription est oubliée ; un client qui n'appelle jamais `voice/transcribe` n'est pas visé, c'est la saisie clavier. Ni le texte transcrit ni le jeton ne sont écrits (journal, fichier, ledger).
+- Aucun LLM ne réécrit la dictée.
+
+## Limites
+
+| Réglage | Défaut | Bornes |
+|---|---|---|
+| `voice.max_record_seconds` | 120 s | 1 à 300 s |
+| `voice.spoken_max_seconds` | 45 s | 5 à 300 s |
+| `voice.idle_unload_seconds` | 300 s | 0 = jamais |
+| `voice.incoming_ttl_seconds` | 300 s | 30 à 86 400 s |
+
+L'enregistrement accepté est un WAV PCM 16 bits, mono, à 16 kHz, d'au moins 0,1 s. Le serveur lit l'en-tête : un autre format (8 bits, 8 kHz, 44,1 kHz, stéréo, audio compressé), une taille déclarée qui ne correspond pas aux octets reçus, ou une durée au-delà du plafond est refusé avant d'atteindre le moteur. Les 300 s maximales tiennent sous le plafond du corps HTTP de la transcription (16 Mio).
+
+## Où tourne le calcul
+
+Tout tourne sur la machine, dans le processus du cockpit : reconnaissance (faster-whisper) et synthèse (Qwen3-TTS, Pocket TTS) sont locales ; seule la voix du navigateur dépend du système. Aucun modèle n'est téléchargé sans `voice.allow_download: true`. Un seul moteur de reconnaissance et un seul moteur de synthèse sont chargés pour tout le cockpit, quel que soit le nombre de projets enrôlés ; ils se déchargent après `idle_unload_seconds` sans usage. Les reconnaissances passent une à la fois pour tout le processus, les synthèses aussi : deux projets qui dictent ou écoutent en même temps attendent leur tour. Des projets aux réglages vocaux différents se partagent l'unique emplacement, qui recharge le modèle à chaque alternance.
+
+## Ce qui est gardé
+
+- L'audio entrant n'existe sur disque que le temps de la transcription : un fichier lisible par vous seul (0600) sous `_grimoire-runtime-output/voice/incoming/` dans le projet, dossier ignoré par git par son propre `.gitignore`, supprimé ensuite, y compris en cas d'échec ; le moteur reçoit les octets relus du descripteur qui a servi à l'écriture, rembobiné, jamais un chemin rejouable (un dossier parent remplacé par un lien après l'écriture ne change pas ce qui est transcrit) ; le dossier est atteint depuis un descripteur de la racine du projet, composant par composant (`O_DIRECTORY | O_NOFOLLOW` avec `dir_fd=`, parents compris : un composant remplacé par un lien après le contrôle n'est pas suivi), puis le `.gitignore`, le fichier, sa suppression et la purge se font relativement au dernier descripteur, toujours fermé, sauf là où ces moyens manquent (Windows : repli par chemin). Un fichier laissé par un arrêt brutal est purgé passé `voice.incoming_ttl_seconds`, à l'ouverture du chat et à chaque transcription ; la purge ne suit aucun lien symbolique, et un dossier vocal en lien symbolique est refusé.
+- La synthèse se fait en mémoire ; l'audio part dans la réponse au navigateur et nulle part ailleurs.
+- Le fil du chat, le ledger, les traces et le journal du cockpit ne reçoivent que du texte et des métadonnées (texte transcrit, langue, durée), jamais d'audio.
+- Les messages parlés restent en mémoire, perdus au redémarrage du cockpit.
+
+Voir aussi [Synthèse vocale par clonage](voice-clone.md).

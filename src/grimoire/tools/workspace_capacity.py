@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.missions.admission import (
     Capacity,
     Defer,
@@ -33,6 +34,7 @@ from grimoire.missions.admission import (
 )
 from grimoire.missions.pause import read_pause
 from grimoire.missions.service import TaskService
+from grimoire.missions.usage_rules import rules_report
 
 __all__ = ["REASON_LABELS", "capacity_view"]
 
@@ -45,6 +47,7 @@ REASON_LABELS: dict[str, str] = {
     "quota": "quota du jour atteint",
     "pause": "pause",
     "provider": "fournisseur différé",
+    "usage_rule": "règle d'usage franchie",
     "unknown": "inconnue",
 }
 
@@ -138,6 +141,8 @@ def _quota(capacity: Capacity, view: LedgerView) -> dict[str, Any]:
     else:
         reste = max(plafond - used.tokens, 0)
         detail = f">= {used.tokens}/{plafond} tokens consommés — {reste} restants au mieux"
+        if used.status == "partial":
+            detail += f" ; {used.unknown_sessions} session(s) sans chiffre (consommation partiellement inconnue)"
     return {"mode": "fini", "consomme": used.tokens, "plafond": plafond, "statut": used.status, "detail": detail}
 
 
@@ -168,6 +173,18 @@ def capacity_view(
     now: datetime | None = None,
     probe: Callable[[], HostReading | None] = read_host,
 ) -> dict[str, Any]:
+    """:func:`_capacity_view` dans une lecture d'affichage : le registre de fournisseurs, que le plan relit
+    64 fois, n'est lu et analysé qu'une fois par changement du fichier (#1243)."""
+    with file_memo.view_scope():
+        return _capacity_view(project_root, now=now, probe=probe)
+
+
+def _capacity_view(
+    project_root: Path,
+    *,
+    now: datetime | None = None,
+    probe: Callable[[], HostReading | None] = read_host,
+) -> dict[str, Any]:
     """L'état de l'admission pour *project_root* : WIP, réservoirs, quota, file. Lecture pure.
 
     Même plan à blanc que ``grimoire queue plan`` (routes du routeur lues, jamais
@@ -186,6 +203,7 @@ def capacity_view(
             "wip": _wip(capacity, view),
             "reservoirs": [_ci_reservoir(capacity, view), *_host_reservoirs(capacity, host), *_llm_reservoirs(capacity, view)],
             "quota": _quota(capacity, view),
+            "usage": rules_report(capacity.usage_rules, capacity.rule_issues, [], moment),
             "file": [],
             "exclues": [],
             "famine": [],
@@ -207,6 +225,7 @@ def capacity_view(
             *_llm_reservoirs(capacity, plan.view),
         ],
         "quota": _quota(capacity, plan.view),
+        "usage": rules_report(capacity.usage_rules, capacity.rule_issues, service.ledger.list_events(), moment),
         "file": _queue(plan, titles),
         "exclues": [{"task_id": t, "titre": titles.get(t, t), "raison": r} for t, r in plan.excluded],
         "famine": [f.task_id for f in plan.famine],

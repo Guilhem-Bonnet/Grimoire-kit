@@ -24,100 +24,13 @@
 // module `revue.js`), la PR déjà sélectionnée. Aucune fusion ici : l'écran
 // de revue renvoie sur GitHub.
 
+import { moaGuide, MOA_KINDS } from './a-traiter-moa.js';
 import { copyText, glyph, kpiRow, listNav, rowActions, spaceHead } from '../shell.js';
 import { agoText } from '../live.js';
 import { mountSince } from './a-traiter-since.js';
-import { groupSections, kindsOf } from './a-traiter-group.js';
+import { groupSections } from './a-traiter-group.js';
 
-const STYLE_ID = 'at-styles';
 
-const CSS = `
-.at-wrap { display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-6); max-width: 1120px; }
-.at-formula { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); white-space: nowrap; }
-.at-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
-.at-partial { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); padding: var(--sp-2) var(--sp-4);
-  border: 1px dashed var(--line); border-radius: var(--r); color: var(--ink2); }
-.at-partial strong { color: var(--ink); font-weight: 600; }
-.at-partial .btn { margin-left: auto; }
-.at-ro { margin: 0; color: var(--ink2); }
-.at-pilot { color: var(--ink2); font-style: italic; overflow-wrap: anywhere; }
-.at-section { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow);
-  overflow: hidden; padding: var(--sp-1) 0 var(--sp-2); }
-.at-section-head { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
-.at-section-head h3 { margin: 0; font-size: var(--t-s); font-weight: 600; }
-.at-n { color: var(--rub); font-weight: 600; }
-.at-section-head .at-hint { margin-left: auto; color: var(--ink3); }
-.at-list { list-style: none; margin: 0; padding: 0; }
-.at-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(64px, auto) auto auto;
-  align-items: center; gap: 14px; padding: var(--sp-3) var(--sp-4); margin: 2px var(--sp-2);
-  border-radius: 12px; cursor: pointer; }
-.at-row:hover { background: var(--hover); }
-.at-row[aria-current="true"] { background: var(--acc-soft); }
-.at-row:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
-.at-rico { width: 32px; height: 32px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
-  background: var(--hover); color: var(--ink2); }
-.at-rico .glyph, .at-rico .glyph.warn, .at-rico .glyph.bad, .at-rico .glyph.ok { color: inherit; }
-.at-rico[data-tone="warn"] { background: var(--warn-soft); color: var(--warn); }
-.at-rico[data-tone="bad"] { background: var(--bad-soft); color: var(--bad); }
-.at-rico[data-tone="ok"] { background: var(--ok-soft); color: var(--ok); }
-.at-title, .at-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.at-reason { flex: 1 1 0; min-width: 0; text-align: left; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box;
-  -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
-.at-section[data-section="decide"] .at-reason { -webkit-line-clamp: 3; line-clamp: 3; }
-.at-head { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
-.at-head .at-title { min-width: 0; }
-.at-chips { display: flex; flex: none; gap: var(--sp-1); }
-.at-chip { padding: 0 8px; border-radius: 999px; background: var(--hover); color: var(--ink2);
-  font-size: var(--t-min); line-height: 20px; white-space: nowrap; }
-.at-tile { font: inherit; text-align: left; color: inherit; cursor: pointer; }
-.at-tile:hover { background: var(--hover); }
-.at-tile[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); }
-.at-tile:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-.at-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.at-title { font-weight: 600; }
-.at-sub { display: flex; align-items: baseline; gap: var(--sp-1); min-width: 0; color: var(--ink2); }
-.at-sub .at-project { flex: none; max-width: 40%; }
-.at-sub .at-sep { flex: none; }
-.at-since { color: var(--ink3); text-align: right; white-space: nowrap; font-size: var(--t-min); }
-.at-act { justify-self: end; text-decoration: none; white-space: nowrap; }
-.at-detail { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
-.at-eyebrow { margin: 0; font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
-.at-detail h3 { margin: 0; font-size: 21px; line-height: 1.2; font-weight: 600; overflow-wrap: anywhere; }
-.at-detail p { margin: 0; overflow-wrap: anywhere; }
-.at-lead { color: var(--ink2); font-size: 14px; line-height: 21px; }
-.at-kv { display: grid; grid-template-columns: 100px minmax(0, 1fr); margin: 0; }
-.at-kv dt, .at-kv dd { margin: 0; padding: var(--sp-2) 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
-.at-kv dt { color: var(--ink3); }
-.at-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-.at-equiv { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
-.at-refusals { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
-.at-defaults > .at-hint { margin: var(--sp-2) 0 0; color: var(--ink3); }
-.at-default-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; }
-.at-default { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) 0; border-top: 1px solid var(--line);
-  font-size: var(--t-s); overflow-wrap: anywhere; }
-.at-default-head { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
-.at-default-head .at-project { color: var(--ink3); }
-.at-default-q { color: var(--ink2); }
-.at-default-k { color: var(--ink3); margin-right: var(--sp-2); }
-.at-default-why { color: var(--ink2); }
-.at-defaults > .btn { margin-top: var(--sp-2); }
-@container canvas (max-width: 720px) {
-  .at-wrap { padding: var(--sp-4); }
-  .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
-  .at-sub { flex-wrap: wrap; column-gap: var(--sp-1); }
-  .at-sub .at-project { max-width: 100%; }
-  .at-sub .at-reason { flex-basis: 100%; }
-  .at-head { flex-wrap: wrap; row-gap: 2px; }
-  .kpi.at-tiles { display: flex; overflow-x: auto; gap: var(--sp-2); padding-bottom: 2px; scrollbar-width: none; }
-  .at-tiles .kpi-item { flex: none; flex-direction: row; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 6px 14px;
-    border-radius: 999px; }
-  .at-tiles .kpi-val { font-size: 17px; line-height: 24px; }
-  .at-tiles .kpi-sub { display: none; }
-  .at-since { grid-column: 2; text-align: left; }
-  .at-act { grid-column: 3; grid-row: 1 / span 2; }
-  .at-row .row-actions { grid-column: 2; grid-row: 3; justify-self: start; }
-}
-`;
 
 /** Chaque type d'élément (`workspace_attention.KINDS`) : son icône, son mot,
  *  le verbe de son action en ligne. Un type inconnu prend `FALLBACK`. */
@@ -189,6 +102,8 @@ function cliOf(item) {
   if (ref.task_id) return `grimoire task show ${ref.task_id}`;
   if (item.kind === 'pr_review' && ref.pr) return `gh pr view ${ref.pr}${ref.repo ? ` -R ${ref.repo}` : ''}`;
   if (ref.gesture && ref.gesture.command) return ref.gesture.command;
+  const moa = moaGuide(item);
+  if (moa) return moa.commands[0] || '';
   if (item.kind === 'checkpoint') return 'grimoire upgrade-flow review';
   return '';
 }
@@ -198,13 +113,6 @@ function cliOf(item) {
 const FOCUS = { checkpoint: 'checkpoint', proposal: 'proposal', kit_behind: 'kit', service: 'memory', service_resolved: 'memory' };
 const PROBE_FOCUS = { memory: 'memory', 'mémoire': 'memory', services: 'memory', kit: 'kit', propositions: 'proposal', checkpoints: 'checkpoint' };
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = CSS;
-  document.head.append(style);
-}
 
 function node(tag, cls, text) {
   const el = document.createElement(tag);
@@ -213,7 +121,11 @@ function node(tag, cls, text) {
   return el;
 }
 
-const kindOf = (item) => KINDS[item.kind] || FALLBACK;
+const kindOf = (item) => {
+  const moa = MOA_KINDS[item.kind];
+  if (moa) return { ...moa, word: (moaGuide(item) || moa).word };
+  return KINDS[item.kind] || FALLBACK;
+};
 /** La teinte d'une PR suit sa CI : échec en rouge, verte en vert, en cours neutre. */
 const CI_TONE = { failed: 'bad', passed: 'ok' };
 const toneOf = (item) => (item.kind === 'pr_review'
@@ -349,19 +261,49 @@ function kv(rows) {
   return list;
 }
 
+/** Qui agit, le geste attendu et les commandes exactes à lancer dans un terminal, chacune avec son bouton « copier ».
+ *  Aucun bouton ne valide ni ne recette d'ici : ces gestes exigent un terminal interactif humain. */
+function moaBlock(moa) {
+  const box = node('div', 'at-moa');
+  box.dataset.role = 'moa-guide';
+  box.dataset.stage = moa.stage;
+  box.append(kv([['Qui agit', moa.who], ['Geste attendu', moa.gesture]]));
+  for (const note of moa.notes) box.append(node('p', 'at-hint', note));
+  if (moa.commands.length) {
+    const cmds = node('div', 'at-moa-cmds');
+    cmds.append(node('span', 'at-eyebrow', 'À lancer dans un terminal'));
+    for (const command of moa.commands) {
+      const line = node('div', 'at-moa-cmd');
+      const formula = node('span', 'at-formula', command);
+      formula.dataset.role = 'moa-command';
+      const copy = node('button', 'btn', 'Copier');
+      copy.type = 'button';
+      copy.dataset.action = 'copy-command';
+      copy.setAttribute('aria-label', `Copier la commande : ${command}`);
+      copy.addEventListener('click', () => copyText(command, copy));
+      line.append(formula, copy);
+      cmds.append(line);
+    }
+    box.append(cmds);
+  }
+  return box;
+}
+
 /** Le détail de l'élément choisi, dans le panneau de droite : de quoi il
  *  s'agit, depuis quand, ce que le serveur sait de sa référence, la même
  *  action que la ligne (rien de nouveau ne s'écrit d'ici), et l'équivalent CLI. */
 function renderDetail(ctx, item) {
   const kind = kindOf(item);
   const ref = item.ref || {};
+  const moa = moaGuide(item);
   const box = node('div', 'at-detail');
   box.dataset.item = item.id;
   box.append(
     node('p', 'at-eyebrow', `${projectName(item)} · ${kind.word}`),
     node('h3', null, item.title || kind.word),
-    node('p', 'at-lead', item.reason || ''),
+    node('p', 'at-lead', moa ? moa.explain : item.reason || ''),
   );
+  if (moa) box.append(moaBlock(moa));
   if (item.pilot) {
     const held = node('p', 'at-lead at-pilot', `Pilote automatique : ${item.pilot.reason}`);
     held.dataset.role = 'pilot-reason';
@@ -397,7 +339,7 @@ function renderDetail(ctx, item) {
   box.append(actions);
   if (ctx.host.readOnly) box.append(node('p', 'at-lead', readOnlyReason(ctx)));
   const command = cliOf(item);
-  if (command) {
+  if (command && !moa) {
     const formula = node('span', 'at-formula');
     formula.append(node('b', null, '›'), command);
     const equiv = node('div', 'at-equiv');
@@ -472,7 +414,6 @@ export async function mount(root, ctx) {
       return;
     }
   }
-  injectStyles();
   const wrap = node('div', 'at-wrap');
   root.append(wrap);
 
@@ -611,10 +552,12 @@ export async function mount(root, ctx) {
         const sub = node('span', 'at-sub');
         const project = node('span', 'at-project', projectName(item));
         project.title = projectName(item);
-        const reason = node('span', 'at-reason', item.reason || '');
-        reason.title = item.reason || '';
+        const moa = moaGuide(item);
+        const reasonText = moa ? moa.gesture : item.reason || '';
+        const reason = node('span', 'at-reason', reasonText);
+        reason.title = reasonText;
         sub.append(project);
-        if (item.reason) sub.append(node('span', 'at-sep', '·'), reason);
+        if (reasonText) sub.append(node('span', 'at-sep', '·'), reason);
         // Pilote activé (P83) : ce qui reste à l'humain dit pourquoi le pilote ne le prend pas.
         const held = group.items.map((i) => i.pilot).find(Boolean);
         if (held) {
@@ -627,7 +570,7 @@ export async function mount(root, ctx) {
         const title = node('span', 'at-title', item.title || kind.word);
         title.title = item.title || '';
         const chips = node('span', 'at-chips');
-        for (const motif of kindsOf(group)) chips.append(node('span', 'at-chip', (KINDS[motif] || FALLBACK).word));
+        for (const word of new Set(group.items.map((i) => kindOf(i).word))) chips.append(node('span', 'at-chip', word));
         const head = node('span', 'at-head');
         head.append(title, chips);
         text.append(head, sub);

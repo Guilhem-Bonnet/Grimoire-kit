@@ -32,6 +32,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -44,6 +45,9 @@ else:
     pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
 from playwright.sync_api import Browser, Page, sync_playwright
+
+if TYPE_CHECKING:
+    from playwright.sync_api import BrowserContext
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -773,11 +777,15 @@ def cockpit_workspace(browser: Browser, served_cockpit: tuple[str, str]) -> Iter
         context.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def served_cockpit_upgrade(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[tuple[str, str, Path]]:
     """Un cockpit dédié, sur un projet jetable prêt à produire une proposition (#490).
+
+    Portée « module » : le test qui applique le flow (`test_workspace_cockpit_upgrade_flow`) laisse le projet à
+    jour, et l'écran de mise à jour (`..._update_screen_p44`) y trouverait « rien à écrire » s'il passait derrière
+    lui dans la même part de CI. Un projet par fichier de tests coupe cette dépendance d'ordre.
 
     Dédié plutôt que ``served_cockpit``/``real_project`` (partagés par toute
     la session) : le flow complet que ce lot branche sur le bouton (``apply``
@@ -892,10 +900,37 @@ def browser() -> Iterator[Browser]:
         except Exception as exc:  # pragma: no cover — navigateur non installé
             pytest.skip(f"Chromium absent : {exc} — `playwright install chromium`")
         else:
+            _throttle_every_page(instance)
             try:
                 yield instance
             finally:
                 instance.close()
+
+
+def _throttle_every_page(instance: Browser) -> None:
+    """Applique ``GRIMOIRE_E2E_CPU_THROTTLE`` à toute page ouverte par ``instance``, sans que chaque fichier s'en charge.
+
+    Les fichiers qui ouvrent leur propre contexte (l'Atelier, la mascotte) n'appellent pas ``throttle_cpu`` : on
+    enveloppe ``new_context`` puis ``new_page`` pour que le ralentissement soit le même partout. Sans la variable,
+    rien n'est enveloppé.
+    """
+    if float(os.environ.get("GRIMOIRE_E2E_CPU_THROTTLE", "1")) <= 1:
+        return
+    open_context = instance.new_context
+
+    def new_context(*args: Any, **kwargs: Any) -> BrowserContext:
+        context = open_context(*args, **kwargs)
+        open_page = context.new_page
+
+        def new_page() -> Page:
+            page = open_page()
+            throttle_cpu(page)
+            return page
+
+        context.new_page = new_page  # type: ignore[method-assign]
+        return context
+
+    instance.new_context = new_context  # type: ignore[method-assign]
 
 
 @pytest.fixture
@@ -914,12 +949,24 @@ def workspace(browser: Browser, served: str) -> Iterator[Page]:
         viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark"
     )
     page = context.new_page()
+    throttle_cpu(page)
     page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     try:
         yield page
     finally:
         context.close()
+
+
+def throttle_cpu(page: Page) -> None:
+    """Ralentit le processeur du navigateur si ``GRIMOIRE_E2E_CPU_THROTTLE`` > 1 (CDP, ``Emulation.setCPUThrottlingRate``).
+
+    Reproduit un runner de CI chargé : un test qui ne tient que sur un poste rapide (attente non synchronisée, seuil
+    de temps fixe) échoue alors à coup sûr au lieu de « passer à la relance ». Sans la variable, rien ne change.
+    """
+    slow = float(os.environ.get("GRIMOIRE_E2E_CPU_THROTTLE", "1"))
+    if slow > 1:
+        page.context.new_cdp_session(page).send("Emulation.setCPUThrottlingRate", {"rate": slow})
 
 
 def open_scope_all(page: Page, hash_: str = "#flotte") -> None:
@@ -941,7 +988,7 @@ def open_atelier(page: Page, on: bool = True) -> None:
     Par défaut la coque ne montre que la barre du haut, le contenu et le panneau
     de détail. Rail, explorateur, inspecteur permanent, preuves et dock se
     rouvrent par la bascule ``setAtelier`` — la même que ⇧⌘L, la palette et le
-    bouton « Atelier » du pied de page. Un test qui mesure l'un d'eux l'ouvre ici
+    bouton « Panneaux » du pied de page. Un test qui mesure l'un d'eux l'ouvre ici
     plutôt que de supposer qu'il est là.
     """
     page.evaluate("(on) => window.GrimoireWorkspace.setAtelier(on)", on)

@@ -699,6 +699,9 @@ def doctor(
             from grimoire.cli.doctor_memory import apply_memory_checks
 
             apply_memory_checks(cfg, results, fmt=fmt, console=console)
+        with _timed_phase("voice"):  # Vocal (#1343) : réglages, extra voice, moteurs — rien n'est chargé.
+            from grimoire.cli.doctor_voice import apply_voice_check
+            apply_voice_check(cfg.extra, results, fmt=fmt, console=console)
 
     # 6. Optional dependencies
     with _timed_phase("dependency_scan"):
@@ -783,18 +786,20 @@ def doctor(
     _record("python", passed=True, detail=f"Python {sys.version.split()[0]}")
 
     # 9. Summary
-    ok_count = sum(1 for r in results if r["passed"])
-    fail_count = sum(1 for r in results if not r["passed"])
+    from grimoire.cli.doctor_summary import conclusion, tally
+
+    ok_count, fail_count, warn_count = tally(results)
 
     if fmt == "json":
-        data: dict[str, Any] = {"project": str(target), "checks": results, "passed": ok_count, "failed": fail_count}
+        data: dict[str, Any] = {"project": str(target), "checks": results, "passed": ok_count, "failed": fail_count,
+                                "warnings": warn_count}
         if fixed:
             data["fixed"] = fixed
         typer.echo(json.dumps(data, indent=2))
     else:
         if fixed:
             console.print(f"\n[green]Fixed {len(fixed)} issue(s):[/green] {', '.join(fixed)}")
-        console.print(f"\n[bold]{ok_count}/{ok_count + fail_count} checks passed[/bold]")
+        console.print(f"\n[bold]{conclusion(ok_count, fail_count, warn_count)}[/bold]")
         if cfg:
             from grimoire.core.project_capabilities import discover_footer_line, unexploited_hints
 

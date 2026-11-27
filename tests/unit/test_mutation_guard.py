@@ -364,3 +364,240 @@ def test_an_accepted_write_is_journaled_by_append(
     lines = host.journal_lines()
     assert len(lines) == before + 2, "le journal n'est pas en ajout seul"
     assert all(x["verdict"] == "acceptée" for x in lines[before:])
+
+
+# ── 5. La route de décision de l'Atelier (suggestions) : seule la page décide ──────────────────────────────
+
+
+def _armed_suggestion(host: Host) -> tuple[str, Path, str]:
+    """Un chantier avec une suggestion en attente ; rend (id, fichier de phase, chemin de la route de décision)."""
+    from grimoire.core.chantiers import new_chantier
+    from grimoire.tools import workspace_atelier as wa
+    from grimoire.tools import workspace_atelier_suggestions as sugg
+
+    (host.root / "project-context.yaml").write_text("project:\n  name: demo\n", encoding="utf-8")
+    wa.set_atelier(host.root, True)
+    new_chantier(host.root, "Un")
+    phase = host.root / "_grimoire" / "cadrage" / "un" / "02-brainstorm.md"
+    phase.write_text(phase.read_text(encoding="utf-8") + "\n- Une piste\n", encoding="utf-8")
+    block = next(b for p in wa.document(host.root, "un")["phases"] for b in p["blocks"] if b["text"] == "- Une piste")
+    made = sugg.deposit(host.root, "un", {"block_id": block["id"], "texte": "- Une piste, par l'agent"})["suggestion"]
+    return str(made["id"]), phase, f"/api/workspace/atelier/chantiers/un/suggestions/{made['id']}"
+
+
+@pytest.mark.no_session_token  # le conftest pose sinon le jeton sur toute écriture : ici on prouve le refus sans lui
+@pytest.mark.parametrize("fixture_name", ["cockpit", "atelier"])
+def test_the_atelier_decision_route_refuses_everything_but_the_page(
+    fixture_name: str, request: pytest.FixtureRequest
+) -> None:
+    """Sans jeton, avec un faux, depuis une origine tierce, hors JSON, par PUT ou par GET : rien n'est écrit."""
+    from grimoire.core import atelier_suggestions as store
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    host: Host = request.getfixturevalue(fixture_name)
+    sid, phase, route = _armed_suggestion(host)
+    token = {SESSION_HEADER: session_token()}
+    accept = json.dumps({"decision": "accept"}).encode()
+    before_phase = phase.read_bytes()
+    before = host.snapshot()
+    url = f"{route}?project={host.slug}"
+    attempts = {
+        "POST sans jeton": ("POST", JSON, accept),
+        "POST jeton faux": ("POST", {**JSON, SESSION_HEADER: "pas-le-bon"}, accept),
+        "POST origine tierce": ("POST", {**JSON, **token, "Origin": EVIL}, accept),
+        "POST fetch inter-sites": ("POST", {**JSON, **token, "Sec-Fetch-Site": "cross-site"}, accept),
+        "POST hors JSON": ("POST", {"Content-Type": "text/plain", **token}, accept),
+        "PUT": ("PUT", {**JSON, **token}, accept),
+        "GET": ("GET", {}, None),
+    }
+    for label, (method, headers, body) in attempts.items():
+        code = host.request(method, url, body, headers)
+        assert code in (400, 403, 404, 405, 415, 501), f"{label} a répondu {code}"
+        assert phase.read_bytes() == before_phase, f"{label} a écrit dans la phase"
+    assert host.snapshot() == before
+    assert [s.etat for s in store.load(phase.parent)] == ["proposee"]
+    # Et la page, elle, décide : même requête avec le jeton valide.
+    assert host.request("POST", url, accept, {**JSON, **token}) == 200
+    assert b"- Une piste, par l'agent" in phase.read_bytes()
+    assert [s.etat for s in store.load(phase.parent)] == ["acceptee"]
+    assert sid
+
+
+def test_atelier_writes_leave_their_governed_trace(atelier: Host) -> None:
+    """Décision, dépôt et création de chantier passent par le journal des mutations, comme toute écriture de la vue."""
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    _sid, phase, route = _armed_suggestion(atelier)
+    headers = {**JSON, SESSION_HEADER: session_token()}
+    assert atelier.request("POST", route, json.dumps({"decision": "accept"}).encode(), headers) == 200
+    assert atelier.request("POST", "/api/workspace/atelier/chantiers", json.dumps({"titre": "Deux"}).encode(), headers) == 200
+    journal = atelier.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+    entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    routes = [e["route"] for e in entries if e["action"] == "workspace.post"]
+    assert any(r.startswith("atelier/chantiers/un/suggestions/sug-") for r in routes), routes
+    assert "atelier/chantiers" in routes
+    assert phase.read_bytes()
+
+
+def _armed_comment(host: Host) -> tuple[str, Path, str]:
+    """Un chantier avec un fil ouvert ; rend (id, magasin des commentaires, chemin de la route du fil)."""
+    from grimoire.tools import workspace_atelier as wa
+    from grimoire.tools import workspace_atelier_comments as com
+
+    _sid, phase, _route = _armed_suggestion(host)
+    block = next(b for p in wa.document(host.root, "un")["phases"] for b in p["blocks"] if b["text"] == "- Une piste")
+    made = com.create(host.root, "un", {"block_id": block["id"], "texte": "Une question"}, "humain")["comment"]
+    return str(made["id"]), phase.parent / "comments.json", f"/api/workspace/atelier/chantiers/un/comments/{made['id']}"
+
+
+@pytest.mark.no_session_token
+@pytest.mark.parametrize("fixture_name", ["cockpit", "atelier"])
+def test_the_atelier_comment_routes_refuse_everything_but_the_page(
+    fixture_name: str, request: pytest.FixtureRequest
+) -> None:
+    """Résoudre, répondre, supprimer et commenter : sans jeton, avec un faux, d'une origine tierce, hors JSON, par PUT ou GET."""
+    from grimoire.core import atelier_comments as store
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    host: Host = request.getfixturevalue(fixture_name)
+    cid, saved, route = _armed_comment(host)
+    token = {SESSION_HEADER: session_token()}
+    before_store = saved.read_bytes()
+    before = host.snapshot()
+    for target, body in (
+        (route, json.dumps({"action": "resolve"}).encode()),
+        (route, json.dumps({"action": "delete"}).encode()),
+        (route, json.dumps({"action": "reply", "texte": "x"}).encode()),
+        (route, json.dumps({"action": "attach", "block_id": "brainstorm.x"}).encode()),
+        (route.rsplit("/", 1)[0], json.dumps({"block_id": "brainstorm.x", "texte": "x"}).encode()),
+    ):
+        url = f"{target}?project={host.slug}"
+        attempts = {
+            "POST sans jeton": ("POST", JSON, body),
+            "POST jeton faux": ("POST", {**JSON, SESSION_HEADER: "pas-le-bon"}, body),
+            "POST origine tierce": ("POST", {**JSON, **token, "Origin": EVIL}, body),
+            "POST fetch inter-sites": ("POST", {**JSON, **token, "Sec-Fetch-Site": "cross-site"}, body),
+            "POST hors JSON": ("POST", {"Content-Type": "text/plain", **token}, body),
+            "PUT": ("PUT", {**JSON, **token}, body),
+        }
+        for label, (method, headers, payload) in attempts.items():
+            code = host.request(method, url, payload, headers)
+            assert code in (400, 403, 404, 405, 415, 501), f"{label} a répondu {code}"
+            assert saved.read_bytes() == before_store, f"{label} a écrit dans les commentaires"
+    assert host.snapshot() == before
+    assert [c.etat for c in store.load(saved.parent)] == ["ouvert"]
+    # Et la page, elle, tranche : même requête avec le jeton valide.
+    assert host.request("POST", f"{route}?project={host.slug}", json.dumps({"action": "resolve"}).encode(), {**JSON, **token}) == 200
+    assert [c.etat for c in store.load(saved.parent)] == ["resolu"]
+    assert cid
+
+
+def test_atelier_comment_writes_leave_their_governed_trace(atelier: Host) -> None:
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    cid, _saved, route = _armed_comment(atelier)
+    headers = {**JSON, SESSION_HEADER: session_token()}
+    assert atelier.request("POST", route, json.dumps({"action": "resolve"}).encode(), headers) == 200
+    journal = atelier.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+    entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    routes = [e["route"] for e in entries if e["action"] == "workspace.post"]
+    assert f"atelier/chantiers/un/comments/{cid}" in routes, routes
+
+
+@pytest.mark.no_session_token
+def test_the_atelier_split_is_guarded_and_leaves_its_governed_trace(atelier: Host) -> None:
+    """« Valider et découper » : refusé sans le jeton de la page, journalisé avec lui, et aucune route ne valide."""
+    from grimoire.core.cadrage import CADRAGE_DIR
+    from grimoire.core.chantiers import new_chantier
+    from grimoire.tools import workspace_atelier as wa
+    from grimoire.tools import workspace_atelier_trace as live
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    (atelier.root / "project-context.yaml").write_text("project:\n  name: demo\n", encoding="utf-8")
+    wa.set_atelier(atelier.root, True)
+    made = new_chantier(atelier.root, "Deux")
+    (atelier.root / CADRAGE_DIR / made.slug / "04-exigences.md").write_text(
+        "- REQ-001 (Could) : une idée\n  - `pytest tests/x.py`\n", encoding="utf-8"
+    )
+    route = f"/api/workspace/atelier/chantiers/{made.slug}/decoupage?project={atelier.slug}"
+    digest = live.decoupage_preview(atelier.root, made.slug)["digest"]
+    body = json.dumps({"confirm": True, "digest": digest}).encode()
+    before = atelier.snapshot()
+    assert atelier.request("POST", route, body, JSON) in (400, 403, 404)  # sans jeton
+    assert atelier.snapshot() == before
+    headers = {**JSON, SESSION_HEADER: session_token()}
+    assert atelier.request("POST", route, body, headers) == 200
+    valider = route.replace("/decoupage", "/exigences/REQ-001/valider")
+    assert atelier.request("POST", valider, json.dumps({}).encode(), headers) in (400, 403, 404)
+    journal = atelier.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+    entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    assert f"atelier/chantiers/{made.slug}/decoupage" in [e["route"] for e in entries if e["action"] == "workspace.post"]
+
+
+def _armed_restore(host: Host) -> tuple[Path, str, str, str]:
+    """Un dépôt git réel, un chantier à deux versions du brief ; rend (brief, route, empreinte lue, première version)."""
+    import os
+    import subprocess
+
+    from grimoire.core.chantiers import new_chantier
+    from grimoire.tools import atelier_blocs
+    from grimoire.tools import workspace_atelier as wa
+
+    def git(*args: str) -> str:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_AUTHOR_NAME": "A",
+                    "GIT_AUTHOR_EMAIL": "a@x", "GIT_COMMITTER_NAME": "A", "GIT_COMMITTER_EMAIL": "a@x"})
+        done = subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=host.root, capture_output=True, text=True,
+                              check=True, env=env)
+        return done.stdout.strip()
+
+    (host.root / "project-context.yaml").write_text("project:\n  name: demo\n", encoding="utf-8")
+    wa.set_atelier(host.root, True)
+    made = new_chantier(host.root, "Trois")
+    brief = host.root / "_grimoire" / "cadrage" / made.slug / "01-brief.md"
+    git("init", "-q", "-b", "main")
+    brief.write_text("# Brief\n\nPremière version.\n", encoding="utf-8")
+    git("add", "--", str(brief.relative_to(host.root)))
+    git("commit", "-q", "-m", "v1")
+    first = git("rev-parse", "HEAD")
+    brief.write_text("# Brief\n\nSeconde version.\n", encoding="utf-8")
+    fp = atelier_blocs.fingerprint(brief.read_text(encoding="utf-8"))
+    return brief, f"/api/workspace/atelier/chantiers/{made.slug}/restore", fp, first
+
+
+@pytest.mark.no_session_token
+@pytest.mark.parametrize("fixture_name", ["cockpit", "atelier"])
+def test_the_atelier_restore_route_refuses_everything_but_the_page(
+    fixture_name: str, request: pytest.FixtureRequest
+) -> None:
+    """« Restaurer cette phase » : sans jeton, avec un faux, d'une origine tierce, hors JSON, par PUT ou GET : rien n'est écrit."""
+    from grimoire.tools.request_guard import SESSION_HEADER, session_token
+
+    host: Host = request.getfixturevalue(fixture_name)
+    brief, route, fp, first = _armed_restore(host)
+    token = {SESSION_HEADER: session_token()}
+    body = json.dumps({"phase": "brief", "expected": fp, "version": first}).encode()
+    before_brief = brief.read_bytes()
+    before = host.snapshot()
+    url = f"{route}?project={host.slug}"
+    attempts = {
+        "POST sans jeton": ("POST", JSON, body),
+        "POST jeton faux": ("POST", {**JSON, SESSION_HEADER: "pas-le-bon"}, body),
+        "POST origine tierce": ("POST", {**JSON, **token, "Origin": EVIL}, body),
+        "POST fetch inter-sites": ("POST", {**JSON, **token, "Sec-Fetch-Site": "cross-site"}, body),
+        "POST hors JSON": ("POST", {"Content-Type": "text/plain", **token}, body),
+        "PUT": ("PUT", {**JSON, **token}, body),
+        "GET": ("GET", {}, None),
+    }
+    for label, (method, headers, payload) in attempts.items():
+        code = host.request(method, url, payload, headers)
+        assert code in (400, 403, 404, 405, 415, 501), f"{label} a répondu {code}"
+        assert brief.read_bytes() == before_brief, f"{label} a écrit dans la phase"
+    assert host.snapshot() == before
+    # Et la page, elle, restaure : même requête avec le jeton valide ; la trace gouvernée la nomme.
+    assert host.request("POST", url, body, {**JSON, **token}) == 200
+    assert brief.read_text(encoding="utf-8") == "# Brief\n\nPremière version.\n"
+    if fixture_name == "atelier":
+        journal = host.root / "_grimoire-runtime-output" / "hook-runtime" / "serve-mutations.jsonl"
+        entries = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+        assert route.removeprefix("/api/workspace/") in [e["route"] for e in entries if e["action"] == "workspace.post"]

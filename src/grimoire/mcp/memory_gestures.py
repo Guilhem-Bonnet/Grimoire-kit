@@ -112,3 +112,7 @@ def register(tool: Callable[[Any], Callable[[Any], Any]], writes: Callable[..., 
     from grimoire.mcp import idea_tools
 
     idea_tools.register(tool, writes)
+    # Atelier de spec (#1197) : l'agent dépose des suggestions, il ne tranche jamais.
+    from grimoire.mcp import atelier_tools
+
+    atelier_tools.register(tool, writes)

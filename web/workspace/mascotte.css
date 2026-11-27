@@ -1,0 +1,51 @@
+/* La mascotte vocale du chat (fonction en test, `cockpit.test_features.mascotte`) : une bande étroite entre le
+   fil et la saisie, le slime d'encre en petit et sa légende. Chargée à la demande par `mascotte_dock.js` : éteinte,
+   cette feuille n'est jamais demandée. Aucune police ni ressource externe.
+
+   Le slime est une encre sombre, faite pour une scène de nuit : le canevas porte donc sa propre lueur nocturne (le
+   dégradé de la scène du prototype), quel que soit le thème, comme le fil du chat reste sombre dans les deux. */
+
+.chat-mascotte {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  border-top: 1px solid var(--line, currentColor);
+  background: var(--term);
+  flex: none;
+}
+
+.chat-mascotte[hidden] {
+  display: none;
+}
+
+.chat-mascotte-canvas {
+  display: block;
+  flex: none;
+  width: 120px;
+  height: 80px;
+  border-radius: var(--r);
+  background: radial-gradient(ellipse at 50% 46%, var(--mascotte-night-1) 0%, var(--mascotte-night-2) 55%, var(--mascotte-night-3) 100%);
+}
+
+.chat-mascotte-caption {
+  color: var(--termink);
+  font-size: var(--t-s);
+}
+
+/* Sans WebGL 2 (ou shader refusé) : une pastille sobre à la place du canevas, le libellé reste. */
+.chat-mascotte-dot {
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 var(--sp-2);
+  border-radius: 50%;
+  background: var(--mascotte-night-1);
+  box-shadow: 0 0 0 2px var(--line, currentColor);
+}
+
+.chat-mascotte[data-action="question"] .chat-mascotte-dot {
+  background: var(--acc);
+}

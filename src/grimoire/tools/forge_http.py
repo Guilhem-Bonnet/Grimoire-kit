@@ -22,12 +22,12 @@ from urllib.parse import parse_qs, urlparse
 
 from grimoire.tools.ext_manager import ExtensionError
 from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
+from grimoire.tools.page_security import SecureHandlerMixin, html_page, serve_session_script
 from grimoire.tools.project_registry import DEFAULT_SCAN_DEPTH, looks_grimoire, register_project
 from grimoire.tools.request_guard import (
     check_host,
     drain_body,
     has_body,
-    inject_session_token,
     new_session_token,
 )
 from grimoire.tools.workspace_legacy import legacy_redirect_target
@@ -41,7 +41,7 @@ if TYPE_CHECKING:  # pragma: no cover - uniquement pour le typage
 __all__ = ["make_handler", "serve"]
 
 
-class _ForgeHandler(BaseHTTPRequestHandler):
+class _ForgeHandler(SecureHandlerMixin, BaseHTTPRequestHandler):
     """Transport HTTP de l'atelier — ``api`` est posée par :func:`make_handler`."""
 
     api: ForgeAPI
@@ -287,6 +287,14 @@ class _ForgeHandler(BaseHTTPRequestHandler):
         # déclare `readOnly` et n'a pas de raison de réclamer une
         # tâche ou de créer un override dans un dépôt qu'il ne sert
         # pas. Le refus y est donc un 404, pas un oubli.
+        from grimoire.tools import workspace_atelier
+
+        if path.startswith(workspace_atelier.ATELIER):  # Atelier en test : 404 drapeau, 409 bloc changé
+            code, payload = workspace_atelier.post_http(self.api.project_root, path, body)
+            if code == 200:  # même trace gouvernée que toute écriture de la vue de travail
+                self._governed_event("workspace.post", route=path[len(WORKSPACE_PREFIX):])
+            self._json(payload, code)
+            return
         result = workspace_post(self.api.project_root, path, body)
         if result is WORKSPACE_UNHANDLED:
             self._error("route inconnue", 404)
@@ -306,6 +314,14 @@ class _ForgeHandler(BaseHTTPRequestHandler):
                 saved = self.api.blueprint_put(bp_id, self._body())
                 self._governed_event("blueprint.put", id=bp_id)
                 self._json(saved)
+            elif path.startswith("/api/workspace/atelier/"):
+                from grimoire.tools import workspace_atelier  # Atelier en test : 404 tant que le drapeau est éteint
+
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                code, payload = workspace_atelier.put_http(self.api.project_root, path, self.rfile.read(length))
+                if code == 200:
+                    self._governed_event("workspace.put", route=path[len(WORKSPACE_PREFIX):])
+                self._json(payload, code)
             else:
                 self._error("route inconnue", 404)
         except (ValueError, json.JSONDecodeError) as exc:
@@ -346,6 +362,8 @@ class _ForgeHandler(BaseHTTPRequestHandler):
         if self.api.ui_dir is None:
             self._json({"grimoire": "serve", "hint": "API disponible sous /api/"}, 200)
             return
+        if serve_session_script(self, path):
+            return
         rel = path.lstrip("/")
         if rel.startswith("data/"):
             self._data_file(rel[len("data/"):])
@@ -374,13 +392,18 @@ class _ForgeHandler(BaseHTTPRequestHandler):
             ".png": "image/png", ".ico": "image/x-icon",
         }
         body = target.read_bytes()
+        security: list[tuple[str, str]] = []
         if target.suffix == ".html":
-            body = inject_session_token(body)
+            body, security = html_page(body)
         self.send_response(200)
         self.send_header(
             "Content-Type",
             content_types.get(target.suffix, "application/octet-stream"),
         )
+        for name, value in security:
+            self.send_header(name, value)
+        if security:
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

@@ -1,6 +1,7 @@
 """Contrôle ``doctor`` du mode ACP des hôtes installés (ACP3).
 
-Pour chaque hôte dont l'exécutable est présent, lance sa commande ACP et négocie
+Pour chaque hôte que le projet utilise (``hosts.enabled`` ou détecté, plus l'hôte du chat) et dont
+l'exécutable est présent, lance sa commande ACP et négocie
 ``initialize`` — rien d'autre : pas de ``session/new``, pas de prompt, donc aucun
 coût de modèle. Un hôte absent n'est pas rapporté (rien à vérifier) ; un mode qui ne
 répond pas est un avertissement, jamais une panne : le chat se replie sur le kanban.
@@ -13,9 +14,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from grimoire.acp import AcpClient, AcpError
+from grimoire.bridges.schemas import HostId
 from grimoire.cli.env_checks import EnvCheck
-from grimoire.hosts.acp_hosts import acp_availability
-from grimoire.hosts.capabilities import HostProfile, all_profiles
+from grimoire.hosts.acp_hosts import acp_availability, chosen_alias
+from grimoire.hosts.capabilities import HostProfile, all_profiles, resolve_host
+from grimoire.hosts.detection import enabled_host_ids
 
 __all__ = ["check_acp_hosts", "probe_initialize"]
 
@@ -55,7 +58,30 @@ def _check(profile: HostProfile, target: Path, probe: Probe) -> EnvCheck:
 def check_acp_hosts(target: Path, probe: Probe = probe_initialize) -> list[EnvCheck]:
     """Un contrôle par hôte installé qui déclare un mode ACP, dans l'ordre des profils."""
     installed = [p for p in all_profiles() if p.acp_command and acp_availability(p)[0]]
-    if not installed:
-        return []
-    with ThreadPoolExecutor(max_workers=len(installed)) as pool:
-        return list(pool.map(lambda p: _check(p, target, probe), installed))
+    # A host the project does not use is not probed: its agent may be installed on
+    # the machine without being set up, and a failed handshake there is neither a
+    # fault of the project nor worth a trace. The chosen chat host stays checked.
+    used = _used_hosts(target)
+    active = [p for p in installed if p.host_id in used]
+    skipped = [p.display_name for p in installed if p.host_id not in used]
+    checks: list[EnvCheck] = []
+    if active:
+        with ThreadPoolExecutor(max_workers=len(active)) as pool:
+            checks = list(pool.map(lambda p: _check(p, target, probe), active))
+    if skipped:
+        checks.append(EnvCheck(
+            "acp_unused_hosts",
+            passed=True,
+            level="info",
+            detail=f"ACP not checked for hosts this project does not use: {', '.join(skipped)}",
+        ))
+    return checks
+
+
+def _used_hosts(target: Path) -> set[HostId]:
+    """Hosts the project enables, plus the one the orchestrator chat talks to."""
+    used = enabled_host_ids(target)
+    chosen = resolve_host(chosen_alias(target))
+    if chosen is not None:
+        used.add(chosen)
+    return used

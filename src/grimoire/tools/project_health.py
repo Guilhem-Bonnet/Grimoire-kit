@@ -22,6 +22,8 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
+import time
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -161,7 +163,55 @@ def project_tool_version(project_root: Path) -> dict[str, Any]:
     binary = _declared_project_tool(project_root)
     if binary is None:
         return {"version": None, "source": None}
+    signature = _tool_signature(binary)
+    if signature is not None:
+        with _tool_lock:
+            known = _tool_versions.get(str(binary))
+        if known is not None and known[0] == signature and time.monotonic() - known[1] < _TOOL_VERSION_TTL_S:
+            return dict(known[2])
+    result = _run_tool_version(binary)
+    # Un échec n'est jamais gardé ; un binaire modifié il y a moins de 2 s non plus (même pas d'horloge).
+    if signature is not None and result["version"] is not None and signature[1]:
+        with _tool_lock:
+            _tool_versions[str(binary)] = (signature, time.monotonic(), dict(result))
+    return result
 
+
+#: Plafond de garde : filet de sécurité si une mise à jour échappe à la signature (installation éditable).
+_TOOL_VERSION_TTL_S = 30.0
+_tool_lock = threading.Lock()
+_tool_versions: dict[str, tuple[tuple[Any, bool], float, dict[str, Any]]] = {}
+
+
+def _tool_signature(binary: Path) -> tuple[Any, bool] | None:
+    """(empreintes, assez vieilles) du binaire, de sa cible, de ``pyvenv.cfg`` et des ``site-packages`` de son venv.
+
+    Une mise à jour (pip, uv) remplace un dossier ``*.dist-info`` dans ``site-packages`` : la date de ce
+    dossier bouge, donc la signature, et ``--version`` est relancé. ``None`` si un fichier ne se lit pas.
+    """
+    venv = binary.parent.parent
+    paths = [binary, binary.resolve(), venv / "pyvenv.cfg", *sorted(venv.glob("lib*/python*/site-packages")),
+             venv / "Lib" / "site-packages"]
+    stamps: list[tuple[str, int, int, int]] = []
+    now = time.time_ns()
+    old_enough = True
+    for path in paths:
+        try:
+            info = path.stat()
+        except OSError:
+            if path in (binary, binary.resolve()):
+                return None
+            continue
+        stamps.append((str(path), info.st_mtime_ns, info.st_size, info.st_ino))
+        if now - info.st_mtime_ns <= _COARSE_CLOCK_NS:
+            old_enough = False
+    return tuple(stamps), old_enough
+
+
+_COARSE_CLOCK_NS = 2_000_000_000
+
+
+def _run_tool_version(binary: Path) -> dict[str, Any]:
     try:
         proc = subprocess.run(
             [str(binary), "--version"],

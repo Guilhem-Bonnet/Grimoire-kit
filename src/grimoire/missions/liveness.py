@@ -52,6 +52,7 @@ __all__ = [
     "attention",
     "claimed_at",
     "git_commit_at",
+    "git_commit_times",
     "label",
     "last_sign",
     "liveness",
@@ -316,6 +317,40 @@ def git_commit_at(project_root: Path, task_id: str, *, run: Callable[..., Any] =
     except (OSError, subprocess.SubprocessError):
         return None
     return parse_instant(done.stdout.strip()) if done.returncode == 0 else None
+
+
+def git_commit_times(
+    project_root: Path, *, run: Callable[..., Any] = subprocess.run
+) -> Callable[[Path, str], datetime | None]:
+    """Un seul ``git for-each-ref`` pour toutes les branches ``task/*`` ; rend un ``commit_at`` à passer à :func:`task_progress`.
+
+    Même réponse que :func:`git_commit_at` appelée tâche par tâche (date du committer du sommet de la
+    branche, ``None`` si absente ou si git échoue), pour un sous-processus au lieu d'un par tâche tenue.
+    La lecture est faite au premier appel, pas à la construction : aucune tâche tenue, aucun git.
+    """
+    times: dict[str, datetime | None] | None = None
+
+    def commit_at(_root: Path, task_id: str) -> datetime | None:
+        nonlocal times
+        if not _SAFE_TASK_ID.fullmatch(task_id) or task_id.startswith("-"):
+            return None
+        if times is None:
+            times = {}
+            try:
+                done = run(
+                    ["git", "-C", str(project_root), "for-each-ref", "--format=%(refname)%09%(committerdate:iso-strict)",
+                     "refs/heads/task/"],
+                    capture_output=True, text=True, encoding="utf-8", timeout=3.0, check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return None
+            if done.returncode == 0:
+                for line in done.stdout.splitlines():
+                    ref, _, stamp = line.partition("\t")
+                    times[ref.removeprefix("refs/heads/task/")] = parse_instant(stamp.strip())
+        return times.get(task_id)
+
+    return commit_at
 
 
 def task_progress(

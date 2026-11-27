@@ -147,3 +147,27 @@ def test_put_on_an_unknown_route_is_a_404(duo_server: Any) -> None:
 
     assert status == 404
     assert body["ok"] is False
+
+
+ATELIER_ROUTE = "/api/workspace/atelier/chantiers/x/blocs/brief.a"
+
+
+def test_atelier_put_with_a_body_project_contradicting_the_url_is_refused(duo_server: Any) -> None:
+    """Même contrôle du slug du corps que les POST : un client qui se trompe de projet n'écrit pas ailleurs."""
+    port, _home, _foreign = duo_server
+    status, body = _put(port, f"{ATELIER_ROUTE}?project=home", {"text": "a", "expected": "b", "project": "foreign"})
+    assert status == 403, body
+    assert "ne correspond pas" in body["error"]
+
+
+def test_atelier_put_with_an_invalid_json_body_is_a_400(duo_server: Any) -> None:
+    port, _home, _foreign = duo_server
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{ATELIER_ROUTE}?project=home",
+        data=b"{pas du json",
+        method="PUT",
+        headers={"Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(req, timeout=10)  # noqa: S310 — loopback de test
+    assert err.value.code == 400

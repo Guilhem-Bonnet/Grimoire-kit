@@ -172,6 +172,41 @@ def test_an_empty_message_and_a_second_concurrent_turn_are_refused(root: Path) -
         feed.close()
 
 
+def test_a_message_typed_while_the_agent_is_resuming_waits_instead_of_being_refused(root: Path) -> None:
+    """Cockpit rouvert : l'agent redémarre (reprise de session) pendant que la personne tape déjà.
+
+    Le message attend la fin du démarrage ; avant, il était refusé comme « un tour est déjà en cours »,
+    à tort : aucun tour n'était lancé.
+    """
+    conv = workspace_chat._conversation(root)
+    with conv._cond:
+        conv._starting = True  # le démarrage de l'agent est en cours, comme pendant `session/load`
+    feed = Feed(root)
+    answers: list[dict[str, Any]] = []
+    errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            answers.append(workspace_chat.chat_send(root, {"text": "bonjour"}))
+        except BaseException as exc:  # remonté au thread principal ci-dessous
+            errors.append(exc)
+
+    sender = threading.Thread(target=send)
+    try:
+        sender.start()
+        time.sleep(0.3)
+        assert sender.is_alive() and not answers and not errors, "le message doit attendre, pas être refusé"
+        with conv._cond:
+            conv._starting = False
+            conv._cond.notify_all()
+        sender.join(timeout=10)
+        assert not errors and answers == [{"ok": True, "accepted": True}]
+        feed.until(_is("turn_ended"))
+    finally:
+        sender.join(timeout=10)
+        feed.close()
+
+
 # ── Permissions ─────────────────────────────────────────────────────────────
 
 
@@ -435,3 +470,49 @@ def test_a_closed_page_unsubscribes_and_the_agent_stops_after_the_grace(server: 
     while workspace_chat.chat_state(server["root"], {})["subscribers"] and time.monotonic() < deadline:
         time.sleep(0.1)
     assert workspace_chat.chat_state(server["root"], {})["subscribers"] == 0
+
+
+def test_the_idle_close_decides_and_detaches_the_agent_in_one_locked_section(tmp_path: Path) -> None:
+    """Fermeture à délai de grâce nul : le constat « plus personne » et le retrait de l'agent ne font qu'une section.
+
+    Avant, `_close_if_idle` relâchait le verrou puis `close()` le reprenait : un abonné (ou un message) arrivé
+    entre les deux trouvait l'agent en marche, puis le voyait disparaître sous lui (tour vide, flux « connecté »
+    sans agent). On rejoue l'entrelacement : à la sortie de la première section verrouillée, l'agent doit déjà
+    être détaché.
+    """
+
+    class Closed:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    conv = workspace_chat.Conversation(tmp_path)
+    agent = Closed()
+    conv._client = agent  # type: ignore[assignment]
+    seen_at_first_exit: list[object] = []
+
+    class Hooked(threading.Condition):
+        def __exit__(self, *exc: object) -> None:
+            if not seen_at_first_exit:
+                seen_at_first_exit.append(conv._client)
+            return super().__exit__(*exc)
+
+    conv._cond = Hooked()
+    conv._close_if_idle()
+
+    assert seen_at_first_exit == [None], "l'agent était encore attaché quand le verrou a été relâché"
+    assert agent.closed is True
+    assert conv.running is False
+
+
+def test_a_turn_whose_agent_vanished_says_so_instead_of_staying_silent(tmp_path: Path) -> None:
+    conv = workspace_chat.Conversation(tmp_path)
+    conv.ensure_started = lambda *a, **k: None  # type: ignore[method-assign]  # l'agent a disparu juste après son démarrage
+    conv._busy = True
+
+    conv._run_turn("bonjour")
+
+    kinds = [e["type"] for e in conv._log]
+    assert kinds == ["error", "turn_ended"] and conv._log[-1]["stop_reason"] == "error"
+    assert conv._busy is False

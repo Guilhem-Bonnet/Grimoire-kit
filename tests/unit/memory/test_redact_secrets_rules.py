@@ -54,14 +54,25 @@ def test_pem_block_is_redacted() -> None:
     assert hits == ("private-key-block",)
 
 
-def test_redact_secrets_is_fast_on_trapped_pem_input() -> None:
-    trap = f"{_DASHES}BEGIN RSA PRIVATE KEY{_DASHES}" * (200_000 // 30)
-    # Meilleur de cinq : mesure le coût de la fonction, pas la gigue d'un runner chargé.
+def _best_of(text: str, runs: int = 5) -> tuple[float, str, tuple[str, ...]]:
     best = float("inf")
-    for _ in range(5):
+    out, hits = "", ()
+    for _ in range(runs):
         start = time.perf_counter()
-        text, hits = redact_secrets(trap)
+        out, hits = redact_secrets(text)
         best = min(best, time.perf_counter() - start)
-    assert best < 0.1
+    return best, out, hits
+
+
+def test_redact_secrets_is_fast_on_trapped_pem_input() -> None:
+    unit = f"{_DASHES}BEGIN RSA PRIVATE KEY{_DASHES}"
+    small, _, _ = _best_of(unit * (50_000 // 30))
+    best, text, hits = _best_of(unit * (200_000 // 30))
+    # Coût linéaire, pas quadratique : une entrée quatre fois plus longue coûte environ quatre fois plus
+    # (seize fois en quadratique). Un rapport plutôt qu'une durée seule : un runner partagé est lent, pas
+    # quadratique (le seuil fixe de 100 ms cassait main à 130-240 ms). Le plafond large garde l'ordre de
+    # grandeur : le motif d'origine prenait une dizaine de secondes.
+    assert best < max(small, 0.001) * 10
+    assert best < 2.0
     assert "BEGIN" not in text
     assert "private-key-block" in hits

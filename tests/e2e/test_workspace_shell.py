@@ -491,6 +491,35 @@ def test_la_palette_se_navigue_au_clavier(workspace: Page) -> None:
     workspace.locator("body").press("Escape")
 
 
+def test_la_selection_de_la_palette_survit_a_l_arrivee_des_fichiers(workspace: Page) -> None:
+    """Les fichiers arrivent après l'ouverture et redessinent la liste : la flèche déjà tapée ne s'efface pas.
+
+    Sur un poste chargé, la réponse de `/api/workspace/files` tombait entre la flèche bas et la
+    lecture de la sélection : la liste revenait à la première entrée, comme si la touche était perdue.
+    Ici la réponse est tenue en suspens puis relâchée *après* la flèche, ce qui rend l'ordre certain.
+    """
+    held: list[Route] = []
+    workspace.route("**/api/workspace/files*", lambda route: held.append(route))
+
+    workspace.locator("body").press("ControlOrMeta+k")
+    workspace.wait_for_selector("#palette:not([hidden])")
+    workspace.wait_for_function("() => document.querySelectorAll('#palette-list li[role=option]').length > 1")
+    assert held, "la palette demande les fichiers à son ouverture"
+
+    first = workspace.locator("#palette-list li[aria-selected='true']").inner_text()
+    workspace.locator("body").press("ArrowDown")
+    moved = workspace.locator("#palette-list li[aria-selected='true']").inner_text()
+    assert moved != first
+
+    for route in held:
+        route.continue_()
+    workspace.wait_for_selector("#palette-list .palette-section:text-is('Fichiers')")
+
+    assert workspace.locator("#palette-list li[aria-selected='true']").inner_text() == moved, (
+        "l'arrivée des fichiers a ramené la sélection en tête de liste"
+    )
+
+
 def test_la_palette_execute_l_entree_selectionnee_a_l_entree(workspace: Page) -> None:
     """Entrée déclenche exactement ce que le clavier vient de mettre en évidence."""
     workspace.locator("body").press("ControlOrMeta+k")

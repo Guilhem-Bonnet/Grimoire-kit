@@ -1,0 +1,17 @@
+.tc-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line);
+  border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); max-width: 720px; }
+.tc-card h3 { margin: 0; font-size: var(--t-m); line-height: 20px; font-weight: 600; color: var(--ink); }
+.tc-sub { margin: 0; color: var(--ink2); font-size: var(--t-s); }
+.tc-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+.tc-form label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tc-lbl { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink2); }
+.tc-lbl small { font-weight: 400; color: var(--ink2); }
+.tc-form input[type="text"], .tc-form textarea { width: 100%; box-sizing: border-box; min-height: var(--h-ctl);
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--r); font: inherit; }
+.tc-form input[type="text"]:focus, .tc-form textarea:focus { border-color: var(--acc); }
+.tc-form textarea { min-height: 72px; resize: vertical; }
+.tc-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+.tc-done { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+.tc-done .action-status { flex: 1 1 260px; }
+.tc-reason { color: var(--ink2); font-size: var(--t-s); max-width: 280px; }
+.tc-done a.btn { text-decoration: none; }

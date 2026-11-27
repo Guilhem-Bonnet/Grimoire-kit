@@ -30,6 +30,7 @@ import typer
 from rich.console import Console
 
 from grimoire.cli import cmd_setup
+from grimoire.cli.cmd_up_identity import set_config_user_name as _set_config_user_name
 from grimoire.cli.doctor_acp import check_acp_hosts
 from grimoire.cli.doctor_codex import check_codex_hooks
 from grimoire.cli.doctor_copilot import check_copilot_hooks
@@ -40,7 +41,7 @@ from grimoire.cli.doctor_hooks import (
     check_hook_path,
 )
 from grimoire.cli.doctor_instructions import check_instruction_files
-from grimoire.cli.doctor_mcp import check_mcp_processes, check_mcp_spec_http
+from grimoire.cli.doctor_mcp import check_mcp_processes, check_mcp_skills, check_mcp_spec_http
 from grimoire.cli.env_checks import EnvCheck
 from grimoire.cli.up_report import render_report
 from grimoire.core import layout
@@ -511,6 +512,7 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         check_embedding_model(target),
         *check_mcp_json(target),
         check_mcp_processes(),
+        check_mcp_skills(target),
         *check_hook_commands(target),
         *check_guard_timeout(target),
         *check_copilot_guard_timeout(target),
@@ -617,26 +619,6 @@ class _UpState:
         return any(s.status == "failed" for s in self.steps)
 
 
-def _set_config_user_name(config_path: Path, user_name: str) -> bool:
-    """Update ``user.name`` in project-context.yaml (round-trip safe)."""
-    from ruamel.yaml import YAML
-
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    with open(config_path, encoding="utf-8") as fh:
-        data = yaml.load(fh)
-    if not isinstance(data, dict):
-        return False
-    user = data.get("user") or {}
-    if str(user.get("name", "")) == user_name:
-        return False
-    user["name"] = user_name
-    data["user"] = user
-    with open(config_path, "w", encoding="utf-8") as fh:
-        yaml.dump(data, fh)
-    return True
-
-
 def _split_csv(values: list[str] | None) -> list[str]:
     collected: list[str] = []
     for value in values or []:
@@ -658,6 +640,7 @@ def _step_init(
     interactive: bool,
     dry_run: bool,
     no_cockpit: bool = False,
+    no_standard: bool = False,
 ) -> bool:
     """Run (or skip) express init. Returns True when a config is available after the step."""
     from grimoire.cli.cmd_init import run_init
@@ -681,7 +664,7 @@ def _step_init(
         ctx.obj["output"] = "text"
         run_init(
             ctx, target, name=name, archetype=",".join(archetypes), backend=backend,
-            force=False, dry_run=False, no_cockpit=no_cockpit,
+            force=False, dry_run=False, no_cockpit=no_cockpit, standard_follows=not no_standard,
         )
     except typer.Abort:
         state.steps.append(StepResult("init", "failed", "init cancelled by user"))
@@ -1182,6 +1165,9 @@ def _step_standard(
                     "(grimoire standard init --force to overwrite)"
                 )
 
+        if result.notices:
+            activation_note += "; " + " ; ".join(result.notices)
+
         if downgrade:
             # Explicit `--needs` may legitimately shrink the profile — honor
             # it, but never call a scope reduction "done": that word is what
@@ -1329,7 +1315,7 @@ def run_up_pipeline(
         ctx, state, target,
         name=name, archetypes=archetypes, backend=backend,
         interactive=interactive, dry_run=dry_run,
-        no_cockpit=no_cockpit,
+        no_cockpit=no_cockpit, no_standard=no_standard,
     )
     blocked = not has_config
     # #888 — the interactive wizard deduced the standard needs from « who works on this
@@ -1339,6 +1325,12 @@ def run_up_pipeline(
     # 2. Structure reconciliation (idempotent).
     if not blocked:
         _step_structure(state, target, dry_run=dry_run)
+
+    # 2gitignore. Kit lines in the project's `.gitignore` (locks…), before the refresh so the
+    # scaffold finds the marker and leaves the file to the shared, byte-safe writer.
+    from grimoire.cli.cmd_up_gitignore import step_gitignore
+
+    step_gitignore(state, target, dry_run=dry_run, blocked=blocked)
 
     # 2bis. Refresh the kit tier — this is how an existing project receives a
     # newer kit. Runs after init so a fresh project simply finds nothing to do.

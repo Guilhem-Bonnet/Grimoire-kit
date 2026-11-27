@@ -22,7 +22,7 @@ projet (agents, standard, mémoire)
   ProjectSurface  ← description host-neutre, construite une fois
         │
         ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
-        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}, .vscode/mcp.json,
+        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks,instructions}, .vscode/mcp.json,
         │                            .github/workflows/copilot-setup-steps.yml
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
         ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, .agents/skills, GEMINI.md
@@ -121,6 +121,81 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
 - Un hôte en prose n'a pas de hooks : la gouvernance y est
   énoncée comme règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le
   catalogue le dit explicitement plutôt que de laisser croire à une protection.
+
+## Matrice de capacités par système
+
+`grimoire host status --host copilot` (texte ou `-o json`) et l'outil MCP `grimoire_host_status`
+rendent, **système par système et surface par surface** (VS Code Copilot Chat, Copilot CLI, agent
+cloud), l'un de quatre états :
+
+- **appliqué et prouvé par capture** : une capture versée sous `tests/fixtures/hosts/` montre l'effet ;
+- **émis, non vérifié** : le kit écrit ou lit la chose, aucune capture ne l'a observée ;
+- **dégradé** : elle existe sous forme réduite, avec son repli (dit dans la cellule) ;
+- **non pris en charge** : elle n'existe pas sur cette surface, avec la raison.
+
+La matrice est **dérivée du code**, jamais écrite à la main : profil d'hôte (`HostProfile`), contrat
+enregistré, dégradations que l'émetteur déclare dans son plan, `WORKER_HOSTS`, `claude_only_refusal`,
+`acp_command` et lecteurs de journal de session. Elle ne promeut rien : un événement déclaré bloquant
+sans capture n'est jamais rendu « prouvé » et fait échouer la CI. Les captures du dépôt viennent d'une
+seule surface (VS Code, d'après le manifeste) : sur la CLI et l'agent cloud, rien n'est prouvé. La table
+ci-dessous est vérifiée contre cette matrice par `tests/unit/hosts/test_capability_matrix.py` ; le
+détail de chaque cellule (raison, repli, captures) est dans `grimoire host status`.
+
+<!-- capability-matrix:copilot:begin -->
+| Système | VS Code Copilot Chat | Copilot CLI | Agent cloud |
+|---|---|---|---|
+| Hooks avant outil | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Hooks après outil | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Hooks de session | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Hooks de sous-agents | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Hook de compaction | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Hook de clôture | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Rattachement de session | dégradé | dégradé | non pris en charge |
+| Mémoire | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Outils MCP | émis, non vérifié | émis, non vérifié | dégradé |
+| Skills et agents | émis, non vérifié | émis, non vérifié | émis, non vérifié |
+| Cadrage et Atelier | émis, non vérifié | émis, non vérifié | dégradé |
+| Dispatch et modèle des sous-agents | dégradé | dégradé | dégradé |
+| Orchestrateur autonome : worker | non pris en charge | non pris en charge | non pris en charge |
+| Orchestrateur autonome : relecteur | non pris en charge | non pris en charge | non pris en charge |
+| Orchestrateur autonome : arbitre | non pris en charge | non pris en charge | non pris en charge |
+| Orchestrateur autonome : session orchestrateur | non pris en charge | non pris en charge | non pris en charge |
+| Chat du cockpit | dégradé | dégradé | non pris en charge |
+| Flotte en direct | émis, non vérifié | émis, non vérifié | non pris en charge |
+| Jetons | émis, non vérifié | émis, non vérifié | non pris en charge |
+<!-- capability-matrix:copilot:end -->
+
+Les journaux de session de Copilot (jetons, flotte en direct) ne se lisent que si leur emplacement est
+configuré : variable d'environnement `GRIMOIRE_COPILOT_LOGS_DIR` ou réglage `hosts.copilot_session_logs`
+de `project-context.yaml` (chemin absolu). **Aucun défaut** : le dépôt n'établit pas où Copilot écrit ses
+journaux. `grimoire doctor` et `grimoire host status` disent « journaux Copilot : emplacement non
+configuré » tant que rien n'est posé. Le format lu est celui des fixtures de `copilot-harness/`
+(`session.shutdown.modelMetrics`, `assistant.message.outputTokens`) : **non vérifié sur un vrai Copilot**,
+chaque chiffre le dit. Une session sans `session.shutdown` n'a ni entrée ni cache connus ; le coût en
+dollars est toujours inconnu (le format ne donne que des requêtes premium).
+
+## Cadrage, Atelier et rappel de tâche sous Copilot
+
+Ce que `grimoire up` / `grimoire host sync --host copilot` livrent à Copilot, comme à Claude Code :
+
+| Surface du kit | Où elle arrive sous Copilot |
+|---|---|
+| Skills (`grimoire-cadrage`, `grimoire-memory`, `grimoire-steward`, `grimoire-agent-dispatch`) | `.github/skills/<nom>/SKILL.md`, chargés à la demande |
+| Commandes `grimoire cadrage …` (`interview`, `recall`, `trace`, `export`, `plan`…) | le terminal de l'agent (outil `execute`) ; `approve` et `recette` restent des gestes de la MOA |
+| Outils MCP `atelier_suggest`, `atelier_comment`, `atelier_comments` (et les outils mémoire et tâches) | le serveur `grimoire` : `.vscode/mcp.json` (VS Code), `.mcp.json` (CLI), saisie manuelle pour l'agent cloud (voir ci-dessous) |
+| Rappel de tâche | hook `SessionStart` de `.github/hooks/` |
+| Où trouver tout cela | `.github/instructions/grimoire-kit.instructions.md`, fichier géré (court : des noms, pas des corps), dérivé de la surface, de l'application `grimoire cadrage` et du serveur MCP |
+
+`.github/copilot-instructions.md` reste la graine du projet : le kit ne la réécrit jamais, c'est pourquoi la
+liste ci-dessus vit dans un fichier d'instructions géré à part. Un agent dont le frontmatter `tools:` liste les
+outils intégrés n'a pas les outils MCP, chez Copilot comme chez Claude Code (frontière d'outils des personas).
+Tout ceci est **non vérifié sur une session Copilot réelle**.
+
+Reprise d'une session Copilot CLI : la référence de la CLI (docs.github.com, « Copilot CLI command reference »,
+lue le 2026-11-26) documente `/resume` et `--continue`, qui ouvrent le **sélecteur** de sessions. Elle ne montre
+pas de syntaxe pour reprendre une session par son identifiant ni de commande qui affiche ou exporte un journal ;
+le kit n'écrit donc aucune commande de reprise ni de journal pour Copilot (la carte de tâche montre
+l'identifiant seul).
 
 ## MCP sous Copilot
 

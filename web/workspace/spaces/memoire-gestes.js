@@ -22,42 +22,6 @@
 
 import { actionStatus, failureText, icon, setActionStatus } from '../shell.js';
 
-export const GESTURE_STYLES = `
-.kn-gesture { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line);
-  border-radius: var(--r-l); background: var(--panel); }
-.kn-gesture h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
-.kn-gesture .seg { align-self: flex-start; }
-.kn-g-form { display: flex; flex-direction: column; gap: 10px; }
-.kn-g-form label, .kn-g-form fieldset { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.kn-g-form fieldset { border: 0; margin: 0; padding: 0; }
-.kn-g-form legend, .kn-g-lbl { padding: 0; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink3); }
-.kn-g-form input[type="text"], .kn-g-form select, .kn-g-form textarea { width: 100%; min-height: var(--h-ctl); padding: 4px 9px;
-  border: 1px solid var(--line); border-radius: var(--r); font: inherit; }
-.kn-g-form textarea { min-height: 88px; resize: vertical; }
-.kn-g-pair { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: 8px; }
-.kn-g-pick { display: flex; flex-direction: row !important; align-items: flex-start; gap: 8px; cursor: pointer; }
-.kn-g-pick input { margin: 3px 0 0; flex: none; accent-color: var(--acc); }
-.kn-g-pick span { overflow-wrap: anywhere; }
-.kn-g-empty { margin: 0; color: var(--ink2); font-size: var(--t-s); }
-.kn-diff { display: flex; flex-direction: column; gap: 10px; }
-.kn-diff-entry { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink2); overflow-wrap: anywhere; }
-.kn-diff-row { display: flex; flex-direction: column; gap: 4px; }
-.kn-diff-field { font-size: 12px; font-weight: 500; color: var(--ink3); }
-.kn-diff-cells { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
-.kn-diff-cells > div { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: var(--r);
-  font-size: var(--t-s); overflow-wrap: anywhere; color: var(--ink); }
-.kn-diff-before { background: var(--hover); }
-.kn-diff-after { background: var(--ok-soft); }
-.kn-diff-cells b { font-size: 11px; font-weight: 500; color: var(--ink2); }
-.kn-g-note { margin: 0; color: var(--ink2); font-size: var(--t-s); }
-.kn-hist { display: flex; flex-direction: column; gap: 6px; }
-.kn-hist-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
-.kn-hist-list li { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); }
-.kn-hist-list li:first-child { border-top: 0; }
-.kn-hist-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: var(--t-s); }
-.kn-hist-text time { color: var(--ink3); }
-.kn-hist-list .btn { flex: none; }
-`;
 
 const TITLES = {
   correct: 'Corriger',

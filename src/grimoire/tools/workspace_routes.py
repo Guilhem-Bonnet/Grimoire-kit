@@ -18,17 +18,14 @@ ENRÔLÉ, nommé par ``?project=`` et résolu par le registre seul : un seul
 cockpit écrit donc sur toute sa flotte, pas seulement sur le projet qu'il a
 ouvert (lot 1 de l'écriture multi-projets, 2026-11-07).
 
-Écrire un fichier, créer un override, lancer une commande et muter la mémoire
-acceptent n'importe quel projet ENRÔLÉ (lot 5, 2026-11-12) : tout projet enrôlé
-se pilote comme le projet d'ouverture, sans confirmation nommée. La garde
-d'écriture du cockpit (Origin, ``Sec-Fetch-Site``, jeton, hôte loopback) et le
-journal ``write-guard.jsonl`` — qui note le projet visé — restent inchangés.
+Écrire un fichier, créer un override, lancer une commande et muter la mémoire acceptent n'importe quel projet ENRÔLÉ
+(lot 5, 2026-11-12) : tout projet enrôlé se pilote comme le projet d'ouverture, sans confirmation nommée. La garde
+d'écriture du cockpit (Origin, ``Sec-Fetch-Site``, jeton, hôte loopback) et le journal ``write-guard.jsonl`` — qui note
+le projet visé — restent inchangés.
 
-Les anciennes dérogations nommées (décider une proposition, #490 ; migrer un
-board, #559/#560 ; agir depuis le portefeuille, #638) gardent leur sens comme
-CONTRAT de corps : le ``project`` du corps, quand il est présent, doit
-confirmer le slug de l'URL. Elles ne dérogent plus à rien — la porte générale
-est déjà ouverte à tout projet enrôlé.
+Les anciennes dérogations nommées (décider une proposition, #490 ; migrer un board, #559/#560 ; agir depuis le
+portefeuille, #638) gardent leur sens comme CONTRAT de corps : le ``project`` du corps, quand il est présent, doit
+confirmer le slug de l'URL. Elles ne dérogent plus à rien — la porte générale est déjà ouverte à tout projet enrôlé.
 
 Le flux du pouls (``GET /api/workspace/stream``, P10) n'est pas une entrée de
 :data:`GET_ROUTES` (charge utile) mais un flux sans fin : :func:`workspace_stream`
@@ -55,6 +52,7 @@ from grimoire.tools import (
     workspace_accept_merged,
     workspace_actions,
     workspace_api,
+    workspace_atelier,
     workspace_attention,
     workspace_autopilot,
     workspace_chat,
@@ -69,6 +67,7 @@ from grimoire.tools import (
     workspace_machine,
     workspace_memory,
     workspace_notify,
+    workspace_pilotage,
     workspace_portfolio,
     workspace_providers_write,
     workspace_pulse,
@@ -79,6 +78,7 @@ from grimoire.tools import (
     workspace_since,
 )
 from grimoire.tools.project_registry import refuse_foreign_body
+from grimoire.voice import interview, outbox_service, stt_service
 
 __all__ = [
     "CHAT_STREAM_PATH",
@@ -269,8 +269,8 @@ def _proposals(project_root: Path, _query: _Query) -> Any:
     return workspace_api.proposals_view(project_root)
 
 
-def _sheet(project_root: Path, _query: _Query) -> Any:
-    return workspace_api.sheet_view(project_root)
+def _sheet(project_root: Path, query: _Query) -> Any:
+    return workspace_api.sheet_view(project_root, _one(query, "sections"))  # `?sections=a,b` (#1243)
 
 
 def _flow_runs(project_root: Path, query: _Query) -> Any:
@@ -610,6 +610,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}options": _options,
     **workspace_notify.GET_ROUTES,
     **workspace_ideas.GET_ROUTES,
+    **workspace_pilotage.GET_ROUTES,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -636,6 +637,9 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
     f"{PREFIX}chat/state": workspace_chat.chat_state,
     f"{PREFIX}chat/hosts": workspace_chat.chat_hosts,
+    f"{PREFIX}voice/config": stt_service.voice_config,
+    f"{PREFIX}voice/outbox": outbox_service.outbox_state,
+    f"{PREFIX}voice/interview": interview.interview_view,
 }
 
 
@@ -724,6 +728,8 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
     """
     if not path.startswith(PREFIX):
         return WORKSPACE_UNHANDLED
+    if workspace_atelier.handles(path):  # Atelier en test : drapeau lu par le module, 404 quand il est éteint
+        return workspace_atelier.get(project_root, path, query)
     from grimoire.core.exceptions import GrimoireError
 
     try:
@@ -957,12 +963,11 @@ def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
         MandateRefusedError,
         MandateRequest,
         MandateStore,
-        verify_control_key,
     )
     from grimoire.missions.schemas import ORIGIN_HUMAN
+    from grimoire.tools.human_gesture import require_human_key
     refuse_foreign_body(project_root, body)
-    if not verify_control_key(body.get("control_key")):
-        raise PermissionError("clé de contrôle absente ou invalide : accorder un mandat est un geste d'humain")
+    require_human_key(project_root, body, "clé de contrôle absente ou invalide : accorder un mandat est un geste d'humain")
     try:
         request = MandateRequest.build(
             body.get("gestures") or (), body.get("task_types") or (), body.get("max_sessions_per_day") or 0,
@@ -990,11 +995,11 @@ def _autopilot_set(project_root: Path, body: dict[str, Any]) -> Any:
     mandat actif, auquel le pilote reste lié.
     """
     from grimoire.missions.autopilot import AutopilotStore
-    from grimoire.missions.mandate import JournalError, MandateRefusedError, verify_control_key
+    from grimoire.missions.mandate import JournalError, MandateRefusedError
     from grimoire.missions.schemas import ORIGIN_HUMAN
+    from grimoire.tools.human_gesture import require_human_key
     refuse_foreign_body(project_root, body)
-    if not verify_control_key(body.get("control_key")):
-        raise PermissionError("clé de contrôle absente ou invalide : le pilote automatique est un geste d'humain")
+    require_human_key(project_root, body, "clé de contrôle absente ou invalide : le pilote automatique est un geste d'humain")
     if not isinstance(body.get("on"), bool):
         raise ValueError("`on` (booléen) requis : true active, false coupe")
     try:
@@ -1014,6 +1019,8 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}chat/cancel": workspace_chat.chat_cancel,
     f"{PREFIX}chat/stop": workspace_chat.chat_stop,
     f"{PREFIX}chat/host": workspace_chat.chat_host,
+    f"{PREFIX}voice/transcribe": stt_service.transcribe,
+    f"{PREFIX}voice/outbox/play": outbox_service.outbox_play,
     f"{PREFIX}autonomy/mandate/grant": _mandate_grant,
     f"{PREFIX}autonomy/mandate/revoke": _mandate_revoke,
     f"{PREFIX}file/override": _create_override,
@@ -1028,6 +1035,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/intake/create": workspace_ideas.task_intake_create,
     f"{PREFIX}options": _options_write,
     **workspace_providers_write.POST_ROUTES,
+    **workspace_pilotage.POST_ROUTES,
     f"{PREFIX}setup/launch": workspace_first_launch.launch_verb,
     **workspace_notify.POST_ROUTES,
     **workspace_ideas.POST_ROUTES,
@@ -1427,6 +1435,8 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
     """
     if not path.startswith(PREFIX):
         return WORKSPACE_UNHANDLED
+    if workspace_atelier.handles(path):
+        return workspace_atelier.post(project_root, path, body)
     from grimoire.core.exceptions import GrimoireError
     from grimoire.missions.service import TaskRefusedError
 

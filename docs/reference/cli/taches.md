@@ -639,7 +639,7 @@ orchestrator:
     worker:
       provider: deepseek
       model_by_class: true
-      sensitive_route: strong   # off (défaut) : inchangé ; toute autre valeur rend la politique invalide
+      sensitive_route: strong   # défaut `strong` sans réglage de modèle (voir plus bas), sinon `off` ; toute autre valeur rend la politique invalide
       sensitive_paths: []       # motifs ajoutés aux chemins réservés ci-dessous
 ```
 
@@ -661,6 +661,77 @@ orchestrator:
   le détail du lancement.
 - **Avant de lancer** : `grimoire orchestrate tick` (le plan, sans `--apply`) affiche `Routage prévu : <id> — fort
   | habituel : <raison>` pour chaque tâche admise, et la clé `routes` en `--json`.
+
+### Modèle du worker : défauts, trace et montée en gamme
+
+Sans réglage de modèle dans `orchestrator.roles.worker` (ni `model`, `tier`, `provider` ni `model_by_class`, hôte
+Claude Code), le palier du worker suit la classe de la tâche : V0 `cheap` (`haiku`), V1 `mid` (`sonnet`), V2 `strong`
+(`opus`). Une tâche qui cite un chemin sensible part au palier fort, `sensitive_route` valant alors `strong` par
+défaut. Un seul réglage explicite écarte ces défauts : le routage du projet reste celui qu'il a écrit. `sensitive_route`
+posé explicitement (`off` compris) prime toujours. Avant ce changement, un projet sans réglage lançait ses workers sur
+le modèle par défaut de l'hôte ; pour le retrouver, poser `model_by_class: false`.
+
+| Clé absente | Défaut | Pour le garder comme avant |
+|---|---|---|
+| `model_by_class`, `tier`, `model`, `provider` (aucune des quatre) | V0 `cheap`, V1 `mid`, V2 `strong` | `model_by_class: false` |
+| `sensitive_route` (sous la même condition) | `strong` | `sensitive_route: off` |
+
+- **Trace** : chaque lancement note, dans `task.session_launched`, un bloc `routing` : `class`, `tier`, `model`,
+  `reason` (`default_class`, `policy_class`, `policy_tier`, `policy_model`, `sensitive_path`, `router`,
+  `provider_route`, `host_default`, `host_model`) et un `detail` éventuel. `grimoire task show <id>` l'affiche
+  (`routage : haiku (palier cheap, classe V0) — défaut du kit pour cette classe`) ; `--json` le porte dans
+  `last_launch.routing`.
+- **Montée en gamme** : réservée aux projets sans réglage de modèle (ceux dont les défauts ci-dessus s'appliquent,
+  relus au moment de la reprise : un projet qui a posé `tier`, `model`, `provider` ou `model_by_class` ne monte
+  jamais). Après un refus de relecture (`NOT-READY`), le worker repart un palier au-dessus du modèle réellement
+  lancé (`haiku` → `sonnet` → `opus`), une marche par refus, plafonnée au palier fort ; un modèle que la table ne
+  connaît pas ne monte pas, et un modèle n'est jamais remplacé par un modèle de rang inférieur. `claude --resume` ne
+  reçoit pas de modèle : la montée est une session neuve sur le même worktree, avec la consigne du worker et les
+  constats du relecteur. Elle passe par les mêmes contrôles qu'un lancement (plafond `sessions_per_day`, mandat,
+  disjoncteur) et exige que l'ancienne session soit arrêtée de façon prouvée. Si une condition manque, ou si la session
+  neuve échoue (lancement refusé, aucun identifiant dans la sortie, identité non résolue, inscription refusée), la
+  conversation est reprise comme avant, sans montée et sans échec compté au disjoncteur. La session de montée est notée
+  dans `task.session_launched` (`relaunch: true`, `routing.reason: step_up`) et `task.worker_session_resumed` ;
+  `grimoire task show` l'affiche une fois, sur la ligne `routage :`.
+- **À savoir** :
+  - Sans réglage, une tâche dont un critère d'acceptation est ambigu (aucun verdict qu'un programme puisse rendre)
+    est classée V2 et part sur le modèle fort. Pour la faire descendre, reformuler le critère
+    (`grimoire task show` explique la classe) ; pour revenir au comportement d'avant pour tout le projet, poser
+    `model_by_class: false` et `sensitive_route: off`.
+  - Les règles d'usage (`usage_rules`) ne distinguent pas les modèles : une session `opus` compte comme une session
+    `haiku` dans le plafond `sessions_per_day` et dans les règles. Les défauts font partir davantage de tâches sur le
+    modèle fort sans que ces règles le voient.
+
+### Réveil du tick sur événement
+
+Le minuteur (`orchestrate install-timer`, 5 min par défaut) reste le filet de sécurité et sa cadence ne change pas.
+Cinq événements demandent en plus un tick **proche** au lieu d'attendre le suivant : une réponse humaine à une question
+(CLI, cockpit, chat du cockpit), l'acceptation humaine d'une tâche, `orchestrate resume` qui lève une pause, la fin d'une
+session de worker et une fusion, ces deux derniers vus par le tick lui-même. Aucun hook n'est ajouté : le réveil est
+l'appel `request_tick(racine, motif)` de `missions/tick_wake.py`, en fin de geste.
+
+- **Ce que ça fait** : `systemctl --user start --no-block grimoire-tick-<nom>-<empreinte>.service`, l'unité déjà posée
+  par `install-timer`, jamais le tick dans le processus du geste. Le verrou du tick, la pause, le disjoncteur et la
+  politique s'appliquent donc comme pour un tick du minuteur. Un réveil demandé par un tick part en différé de 30 s
+  (par `systemd-run --user --on-active`), car l'unité est encore active pendant le tick qui le demande.
+- **Ce que ça ne fait jamais** : activer l'autonomie. Rien ne part sans rôle autonome activé dans
+  `orchestration-policy.yaml`, sans minuteur installé, sous une pause de tout le périmètre (projet ou machine), disjoncteur
+  ouvert ou sans systemd (le minuteur ou le cron fait alors le travail). Une pause qui ne vise que des tâches nommées
+  laisse le tick tourner : le réveil aussi.
+- **Bornes** : au plus un réveil par fenêtre de 20 s et par projet, 12 par heure ; un tick qui a fusionné ou récolté une
+  session ne provoque qu'un seul tick de plus (pas de chaîne dans les 6 min, sauf geste humain entre-temps) et un tick qui
+  n'a rien fait ne réveille rien. L'état tient dans `_grimoire-output/control/tick-wake.json`. Sens fermé : un état
+  absent, abîmé, tronqué ou non ordinaire ne vaut pas « aucun réveil récent » : un réveil demandé par un tick n'est alors
+  pas accordé, un geste humain l'est et recrée l'état. Une seconde borne ne dépend pas de ce fichier : un tick démarré
+  moins de 60 s après le précédent (date du témoin `tick-last`) ne demande aucun réveil. Le réveil ne retient jamais le
+  geste plus de 3 s (fil détaché, verrou non ordinaire refusé avant d'être ouvert) ; `systemctl` et `systemd-run` sont
+  lancés par leur chemin absolu, vérifié ordinaire et exécutable.
+- **Sans risque pour le geste** : une erreur du réveil est avalée et journalisée, la réponse ou l'acceptation aboutit.
+  Seuls les gestes d'origine humaine réveillent ; un agent ne gagne rien (le motif vient d'une liste fermée, le nom
+  d'unité est dérivé du chemin du projet, la ligne de commande n'a aucune entrée externe).
+- **Voir le dernier réveil** : `grimoire orchestrate status` (clé `last_wake` en `--json`) : date, motif, résultat.
+  Un réveil différé est dit « demandé » (minuteur transitoire créé, tick non confirmé), jamais « démarré ».
+  Le serveur MCP n'expose ni réponse ni acceptation : il n'est pas un point de réveil.
 
 ### Hôte du worker : Claude Code ou opencode (#1281, lot L4)
 

@@ -753,6 +753,7 @@ class TestReadOnlyToolsWriteNothing:
         "grimoire_providers_status": {},
         "grimoire_skill": {"slug": "inexistant"},
         "grimoire_command": {"slug": "inexistant"},
+        "atelier_comments": {"chantier": "principal"},  # drapeau éteint : refus, rien d'écrit
     }
 
     #: Seule exception admise : le reçu de lecture mémoire (P13), télémétrie interne locale, bornée,
@@ -774,7 +775,10 @@ class TestReadOnlyToolsWriteNothing:
         from grimoire.mcp import server as module
 
         before = self._snapshot(gouverne)
-        getattr(module, name)(project_path=str(gouverne), **self._ARGS[name])
+        from grimoire.mcp import atelier_tools
+
+        tool = getattr(module, name, None) or getattr(atelier_tools, name)  # `atelier_*` vivent dans leur module voisin
+        tool(project_path=str(gouverne), **self._ARGS[name])
         after = self._snapshot(gouverne)
         created = sorted(set(after) - set(before))
         modified = sorted(k for k in set(after) & set(before) if after[k] != before[k])

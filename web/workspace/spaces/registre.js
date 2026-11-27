@@ -21,47 +21,11 @@
 
 import { actionStatus, badge, failureText, icon, listNav, monogram, setActionStatus, spaceHead, undoToast } from '../shell.js';
 
-const STYLE_ID = 'rg-styles';
 const FOLDER_NOTE = 'Retirer ne touche pas au dossier, seulement au registre du cockpit.';
 
 /** Ce qui survit à un redessin : le panneau ouvert et le dernier retour. */
 const view = { panel: '', notice: null, removing: '' };
 
-function injectStyles() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    .rg-wrap { padding: var(--sp-6); max-width: 1100px; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--sp-4); }
-    .rg-bar { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
-    .rg-note { margin: 0 0 0 auto; color: var(--ink2); font-size: var(--t-s); }
-    .rg-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line);
-      border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); }
-    .rg-card h3 { margin: 0; font-size: var(--t-m); line-height: 20px; font-weight: 600; color: var(--ink); }
-    .rg-sub { margin: 0; color: var(--ink2); font-size: var(--t-s); overflow-wrap: anywhere; }
-    .rg-line { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
-    .rg-line input[type="text"] { flex: 1 1 320px; min-width: 0; min-height: var(--h-ctl); padding: 4px 9px; border: 1px solid var(--line);
-      border-radius: var(--r); font: inherit; }
-    .rg-line input[type="text"]:focus { border-color: var(--acc); }
-    .rg-check { display: flex; gap: var(--sp-2); align-items: center; font-size: var(--t-s); color: var(--ink2); }
-    .rg-check input { accent-color: var(--acc); }
-    .rg-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
-    .rg-list li { display: flex; gap: var(--sp-2); align-items: center; padding: 7px 0; border-top: 1px solid var(--line); min-width: 0; }
-    .rg-list li:first-child { border-top: 0; }
-    .rg-list .rg-path { flex: 1 1 auto; }
-    .rg-path { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-    .rg-name { display: flex; gap: var(--sp-2); align-items: center; min-width: 0; font-weight: 500; }
-    .rg-name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .rg-wrap .tbl { table-layout: fixed; }
-    .rg-wrap .tbl td { overflow: hidden; }
-    .rg-wrap .tbl td > .rg-path { display: block; }
-    .rg-confirm td { background: var(--hover); }
-    .rg-confirm .rg-card { box-shadow: none; }
-    @container canvas (max-width: 720px) { .rg-wrap { padding: var(--sp-3); } .rg-note { margin-left: 0; } }
-    @container canvas (max-width: 700px) { .rg-wrap .tbl { table-layout: auto; } }
-  `;
-  document.head.append(style);
-}
 
 function el(tag, className, text, attrs) {
   const node = document.createElement(tag);
@@ -371,7 +335,6 @@ function projectsTable(ctx, data, home, reload) {
 }
 
 export async function mount(root, ctx) {
-  injectStyles();
   // P58 : j / k parcourent les projets du registre (`aria-current` sur la ligne
   // active) ; Entrée ouvre le projet dans la Flotte, comme une ligne de la Flotte.
   listNav(root, {
