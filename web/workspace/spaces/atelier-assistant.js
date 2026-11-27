@@ -294,6 +294,7 @@ export function createAssistant(ctx, slug, hooks) {
     if (ctx.signal.aborted) return;
     if (document.hidden) { skippedHidden = true; timer = setTimeout(tick, SLOW_MS); return; } // onglet caché : aucune requête
     let next;
+    const started = Date.now();
     try {
       next = await ctx.api.atelierEntretien(slug);
     } catch {
@@ -310,7 +311,7 @@ export function createAssistant(ctx, slug, hooks) {
     covered = next.covered;
     wasMine = mine;
     // Le redessin garde toute saisie en cours : plus besoin d'attendre qu'elle finisse. Sans le suivi des fichiers, rechargement simple.
-    if (hooks.files) await hooks.files(next.fichiers, next.annexes, { force: changed }); // fichier de phase, suggestion ou commentaire déposé hors du cockpit : le document le suit
+    if (hooks.files) await hooks.files(next.fichiers, next.annexes, { force: changed, started }); // fichier de phase, suggestion ou commentaire déposé hors du cockpit : le document le suit
     else if (changed) await hooks.reload();
     timer = setTimeout(tick, mine || next.turn.busy ? FAST_MS : SLOW_MS);
   };

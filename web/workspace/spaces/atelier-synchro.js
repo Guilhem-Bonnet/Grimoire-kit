@@ -18,8 +18,12 @@ export function createSync(ctx, hooks) {
 
   // `annexes` : l'empreinte des suggestions et des commentaires (un dépôt de l'agent plus court que le pouls ne change ni le
   // tour vu en cours ni les angles couverts). `force` : un tour d'agent vient de finir, on recharge dans tous les cas.
-  const check = async (files, annexes, { force = false } = {}) => {
+  // `started` : l'instant où la lecture du pouls est partie. Une lecture partie AVANT le dernier geste de cette page (document relu
+  // ou réécrit par elle) ne dit rien d'un dépôt extérieur : elle est ignorée, la suivante tranche (elle compare à l'état rendu par
+  // le geste, donc une écriture extérieure tombée entre-temps reste détectée).
+  const check = async (files, annexes, { force = false, started = Infinity } = {}) => {
     if (ctx.signal.aborted) return;
+    if (!force && hooks.docAt && started < hooks.docAt()) return;
     if (running && force) { await hooks.reload(); return; } // un rechargement est déjà en cours : celui-ci reste dû
     if (running || document.hidden) return;
     const stale = staleFiles(hooks.doc(), files).length > 0;

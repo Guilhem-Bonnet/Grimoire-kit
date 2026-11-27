@@ -27,6 +27,7 @@ import { createRefs, flash } from './atelier-liens.js';
 import { atelierHash, exigenceBlocks, reqFromParams } from './atelier-liens-logic.js';
 import { createReading } from './atelier-lecture.js';
 import { createSync } from './atelier-synchro.js';
+import { annexMessage } from './atelier-synchro-logic.js';
 import { createDevalidation } from './atelier-devalidation.js';
 import { buildOutline } from './atelier-document-logic.js';
 import { createPlan } from './atelier-plan.js';
@@ -483,7 +484,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   setAtelierContext({ slug, phase: focusId });
   ctx.signal.addEventListener('abort', () => setAtelierContext(null));
   // Le document suit son fichier : l'empreinte que porte chaque réponse du pouls de l'assistant décide (voir `atelier-synchro.js`).
-  const sync = createSync(ctx, { doc: () => state.doc, reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
+  const sync = createSync(ctx, { doc: () => state.doc, docAt: () => docAt, reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
   const assist = createAssistant(ctx, slug, {
     focus: () => focusId,
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
@@ -633,6 +634,12 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     cancelAnimationFrame(frame);
   });
 
+  let docAt = Date.now(); // quand le document affiché a été relu ou réécrit par un geste de cette page
+  /** Ce que le serveur dit des suggestions et des commentaires est adopté si rien d'extérieur n'est à voir : le pouls n'y verra pas un dépôt. */
+  const adoptAnnexes = (fresh) => {
+    docAt = Date.now();
+    if (fresh && fresh.annexes && annexMessage(state.doc, fresh) === '' && annexMessage(fresh, state.doc) === '') state.doc.annexes = fresh.annexes;
+  };
   const reload = async (message, kind) => {
     try {
       state.doc = await ctx.api.atelierChantier(slug);
@@ -644,8 +651,12 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     const top = root.scrollTop;
     drawAll();
     if (root.scrollTop !== top) root.scrollTop = top; // la lecture ne saute pas
-    if (message && kind) status.setAttribute('data-kind', kind);
-    status.textContent = message || '';
+    docAt = Date.now();
+    // La ligne d'état est une zone d'annonce : un rechargement sans message (synchro, pouls) ne la vide jamais, seul un nouveau message la change.
+    if (message) {
+      if (kind) status.setAttribute('data-kind', kind);
+      status.textContent = message;
+    }
     liveDoc.refresh();
   };
 
@@ -688,7 +699,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       // Des fils dont le passage vient de disparaître : on le dit là où l'on a écrit, avec un lien qui y mène.
       const lost = newOrphans(mine.comments, next.comments);
       mine.comments = next.comments;
-      if (fresh.annexes) state.doc.annexes = fresh.annexes; // ce que la page affiche désormais : le pouls n'y voit pas un dépôt extérieur
+      adoptAnnexes(fresh);
       if (lost.length) {
         const where = lost[0];
         notifier.push(orphanNotice(lost.length), {
@@ -1011,6 +1022,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       state.doc.avancement = fresh.avancement;
       state.doc.taches = fresh.taches;
       state.doc.chantier = fresh.chantier;
+      adoptAnnexes(fresh); // l'écriture qui précède est la nôtre : le pouls n'y verra pas un dépôt extérieur
       paintHead();
       loop.update(fresh);
       phaseNav(); // la barre collante lit l'avancement unique
