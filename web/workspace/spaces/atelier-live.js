@@ -224,8 +224,8 @@ function previewPanel(data, { confirm, cancel }) {
 
 /**
  * Le document vivant d'un chantier. `sheet` : le conteneur du document, où chercher les lignes ; `status` : la ligne
- * de statut du document. Rend `{ line(req), toolbar, refresh }` : `line` pour chaque bloc d'exigence au rendu,
- * `toolbar` à poser dans l'en-tête, `refresh` pour relire l'état.
+ * de statut du document. Rend `{ line(req), toolbar, panels, refresh }` : `line` pour chaque bloc d'exigence au rendu,
+ * `toolbar` à poser dans la barre collante, `panels` juste sous elle, `refresh` pour relire l'état.
  */
 export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, onTrace = () => {}, onSplit = async () => {} }) {
   const commentsOf = (req) => comments(req) || 0; // lot 3 : fils ouverts sur l'exigence, comptés par le document
@@ -246,11 +246,31 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
     split.title = locked ? reason : '';
   };
   lockSplit(true, 'État des exigences en cours de lecture.');
-  const refreshButton = el('button', 'at-btn ghost', null, { type: 'button', 'data-act': 'live-refresh', 'aria-label': 'Actualiser l’état des exigences' });
-  refreshButton.append(icon('i-act-retry'), 'Actualiser');
+  const refreshButton = el('button', 'at-btn ghost at-live-refresh', null, { type: 'button', 'data-act': 'live-refresh', 'aria-label': 'Actualiser l’état des exigences', title: 'Actualiser l’état des exigences' });
+  refreshButton.append(icon('i-act-retry'), el('span', 'sr-only', 'Actualiser'));
   const slot = el('div', null, null, { 'data-role': 'decoupage-slot' });
-  const moaSlot = el('div', null, null, { 'data-role': 'moa-slot' }); // comment déclarer la MOA, quand elle ne l'est pas
-  toolbar.append(splitWrap, summary, refreshButton);
+  // Comment déclarer la MOA : repliée derrière un lien court, ouverte seulement quand un refus vient de s'y heurter.
+  const moaSlot = el('div', 'at-help', null, { 'data-role': 'moa-slot', id: 'at-moa-panel' });
+  moaSlot.hidden = true;
+  const whyLink = el('button', 'at-link', 'Pourquoi c’est bloqué ?', { type: 'button', 'data-act': 'moa-why', 'aria-expanded': 'false', 'aria-controls': 'at-moa-panel' });
+  whyLink.hidden = true;
+  let moaInfo = null; // les consignes du serveur, tant que la MOA n'est pas déclarée
+  let helpOpen = false;
+  const syncHelp = () => {
+    const missing = Boolean(moaInfo);
+    whyLink.hidden = !missing;
+    moaSlot.hidden = !missing || !helpOpen;
+    whyLink.setAttribute('aria-expanded', String(missing && helpOpen));
+  };
+  const setHelp = (moa, { open = false } = {}) => {
+    moaInfo = moa && !moa.declared ? moa : null;
+    if (!moaInfo) helpOpen = false;
+    else if (open) helpOpen = true;
+    moaSlot.replaceChildren(...(moaInfo ? [moaHelp(moaInfo, say)] : []));
+    syncHelp();
+  };
+  whyLink.addEventListener('click', () => { helpOpen = !helpOpen; syncHelp(); });
+  toolbar.append(splitWrap, summary, whyLink, refreshButton);
 
   /** Le détail complet d'une exigence, pour un chantier dont les lignes sont allégées. */
   const more = async (req) => {
@@ -276,10 +296,11 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
       node.replaceWith(line(node.getAttribute('data-live')));
     }
     const trace = state.trace;
-    moaSlot.replaceChildren(...(trace && !trace.moa.declared ? [moaHelp(trace.moa, say)] : []));
+    setHelp(trace ? trace.moa : null);
     onTrace(trace);
     if (!trace || !trace.requirements.length) {
       summary.textContent = trace ? 'Aucune exigence identifiée : écris-les en « REQ-001 : … » pour les suivre.' : '';
+      summary.title = summary.textContent;
       lockSplit(true, summary.textContent || 'État des exigences en cours de lecture.');
       return;
     }
@@ -288,7 +309,8 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
     summary.textContent = missing.length
       ? `${plural(done, 'exigence Must validée', 'exigences Must validées')} sur ${must} : à valider d’abord ${missing.join(', ')}.`
       : (must ? (must > 1 ? `Les ${must} exigences Must sont validées.` : 'L’exigence Must est validée.') : 'Aucune exigence Must : le découpage est possible.');
-    if (!trace.moa.declared) summary.textContent += ' Aucune MOA déclarée : voir ci-dessous comment la déclarer.';
+    if (!trace.moa.declared) summary.textContent += ' Aucune MOA déclarée.';
+    summary.title = summary.textContent; // la barre est compacte : le texte entier reste lisible au survol
     lockSplit(missing.length > 0, `Valide d’abord les exigences Must : ${missing.join(', ')}.`);
   };
 
@@ -320,7 +342,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
       if (ctx.signal.aborted) return;
       if (!data.ready) {
         say(`Valide d’abord les exigences Must : ${data.blocked_by.map((b) => b.id).join(', ')}.`, 'warn');
-        slot.replaceChildren(...(data.moa && !data.moa.declared ? [moaHelp(data.moa, say)] : []));
+        setHelp(data.moa, { open: true }); // le refus vient de là : l'explication s'ouvre
         return;
       }
       const confirm = async (go) => {
@@ -358,7 +380,11 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
   };
   split.addEventListener('click', () => {
     // Désactivé, le bouton explique au lieu de rester muet.
-    if (split.getAttribute('aria-disabled') === 'true') { if (why.textContent) say(why.textContent); return; }
+    if (split.getAttribute('aria-disabled') === 'true') {
+      if (why.textContent) say(why.textContent);
+      if (state.trace && !state.trace.moa.declared) { helpOpen = true; syncHelp(); } // refus : l'aide MOA s'ouvre
+      return;
+    }
     openSplit();
   });
   refreshButton.addEventListener('click', () => { say(''); refresh(); });
@@ -390,7 +416,8 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
     }, 4000);
     ctx.signal.addEventListener('abort', () => clearInterval(watching));
   });
-  const wrap = el('div');
-  wrap.append(toolbar, moaSlot, slot);
-  return { line, toolbar: wrap, refresh };
+  // `toolbar` va dans la barre collante ; `panels` (aide MOA, aperçu du découpage) s'ouvre sous elle, dans le flux.
+  const panels = el('div', 'at-live-panels');
+  panels.append(moaSlot, slot);
+  return { line, toolbar, panels, refresh };
 }

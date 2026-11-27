@@ -185,7 +185,11 @@ def test_sans_moa_la_page_donne_la_cle_a_poser(browser: Browser, sans_moa: tuple
     (root / "_grimoire" / "cadrage" / slug / "04-exigences.md").write_text(EXIGENCES, encoding="utf-8")
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         help_ = page.locator("[data-role='moa-help']")
-        help_.wait_for(timeout=APPEAR_MS)
+        # Repliée par défaut derrière un lien court ; le lien l'ouvre sur place.
+        page.locator("[data-act='moa-why']").wait_for(timeout=APPEAR_MS)
+        assert not help_.is_visible()
+        page.locator("[data-act='moa-why']").click()
+        help_.wait_for(state="visible", timeout=APPEAR_MS)
         assert "governance.roles.moa" in help_.inner_text() and "project-context.yaml" in help_.inner_text()
         assert "moa: " in page.locator("[data-role='moa-example']").inner_text()
         assert help_.get_by_role("button").count() == 1  # copier l'exemple : aucun bouton n'écrit la MOA
