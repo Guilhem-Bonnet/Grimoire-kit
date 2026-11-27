@@ -53,7 +53,7 @@ export function createAssistant(ctx, slug, hooks) {
     if (focus) (open ? bar.querySelector('[data-act="fold"]') : pill)?.focus({ preventScroll: true });
   };
   /** Appelée une fois la barre posée dans la page : le choix mémorisé du chantier, sinon la largeur, décide. */
-  const layout = () => setOpen(initialOpen(readPref(storage, slug), hooks.narrow ? !hooks.narrow() : true), { remember: false });
+  const layout = () => setOpen(initialOpen(readPref(storage, slug), hooks.narrow ? !hooks.narrow() : true, hooks.phone ? hooks.phone() : false), { remember: false });
   pill.addEventListener('click', () => setOpen(true, { focus: true }));
   /** Ce qui attend, dit sur la pastille : question en cours, suggestions, permission. */
   // Sans agent, la question guidée en cours (cadrage joué dans la page) attend la personne comme celle d'un agent.

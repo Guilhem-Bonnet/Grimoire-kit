@@ -29,7 +29,7 @@ import { createDrafts } from './atelier-brouillons.js';
 import { reconcileChildren, release, tag } from './atelier-reconcile.js';
 import { SELF, plainKey, sigOf } from './atelier-reconcile-logic.js';
 import {
-  INDICATOR_LABEL, WIDE_MIN, activePhase, capitalize, codeSegments, newOrphans, orphanNotice,
+  INDICATOR_LABEL, PHONE_MAX, WIDE_MIN, activePhase, capitalize, codeSegments, newOrphans, orphanNotice,
   phaseFromParams, phaseHash, phaseIndicator, stepsOf,
 } from './atelier-layout-logic.js';
 
@@ -447,6 +447,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   });
   const phaseIds = () => state.doc.phases.map((p) => p.id);
   let focusId = phaseFromParams({ phase: phaseFocus }, phaseIds(), state.doc.phases[0].id);
+  let compareIds = null; // les phases de la comparaison d'historique affichée (la feuille est alors masquée), sinon nul
+  let compareFocus = ''; // celle que la barre marque pendant la comparaison
   let lockUntil = 0; // juste après un clic sur une phase, le défilement ne la redécide pas
   const narrow = () => root.clientWidth < WIDE_MIN;
   // Lot 5 : le chat sait quel chantier est ouvert (et quelle phase) ; la barre de l'assistant guide le cadrage.
@@ -467,6 +469,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       host.append(note);
     },
     narrow,
+    phone: () => root.clientWidth < PHONE_MAX, // sous 900 px, le document d'abord : l'assistant reste derrière sa pastille
     drafts,
     // La mascotte de l'assistant : combien de suggestions attendent, et la première mise sous les yeux.
     suggestions: () => state.doc.phases.reduce((n, p) => n + (p.suggestions || []).length, 0),
@@ -519,7 +522,13 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       have.delete(p.id);
       if (!button) {
         button = el('button', 'at-phase', null, { type: 'button', 'data-phase': p.id });
-        button.addEventListener('click', () => setFocus(p.id, { scroll: true }));
+        button.addEventListener('click', () => {
+          if (compareIds) { // la feuille est masquée : la phase se lit dans la comparaison, si elle y figure
+            const target = compareIds.includes(p.id) ? document.querySelector(`[data-role="hist-comparaison"] [data-phase="${p.id}"]`) : null;
+            if (target) { compareFocus = p.id; phaseNav(); target.scrollIntoView({ block: 'start' }); return; }
+          }
+          setFocus(p.id, { scroll: true });
+        });
       }
       const name = PHASE_NAMES[p.id] || p.title;
       if (button.getAttribute('data-state') !== indicator || button.getAttribute('data-name') !== name) {
@@ -530,7 +539,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         if (indicator === 'complete') mark.append(icon('i-act-approve'));
         button.replaceChildren(mark, name, el('span', 'sr-only', ` — ${INDICATOR_LABEL[indicator]}`));
       }
-      if (p.id === focusId) button.setAttribute('aria-current', 'step'); else button.removeAttribute('aria-current');
+      if (p.id === (compareIds ? compareFocus : focusId)) button.setAttribute('aria-current', 'step'); else button.removeAttribute('aria-current');
       if (nav.children[index] !== button) nav.insertBefore(button, nav.children[index] || null);
     });
     for (const gone of have.values()) gone.remove();
@@ -707,6 +716,10 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
       }
       conflictBox.replaceChildren(el('p', null, lead), cols, choices);
       conflictBox.hidden = false;
+      // Le panneau peut tomber sous le pli : il vient sous les yeux et prend le focus (la zone `role="alert"` l'annonce).
+      conflictBox.setAttribute('tabindex', '-1');
+      conflictBox.scrollIntoView({ block: 'start' });
+      conflictBox.focus({ preventScroll: true });
     };
     const commit = async () => {
       if (area.value === mark.text && mark === block) { leave(true); return; }
@@ -912,22 +925,39 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   // replié. L'aide MOA et l'aperçu du découpage s'ouvrent sous elle ; le document et l'assistant viennent ensuite côte à côte.
   const phasebar = el('div', 'at-phasebar', null, { 'data-role': 'atelier-barre' });
   // Lecture et navigation (lecture seule) : menu « Document », recherche Ctrl+F, plan à gauche de la feuille.
-  const docMenu = createDocumentMenu(ctx, { slug, doc: () => state.doc });
+  const docMenu = createDocumentMenu(ctx, {
+    slug, doc: () => state.doc,
+    say: (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; },
+  });
   const find = createFind(ctx, { sheet });
   const plan = createPlan(ctx, { root, sheet, doc: () => state.doc });
   phasebar.append(nav, steps, liveDoc.toolbar, plan.toggle, docMenu.element, assist.pill);
   find.attach(phasebar);
   const main = el('div', 'at-doc-main');
-  main.append(docMenu.printTitle, status, sheet);
+  main.append(docMenu.printTitle, status, sheet, docMenu.printNotes);
   const grid = el('div', 'at-doc-grid');
   grid.append(main, assist.element);
   // Historique des versions (lecture seule) : un bouton dans la barre, un volet à la place de l'assistant (voir `atelier-historique.js`).
-  const versionsPane = createHistory(ctx, slug, { sheet, main, grid, say: (message) => { status.textContent = message; } });
+  const versionsPane = createHistory(ctx, slug, {
+    sheet, main, grid, say: (message) => { status.textContent = message; },
+    // La comparaison affichée (ses phases) : la barre des phases marque celle dont le diff est sous les yeux.
+    onCompare: (ids) => { compareIds = ids; compareFocus = ids && ids.length ? ids[0] : ''; phaseNav(); },
+  });
   docMenu.element.before(versionsPane.button);
   grid.append(versionsPane.element);
   plan.attach(grid);
   const view = page(ctx, head, loop.element, phasebar, liveDoc.panels, grid);
   view.querySelector('.at-body').classList.add('at-body-doc');
+  // Lien d'évitement : en tête de l'Atelier, visible au focus, il saute l'en-tête et la barre jusqu'au premier bloc du document.
+  const skip = el('a', 'at-skip', 'Aller au document', { href: '#at-document', 'data-role': 'skip-document' });
+  skip.addEventListener('click', (event) => {
+    event.preventDefault();
+    const target = sheet.querySelector('.at-blk') || sheet.querySelector('h2');
+    if (!target) return;
+    target.scrollIntoView({ block: 'center' });
+    target.focus({ preventScroll: true });
+  });
+  view.prepend(skip);
   view.append(notifier.element);
   root.replaceChildren(view);
   assist.layout(); // le choix mémorisé, ou la largeur, décide si le panneau est déplié

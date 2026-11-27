@@ -331,7 +331,13 @@ def test_the_document_menu_counts_words_and_copies_the_stored_markdown(browser: 
         assert int(found.group(2)) == max(1, -(-words // 230))
         page.locator("[data-role='doc-copy']").click()
         page.wait_for_function("() => document.querySelector('[data-role=doc-say]').textContent.includes('copié')", timeout=APPEAR_MS)
-        assert page.evaluate("navigator.clipboard.readText()") == expected
+        copied = page.evaluate("navigator.clipboard.readText()")
+        # Un document propre (voir test_workspace_atelier_lecture_correctifs) : le contenu y est, ni front matter ni gabarit.
+        assert copied.startswith("# Menu copie\n") and "Les équipes perdent le fil des décisions de cadrage." in copied
+        assert "phase:" not in copied and "À compléter" not in copied
+        # Le menu s'est refermé après l'action et le focus est revenu au bouton.
+        assert page.locator("#at-docmenu-panel").is_hidden()
+        button.click()
         # Échap referme le menu et rend le focus au bouton.
         page.keyboard.press("Escape")
         assert page.locator("#at-docmenu-panel").is_hidden() and page.evaluate("document.activeElement.dataset.role") == "document-menu"
@@ -353,7 +359,9 @@ def test_the_document_menu_downloads_the_same_markdown(browser: Browser, project
         assert download.suggested_filename == f"{slug}.md"
         target = tmp_path / "export.md"
         download.save_as(target)
-        assert target.read_bytes().decode("utf-8") == expected
+        saved = target.read_bytes().decode("utf-8")
+        assert saved.startswith("# Menu fichier\n") and "phase:" not in saved and "À compléter" not in saved
+        assert saved != expected  # les fichiers tels que stockés sont l'entrée « Fichiers bruts (.md) »
 
 
 def test_the_print_sheet_keeps_only_the_document(browser: Browser, project_on: tuple[str, Path], tmp_path: Path) -> None:
@@ -381,12 +389,12 @@ def test_the_print_sheet_keeps_only_the_document(browser: Browser, project_on: t
         assert sheet["x"] <= 2 and sheet["width"] > 600
         paper = page.evaluate("() => [getComputedStyle(document.body).backgroundColor, getComputedStyle(document.querySelector('.at-sheet p, .at-sheet .at-rub')).color]")
         assert paper == ["rgb(255, 255, 255)", "rgb(0, 0, 0)"], paper
-        # Un vrai PDF : plusieurs pages (un saut avant chaque phase), contenu complet, marges propres.
+        # Un vrai PDF : les phases s'enchaînent (aucun saut forcé), un document long tient sur plusieurs pages.
         pdf = tmp_path / "atelier.pdf"
         page.pdf(path=str(pdf), format="A4", print_background=True)
         data = pdf.read_bytes()
         pages = len(re.findall(rb"/Type\s*/Page[^s]", data))
-        assert pages >= 5, pages
+        assert 2 <= pages <= 5, pages
         page.emulate_media(media="screen")
         assert page.locator(".at-phasebar").is_visible()
         assert page.locator(".at-print-title").is_hidden()

@@ -126,7 +126,8 @@ def test_no_horizontal_overflow_on_narrow_widths(browser: Browser, project_on: t
                 ".map((n) => n.scrollWidth - n.clientWidth)"
             )
             assert max(over) <= 1, f"débordement à {width} px : {over}"
-            right = page.evaluate("() => Math.max(...[...document.querySelectorAll('.at-page *')].map((n) => n.getBoundingClientRect().right))")
+            # Hors de la barre des phases : elle défile (ses pastilles ne tronquent plus leur libellé), son conteneur, lui, ne déborde pas.
+            right = page.evaluate("() => Math.max(...[...document.querySelectorAll('.at-page *:not(.at-phases *)')].map((n) => n.getBoundingClientRect().right))")
             assert right <= width + 1, f"un élément dépasse à droite à {width} px : {right}"
 
 
