@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.cadrage import DEFAULT_CHANTIER, PHASES, PLACEHOLDER, cadrage_dir
+from grimoire.core.cadrage import DEFAULT_CHANTIER, NOT_APPLICABLE, PHASES, PLACEHOLDER, cadrage_dir
 from grimoire.core.regular_file import open_regular
 from grimoire.missions.request_kind import KIND_PROFILES, RequestKind, parse_kind
 
@@ -57,6 +57,8 @@ class Angle:
     seeds: tuple[str, str]
     phase: str
     section: str
+    #: La rubrique (phase, section) que vise CHAQUE question d'amorce, dans l'ordre ; au-delà, ``phase``/``section``.
+    targets: tuple[tuple[str, str], ...] = ()
 
 
 ANGLES: tuple[Angle, ...] = (
@@ -64,7 +66,7 @@ ANGLES: tuple[Angle, ...] = (
           "Savoir qui s'en sert, dans quelle situation, et ce qu'il fait aujourd'hui sans.",
           ("Qui utilisera cela, et dans quelle situation concrète ?",
            "Que fait cette personne aujourd'hui pour s'en passer, et qu'est-ce qui l'agace ?"),
-          "brief", "L'utilisateur"),
+          "brief", "L'utilisateur", (("brief", "L'utilisateur"), ("brief", "Le problème"))),
     Angle("existant", "Existant à réutiliser",
           "Éviter de reconstruire ce qui existe déjà dans le dépôt, le kit ou l'écosystème.",
           ("Qu'existe-t-il déjà qui résout tout ou partie du besoin ?",
@@ -94,9 +96,20 @@ ANGLES: tuple[Angle, ...] = (
           "Vérifier qu'une solution plus petite ne suffit pas.",
           ("Quelle version plus simple, voire sans code, répondrait à 80 % du besoin ?",
            "Qu'a-t-on envisagé puis écarté, et pourquoi ?"),
-          "brainstorm", "Écarté (et pourquoi)"),
+          "brainstorm", "Écarté (et pourquoi)", (("brainstorm", "Pistes"), ("brainstorm", "Écarté (et pourquoi)"))),
 )
 _BY_ID = {a.id: a for a in ANGLES}
+
+
+def question_target(angle: Angle, index: int) -> tuple[str, str]:
+    """La rubrique (phase, section) que vise la question d'amorce ``index`` de l'angle."""
+    return angle.targets[index] if index < len(angle.targets) else (angle.phase, angle.section)
+
+
+def _label(question: str) -> str:
+    """Une question en une ligne, sans balise d'emphase (elle se pose en italique devant la réponse), bornée."""
+    flat = _fold(question).replace("*", "")
+    return flat if len(flat) <= 300 else flat[:299] + "…"
 
 #: Par profondeur : (angles obligatoires, questions d'amorce par angle).
 _PROFILE: dict[str, tuple[tuple[str, ...], int]] = {
@@ -145,6 +158,14 @@ def read_regular(path: Path, *, limit: int | None = None) -> str | None:
         return handle.read().decode("utf-8", errors="replace")
 
 
+def _written_ok(entry: Any, *, line_required: bool = True) -> bool:
+    """Une trace d'écriture ``{"phase", "section", "line"[, "text"]}`` : ce que ``answer`` a posé, pour que ``retract`` le retire."""
+    if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) for k in ("phase", "section", "line")):
+        return False
+    known = {p.id for p in PHASES}
+    return entry["phase"] in known and (not line_required or bool(entry["line"])) and isinstance(entry.get("text", ""), str)
+
+
 def _load(root: Path, chantier: str | None) -> dict[str, Any] | None:
     """L'état enregistré ; ``None`` si aucun entretien. Un fichier présent mais invalide lève ValueError."""
     path = _state_path(root, chantier)
@@ -172,6 +193,11 @@ def _load(root: Path, chantier: str | None) -> dict[str, Any] | None:
             raise ValueError(f"{STATE_FILE} invalide : état {rec.get('state')!r} inconnu pour {aid}")
         if not isinstance(rec.get("answers", []), list):
             raise ValueError(f"{STATE_FILE} invalide : « answers » de {aid} doit être une liste")
+        written = rec.get("lines", [])
+        if not isinstance(written, list) or not all(w is None or _written_ok(w) for w in written):
+            raise ValueError(f"{STATE_FILE} invalide : « lines » de {aid} mal formé")
+        if "skip" in rec and not _written_ok(rec["skip"], line_required=False):
+            raise ValueError(f"{STATE_FILE} invalide : « skip » de {aid} mal formé")
     data["angles"] = angles
     return data
 
@@ -330,9 +356,13 @@ def _append_to_section(path: Path, section: str, line: str) -> None:
 
 def answer(
     root: Path, chantier: str | None, angle_id: str, text: str,
-    *, unknown: bool = False, skip: bool = False,
+    *, unknown: bool = False, skip: bool = False, question: str | None = None,
 ) -> dict[str, Any]:
-    """Consigne une réponse, un « je ne sais pas » (hypothèse) ou l'écart motivé d'un angle."""
+    """Consigne une réponse, un « je ne sais pas » (question ouverte) ou l'écart motivé d'un angle (rubrique « Sans objet »).
+
+    ``question`` : la question posée, si elle diffère de l'amorce de l'angle (sinon l'amorce de rang égal au nombre de
+    réponses déjà données). Elle donne la rubrique visée, et reste lisible devant la réponse.
+    """
     angle = _BY_ID.get(angle_id)
     if angle is None:
         raise ValueError(f"angle inconnu : {angle_id!r} — {', '.join(_BY_ID)}")
@@ -354,26 +384,64 @@ def answer(
     rec = state["angles"].setdefault(angle.id, {"state": "ouvert", "answers": []})
     rec.setdefault("answers", [])
     target = cadrage_dir(root, chantier)
+    index = len(rec["answers"])  # la question d'amorce à laquelle on répond : autant de réponses déjà données
+    asked = _label(question) if question else (_label(angle.seeds[index]) if index < len(angle.seeds) else "")
+    phase_id, section = question_target(angle, index)
     if skip:
+        # La rubrique de l'angle est marquée « Sans objet » à sa place (le gabarit s'efface), le brainstorm reste net.
         rec.update(state="ecarte", reason=text)
-        _append_to_section(target / next(p.filename for p in PHASES if p.id == "brainstorm"),
-                           "Écarté (et pourquoi)", f"- Angle « {angle.title} » écarté : {text}")
+        marker = NOT_APPLICABLE if text.rstrip(". ").lower() == "sans objet" else f"{NOT_APPLICABLE} — {text}"
+        phase_id, section = angle.phase, angle.section
+        filename = next(p.filename for p in PHASES if p.id == phase_id)
+        free = not _section_has_content(target / filename, section)
+        if free:
+            _append_to_section(target / filename, section, marker)
+        rec["skip"] = {"phase": phase_id, "section": section, "line": marker if free else ""}
     elif unknown:
-        note = f"{UNKNOWN_PREFIX}{angle.title}" + (f" — {text}" if text else "")
+        # Une question ouverte exploitable : la question posée, pas le titre de l'angle.
+        phase_id, section = "brainstorm", "Questions ouvertes"
+        note = f"{UNKNOWN_PREFIX}{asked or angle.title}"
         if note not in rec["answers"]:
+            _pad(rec)
             rec["answers"].append(note)
+            line = f"- À préciser : {asked or angle.title}" + (f" — {text}" if text else "")
+            rec["lines"].append({"phase": phase_id, "section": section, "line": line, "text": text})
+            filename = next(p.filename for p in PHASES if p.id == phase_id)
+            _append_to_section(target / filename, section, line)
         rec["state"] = "couvert"
-        _append_to_section(target / next(p.filename for p in PHASES if p.id == "comprehension"),
-                           "Hypothèses", f"- {note}")
     else:
         if text in rec["answers"]:  # même réponse redonnée : pas de doublon dans le cadrage
             return _render(state, "enregistrée")
+        _pad(rec)
         rec["answers"].append(text)
         rec["state"] = "couvert"
-        filename = next(p.filename for p in PHASES if p.id == angle.phase)
-        _append_to_section(target / filename, angle.section, f"- {text}")
+        # La réponse va dans la rubrique que vise sa question, qui reste lisible en italique devant elle.
+        line = f"- *{asked}* {text}" if asked else f"- {text}"
+        rec["lines"].append({"phase": phase_id, "section": section, "line": line})
+        filename = next(p.filename for p in PHASES if p.id == phase_id)
+        _append_to_section(target / filename, section, line)
     _save(root, chantier, state)
     return _render(state, "enregistrée")
+
+
+def _pad(rec: dict[str, Any]) -> None:
+    """Aligne ``lines`` sur ``answers`` : les réponses d'avant ce suivi n'ont pas de trace (``None``)."""
+    lines: list[dict[str, str] | None] = rec.setdefault("lines", [])
+    missing = len(rec["answers"]) - len(lines)
+    if missing > 0:
+        lines[:0] = [None] * missing
+    elif missing < 0:
+        del lines[len(rec["answers"]):]
+
+
+def _section_has_content(path: Path, section: str) -> bool:
+    """La rubrique porte-t-elle autre chose que son gabarit ?"""
+    lines = (read_regular(path) or "").splitlines()
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == f"## {section}"), None)
+    if start is None:
+        return False
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return any(ln.strip() and not ln.strip().startswith(PLACEHOLDER) for ln in lines[start + 1:end])
 
 
 def _phase_file(root: Path, chantier: str | None, phase_id: str) -> Path:
@@ -438,12 +506,23 @@ def retract(root: Path, chantier: str | None, angle_id: str) -> dict[str, Any]:
     answers: list[str] = rec.setdefault("answers", [])
     if rec.get("state") == "ecarte" and str(rec.get("reason", "")).strip():
         kind, text = "skip", str(rec.pop("reason"))
-        removed = _remove_from_section(
-            _phase_file(root, chantier, "brainstorm"),
-            "Écarté (et pourquoi)", f"- Angle « {angle.title} » écarté : {text}")
+        mark = rec.pop("skip", None)
+        if mark is None:  # écart d'avant la marque « Sans objet » : la ligne était dans le brainstorm
+            removed = _remove_from_section(
+                _phase_file(root, chantier, "brainstorm"),
+                "Écarté (et pourquoi)", f"- Angle « {angle.title} » écarté : {text}")
+        else:  # rien n'a été écrit si la rubrique avait déjà du contenu
+            removed = not mark["line"] or _remove_from_section(
+                _phase_file(root, chantier, mark["phase"]), mark["section"], mark["line"])
     elif answers:
+        _pad(rec)
         text = str(answers.pop())
-        if text.startswith(UNKNOWN_PREFIX):
+        entry = rec["lines"].pop()
+        if entry is not None:  # la trace dit où la ligne a été posée et ce qu'elle disait
+            kind = "unknown" if text.startswith(UNKNOWN_PREFIX) else "answer"
+            removed = _remove_from_section(_phase_file(root, chantier, entry["phase"]), entry["section"], entry["line"])
+            text = str(entry.get("text", "")) if kind == "unknown" else text
+        elif text.startswith(UNKNOWN_PREFIX):  # d'avant la trace : l'hypothèse était dans « Hypothèses »
             kind, removed = "unknown", _remove_from_section(
                 _phase_file(root, chantier, "comprehension"), "Hypothèses", f"- {text}")
             text = text[len(UNKNOWN_PREFIX) + len(angle.title):].lstrip(" —")

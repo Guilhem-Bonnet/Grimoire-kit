@@ -17,8 +17,12 @@ n'est pas ce bloc ; au moindre doute, le fil est orphelin. Règle, la première 
    identiques, et un seul bloc dans ce cas). L'extrait n'y est cherché que **dans ce bloc**, mot pour mot : retrouvé
    (``retrouve``) s'il y figure une seule fois, ou, s'il y figure plusieurs fois, si une seule occurrence a exactement le
    même contexte avant et après ; sinon orphelin.
-3. **Sinon** : ``orphelin``. Pas de recherche dans les autres blocs, pas de distance d'édition, pas d'unicité « dans la
-   phase ».
+   Si l'extrait n'y figure plus du tout (le bloc a été réécrit sur place, même place entre les mêmes voisins), le fil
+   suit le bloc entier (``retrouve``) : le passage a changé, pas sa place.
+3. **Le bloc visé a été réécrit et ses voisins aussi** (aucun bloc de la phase n'a son empreinte) : meilleure
+   correspondance de texte entre l'ancre (contexte et extrait) et les blocs, au-dessus d'un seuil prudent et **unique**
+   (le suivant est nettement plus bas), sinon orphelin.
+4. **Sinon** : ``orphelin``. Jamais de ré-ancrage sur un bloc ambigu ni sur un homonyme.
 
 Un fil « retrouvé » (:attr:`Comment.deplace`) le reste : la marque est écrite au magasin et ne s'efface pas.
 """
@@ -27,9 +31,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any, Protocol
 
-from grimoire.core.atelier_comments import CONTEXT_MAX
+from grimoire.core.atelier_comments import CONTEXT_MAX, QUOTE_MAX
 from grimoire.tools import atelier_blocs
 
 
@@ -57,9 +62,14 @@ class Anchor:
     start: int = 0
     end: int = 0
     near: str = ""
+    #: Le passage tel qu'il se lit aujourd'hui, quand il diffère de l'extrait gardé (bloc réécrit) ; vide sinon.
+    quote: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"state": self.state, "block_id": self.block_id, "start": self.start, "end": self.end, "near": self.near}
+        return {
+            "state": self.state, "block_id": self.block_id, "start": self.start, "end": self.end, "near": self.near,
+            "quote": self.quote,
+        }
 
 
 def context(text: str, start: int, end: int) -> tuple[str, str]:
@@ -116,12 +126,76 @@ def locate(blocks: Sequence[atelier_blocs.Block], item: Anchored) -> Anchor:
         i for i, b in enumerate(blocks)
         if b.editable and _fp(b) != item.block_fingerprint and around(blocks, i)[1:] == (item.prev, item.next)
     ]
-    if len(slot) != 1:
+    if len(slot) > 1 or (not slot and same):
         return Anchor("orphelin")
+    if not slot:
+        return _by_similarity(blocks, item)
     block = blocks[slot[0]]
     found = occurrences(block.text, item.quote)
     if len(found) > 1:
         found = [at for at in found if context(block.text, at, at + len(item.quote)) == (item.before, item.after)]
     if len(found) == 1:
         return Anchor("retrouve", block.id, found[0], found[0] + len(item.quote))
+    if not occurrences(block.text, item.quote):
+        return _whole(block, item)  # réécrit sur place : le fil suit le bloc (un extrait ambigu, lui, reste orphelin)
     return Anchor("orphelin")
+
+
+def _whole(block: atelier_blocs.Block, item: Anchored) -> Anchor:
+    """Ce que suit un fil dont l'extrait a été réécrit : le passage qui correspond à l'ancre (extrait et contexte de
+    chaque côté, comparés au bloc), à défaut le bloc entier (borné à :data:`QUOTE_MAX`)."""
+    window = item.before + item.quote + item.after
+    begin, end = follow(window, block.text, len(item.before), len(item.before) + len(item.quote))
+    return Anchor("retrouve", block.id, begin, end, quote=block.text[begin:end])
+
+
+#: Similarité minimale (part de l'ancre retrouvée dans le bloc) et écart au second pour suivre un bloc réécrit.
+SIMILAR_MIN = 0.8
+SIMILAR_GAP = 0.15
+_SIMILAR_TEXT_MAX = 3000
+
+
+def _similarity(window: str, text: str) -> float:
+    """Part de ``window`` que l'on retrouve (par blocs communs) dans ``text`` ; 0 si l'un est vide."""
+    text = text[:_SIMILAR_TEXT_MAX]
+    if not window or not text:
+        return 0.0
+    if SequenceMatcher(None, window, text).quick_ratio() * (len(window) + len(text)) / 2 < SIMILAR_MIN * len(window):
+        return 0.0  # même pas assez de lettres communes : inutile de comparer
+    matcher = SequenceMatcher(None, window, text, autojunk=False)
+    return sum(m.size for m in matcher.get_matching_blocks()) / len(window)
+
+
+def _by_similarity(blocks: Sequence[atelier_blocs.Block], item: Anchored) -> Anchor:
+    """Le bloc qui ressemble le plus à l'ancre (contexte et extrait), s'il est seul à dépasser le seuil."""
+    window = item.before + item.quote + item.after
+    scored = sorted(((_similarity(window, b.text), i) for i, b in enumerate(blocks) if b.editable), reverse=True)
+    if not scored or scored[0][0] < SIMILAR_MIN or (len(scored) > 1 and scored[1][0] > scored[0][0] - SIMILAR_GAP):
+        return Anchor("orphelin")
+    block = blocks[scored[0][1]]
+    found = occurrences(block.text, item.quote)
+    if len(found) == 1:
+        return Anchor("retrouve", block.id, found[0], found[0] + len(item.quote))
+    return _whole(block, item)
+
+
+def follow(old: str, new: str, start: int, end: int) -> tuple[int, int]:
+    """Où ``old[start:end]`` se lit dans ``new`` (le même bloc, réécrit) : la plage qui lui correspond, ou le texte
+    entier de ``new`` (borné) quand rien ne subsiste. Appelé par la route d'édition, qui connaît les deux versions."""
+    whole = (0, min(len(new), QUOTE_MAX))
+    if not old or not new or len(old) > _FOLLOW_MAX or len(new) > _FOLLOW_MAX:
+        return whole
+    if start == 0 and old[:QUOTE_MAX] == old[start:end]:
+        return whole  # le fil portait sur le bloc entier : il porte sur le bloc entier
+    first = last = -1
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if i1 <= start < i2:
+            first = j1 + (start - i1) if tag == "equal" else j1
+        if i1 < end <= i2:
+            last = j1 + (end - i1) if tag == "equal" else j2
+    if first < 0 or last <= first or not new[first:last].strip():
+        return whole
+    return first, min(last, first + QUOTE_MAX)
+
+
+_FOLLOW_MAX = 20_000

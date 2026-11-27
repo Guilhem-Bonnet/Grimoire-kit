@@ -3,8 +3,9 @@
 // L'humain sélectionne un passage d'un bloc, clique « Commenter », puis répond, résout, rouvre ou supprime le fil ;
 // l'agent commente et répond par l'outil MCP `atelier_comment` (jamais d'ici) et ne peut ni résoudre, ni rouvrir, ni
 // supprimer. Chaque fil porte l'extrait cité et une ancre que le serveur recalcule à chaque lecture : `ancre` (le bloc
-// n'a pas changé), `retrouve` (le bloc a changé, l'extrait a été retrouvé mot pour mot et en contexte) ou `orphelin`
-// (extrait modifié ou disparu : le fil reste lisible, avec l'extrait d'origine, et n'est jamais rattaché ailleurs).
+// n'a pas changé), `retrouve` (le bloc a été modifié : le serveur a suivi le fil, `quote` dit le passage d'aujourd'hui et
+// `modifie_depuis` l'extrait d'origine) ou `orphelin` (aucun bloc sûr : le fil reste lisible, avec l'extrait d'origine, et
+// n'est jamais rattaché ailleurs que par « Rattacher ici »).
 //
 // Tout texte est posé par `textContent`, jamais par `innerHTML`. Le surlignage utilise l'API CSS Custom Highlight
 // (aucune mutation du DOM du bloc) ; sans elle, le bloc entier porte un filet.
@@ -17,7 +18,7 @@ import { sigOf } from './atelier-reconcile-logic.js';
 
 const AUTHOR = { humain: 'Humain', agent: 'Agent' };
 const STATE_NOTE = {
-  retrouve: 'Le bloc a changé depuis le commentaire : le passage cité y figure toujours, tel quel.',
+  retrouve: 'Le passage commenté a été modifié : le fil l’a suivi. L’extrait d’origine reste lisible plus bas.',
   orphelin: 'Le passage cité a changé ou disparu : le commentaire reste orphelin : rien ne le rattache de soi-même, seul « Rattacher ici » le fait, sur ton geste.',
 };
 
@@ -33,6 +34,13 @@ function when(iso) {
   const date = new Date(iso);
   if (!iso || Number.isNaN(date.getTime())) return '';
   return `${date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}, ${date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/** Une ligne de la trace d'un fil que le serveur a suivi (bloc réécrit), à ne pas confondre avec un rattachement. */
+function followLine(entry) {
+  const cut = (text) => (text.length > 60 ? `${text.slice(0, 59)}…` : text);
+  const day = when(entry.date);
+  return `Passage modifié${day ? ` le ${day}` : ''} : « ${cut(entry.avant.quote)} » → « ${cut(entry.apres.quote)} »`;
 }
 
 const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
@@ -255,17 +263,25 @@ export function createComments(ctx, slug, { doc, sheet, reload, drafts }) {
     });
     const flags = el('div', 'at-cm-flags');
     if (resolved) flags.append(badge('Résolu', 'ok'));
-    if (orphan) flags.append(badge('Orphelin', 'warn', STATE_NOTE.orphelin));
-    if (c.anchor.state === 'retrouve') flags.append(badge('Passage modifié depuis le commentaire', 'warn', STATE_NOTE.retrouve));
+    // Un fil résolu dont le passage a changé reste « résolu » : l'orphelin n'est une alerte que pour un fil encore ouvert.
+    if (orphan && !resolved) flags.append(badge('Orphelin', 'warn', STATE_NOTE.orphelin));
+    if (c.anchor.state === 'retrouve') flags.append(badge('Le passage commenté a été modifié', 'warn', STATE_NOTE.retrouve));
     const first = message(c.auteur, c.date, c.texte);
     const inner = [];
-    if (orphan) inner.push(el('p', 'at-muted', 'Passage d’origine, modifié ou supprimé :'));
-    inner.push(quote, first);
+    if (orphan && !resolved) inner.push(el('p', 'at-muted', 'Passage d’origine, modifié ou supprimé :'));
+    inner.push(quote);
+    if (c.modifie_depuis) {
+      // L'extrait tel qu'il était quand le fil a été ouvert : dépliable, posé par `textContent`.
+      const origin = el('details', 'at-cm-origin', null, { 'data-role': 'origin' });
+      origin.append(el('summary', 'at-muted', 'Extrait d’origine'), el('blockquote', 'at-cm-quote', c.modifie_depuis));
+      inner.push(origin);
+    }
+    inner.push(first);
     for (const r of c.reponses || []) inner.push(message(r.auteur, r.date, r.texte));
     if (c.suggestion) inner.push(suggestionLink(c));
     if ((c.historique || []).length) {
       const trace = el('ul', 'at-cm-trace', null, { 'data-role': 'attach-history', 'aria-label': 'Rattachements de ce fil' });
-      for (const entry of c.historique) trace.append(el('li', 'at-muted', historyLine(entry, when)));
+      for (const entry of c.historique) trace.append(el('li', 'at-muted', entry.auto ? followLine(entry) : historyLine(entry, when)));
       inner.push(trace);
     }
     const actions = el('div', 'at-edit-bar');

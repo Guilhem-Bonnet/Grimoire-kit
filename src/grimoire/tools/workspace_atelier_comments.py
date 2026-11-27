@@ -74,6 +74,13 @@ def _view(item: Comment, anchor: atelier_anchor.Anchor) -> dict[str, Any]:
     row = item.to_dict()
     row["reponses"] = row.pop("replies")
     row["anchor"] = anchor.to_dict()
+    # Le passage d'origine d'un fil dont le bloc a été réécrit (vide sinon) : l'écran le dit au lieu de « orphelin ».
+    origin = ""
+    if anchor.quote and anchor.quote != item.quote:
+        origin, row["quote"] = item.quote, anchor.quote
+    elif item.deplace and item.historique and item.historique[-1]["avant"]["quote"] != item.quote:
+        origin = str(item.historique[-1]["avant"]["quote"])
+    row["modifie_depuis"] = origin
     return row
 
 
@@ -135,14 +142,77 @@ def _resync(blocks: dict[str, list[atelier_blocs.Block] | None], items: list[Com
         block = next(b for b in found if b.id == anchor.block_id)
         before, after = atelier_anchor.context(block.text, anchor.start, anchor.end)
         rank, prev, after_fp = atelier_anchor.around(found, found.index(block))
-        fresh = (anchor.block_id, atelier_blocs.fingerprint(block.text), anchor.start, before, after, rank, prev, after_fp)
-        held = (item.block_id, item.block_fingerprint, item.start, item.before, item.after, item.rank, item.prev, item.next)
+        quote = anchor.quote or item.quote  # le bloc réécrit : le passage tel qu'il se lit aujourd'hui
+        fresh = (anchor.block_id, atelier_blocs.fingerprint(block.text), anchor.start, before, after, rank, prev, after_fp, quote)
+        held = (item.block_id, item.block_fingerprint, item.start, item.before, item.after, item.rank, item.prev, item.next, item.quote)
         moved = item.deplace or anchor.state == "retrouve"
         if fresh != held or moved != item.deplace:
-            (item.block_id, item.block_fingerprint, item.start, item.before, item.after, item.rank, item.prev, item.next) = fresh
+            if quote != item.quote:
+                _remember(item, anchor.block_id, quote, anchor.start)
+            (item.block_id, item.block_fingerprint, item.start, item.before, item.after, item.rank, item.prev, item.next, item.quote) = fresh
             item.deplace = moved
             changed = True
     return changed
+
+
+def _remember(item: Comment, block_id: str, quote: str, start: int) -> None:
+    """Garde dans ``historique`` l'ancre d'avant (extrait d'origine) et celle d'après : le bloc a été réécrit."""
+    old = {"block_id": item.block_id, "quote": item.quote, "start": item.start}
+    new = {"block_id": block_id, "quote": quote, "start": start}
+    item.historique = [*item.historique, {"date": store.now(), "avant": old, "apres": new, "auto": True}][-store.MAX_HISTORY :]
+
+
+def follow_edit(
+    root: Path, slug: str, phase_id: str, old_blocks: list[atelier_blocs.Block], block: atelier_blocs.Block, new_text: str,
+) -> None:
+    """La route d'édition vient de réécrire ``block`` (``new_text`` est la plage écrite, ancien et nouveau connus) : les
+    fils posés sur ce bloc le suivent dans la même opération, sous le verrou du magasin. Un fil qui n'était pas
+    rattaché à ce bloc sans ambiguïté (homonyme, orphelin) n'est pas touché. Sans effet sur l'écriture elle-même."""
+    try:
+        chantier = _dir(root, slug)
+        if not store.store_path(chantier).is_file():
+            return
+        with store.locked_store(chantier):
+            items, ignored, damaged = store.read(chantier)
+            if not items:
+                return
+            every = _phase_blocks(root, slug)
+            fresh = every.get(phase_id)
+            mine = [i for i in items if i.phase == phase_id and not i.orphelin and _anchored_on(old_blocks, i, block.id)]
+            if fresh is not None:
+                for item in mine:
+                    _adopt(item, fresh, block, new_text)
+            if _resync(every, items) or mine:
+                _persist(chantier, items, ignored, damaged)
+    except (OSError, ValueError, TimeoutError):  # le suivi est un confort : la réécriture du bloc a déjà eu lieu
+        return
+
+
+def _anchored_on(blocks: list[atelier_blocs.Block], item: Comment, block_id: str) -> bool:
+    return atelier_anchor.locate(blocks, item).block_id == block_id
+
+
+def _adopt(item: Comment, fresh: list[atelier_blocs.Block], old: atelier_blocs.Block, new_text: str) -> None:
+    """Pose le fil sur le passage qui correspond à l'ancien dans le bloc réécrit (ou sur le bloc entier)."""
+    begin, end = atelier_anchor.follow(old.text, new_text, item.start, item.start + len(item.quote))
+    at = old.start + begin  # le texte réécrit commence là où l'ancien bloc commençait
+    target = next((b for b in fresh if b.editable and b.start <= at < b.end), None)
+    if target is None:
+        target = next((b for b in fresh if b.editable and b.start >= old.start), None)
+        if target is None:
+            return
+        at = target.start
+    start = at - target.start
+    quote = target.text[start : min(old.start + end, target.end) - target.start]
+    if not quote.strip():
+        quote, start = target.text[: store.QUOTE_MAX], 0
+    before, after = atelier_anchor.context(target.text, start, start + len(quote))
+    rank, prev, after_fp = atelier_anchor.around(fresh, fresh.index(target))
+    if quote != item.quote:
+        _remember(item, target.id, quote, start)
+    item.block_id, item.block_fingerprint, item.quote, item.start = target.id, atelier_blocs.fingerprint(target.text), quote, start
+    item.before, item.after, item.rank, item.prev, item.next = before, after, rank, prev, after_fp
+    item.deplace = True
 
 
 def _purgeable(items: list[Comment]) -> int | None:
@@ -151,20 +221,6 @@ def _purgeable(items: list[Comment]) -> int | None:
     resolved = [i for i, x in enumerate(items) if x.etat == "resolu"]
     agent_only = [i for i in resolved if items[i].auteur == "agent" and all(r["auteur"] == "agent" for r in items[i].replies)]
     return min(agent_only or resolved, key=lambda i: items[i].resolu_le, default=None)
-
-
-def resync_after_edit(root: Path, slug: str) -> None:
-    """Après une réécriture de bloc : les fils retrouvés suivent leur passage. Sans effet sur l'écriture elle-même."""
-    try:
-        chantier = _dir(root, slug)
-        if not store.store_path(chantier).is_file():
-            return
-        with store.locked_store(chantier):
-            items, ignored, damaged = store.read(chantier)
-            if items and _resync(_phase_blocks(root, slug), items):
-                _persist(chantier, items, ignored, damaged)
-    except (OSError, ValueError, TimeoutError):  # le réancrage est un confort : la réécriture du bloc a déjà eu lieu
-        return
 
 
 def _text(value: Any, name: str) -> str:

@@ -74,7 +74,7 @@ def test_la_reponse_est_consignee_exactement_comme_la_commande(project: Path, tm
     interview.answer(twin, "un", step["angle"], "les  mainteneurs\ndu kit")
     for name in ("01-brief.md", "02-brainstorm.md", "03-comprehension.md", "05-cahier-des-charges.md", "entretien.json"):
         assert _read(project, name) == (twin / "_grimoire" / "cadrage" / "un" / name).read_text(encoding="utf-8"), name
-    assert "- les mainteneurs du kit" in _read(project, "01-brief.md")  # le bon bloc, texte replié sur une ligne
+    assert "les mainteneurs du kit" in _read(project, "01-brief.md")  # le bon bloc, texte replié sur une ligne
 
 
 def test_les_questions_se_suivent_une_a_une(project: Path) -> None:
@@ -97,14 +97,16 @@ def test_je_ne_sais_pas_ecrit_l_hypothese_et_ferme_l_angle(project: Path) -> Non
     step = _step(project)
     out = _act(project, "guide-ne-sais-pas", **step)
     assert out["guide"]["current"]["angle"] != step["angle"]  # l'angle entier est clos, pas seulement la question
-    assert interview.UNKNOWN_PREFIX in _read(project, "03-comprehension.md")
+    asked = next(a for a in interview.ANGLES if a.id == step["angle"]).seeds[step["index"]]
+    assert f"À préciser : {asked}" in _read(project, "02-brainstorm.md")  # la question, pas le titre de l'angle
 
 
 def test_sans_objet_ecarte_l_angle_avec_sa_raison(project: Path) -> None:
     _act(project, "guide-demarrer")
     step = _step(project)
     _act(project, "guide-sans-objet", **step)
-    assert "écarté : sans objet" in _read(project, "02-brainstorm.md")
+    assert "> Sans objet" in _read(project, "01-brief.md").split("## L'utilisateur")[1].split("##")[0]  # à sa place
+    assert "Angle «" not in _read(project, "02-brainstorm.md")  # le brainstorm n'est pas pollué
     rec = next(a for a in interview.view(project, "un")["angles"] if a["id"] == step["angle"])
     assert rec["state"] == "ecarte" and rec["reason"] == "sans objet"
 

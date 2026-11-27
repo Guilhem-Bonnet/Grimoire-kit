@@ -28,6 +28,8 @@ from typing import Any
 
 CADRAGE_DIR = Path("_grimoire") / "cadrage"
 PLACEHOLDER = "> À compléter —"
+#: Ce que l'entretien écrit à la place du gabarit quand une rubrique est « sans objet » (suivi de la raison, s'il y en a une).
+NOT_APPLICABLE = "> Sans objet"
 #: Le chantier par défaut : les fichiers historiques, posés à la racine de ``_grimoire/cadrage/``.
 DEFAULT_CHANTIER = "principal"
 

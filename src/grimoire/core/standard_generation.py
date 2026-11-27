@@ -139,6 +139,18 @@ LEXICAL_INDEX_IGNORE_BLOCK = (
     "# Lexical memory index — local state the first task or memory command creates\n"
     f"{LEXICAL_INDEX_IGNORE}\n"
 )
+# Verrous de fichier (``fsio.locked`` : ``.<nom>.lock``, ``.<nom>.xlock`` en repli) : transitoires, posés à côté de
+# chaque fichier que le kit écrit sous verrou. Seuls les dossiers du kit et le contexte projet sont couverts : jamais
+# un ``*.lock`` du projet (``yarn.lock``, ``Cargo.lock``…). ``comments.json`` et ``suggestions.json`` restent suivis.
+LOCK_IGNORE = "_grimoire/**/.*.lock"
+LOCK_IGNORE_LINES = (
+    ".project-context.yaml.lock", ".project-context.yaml.xlock",
+    LOCK_IGNORE, "_grimoire/**/.*.xlock", "_grimoire-output/**/.*.lock", "_grimoire-output/**/.*.xlock",
+)
+LOCK_IGNORE_BLOCK = (
+    "# File locks — transient, created beside each file the kit writes under lock\n"
+    + "".join(f"{line}\n" for line in LOCK_IGNORE_LINES)
+)
 GITIGNORE_SECTION = (
     f"{GITIGNORE_MARKER}\n"
     "# Session runs — ephemeral runtime data\n"
@@ -147,6 +159,7 @@ GITIGNORE_SECTION = (
     "_grimoire/_memory/archives/\n"
     + MEMORY_READS_IGNORE_BLOCK
     + LEXICAL_INDEX_IGNORE_BLOCK
+    + LOCK_IGNORE_BLOCK
 )
 
 
@@ -171,6 +184,7 @@ def ensure_grimoire_gitignore(root: Path) -> Path | None:
         missing = "".join(
             block for line, block in (
                 (MEMORY_READS_IGNORE, MEMORY_READS_IGNORE_BLOCK), (LEXICAL_INDEX_IGNORE, LEXICAL_INDEX_IGNORE_BLOCK),
+                (LOCK_IGNORE, LOCK_IGNORE_BLOCK),
             ) if line not in existing
         )
         if not missing:

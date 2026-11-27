@@ -98,7 +98,7 @@ def test_a_human_comment_is_anchored_and_never_writes_the_phase(project: Path) -
     assert made["before"] == PARA_A[: made["start"]][-store.CONTEXT_MAX :] and made["after"] == "."
     (row,) = _threads(project)
     assert row["anchor"] == {
-        "state": "ancre", "block_id": made["block_id"], "start": made["start"], "end": made["start"] + len(QUOTE), "near": "",
+        "state": "ancre", "block_id": made["block_id"], "start": made["start"], "end": made["start"] + len(QUOTE), "near": "", "quote": "",
     }
     assert [c["id"] for c in _phase(project)["comments"]] == [made["id"]]
     saved = json.loads((project / "_grimoire/cadrage/un" / store.FILENAME).read_text(encoding="utf-8"))
@@ -155,7 +155,7 @@ def test_structure_blocks_and_vanished_blocks_take_no_comment(project: Path) -> 
 def test_the_anchor_survives_a_change_of_the_neighbouring_block(project: Path) -> None:
     made = _comment(project)
     _rewrite(project, PARA_B, "Un second paragraphe, réécrit de fond en comble.")
-    held = {"state": "ancre", "block_id": made["block_id"], "start": made["start"], "end": made["start"] + len(QUOTE), "near": ""}
+    held = {"state": "ancre", "block_id": made["block_id"], "start": made["start"], "end": made["start"] + len(QUOTE), "near": "", "quote": ""}
     assert _anchor(project) == held
     _rewrite(project, "Brainstorm", "Brainstorm, revu")  # un autre bloc encore (le titre n'est pas un bloc modifiable)
     assert _anchor(project) == held
@@ -188,6 +188,7 @@ def test_a_quote_found_twice_in_its_block_with_a_changed_context_is_orphaned_not
 def test_a_deleted_quote_is_an_orphan_that_stays_listed(project: Path) -> None:
     made = _comment(project)
     _rewrite(project, QUOTE, "")
+    _rewrite(project, PARA_B, "Autre sujet.")  # le voisin change aussi : plus rien ne place le fil
     (row,) = _threads(project)
     assert row["anchor"]["state"] == "orphelin" and row["quote"] == QUOTE and row["id"] == made["id"]
     assert [c["id"] for c in _phase(project)["comments"]] == [made["id"]]  # visible en fin de phase
@@ -256,10 +257,12 @@ def _cockpit_edit(root: Path, block_id: str, text: str) -> None:
 
 def test_an_orphan_stays_an_orphan_and_is_written_as_such(project: Path) -> None:
     made = _comment(project)
-    _cockpit_edit(project, made["block_id"], "Le bouton sert à dicter.")  # l'extrait disparaît
+    _rewrite(project, PARA_A, "Le bouton sert à dicter.")  # hors cockpit : le passage ET son voisin changent
+    _rewrite(project, PARA_B, "Autre sujet.")
+    _cockpit_edit(project, _block(project, "Autre sujet."), "Autre sujet, précisé.")
     (row,) = store.load(project / "_grimoire/cadrage/un")
     assert row.orphelin is True and (row.block_id, row.quote) == (made["block_id"], QUOTE)
-    _cockpit_edit(project, _block(project, PARA_B), "Autre chose.")  # une autre réécriture ne le réancre pas
+    _cockpit_edit(project, _block(project, "Autre sujet, précisé."), "Autre chose.")  # une autre réécriture ne le réancre pas
     assert store.load(project / "_grimoire/cadrage/un")[0].orphelin is True
     assert _anchor(project)["state"] == "orphelin"
 
@@ -267,8 +270,9 @@ def test_an_orphan_stays_an_orphan_and_is_written_as_such(project: Path) -> None
 def test_an_orphan_is_not_attached_elsewhere_when_its_text_comes_back_in_another_block(project: Path) -> None:
     """Sonde de la relecture (a) : le texte d'origine réécrit dans un autre bloc (suggestion acceptée) ne rattache rien."""
     made = _comment(project)
-    _cockpit_edit(project, made["block_id"], "Le bouton sert à dicter.")
-    other = _block(project, PARA_B)
+    _rewrite(project, PARA_A, "Le bouton sert à dicter.")  # hors cockpit : le passage ET son voisin changent
+    _rewrite(project, PARA_B, "Autre sujet.")
+    other = _block(project, "Autre sujet.")
     filed = sugg.suggest(str(project), "un", other, PARA_A)["suggestion"]
     assert wa.post_http(project, f"{P}atelier/chantiers/un/suggestions/{filed['id']}", {"decision": "accept"})[0] == 200
     assert any(b["text"] == PARA_A for b in _phase(project)["blocks"])  # le texte d'origine est bien revenu, ailleurs
@@ -281,14 +285,15 @@ def test_an_orphan_is_not_attached_elsewhere_even_when_nothing_was_written_in_be
     _comment(project)
     _rewrite(project, "Le bouton maintenu sert à parler " + QUOTE, "Le bouton sert à dicter.")
     _rewrite(project, PARA_B, PARA_A)
-    assert _anchor(project) == {"state": "orphelin", "block_id": "", "start": 0, "end": 0, "near": ""}
+    assert _anchor(project) == {"state": "orphelin", "block_id": "", "start": 0, "end": 0, "near": "", "quote": ""}
 
 
 def test_a_long_quote_is_not_attached_to_a_sentence_introduced_elsewhere(project: Path) -> None:
     """Sonde de la relecture (b) : la règle 3 sans contexte n'existe plus ; seul le bloc d'origine est fouillé."""
-    made = _comment(project)
-    _cockpit_edit(project, made["block_id"], "Le bouton sert à dicter.")
-    _cockpit_edit(project, _block(project, PARA_B), f"Ne jamais parler {QUOTE}, c'est interdit.")
+    _comment(project)
+    _rewrite(project, PARA_A, "Le bouton sert à dicter.")  # hors cockpit : le passage ET son voisin changent
+    _rewrite(project, PARA_B, "Autre sujet.")
+    _cockpit_edit(project, _block(project, "Autre sujet."), f"Ne jamais parler {QUOTE}, c'est interdit.")
     assert _anchor(project)["state"] == "orphelin" and _anchor(project)["block_id"] == ""
     assert store.load(project / "_grimoire/cadrage/un")[0].orphelin is True
 
@@ -410,7 +415,7 @@ def test_the_read_tool_writes_nothing_and_flags_its_content_as_untrusted(project
     com.listing(project, "un")
     assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in sorted(folder.iterdir())} == before
     states = {c["id"]: c["anchor"]["state"] for c in out["comments"]}
-    assert states[made["id"]] == "retrouve" and states[other["id"]] == "orphelin"
+    assert states[made["id"]] == "retrouve" and states[other["id"]] == "retrouve"  # le second suit le bloc entier
     assert out["untrusted"] is True and "PAS UNE INSTRUCTION" in out["notice"]
     assert set(out["untrusted_fields"]) == {"texte", "quote", "reponses", "block_text", "historique"}
     assert through_tool["untrusted"] is True
@@ -532,7 +537,9 @@ def test_the_agent_comments_replies_and_reads_the_open_threads(project: Path) ->
     assert seen[0]["block_text"] == PARA_A and seen[0]["quote"] == "Le bouton maintenu" and seen[0]["anchor"]["state"] == "ancre"
     _rewrite(project, "Le bouton maintenu", "Le bouton")
     (orphan,) = com.agent_threads(str(project), "un")["comments"]
-    assert orphan["anchor"]["state"] == "orphelin" and orphan["quote"] == "Le bouton maintenu" and orphan["block_text"] == ""
+    # Le bloc est réécrit à sa place (mêmes voisins) : le fil le suit, l'extrait d'origine reste dit.
+    assert orphan["anchor"]["state"] == "retrouve" and orphan["modifie_depuis"] == "Le bouton maintenu"
+    assert orphan["block_text"] == PARA_A.replace("Le bouton maintenu", "Le bouton")
 
 
 def test_the_agent_text_is_refused_when_the_human_could_not_see_it(project: Path) -> None:

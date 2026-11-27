@@ -314,7 +314,7 @@ export function createLiveDoc(ctx, slug, { sheet, status, comments = () => 0, on
     setHelp(trace ? trace.moa : null);
     onTrace(trace);
     if (!trace || !trace.requirements.length) {
-      setText(summary, trace ? 'Aucune exigence identifiée : écris-les en « REQ-001 : … » pour les suivre.' : '');
+      setText(summary, trace ? 'Aucune exigence identifiée : écris-les en « - REQ-001 [Must] : … » pour les suivre.' : '');
       summary.title = summary.textContent;
       lockSplit(true, summary.textContent || 'État des exigences en cours de lecture.');
       return;

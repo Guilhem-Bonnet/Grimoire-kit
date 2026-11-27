@@ -113,10 +113,50 @@ def test_l_ecriture_d_un_bloc_met_la_date_a_jour_et_fait_avancer_l_etat(project:
     assert after.etat == "en-discussion"  # cadrage entamé
 
 
-def test_des_exigences_ecrites_font_passer_a_pret_a_valider(project: Path, clock: list[str]) -> None:
+def _fill_everything(root: Path, slug: str) -> None:
+    """Chaque rubrique de chaque phase a du contenu : le cadrage n'a plus aucun point à préciser."""
+    from grimoire.core.cadrage import PHASES
+
+    for phase in PHASES:
+        path = root / "_grimoire" / "cadrage" / slug / phase.filename
+        text = path.read_text(encoding="utf-8")
+        for section in phase.sections:
+            body = EXIGENCES.split("\n", 2)[2].strip() if (phase.id, section) == ("exigences", "Fonctionnelles") else f"Réponse pour {section}."
+            text = text.replace(f"> À compléter — {section.lower()}.", body)
+        path.write_text(text, encoding="utf-8")
+
+
+def test_des_exigences_ecrites_seules_ne_disent_pas_pret_a_valider(project: Path, clock: list[str]) -> None:
     slug = _chantier(project, "# Exigences\n\nUn texte libre.\n")
     _edit(project, slug, "exigences", "Un texte libre", EXIGENCES.split("\n", 2)[2].strip())
+    assert read_chantier(project, slug).etat == "en-discussion"  # le cadrage a encore des points à préciser
+    assert loop.fact_state(project, slug) == "en-discussion"
+
+
+def test_pret_a_valider_exige_des_exigences_et_un_cadrage_complet(project: Path, clock: list[str]) -> None:
+    slug = new_chantier(project, "Dicter une idée").slug
+    _fill_everything(project, slug)
+    assert loop.fact_state(project, slug) == "pret-a-valider"
+    _edit(project, slug, "brief", "Réponse pour Le problème", "Le problème est réel.")
     assert read_chantier(project, slug).etat == "pret-a-valider"
+
+
+def test_pret_a_valider_retombe_quand_le_cadrage_se_rouvre(project: Path, clock: list[str]) -> None:
+    slug = new_chantier(project, "Dicter une idée").slug
+    _fill_everything(project, slug)
+    _edit(project, slug, "brief", "Réponse pour Le problème", "Le problème est réel.")
+    assert read_chantier(project, slug).etat == "pret-a-valider"
+    path = project / "_grimoire/cadrage" / slug / "01-brief.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("Réponse pour Pourquoi maintenant.", "> À compléter — pourquoi maintenant."), encoding="utf-8")
+    _edit(project, slug, "brief", "Le problème est réel", "Le problème est bien réel.")
+    assert read_chantier(project, slug).etat == "en-discussion"  # un point à préciser est revenu : plus « prêt »
+
+
+def test_un_etat_pose_a_la_main_plus_loin_ne_retombe_pas(project: Path, clock: list[str]) -> None:
+    slug = _chantier(project, "# Exigences\n\nUn texte libre.\n")
+    set_state(project, slug, "valide")
+    _edit(project, slug, "exigences", "Un texte libre", EXIGENCES.split("\n", 2)[2].strip())
+    assert read_chantier(project, slug).etat == "valide"
 
 
 def test_l_etat_ne_recule_jamais_et_respecte_un_etat_pose_plus_loin(project: Path, clock: list[str]) -> None:
@@ -169,7 +209,7 @@ def test_un_ledger_ou_des_exigences_illisibles_ne_cassent_ni_la_liste_ni_la_page
 
     monkeypatch.setattr(loop, "tasks", broken)
     assert _doc(project, slug)["taches"] == []  # la page se dessine, sans liste de tâches
-    assert loop.fact_state(project, slug) == "pret-a-valider"  # l'état retombe sur ce qui se lit encore
+    assert loop.fact_state(project, slug) == "en-discussion"  # l'état retombe sur ce qui se lit encore
     monkeypatch.setattr(loop, "_musts_to_validate", broken)
     assert loop.waiting(project, slug, suggestions=2, asking=False) == {"question": 0, "suggestions": 2, "a_valider": 0, "decoupage": 0}
 

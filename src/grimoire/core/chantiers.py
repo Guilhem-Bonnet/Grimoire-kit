@@ -262,6 +262,8 @@ def record_write(root: Path, slug: str, etat: str | None = None) -> Chantier | N
     if etat in ETATS and current.etat in ETATS and ETATS.index(etat) > ETATS.index(current.etat) \
             and current.etat not in ("livre", "archive") and etat not in ("livre", "archive"):
         changes["etat"] = etat
+    elif etat == "en-discussion" and current.etat == "pret-a-valider":
+        changes["etat"] = etat  # la seule retombée : « Prêt à valider » est une affirmation, elle cesse d'être vraie
     return _write(root, name, current, **changes)
 
 
