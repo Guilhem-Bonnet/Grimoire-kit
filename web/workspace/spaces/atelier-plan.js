@@ -95,7 +95,7 @@ export function createPlan(ctx, { root, sheet, doc }) {
   const decide = () => {
     const atBottom = root.scrollTop > 0 && root.scrollHeight - root.scrollTop - root.clientHeight < 4;
     const inBand = new Set(targets.filter((t) => touching.has(t.node())).map((t) => t.id));
-    markCurrent(pickCurrent(targets.map((t) => t.id), inBand, current, atBottom));
+    markCurrent(pickCurrent(targets.map((t) => t.id), inBand, current, atBottom, root.scrollTop <= 0));
   };
 
   const spy = typeof IntersectionObserver === 'function'

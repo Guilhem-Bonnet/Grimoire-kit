@@ -51,7 +51,7 @@ def _done(rec: dict[str, Any], index: int) -> bool:
 
 def _steps(interview: dict[str, Any]) -> list[dict[str, Any]]:
     """Les questions de l'entretien dans l'ordre : pour chaque angle obligatoire, ses questions d'amorce."""
-    from grimoire.core.cadrage_interview import ANGLES
+    from grimoire.core.cadrage_interview import ANGLES, question_target
 
     phase_of = {a.id: a for a in ANGLES}
     titles = {p.id: p.title for p in PHASES}
@@ -61,10 +61,12 @@ def _steps(interview: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         meta = phase_of[rec["id"]]
         for index, question in enumerate(rec["questions"]):
+            target_phase, target_section = question_target(meta, index)  # où ira la réponse à CETTE question
             out.append({
                 "angle": rec["id"], "title": rec["title"], "intent": rec["intent"], "index": index,
                 "of": len(rec["questions"]), "question": question, "phase": meta.phase,
                 "phase_title": titles[meta.phase], "section": meta.section, "done": _done(rec, index),
+                "target_phase": target_phase, "target_phase_title": titles[target_phase], "target_section": target_section,
                 "answers": list(rec.get("answers", [])), "reason": rec.get("reason", ""), "state": rec["state"],
             })
     return out
@@ -91,14 +93,31 @@ def view(root: Path, slug: str) -> dict[str, Any]:
     def public(step: dict[str, Any] | None) -> dict[str, Any] | None:
         if step is None:
             return None
-        return {k: step[k] for k in ("angle", "title", "intent", "index", "of", "question", "phase", "phase_title", "section")}
+        return {k: step[k] for k in ("angle", "title", "intent", "index", "of", "question", "phase", "phase_title", "section",
+                                     "target_phase", "target_phase_title", "target_section")}
 
-    previous = None if last_done is None else {**public(steps[last_done]), "answer": _shown(steps[last_done])}  # type: ignore[dict-item]
+    previous = None
+    if last_done is not None:
+        previous = {**public(steps[last_done]), "answer": _shown(steps[last_done]), "stored": _stored(steps[last_done])}  # type: ignore[dict-item]
     return {
         "available": True, "started": True, "error": "", "finished": cursor is None, "total": len(steps),
         "position": len(steps) if cursor is None else cursor, "current": None if cursor is None else public(steps[cursor]),
         "previous": previous,
     }
+
+
+def _stored(step: dict[str, Any]) -> dict[str, str]:
+    """Où la réponse de la question *step* a été rangée dans le document (même règle que ``cadrage_interview.answer``)."""
+    from grimoire.core.cadrage_interview import UNKNOWN_PREFIX
+
+    titles = {p.id: p.title for p in PHASES}
+    if step["state"] == "ecarte" and str(step["reason"]).strip():
+        kind, phase, section = "skip", step["phase"], step["section"]
+    elif any(str(a).startswith(UNKNOWN_PREFIX) for a in step["answers"]):
+        kind, phase, section = "unknown", "brainstorm", "Questions ouvertes"
+    else:
+        kind, phase, section = "answer", step["target_phase"], step["target_section"]
+    return {"kind": kind, "phase": phase, "phase_title": titles[phase], "section": section}
 
 
 def _shown(step: dict[str, Any]) -> str:

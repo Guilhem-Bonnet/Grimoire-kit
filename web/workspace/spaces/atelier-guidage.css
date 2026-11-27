@@ -1,0 +1,91 @@
+/* Atelier de spec : dire ce qui est attendu (invites de rubrique), « Ce qu'il me reste à faire », et l'entretien guidé lisible.
+   Mêmes jetons que atelier.css (clair et sombre par les variables), aucune couleur en dur. */
+
+/* ── Invite d'une rubrique vide ─────────────────────────────────────────── */
+.at-empty-slot.at-invite { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); font-style: normal; color: var(--ink); }
+.at-inv-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); margin: 0; }
+.at-inv-what { flex: 1 1 260px; min-width: 0; color: var(--ink); font-size: var(--t-m); }
+.at-inv-statut { flex: none; padding: 1px var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--panel); color: var(--ink2); font-size: var(--t-s); font-weight: 600; white-space: nowrap; }
+.at-inv-statut[data-level="high"] { border-color: var(--warn); background: var(--warn-soft); color: var(--ink); }
+.at-inv-statut[data-level="mid"] { border-color: var(--acc); background: var(--acc-soft); color: var(--ink); }
+.at-inv-ex { margin: 0; color: var(--ink2); font-size: var(--t-s); }
+.at-inv-ex-tag { margin-right: var(--sp-1); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: var(--t-min); color: var(--ink3); }
+.at-inv-note { margin: 0; }
+.at-inv-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.at-inv-actions .at-btn { height: 30px; font-size: var(--t-s); }
+.at-inv-form { margin-top: var(--sp-1); }
+.at-inv-form .at-input { flex: 1 1 220px; min-width: 0; }
+
+/* Rubrique « sans objet » : une ligne repliée, sa raison, le moyen de la rouvrir. */
+.at-empty-slot.at-inv-na { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); padding: var(--sp-1) var(--sp-3); border-style: solid; background: none; font-style: normal; color: var(--ink2); font-size: var(--t-s); }
+.at-inv-na-tag { flex: none; padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-pill); color: var(--ink3); font-weight: 600; font-size: var(--t-min); }
+.at-inv-na-text { flex: 1 1 200px; min-width: 0; }
+.at-inv-na .at-btn { height: 26px; font-size: var(--t-s); }
+.at-inv-na .at-error { flex-basis: 100%; margin: 0; }
+
+/* ── Ce qu'il me reste à faire ──────────────────────────────────────────── */
+.at-reste > :not(summary) { margin-top: var(--sp-2); }
+.at-reste { padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: var(--r); background: var(--panel); }
+.at-reste[hidden] { display: none; }
+.at-reste[data-ready="true"] { border-left-color: var(--ok); }
+.at-reste-sum { display: flex; flex-direction: column; gap: 2px; cursor: pointer; list-style: none; position: relative; padding-left: var(--sp-4); }
+.at-reste-sum::-webkit-details-marker { display: none; }
+.at-reste-sum::before { content: "▸"; position: absolute; left: 0; top: 2px; color: var(--ink3); font-size: var(--t-s); }
+.at-reste[open] > .at-reste-sum::before { content: "▾"; }
+.at-reste-sum:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: var(--r); }
+.at-reste-h { font-size: var(--t-s); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink3); }
+.at-reste p { margin: 0; }
+.at-reste > p { margin-top: var(--sp-2); }
+.at-reste-head { font-size: var(--t-l); font-weight: 600; color: var(--ink); }
+.at-reste-list { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); margin: 0; padding: 0; list-style: none; }
+.at-reste-list li { min-width: 0; font-size: var(--t-m); }
+.at-reste-link { font-size: var(--t-m); white-space: normal; text-align: left; }
+.at-reste-next { color: var(--ink); }
+.at-reste-tail { font-size: var(--t-s); }
+
+/* ── Entretien guidé : une vraie place ──────────────────────────────────── */
+.at-asst-qtext { font-size: var(--t-xl); font-weight: 600; line-height: 1.3; color: var(--ink); }
+.at-asst-q p.at-asst-qtext { font-size: var(--t-xl); font-weight: 600; }
+.at-asst-why { color: var(--ink2); font-size: var(--t-m); }
+.at-asst-q p.at-asst-dest { font-size: var(--t-m); font-weight: 400; color: var(--ink); }
+.at-asst-dest strong { font-weight: 600; }
+.at-asst-tags { flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); }
+.at-asst-area { min-height: calc(5 * 1.5em + var(--sp-3)); font-size: var(--t-m); line-height: 1.5; resize: vertical; }
+.at-asst-keys { margin: 0; font-size: var(--t-s); }
+.at-asst-ack { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--ok); border-radius: var(--r); background: var(--ok-soft); color: var(--ink); font-size: var(--t-s); }
+.at-asst-ack .ico { flex: none; width: 14px; height: 14px; color: var(--ok); }
+.at-asst-ack span { flex: 1 1 160px; min-width: 0; }
+.at-asst-head { flex-wrap: wrap; }
+.at-asst-head .at-muted { min-width: 0; text-align: right; }
+.at-asst-grow { flex: none; white-space: nowrap; margin-left: auto; padding: 0 var(--sp-3); height: 28px; border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--panel); color: var(--ink); font: inherit; font-size: var(--t-s); font-weight: 500; cursor: pointer; }
+.at-asst-grow:hover { background: var(--hover); }
+.at-asst-grow:focus-visible, .at-asst-rail:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.at-asst-head .at-muted + .at-asst-grow { margin-left: var(--sp-2); }
+.at-asst-rail { display: none; }
+
+/* La colonne et le tiroir gardent leur taille d'avant (la mise en page du document ne bouge pas) : c'est « Agrandir » qui donne la place. */
+@container canvas (min-width: 1100px) {
+  /* Agrandi : l'entretien au centre, le document replié à gauche sur un rail à rouvrir. */
+  .at-doc-grid.at-asst-big:has(> .at-asst:not([hidden])) { grid-template-columns: 56px minmax(0, 880px); }
+  .at-doc-grid.at-asst-big > .at-doc-main, .at-doc-grid.at-asst-big > .at-plan { display: none; }
+  .at-doc-grid.at-asst-big > .at-asst.is-big { grid-column: 2; grid-row: 1; position: static; max-height: none; padding: var(--sp-5) var(--sp-6); }
+  .at-doc-grid.at-asst-big > .at-asst-rail { grid-column: 1; grid-row: 1; position: sticky; top: 72px; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-3) 0; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--panel); color: var(--ink); cursor: pointer; font: inherit; font-size: var(--t-s); font-weight: 500; }
+  .at-doc-grid.at-asst-big > .at-asst-rail[hidden] { display: none; }
+  .at-doc-grid.at-asst-big > .at-asst-rail:hover { background: var(--hover); }
+  .at-doc-grid.at-asst-big > .at-asst-rail .ico { width: 14px; height: 14px; transform: rotate(180deg); }
+  .at-asst-rail-text { writing-mode: vertical-rl; }
+  .at-asst.is-big .at-asst-qtext { font-size: 24px; }
+  .at-asst.is-big .at-asst-area { min-height: calc(8 * 1.5em + var(--sp-3)); font-size: var(--t-l); }
+}
+/* Écran étroit : le tiroir grandit (le document reste derrière), sans rail. */
+@container canvas (max-width: 1099px) {
+  .at-doc-grid.at-asst-big > .at-asst.is-big:not([hidden]) { max-height: min(88dvh, 820px); }
+  .at-asst-rail { display: none !important; }
+}
+
+/* Lecture, impression : ni invites animées ni résumé. */
+.at-page.is-reading .at-reste { display: none !important; }
+@media print {
+  .at-reste, .at-inv-actions, .at-inv-form, .at-inv-ex, .at-inv-statut, .at-inv-note { display: none !important; }
+  .at-empty-slot.at-invite, .at-empty-slot.at-inv-na { padding: 0 var(--sp-2); gap: 0; }
+}

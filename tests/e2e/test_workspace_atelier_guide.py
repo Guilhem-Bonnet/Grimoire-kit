@@ -101,7 +101,10 @@ def test_cadrage_guide_sans_agent_de_bout_en_bout(browser: Browser, sans_agent: 
         # Une question à la fois, avec sa place dans l'entretien.
         question = page.locator("[data-role='guided-question']")
         question.wait_for(timeout=APPEAR_MS)
-        expect(question).to_contain_text("Question 1 sur", use_inner_text=True)
+        # Sa place dans l'entretien se dit en mots (« Encore N questions, … »), plus en « Question 1 sur N ».
+        remaining = page.locator("[data-role='guided-remaining']")
+        expect(remaining).to_contain_text("Encore", use_inner_text=True)
+        left = remaining.inner_text()
         first = page.locator("[data-role='guided-text']").inner_text()
         expect(page.locator("[data-act='previous']")).to_be_disabled()  # rien à corriger avant la première
 
@@ -109,13 +112,13 @@ def test_cadrage_guide_sans_agent_de_bout_en_bout(browser: Browser, sans_agent: 
         page.locator(".at-asst-area").fill("Les mainteneurs du kit.")
         page.locator(".at-asst-area").press("Enter")
         page.locator(".at-sheet", has_text="Les mainteneurs du kit.").wait_for(timeout=APPEAR_MS)
-        page.locator("[data-role='guided-question']", has_text="Question 2 sur").wait_for(timeout=APPEAR_MS)
+        expect(remaining).not_to_have_text(left, use_inner_text=True)  # une question de moins à faire
         expect(page.locator("[data-role='guided-text']")).not_to_have_text(first, use_inner_text=True)
         assert "* Les mainteneurs du kit." in _read(root, slug, "01-brief.md")  # la question en italique, puis la réponse
 
         # Retour à la question précédente : la ligne quitte le document, la réponse revient dans le champ.
         page.locator("[data-act='previous']").click()
-        page.locator("[data-role='guided-question']", has_text="Question 1 sur").wait_for(timeout=APPEAR_MS)
+        expect(remaining).to_have_text(left, use_inner_text=True)  # revenu à la première question
         page.wait_for_function("() => document.querySelector('.at-asst-area')?.value === 'Les mainteneurs du kit.'")
         assert "Les mainteneurs du kit." not in _read(root, slug, "01-brief.md")
         page.locator(".at-asst-area").fill("Les mainteneurs et les relecteurs du kit.")
@@ -124,7 +127,7 @@ def test_cadrage_guide_sans_agent_de_bout_en_bout(browser: Browser, sans_agent: 
         assert "* Les mainteneurs et les relecteurs du kit." in _read(root, slug, "01-brief.md")
 
         # « Je ne sais pas » : une hypothèse à valider, l'angle suivant.
-        page.locator("[data-role='guided-question']", has_text="Question 2 sur").wait_for(timeout=APPEAR_MS)
+        expect(remaining).not_to_have_text(left, use_inner_text=True)
         page.locator("[data-act='unknown']").click()
         page.locator("[data-role='atelier-status']", has_text="hypothèse").wait_for(timeout=APPEAR_MS)
         assert "- À préciser : " in _read(root, slug, "02-brainstorm.md")  # la question posée, rangée parmi les questions ouvertes

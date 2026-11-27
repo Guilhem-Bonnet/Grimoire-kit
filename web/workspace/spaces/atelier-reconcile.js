@@ -7,7 +7,7 @@ import { captureFocus, restoreFocus } from './atelier-focus.js';
 import { planChildren } from './atelier-reconcile-logic.js';
 
 /** Ce qui montre une saisie en cours : bloc en édition, nouveau commentaire, réponse, confirmation, refus, rattachement. */
-export const BUSY = '.is-editing, .at-cm-new, .at-cm-reply, .at-cm-confirm, .at-cm-pick, .at-refuse';
+export const BUSY = '.is-editing, .at-cm-new, .at-cm-reply, .at-cm-confirm, .at-cm-pick, .at-refuse, .at-inv-form';
 
 /** Pose l'identité et la signature d'un nœud (rend le nœud). */
 export function tag(node, key, sig) {
