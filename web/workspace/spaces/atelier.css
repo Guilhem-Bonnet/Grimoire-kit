@@ -372,3 +372,85 @@
   .at-sheet { padding: var(--sp-4); }
 }
 @media (prefers-reduced-motion: reduce) { .at-phasebar, .at-link, .at-loop-todo { transition: none; animation: none; } }
+
+/* ── Lecture et navigation : plan du document, recherche, menu « Document » (lecture seule) ── */
+/* Plan : sous 1100 px, un bloc replié au-dessus de la feuille ; au-dessus, une colonne collante à sa gauche. */
+.at-plan { min-width: 0; font-size: var(--t-s); }
+.at-plan[hidden] { display: none; }
+.at-docmenu-btn { flex: none; height: var(--h-ctl); padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--panel); color: var(--ink2); display: inline-flex; align-items: center; gap: var(--sp-2); font: inherit; font-size: var(--t-s); cursor: pointer; }
+.at-docmenu-btn:hover { background: var(--hover); color: var(--ink); }
+.at-docmenu-btn[aria-pressed="true"], .at-docmenu-btn[aria-expanded="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--ink); }
+.at-plan-list { max-height: 260px; overflow: auto; padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); }
+.at-plan-list[hidden] { display: none; }
+.at-plan-phases, .at-plan-rubs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.at-plan-rubs { padding-left: var(--sp-4); margin: 1px 0 var(--sp-2); }
+.at-plan-link { width: 100%; display: flex; align-items: center; gap: var(--sp-2); padding: 3px var(--sp-2); border: 0; border-left: 2px solid transparent; border-radius: 4px; background: none; color: var(--ink2); font: inherit; font-size: var(--t-s); text-align: left; cursor: pointer; }
+.at-plan-link:hover { background: var(--hover); color: var(--ink); }
+.at-plan-link[aria-current="location"] { background: var(--acc-soft); border-left-color: var(--acc); color: var(--ink); font-weight: 600; }
+.at-plan-phase-link { font-weight: 600; color: var(--ink); }
+.at-plan-text { min-width: 0; overflow-wrap: anywhere; }
+/* L'état d'une rubrique : rond vide (à compléter), rond plein (remplie), rond à demi (couverte) ; la forme le dit, le texte caché le répète. */
+.at-plan-mark { flex: none; box-sizing: border-box; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--ink3); }
+.at-plan-mark.is-rempli { border-color: var(--ok); background: var(--ok); }
+.at-plan-mark.is-couvert { border-color: var(--acc); background: linear-gradient(90deg, var(--acc) 50%, transparent 50%); }
+.at-sheet .at-rub { scroll-margin-top: 84px; }
+.at-sheet .at-rub:focus { outline: none; }
+.at-sheet .at-rub:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+@container canvas (min-width: 1100px) {
+  .at-doc-grid.at-has-plan:has(> .at-plan:not([hidden])) { grid-template-columns: 208px minmax(0, 1fr); }
+  .at-doc-grid.at-has-plan:has(> .at-plan:not([hidden])):has(> .at-asst:not([hidden])) { grid-template-columns: 208px minmax(0, 1120px) 320px; }
+  .at-doc-grid > .at-plan { position: sticky; top: 56px; align-self: start; max-height: calc(100dvh - 190px); overflow: auto; }
+  .at-doc-grid > .at-plan .at-plan-list { max-height: none; }
+}
+/* Recherche : une seconde ligne de la barre collante, visible seulement quand elle est ouverte. */
+.at-find { flex: 1 1 100%; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.at-find[hidden] { display: none; }
+.at-find-input { flex: 1 1 160px; min-width: 0; max-width: 360px; height: var(--h-ctl); padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); color: var(--ink); font: inherit; font-size: var(--t-s); }
+.at-find-count { flex: none; min-width: 7em; color: var(--ink2); font-size: var(--t-s); font-variant-numeric: tabular-nums; }
+.at-find-btn { flex: none; width: var(--h-ctl); padding: 0; display: inline-grid; place-items: center; }
+::highlight(at-find) { background-color: color-mix(in srgb, var(--warn) 38%, transparent); }
+::highlight(at-find-current) { background-color: color-mix(in srgb, var(--warn) 78%, transparent); }
+.at-hit { background-color: color-mix(in srgb, var(--warn) 38%, transparent); color: inherit; border-radius: 2px; }
+.at-hit.is-current { background-color: color-mix(in srgb, var(--warn) 78%, transparent); outline: 1px solid var(--warn); }
+/* Menu « Document » : un bouton de la barre et son panneau (mots, copie, fichier, impression). */
+.at-docmenu { position: relative; flex: none; }
+.at-docmenu-btn .ico { width: 14px; height: 14px; }
+.at-docmenu-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: 240px; max-width: calc(100vw - 32px); display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); box-shadow: var(--shadow); }
+.at-docmenu-panel[hidden] { display: none; }
+.at-docmenu-stats { margin: 0; padding: var(--sp-1) var(--sp-2) var(--sp-2); border-bottom: 1px solid var(--line); color: var(--ink2); font-size: var(--t-s); }
+.at-docmenu-item { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2); border: 0; border-radius: 4px; background: none; color: var(--ink); font: inherit; font-size: var(--t-s); text-align: left; cursor: pointer; }
+.at-docmenu-item:hover { background: var(--hover); }
+.at-docmenu-item .ico { width: 14px; height: 14px; color: var(--ink2); }
+.at-docmenu-say { margin: 0; padding: 0 var(--sp-2); min-height: 1.2em; color: var(--ink2); font-size: var(--t-s); }
+.at-print-title { display: none; }
+/* Impression : seule la feuille du document reste (ni barres, ni panneaux, ni mascotte, ni gestes d'édition). Gardé par la présence de la feuille,
+   pour ne rien changer à l'impression des autres espaces. */
+@media print {
+  @page { margin: 18mm 16mm; }
+  /* Papier clair quel que soit le thème : les couleurs système, avec le schéma clair, plutôt que des littéraux. */
+  html:has(.at-sheet) { color-scheme: light; }
+  body:has(.at-sheet) { background: Canvas; color: CanvasText; }
+  body:has(.at-sheet) .at-sheet, body:has(.at-sheet) .at-sheet * { color: CanvasText !important; background-color: transparent !important; box-shadow: none !important; }
+  body:has(.at-sheet) > :not(#shell),
+  body:has(.at-sheet) #shell > :not(#middle),
+  body:has(.at-sheet) #middle > :not(#center),
+  body:has(.at-sheet) #center > :not(#canvas),
+  body:has(.at-sheet) .at-body > :not(.at-doc-grid),
+  body:has(.at-sheet) .at-page > :not(.at-body),
+  body:has(.at-sheet) .at-doc-grid > :not(.at-doc-main),
+  body:has(.at-sheet) .at-doc-main > :not(.at-sheet):not(.at-print-title),
+  body:has(.at-sheet) .at-cm-add, body:has(.at-sheet) .at-ch, body:has(.at-sheet) .at-cm-margin, body:has(.at-sheet) .at-cm,
+  body:has(.at-sheet) .at-sugg, body:has(.at-sheet) .at-error, body:has(.at-sheet) [class*="at-live"],
+  body:has(.at-sheet) .at-sheet .at-cmrow > :not(.at-blk) { display: none !important; }
+  body:has(.at-sheet), body:has(.at-sheet) #shell, body:has(.at-sheet) #middle, body:has(.at-sheet) #center, body:has(.at-sheet) #canvas,
+  body:has(.at-sheet) .at-page, body:has(.at-sheet) .at-body, body:has(.at-sheet) .at-doc-grid, body:has(.at-sheet) .at-doc-main {
+    display: block; position: static; height: auto; min-height: 0; max-height: none; overflow: visible; padding: 0; margin: 0; width: auto; max-width: none; justify-self: stretch; align-self: auto; background: Canvas; container-type: normal;
+  }
+  body:has(.at-sheet) .at-print-title { display: block; margin: 0 0 12pt; font-size: 20pt; }
+  body:has(.at-sheet) .at-sheet { display: block; padding: 0; border-radius: 0; }
+  body:has(.at-sheet) .at-sheet .at-sec { break-before: page; }
+  body:has(.at-sheet) .at-sheet .at-sec:first-of-type { break-before: auto; }
+  body:has(.at-sheet) .at-sheet h2, body:has(.at-sheet) .at-sheet .at-rub { break-after: avoid; }
+  body:has(.at-sheet) .at-sheet .at-blk, body:has(.at-sheet) .at-sheet .at-req, body:has(.at-sheet) .at-sheet .at-cmrow, body:has(.at-sheet) .at-sheet li { break-inside: avoid; }
+  body:has(.at-sheet) .at-blk { border: 0; padding: 0; background: none; box-shadow: none; }
+}
