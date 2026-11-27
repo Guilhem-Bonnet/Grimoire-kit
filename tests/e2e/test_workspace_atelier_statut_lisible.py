@@ -68,7 +68,10 @@ def _page(browser: Browser, url: str, slug: str) -> Iterator[tuple[Page, list[st
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     pulses: list[str] = []
+    docs: list[str] = []  # les lectures du document du chantier (rechargements)
     page.on("response", lambda r: pulses.append(r.url) if r.url.split("?")[0].endswith(f"/chantiers/{slug}/entretien") else None)
+    page.on("response", lambda r: docs.append(r.url) if r.request.method == "GET" and r.url.split("?")[0].endswith(f"/chantiers/{slug}") else None)
+    page.docs = docs  # type: ignore[attr-defined]
     page.goto(f"{url}/workspace/index.html#atelier?chantier={slug}", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=WAIT_MS)
     page.locator("[data-section='brainstorm'] .at-md, [data-section='brief'] .at-md").first.wait_for(timeout=WAIT_MS)
@@ -135,3 +138,84 @@ def test_a_guided_answer_keeps_its_message(browser: Browser, sans_agent: tuple[s
         expect(page.locator(STATUS)).not_to_be_empty(timeout=WAIT_MS)
         message = page.locator(STATUS).inner_text()
         _check_message_kept_and_no_outside(page, pulses, since, message)
+
+
+def test_an_own_block_edit_with_a_comment_does_not_trigger_an_outside_reload(browser: Browser, project: tuple[str, Path]) -> None:
+    """L'écriture propre met le document à jour sur place (avancement, fils) : ni le pouls ni la synchro ne rechargent en plus."""
+    url, root = project
+    slug = _chantier(root, "Statut Edition")
+    workspace_atelier_comments.create(root, slug, {"block_id": _block_id(root, slug), "texte": "Une question", "quote": "Une piste"}, "humain")
+    for page, pulses in _page(browser, url, slug):
+        page.locator("[data-com]").first.wait_for(timeout=WAIT_MS)
+        docs: list[str] = page.docs  # type: ignore[attr-defined]
+        since = len(pulses)
+        before = len(docs)
+        page.locator(".at-blk", has_text="Une piste").click()
+        area = page.locator("[data-role='block-edit'] textarea")
+        area.fill(f"{PARA} Réécrite.")
+        area.press("Control+Enter")
+        expect(page.locator(STATUS)).to_have_text("Bloc enregistré.", timeout=WAIT_MS)
+        _after_two_pulses(page, pulses, since)
+        # Les deux lectures du geste lui-même (avancement, fils) ; une troisième serait un « dépôt extérieur » imaginaire.
+        assert len(docs) - before <= 2, f"lectures du document après le geste : {len(docs) - before}"
+
+
+def test_attaching_an_orphan_thread_announces_in_status_and_notification(browser: Browser, project: tuple[str, Path]) -> None:
+    """« Rattacher ici » en choisissant le bloc : le mode de choix survit au pouls (aucun rechargement), puis le message est annoncé."""
+    url, root = project
+    slug = _chantier(root, "Statut Rattachement")
+    path = root / "_grimoire" / "cadrage" / slug / BRAINSTORM
+    first, second = "Un premier paragraphe sur la touche maintenue.", "Un second paragraphe indépendant."
+    path.write_text(path.read_text(encoding="utf-8").replace(PARA, f"{first}\n\n{second}"), encoding="utf-8")
+    phase = next(p for p in workspace_atelier.document(root, slug)["phases"] if p["id"] == "brainstorm")
+    block = str(next(b for b in phase["blocks"] if b["text"] == first)["id"])
+    made = workspace_atelier_comments.create(root, slug, {"block_id": block, "texte": "Pourquoi ?", "quote": "touche maintenue"}, "humain")
+    cid = str(made["comment"]["id"])
+    for page, pulses in _page(browser, url, slug):
+        page.locator(f"[data-com='{cid}']").wait_for(timeout=WAIT_MS)
+        # Réécrit hors du cockpit, le passage ET son voisin : le fil devient orphelin.
+        path.write_text(path.read_text(encoding="utf-8").replace(first, "Un tout autre texte.").replace(second, f"{second} (revu)"), encoding="utf-8")
+        page.evaluate("window.dispatchEvent(new Event('focus'))")
+        page.wait_for_function(f"() => document.querySelector(\"[data-com='{cid}']\")?.getAttribute('data-anchor') === 'orphelin'", timeout=WAIT_MS)
+        page.locator(f"[data-com='{cid}'] [data-act='attach']").click()
+        expect(page.locator(".at-sheet.is-picking")).to_have_count(1)
+        # Le mode de choix dure : aucune lecture du document (pouls, synchro) ne le défait ni ne remplace le bloc à choisir.
+        docs: list[str] = page.docs  # type: ignore[attr-defined]
+        since, before = len(pulses), len(docs)
+        _after_two_pulses(page, pulses, since)
+        assert len(docs) == before, "le document a été relu pendant le choix du bloc"
+        page.locator(".at-blk", has_text="(revu)").focus()
+        page.keyboard.press("Enter")
+        expect(page.locator(STATUS)).to_have_text("Commentaire rattaché au bloc.", timeout=WAIT_MS)
+        expect(page.locator(TOASTS)).to_contain_text("rattaché au bloc", timeout=WAIT_MS)
+        expect(page.locator(f"[data-com='{cid}']")).to_have_attribute("data-anchor", "ancre", timeout=WAIT_MS)
+
+
+def test_a_message_repeated_identically_is_announced_again(browser: Browser, project: tuple[str, Path]) -> None:
+    """Deux refus de suite : même texte d'état. Le second repasse par le vide (lecteur d'écran) et re-pose la notification."""
+    url, root = project
+    slug = _chantier(root, "Statut Répété")
+    path = root / "_grimoire" / "cadrage" / slug / BRAINSTORM
+    path.write_text(path.read_text(encoding="utf-8") + "\n\n- Une autre piste.\n", encoding="utf-8")
+    phase = next(p for p in workspace_atelier.document(root, slug)["phases"] if p["id"] == "brainstorm")
+    ids = [str(next(b for b in phase["blocks"] if b["text"] == text)["id"]) for text in (PARA, "- Une autre piste.")]
+    cards = [workspace_atelier_suggestions.deposit(root, slug, {"block_id": i, "texte": f"{t} Précisée."})["suggestion"]["id"] for i, t in zip(ids, (PARA, "- Une autre piste."), strict=True)]
+    message = "Suggestion refusée : le document n’a pas changé."
+    for page, _pulses in _page(browser, url, slug):
+        page.evaluate(
+            "() => { window.__seen = []; new MutationObserver(() => window.__seen.push(document.querySelector(\"[data-role='atelier-status']\").textContent))"
+            ".observe(document.querySelector(\"[data-role='atelier-status']\"), { childList: true, characterData: true, subtree: true }); }"
+        )
+        toast_ids: list[str] = []
+        for sid in cards:
+            card = page.locator(f"[data-sugg='{sid}']")
+            card.wait_for(timeout=WAIT_MS)
+            card.get_by_role("button", name="Refuser").click()
+            page.get_by_role("button", name="Confirmer le refus").click()
+            expect(card).to_have_count(0, timeout=WAIT_MS)
+            expect(page.locator(TOASTS)).to_contain_text(message, timeout=WAIT_MS)
+            toast_ids.append(str(page.locator(f"{TOASTS} [data-toast]", has_text=message).get_attribute("data-toast")))
+            expect(page.locator(STATUS)).to_have_text(message)
+        assert toast_ids[0] != toast_ids[1], "le second message identique n'a pas été ré-annoncé en notification"
+        seen: list[str] = page.evaluate("() => window.__seen")
+        assert "" in seen[seen.index(message) + 1 :], "le texte d'état n'est pas repassé par le vide avant d'être ré-annoncé"

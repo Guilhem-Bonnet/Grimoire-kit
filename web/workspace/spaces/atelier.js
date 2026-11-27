@@ -441,7 +441,23 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   const drafts = createDrafts(ctx, slug); // le filet de sécurité : les saisies en cours sont gardées dans le navigateur
   let liveTrace = null; // la trace du découpage (carte d'une exigence au survol)
   const params = ctx.params || {};
-  const say = (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; };
+  // Annoncer : un message identique au précédent est ré-annoncé (lecteur d'écran : le texte passe par le vide ; notification : un
+  // nouveau passage dans la zone). Un message vide n'est pas une annonce ; seul un nouveau message remplace l'ancien.
+  const announce = (message, kind) => {
+    if (!message) return;
+    if (status.textContent !== message) {
+      if (kind) status.setAttribute('data-kind', kind);
+      status.textContent = message;
+      return;
+    }
+    status.textContent = '';
+    setTimeout(() => {
+      if (ctx.signal.aborted || status.textContent) return; // un autre message est passé entre-temps : il garde la place
+      if (kind) status.setAttribute('data-kind', kind);
+      status.textContent = message;
+    }, 60);
+  };
+  const say = (message, kind) => { if (message) announce(message, kind); else status.textContent = ''; };
   // Mode lecture (adresse puis navigateur) : l'adresse garde aussi la phase et l'exigence visées (voir `itemParams`).
   const reading = createReading(ctx, { sheet, say, setItem: () => { if (ctx.setItem) ctx.setItem(itemParams()); } }, params);
   const itemParams = (extra = {}) => ({ chantier: slug, phase: focusId, ...(reading.on() ? { lecture: '1' } : {}), ...extra });
@@ -489,7 +505,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     focus: () => focusId,
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
     reload: (message, kind) => reload(message, kind),
-    say: (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; },
+    say: (message, kind) => say(message, kind),
     // Une erreur liée à un bloc se lit aussi à son pied, là où l'on agissait.
     blockError: (blockId, message) => {
       const host = sheet.querySelector(`[data-block="${CSS.escape(blockId)}"]`);
@@ -653,10 +669,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     if (root.scrollTop !== top) root.scrollTop = top; // la lecture ne saute pas
     docAt = Date.now();
     // La ligne d'état est une zone d'annonce : un rechargement sans message (synchro, pouls) ne la vide jamais, seul un nouveau message la change.
-    if (message) {
-      if (kind) status.setAttribute('data-kind', kind);
-      status.textContent = message;
-    }
+    announce(message, kind);
     liveDoc.refresh();
   };
 
@@ -831,7 +844,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
         drafts.clear('bloc', block.id);
         endEdit(host);
         drawSection(result.phase);
-        status.textContent = 'Bloc enregistré.';
+        announce('Bloc enregistré.');
         loop.warn(result.avertissements); // un identifiant d'exigence en double dans ce fichier
         reloadProgress();
         liveDoc.refresh(); // une exigence réécrite peut être « modifiée depuis la validation »
@@ -890,7 +903,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       countNote();
       phaseNav();
       drawSection(result.phase);
-      status.textContent = checked ? 'Case cochée.' : 'Case décochée.';
+      announce(checked ? 'Case cochée.' : 'Case décochée.');
       loop.warn(result.avertissements);
       reloadProgress();
       liveDoc.refresh();
@@ -1076,7 +1089,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   // Lecture et navigation (lecture seule) : menu « Document », recherche Ctrl+F, plan à gauche de la feuille.
   const docMenu = createDocumentMenu(ctx, {
     slug, doc: () => state.doc,
-    say: (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; },
+    say: (message, kind) => say(message, kind),
   });
   const find = createFind(ctx, { sheet });
   const plan = createPlan(ctx, { root, sheet, doc: () => state.doc });
@@ -1088,7 +1101,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   grid.append(main, assist.element);
   // Historique des versions (lecture seule) : un bouton dans la barre, un volet à la place de l'assistant (voir `atelier-historique.js`).
   const versionsPane = createHistory(ctx, slug, {
-    sheet, main, grid, say: (message) => { status.textContent = message; },
+    sheet, main, grid, say: (message) => say(message),
     reload: (message, kind) => reload(message, kind), // après une restauration (ou son annulation) : le document est relu
     // Restaurer un bloc qui réécrit une exigence validée en défait la validation : même confirmation que pour une édition.
     guard: (before, after) => devalidation.ask(before, after),
