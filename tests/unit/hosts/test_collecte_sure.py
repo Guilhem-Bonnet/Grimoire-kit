@@ -946,3 +946,41 @@ class TestVisibilite:
         excluded: list[Exclusion] = []
         collect_agents(project, known_skills=frozenset(), excluded=excluded)
         assert excluded[0].reason.endswith("; copie suivante servie")
+
+
+class TestVueDesAgentsRobuste:
+    """Un skill refusé à la lecture sûre ne vide pas la vue des agents du cockpit."""
+
+    def _projet(self, project: Path, temoin: Path) -> None:
+        _put(_skills_dir(project), "sain.md", SAIN)
+        (_skills_dir(project) / "refuse.md").symlink_to(temoin)
+        _put(_agents_dir(project), "a.md", _agent_text("a", extra="skills: [refuse, sain]\n"))
+        _put(_agents_dir(project), "b.md", _agent_text("b"))
+
+    def test_la_vue_rend_les_autres_agents_et_dit_le_skill_refuse(self, project: Path, temoin: Path) -> None:
+        from grimoire.tools import workspace_api as wa
+
+        self._projet(project, temoin)
+        payload = wa.agents_view(project)
+        assert sorted(a["name"] for a in payload["agents"]) == ["a", "b"]
+        assert [s["slug"] for s in payload["skills"]] == ["sain"]
+        (agent_a,) = (a for a in payload["agents"] if a["name"] == "a")
+        assert agent_a["skills"] == ["sain"]
+        refus = [e for e in payload["excluded"] if "refuse" in e["name"]]
+        assert refus and "lien symbolique" in refus[0]["reason"]
+        assert TEMOIN not in repr(payload) and str(temoin.parent) not in repr(payload)
+
+    def test_un_skill_vraiment_inconnu_reste_une_erreur(self, project: Path) -> None:
+        from grimoire.core.exceptions import GrimoireAgentError
+        from grimoire.tools import workspace_api as wa
+
+        _put(_agents_dir(project), "a.md", _agent_text("a", extra="skills: [inconnu]\n"))
+        with pytest.raises(GrimoireAgentError, match="introuvables"):
+            wa.agents_view(project)
+
+    def test_la_synchronisation_des_hotes_garde_l_erreur(self, project: Path, temoin: Path) -> None:
+        from grimoire.core.exceptions import GrimoireAgentError
+
+        self._projet(project, temoin)
+        with pytest.raises(GrimoireAgentError, match="refusé à la collecte"):
+            build_surface(project)

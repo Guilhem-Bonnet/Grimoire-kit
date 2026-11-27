@@ -11,10 +11,12 @@ Ce module ne contrôle que les règles de la spec. Il ne reprend pas la règle
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from grimoire.core.safe_sources import Refused, read_source_text, source_dir_issue
 from grimoire.hosts.collect import parse_frontmatter
 
 NAME_MAX = 64
@@ -98,16 +100,22 @@ def _chain_violations(skill_file: Path, body: str) -> list[SkillViolation]:
     """« Un seul niveau depuis SKILL.md » : un fichier référencé n'en référence pas un autre.
 
     La spec vise les chaînes de références, pas le nombre de segments du chemin
-    (``scripts/x/y.py`` est un seul niveau). Seuls les ``.md`` présents sont lus.
+    (``scripts/x/y.py`` est un seul niveau). Seuls les ``.md`` présents sont lus, par la lecture
+    sûre de :mod:`grimoire.core.safe_sources` : un lien symbolique, ou un chemin qui sort du dossier du
+    skill, n'est pas suivi et devient une violation (jamais lu).
     """
     found: list[SkillViolation] = []
     for target in _local_targets(body):
         referenced = skill_file.parent / target
-        if referenced.suffix != ".md" or not referenced.is_file():
+        if referenced.suffix != ".md" or not os.path.lexists(referenced):
             continue
         try:
-            nested = _local_targets(referenced.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
+            nested = _local_targets(read_source_text(referenced, root=skill_file.parent, frontmatter=False))
+        except Refused as exc:
+            if referenced.is_symlink() or source_dir_issue(referenced.parent, skill_file.parent) is not None:
+                found.append(
+                    SkillViolation("references.unsafe", target, f"références : « {target} » non lu ({exc})")
+                )
             continue
         if nested:
             found.append(

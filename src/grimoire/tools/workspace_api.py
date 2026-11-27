@@ -1305,7 +1305,9 @@ def _agents_view_uncached(root: Path) -> dict[str, Any]:
     excluded: list[Any] = []
     skills = collect.collect_skills(root, excluded=excluded)
     known_skills = frozenset(s.slug for s in skills)
-    agents = collect.collect_agents(root, known_skills=known_skills, excluded=excluded)
+    agents = collect.collect_agents(
+        root, known_skills=known_skills, excluded=excluded, tolerate_refused_skills=True
+    )
     usage = _agent_usage(root)
     default_usage = {"choices": 0, "last_chosen_at": None}
 

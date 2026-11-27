@@ -204,6 +204,35 @@ class TestFileEntry:
         (skill.parent / "references" / "guide.md").write_text("Rien de plus. [site](https://a.b/c)\n", encoding="utf-8")
         assert validate_skill_file(skill) == ()
 
+    def test_reference_by_link_leaving_the_skill_is_not_read(self, tmp_path: Path) -> None:
+        outside = tmp_path / "dehors.md"
+        outside.write_text("TEMOIN [suite](ailleurs.md)\n", encoding="utf-8")
+        skill = tmp_path / "bon-skill" / "SKILL.md"
+        (skill.parent / "references").mkdir(parents=True)
+        skill.write_text(_skill(body="Voir [guide](references/guide.md).\n"), encoding="utf-8")
+        (skill.parent / "references" / "guide.md").symlink_to(outside)
+        violations = validate_skill_file(skill)
+        assert [v.rule for v in violations] == ["references.unsafe"]
+        assert "lien symbolique" in str(violations[0])
+        assert "ailleurs.md" not in str(violations[0]) and str(tmp_path) not in str(violations[0])
+
+    def test_reference_not_utf8_is_skipped_without_violation(self, tmp_path: Path) -> None:
+        skill = tmp_path / "bon-skill" / "SKILL.md"
+        skill.parent.mkdir()
+        skill.write_text(_skill(body="Voir [guide](guide.md).\n"), encoding="utf-8")
+        (skill.parent / "guide.md").write_bytes(b"\xff\xfe\n")
+        assert validate_skill_file(skill) == ()
+
+    def test_reference_under_a_linked_directory_is_not_read(self, tmp_path: Path) -> None:
+        outside = tmp_path / "dehors"
+        outside.mkdir()
+        (outside / "guide.md").write_text("[suite](ailleurs.md)\n", encoding="utf-8")
+        skill = tmp_path / "bon-skill" / "SKILL.md"
+        skill.parent.mkdir()
+        skill.write_text(_skill(body="Voir [guide](references/guide.md).\n"), encoding="utf-8")
+        (skill.parent / "references").symlink_to(outside)
+        assert [v.rule for v in validate_skill_file(skill)] == ["references.unsafe"]
+
     def test_unreadable_file_is_a_violation_not_an_exception(self, tmp_path: Path) -> None:
         path = tmp_path / "bon-skill.md"
         path.write_bytes(_skill(description="Caf\xe9").encode("latin-1"))

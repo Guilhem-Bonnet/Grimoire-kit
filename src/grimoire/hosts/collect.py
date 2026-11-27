@@ -598,8 +598,13 @@ def collect_agents(
     notes: list[str] | None = None,
     inline_persona: bool = True,
     excluded: list[Exclusion] | None = None,
+    tolerate_refused_skills: bool = False,
 ) -> tuple[AgentSpec, ...]:
     """Read the project's personas into host-neutral specs.
+
+    With *tolerate_refused_skills* (a read-only view, never a host sync), a declared skill that the safe
+    reading refused is left off the agent and stays reported in *excluded* instead of failing every agent;
+    a slug that resolves to nothing and was never refused remains a build error.
 
     *entry_point* defaults to what the project declares (``agents.entry``);
     pass it explicitly to override.
@@ -705,6 +710,10 @@ def collect_agents(
             definition_ref = body_ref.as_posix()
         skills = _str_tuple(meta.get("skills"))
         unknown = [slug for slug in skills if slug not in known_skills]
+        if unknown and tolerate_refused_skills:
+            refused_slugs = {slug for slug in unknown if _refusal_of(sink, slug) is not None}
+            skills = tuple(slug for slug in skills if slug not in refused_slugs)
+            unknown = [slug for slug in unknown if slug not in refused_slugs]
         if unknown:
             refused = "".join(
                 f" Le skill « {slug} » a été refusé à la collecte : {why}."
