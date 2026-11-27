@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.tools import workspace_atelier
 
@@ -83,13 +83,13 @@ def test_the_live_line_keeps_its_focus_and_its_open_detail(browser: Browser, pro
         _ready(page)
         toggle = page.locator("[data-live='REQ-001'] [data-act='toggle-detail']")
         toggle.click()
-        assert toggle.get_attribute("aria-expanded") == "true"
+        expect(toggle).to_have_attribute("aria-expanded", "true")
         toggle.focus()
         page.evaluate("() => { window.__line = document.querySelector('[data-live=\"REQ-001\"]'); }")
         _refresh_live(page)
         assert page.evaluate(ACTIVE) == "toggle-detail"
         assert page.evaluate("() => document.querySelector('[data-live=\"REQ-001\"]') === window.__line")  # pas redessinée
-        assert page.locator("[data-live='REQ-001'] [data-act='toggle-detail']").get_attribute("aria-expanded") == "true"
+        expect(page.locator("[data-live='REQ-001'] [data-act='toggle-detail']")).to_have_attribute("aria-expanded", "true")
 
 
 def test_a_typed_guided_answer_keeps_its_text_and_its_cursor(browser: Browser, sans_agent: tuple[str, Path]) -> None:
@@ -111,7 +111,7 @@ def test_a_typed_guided_answer_keeps_its_text_and_its_cursor(browser: Browser, s
         # Et la saisie continue là où elle était.
         page.keyboard.type("XY")
         typed = "Les mainteneurs du kit et leurs agents."
-        assert page.locator(".at-asst-area").input_value() == typed[:4] + "XY" + typed[14:]  # la sélection a été remplacée
+        expect(page.locator(".at-asst-area")).to_have_value(typed[:4] + "XY" + typed[14:])  # la sélection a été remplacée
 
 
 def test_a_refresh_does_not_steal_the_focus(browser: Browser, project_on: tuple[str, Path]) -> None:

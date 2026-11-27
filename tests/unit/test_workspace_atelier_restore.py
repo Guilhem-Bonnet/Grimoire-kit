@@ -40,7 +40,9 @@ def git(root: Path, *args: str) -> str:
         "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_AUTHOR_NAME": "Ada",
         "GIT_AUTHOR_EMAIL": "ada@example.org", "GIT_COMMITTER_NAME": "Ada", "GIT_COMMITTER_EMAIL": "ada@example.org",
     })
-    done = subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=root, capture_output=True, text=True, check=True, env=env)
+    # Aucune maintenance détachée (`maintenance.lock`) pendant les comparaisons de `.git`.
+    quiet = ["-c", "commit.gpgsign=false", "-c", "gc.auto=0", "-c", "gc.autoDetach=false", "-c", "maintenance.auto=false"]
+    done = subprocess.run(["git", *quiet, *args], cwd=root, capture_output=True, text=True, check=True, env=env)
     return done.stdout.strip()
 
 

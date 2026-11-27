@@ -26,7 +26,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, BrowserContext, Page, Route
+from playwright.sync_api import Browser, BrowserContext, Page, Route, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier
@@ -202,8 +202,9 @@ def _mic_calls(page: Page) -> int:
     return int(page.evaluate("() => window.__mic.calls"))
 
 
-def _mic_closed(page: Page) -> bool:
-    return bool(page.evaluate("() => window.__mic.tracks.every((t) => t.readyState === 'ended')"))
+def _mic_closed(page: Page) -> None:
+    """Attend que toutes les pistes du micro soient finies : elles passent à « ended » à la suite de la fermeture, pas avec elle."""
+    page.wait_for_function("() => window.__mic.tracks.every((t) => t.readyState === 'ended')", timeout=READY_MS)
 
 
 def _talk_once(page: Page) -> None:
@@ -231,15 +232,16 @@ def test_chat_without_voice_shows_the_disabled_button_with_the_reason_and_never_
     try:
         toggle = page.locator(f".chat {TOGGLE}")
         toggle.wait_for(state="visible", timeout=READY_MS)
-        assert toggle.get_attribute("aria-disabled") == "true"
+        expect(toggle).to_have_attribute("aria-disabled", "true")
         note = page.locator(".chat [data-role='conversation-note']")
         note.wait_for(state="visible")
-        text = note.inner_text()
-        assert "moteur vocal absent" in text, "la raison donnée par le serveur"
-        assert "interaction.mode: voice" in text and "grimoire-kit[voice]" in text, "le geste pour l'activer"
-        assert toggle.get_attribute("aria-describedby") == note.get_attribute("id")
+        expect(note).to_contain_text("moteur vocal absent", use_inner_text=True)  # la raison donnée par le serveur
+        expect(note).to_contain_text("interaction.mode: voice", use_inner_text=True)  # le geste pour l'activer
+        expect(note).to_contain_text("grimoire-kit[voice]", use_inner_text=True)
+        expect(toggle).to_have_attribute("aria-describedby", note.get_attribute("id") or "")
         toggle.click(force=True)  # `aria-disabled` : Playwright n'attend pas un bouton « activé », le clic ne fait rien
         page.keyboard.press("Alt+Shift+V")  # le raccourci ne fait rien non plus
+        # Assertion négative (« le micro ne s'ouvre jamais ») : fenêtre d'observation bornée et explicite, après le geste.
         page.wait_for_timeout(500)
         assert _mic_calls(page) == 0
         assert not errors, errors
@@ -256,9 +258,9 @@ def test_chat_loop_dictates_without_sending_then_reads_the_reply_then_listens(
         toggle = page.locator(f".chat {TOGGLE}")
         toggle.wait_for(state="visible", timeout=READY_MS)
         assert _mic_calls(page) == 0, "le micro ne s'ouvre qu'après le geste"
-        assert page.locator(MIC).is_hidden()
-        assert toggle.get_attribute("aria-keyshortcuts") == "Alt+Shift+V"
-        assert page.locator(STATUS).get_attribute("aria-live") == "polite"
+        expect(page.locator(MIC)).to_be_hidden()
+        expect(toggle).to_have_attribute("aria-keyshortcuts", "Alt+Shift+V")
+        expect(page.locator(STATUS)).to_have_attribute("aria-live", "polite")
         toggle.click()
         _status(page, "je t’écoute")
         page.locator(MIC).wait_for(
@@ -267,9 +269,10 @@ def test_chat_loop_dictates_without_sending_then_reads_the_reply_then_listens(
         assert _mic_calls(page) == 1
         _talk_once(page)
         _status(page, "relis puis envoie")
-        assert page.locator(".chat-input").input_value() == TRANSCRIPT, "la dictée arrive dans la saisie"
+        expect(page.locator(".chat-input")).to_have_value(TRANSCRIPT)  # la dictée arrive dans la saisie
         assert [r for r in requests if r.startswith("POST") and "chat/send" in r] == [], "rien n'est envoyé tout seul"
-        assert _mic_closed(page) and page.locator(MIC).is_hidden(), "le micro est fermé pendant la relecture"
+        _mic_closed(page)  # le micro est fermé pendant la relecture
+        expect(page.locator(MIC)).to_be_hidden()
         # L'envoi est humain : Entrée.
         page.locator(".chat-input").press("Enter")
         page.wait_for_function(
@@ -286,8 +289,8 @@ def test_chat_loop_dictates_without_sending_then_reads_the_reply_then_listens(
         assert _mic_calls(page) == 2
         page.keyboard.press("Escape")
         _status(page, "Conversation arrêtée")
-        page.wait_for_function("() => window.__mic.tracks.every((t) => t.readyState === 'ended')", timeout=READY_MS)
-        assert page.locator(MIC).is_hidden()
+        _mic_closed(page)
+        expect(page.locator(MIC)).to_be_hidden()
         assert not errors, errors
     finally:
         context.close()
@@ -330,7 +333,7 @@ def test_chat_permission_closes_the_mode_only_a_click_decides(browser: Browser, 
         }
         page.evaluate("(e) => window.__push(e)", perm)
         _status(page, "permission")
-        assert _mic_closed(page)
+        _mic_closed(page)
         assert not errors, errors
     finally:
         context.close()
@@ -343,7 +346,7 @@ def test_chat_long_silence_closes_the_mode(browser: Browser, project: tuple[str,
         page.locator(f".chat {TOGGLE}").click()
         _status(page, "je t’écoute")
         _status(page, "silence prolongé", timeout=25_000)
-        assert _mic_closed(page)
+        _mic_closed(page)
         assert not errors, errors
     finally:
         context.close()
@@ -449,12 +452,14 @@ def test_atelier_reads_the_question_dictates_into_the_field_and_never_sends(
         assert _mic_calls(page) == 1
         _talk_once(page)
         _status(page, "relis puis envoie")
-        assert page.locator(".at-asst-area").input_value() == TRANSCRIPT, "la dictée arrive dans le champ de réponse"
+        expect(page.locator(".at-asst-area")).to_have_value(TRANSCRIPT)  # la dictée arrive dans le champ de réponse
         assert [r for r in requests if r.startswith("POST") and "/assistant" in r] == [], "aucun envoi automatique"
-        assert _mic_closed(page)
+        _mic_closed(page)
         # L'envoi est humain : Entrée. L'assistant réfléchit, puis pose sa question suivante : elle est lue, puis on réécoute.
         holder[0] = _entretien(mine=True, busy=True)
-        page.locator(".at-asst-area").press("Enter")
+        # L'envoi part après la frappe : on attend la requête, puis on compte (une seule).
+        with page.expect_request(lambda r: r.method == "POST" and "/assistant" in r.url, timeout=READY_MS):
+            page.locator(".at-asst-area").press("Enter")
         assert len([r for r in requests if r.startswith("POST") and "/assistant" in r]) == 1
         _status(page, "réfléchit")
         holder[0] = _entretien(question=Q2)
@@ -476,19 +481,22 @@ def test_atelier_without_voice_no_conversation(browser: Browser, project: tuple[
         page.locator("[data-role='assistant-mascotte']").wait_for(timeout=READY_MS)
         toggle = page.locator(f"[data-role='assistant-mascotte'] {TOGGLE}")
         toggle.wait_for(state="visible", timeout=READY_MS)  # le bouton reste, désactivé, avec la raison et le geste
-        assert toggle.get_attribute("aria-disabled") == "true"
+        expect(toggle).to_have_attribute("aria-disabled", "true")
         note = page.locator("[data-role='assistant-mascotte'] [data-role='conversation-note']")
         # Replié : une ligne visible et « Pourquoi ? » ; la raison complète reste reliée au bouton, même masquée.
-        assert page.locator("[data-role='conversation-summary']").is_visible() and not note.is_visible()
-        assert toggle.get_attribute("aria-describedby") == note.get_attribute("id")
-        assert "moteur vocal absent" in (note.text_content() or "")
+        expect(page.locator("[data-role='conversation-summary']")).to_be_visible()
+        expect(note).to_be_hidden()
+        expect(toggle).to_have_attribute("aria-describedby", note.get_attribute("id") or "")
+        expect(note).to_contain_text("moteur vocal absent")  # contenu du nœud, même masqué
         why = page.locator("[data-role='assistant-mascotte'] [data-act='why']")
         why.focus()
         page.keyboard.press("Enter")  # au clavier comme à la souris
         note.wait_for(state="visible")
-        assert "moteur vocal absent" in note.inner_text() and "interaction.mode: voice" in note.inner_text()
-        assert why.get_attribute("aria-expanded") == "true"
+        expect(note).to_contain_text("moteur vocal absent", use_inner_text=True)
+        expect(note).to_contain_text("interaction.mode: voice", use_inner_text=True)
+        expect(why).to_have_attribute("aria-expanded", "true")
         toggle.click(force=True)
+        # Assertion négative (« aucun micro ») : fenêtre d'observation bornée et explicite, après le geste.
         page.wait_for_timeout(500)
         assert _mic_calls(page) == 0, "désactivé : aucun micro"
         assert not errors, errors

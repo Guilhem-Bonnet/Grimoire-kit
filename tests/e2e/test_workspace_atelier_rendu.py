@@ -12,6 +12,7 @@ gabarit si l'on annule ; la zone de conflit n'existe que lorsqu'il y a un confli
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,7 +20,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier
@@ -82,16 +83,18 @@ def test_a_markdown_table_is_rendered_as_a_table(browser: Browser, project_on: t
     slug, _path = _chantier(root, "Tableau rendu")
     for page, errors in _open(browser, url, slug):
         table = page.locator(f"{SECTION} table.at-md-table").first
-        assert table.locator("thead th").all_inner_texts() == ["Piste", "Coût", "Durée"]
-        assert table.locator("thead th").first.get_attribute("scope") == "col"
-        assert table.locator("tbody tr").count() == 2
-        assert "|" not in table.inner_text(), "plus de barres verticales en texte brut"
-        align = [table.locator("tbody tr").first.locator("td").nth(i).evaluate("e => getComputedStyle(e).textAlign") for i in range(3)]
-        assert align == ["left", "right", "center"]
+        expect(table.locator("thead th")).to_have_text(["Piste", "Coût", "Durée"], use_inner_text=True)
+        expect(table.locator("thead th").first).to_have_attribute("scope", "col")
+        expect(table.locator("tbody tr")).to_have_count(2)
+        expect(table).not_to_contain_text("|", use_inner_text=True)  # plus de barres verticales en texte brut
+        for at, side in enumerate(["left", "right", "center"]):
+            expect(table.locator("tbody tr").first.locator("td").nth(at)).to_have_css("text-align", side)
         link = table.locator("td a")
-        assert link.get_attribute("href") == "https://exemple.fr/tva"
-        assert "noopener" in (link.get_attribute("rel") or "") and "noreferrer" in (link.get_attribute("rel") or "")
-        assert table.locator("td strong").inner_text() == "Export direct" and table.locator("td code").inner_text() == "3 j"
+        expect(link).to_have_attribute("href", "https://exemple.fr/tva")
+        expect(link).to_have_attribute("rel", re.compile("noopener"))
+        expect(link).to_have_attribute("rel", re.compile("noreferrer"))
+        expect(table.locator("td strong")).to_have_text("Export direct", use_inner_text=True)
+        expect(table.locator("td code")).to_have_text("3 j", use_inner_text=True)
         assert not errors
 
 
@@ -101,9 +104,14 @@ def test_a_wide_table_scrolls_inside_and_the_page_does_not_overflow(browser: Bro
     slug, _path = _chantier(root, f"Tableau large {width}")
     for page, _errors in _open(browser, url, slug, width=width, height=900):
         wrap = page.locator(f"{SECTION} .at-md-tablewrap").nth(1)
-        assert wrap.evaluate("e => e.scrollWidth > e.clientWidth"), "le tableau défile dans son cadre"
-        assert wrap.get_attribute("tabindex") == "0"
-        assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth"), "aucun débordement de la page"
+        # La mise en page se pose en place : on attend l'état voulu (le tableau défile dans son cadre, la page ne déborde pas).
+        page.wait_for_function(
+            "(s) => { const w = document.querySelectorAll(s)[1]; return !!w && w.scrollWidth > w.clientWidth; }",
+            arg=f"{SECTION} .at-md-tablewrap",
+            timeout=APPEAR_MS,
+        )
+        expect(wrap).to_have_attribute("tabindex", "0")
+        page.wait_for_function("() => document.documentElement.scrollWidth <= window.innerWidth", timeout=APPEAR_MS)  # aucun débordement de la page
 
 
 def test_other_markdown_constructions_are_not_left_raw(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -111,15 +119,17 @@ def test_other_markdown_constructions_are_not_left_raw(browser: Browser, project
     slug, _path = _chantier(root, "Constructions courantes")
     for page, _errors in _open(browser, url, slug):
         sec = page.locator(SECTION)
-        assert sec.locator("ol > li").count() == 2 and sec.locator("ol li ul li").inner_text() == "imbriqué"
-        assert sec.locator("blockquote.at-md-quote").count() >= 2
-        assert sec.locator("pre.at-md-code code").inner_text() == "code = 1"
-        assert sec.locator("s").inner_text() == "barré"
+        expect(sec.locator("ol > li")).to_have_count(2)
+        expect(sec.locator("ol li ul li")).to_have_text("imbriqué", use_inner_text=True)
+        expect(sec.locator("blockquote.at-md-quote").nth(1)).to_be_attached()  # au moins deux citations
+        expect(sec.locator("pre.at-md-code code")).to_have_text("code = 1", use_inner_text=True)
+        expect(sec.locator("s")).to_have_text("barré", use_inner_text=True)
         auto = sec.locator("a[href='https://exemple.fr/auto']")
-        assert auto.count() == 1 and auto.get_attribute("target") == "_blank"
-        text = sec.inner_text()
+        expect(auto).to_have_count(1)
+        expect(auto).to_have_attribute("target", "_blank")
+        # Négatifs : posés après les attentes positives ci-dessus, donc sur un rendu terminé.
         for raw in ("**", "~~", "```", "](", "<https"):
-            assert raw not in text, raw
+            expect(sec).not_to_contain_text(raw, use_inner_text=True)
 
 
 def test_checkboxes_are_real_and_toggle_on_click_and_space(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -128,15 +138,20 @@ def test_checkboxes_are_real_and_toggle_on_click_and_space(browser: Browser, pro
     before = path.read_text(encoding="utf-8")
     for page, errors in _open(browser, url, slug):
         boxes = page.locator(f"{SECTION} .at-md > ul.at-tasks input[type='checkbox']")  # hors citation
-        assert boxes.count() == 4 and boxes.evaluate_all("els => els.map((e) => e.checked)") == [False, True, False, False]
-        assert "[ ]" not in page.locator(f"{SECTION} .at-tasks").first.inner_text()
+        expect(boxes).to_have_count(4)
+        for at, checked in enumerate([False, True, False, False]):
+            if checked:
+                expect(boxes.nth(at)).to_be_checked()
+            else:
+                expect(boxes.nth(at)).not_to_be_checked()
+        expect(page.locator(f"{SECTION} .at-tasks").first).not_to_contain_text("[ ]", use_inner_text=True)
         with _put(page):
             boxes.nth(0).click()
         expected = before.replace("- [ ] écrire la spec", "- [x] écrire la spec")
         assert path.read_text(encoding="utf-8") == expected, "seule la ligne visée a changé"
         page.wait_for_function("() => document.querySelector(\"[data-role='atelier-status']\").textContent.includes('cochée')", timeout=APPEAR_MS)
-        assert page.locator(f"{SECTION} .at-tasks input").first.is_checked()
-        assert page.locator(f"{SECTION} [data-role='block-edit']").count() == 0, "cocher n'ouvre pas l'édition"
+        expect(page.locator(f"{SECTION} .at-tasks input").first).to_be_checked()
+        expect(page.locator(f"{SECTION} [data-role='block-edit']")).to_have_count(0)  # cocher n'ouvre pas l'édition
         # Au clavier : le focus est resté sur la case, Espace la décoche (la sous-tâche se coche de même).
         sub = page.locator(f"{SECTION} .at-tasks input[data-line='2']")
         with _put(page):
@@ -156,12 +171,14 @@ def test_checkboxes_are_read_only_where_the_block_cannot_be_written(browser: Bro
     before = path.read_text(encoding="utf-8")
     for page, _errors in _open(browser, url, slug):
         quoted = page.locator(f"{SECTION} blockquote input[type='checkbox']")
-        assert quoted.count() == 1 and quoted.is_disabled(), "une case dans une citation ne s'écrit pas"
+        expect(quoted).to_have_count(1)  # une case dans une citation ne s'écrit pas
+        expect(quoted).to_be_disabled()
         page.locator(f"{SECTION} .at-blk:has(.at-md > ul.at-tasks)").click(position={"x": 4, "y": 4})
         page.locator(f"{SECTION} [data-role='block-edit'] textarea").wait_for(timeout=APPEAR_MS)
-        assert page.locator(f"{SECTION} [data-role='block-edit'] input[type='checkbox']").count() == 0, "en édition, pas de case active"
-        assert page.locator(f"{SECTION} .at-conflict").count() == 0, "pas de zone de conflit sans conflit"
+        expect(page.locator(f"{SECTION} [data-role='block-edit'] input[type='checkbox']")).to_have_count(0)  # en édition, pas de case active
+        expect(page.locator(f"{SECTION} .at-conflict")).to_have_count(0)  # pas de zone de conflit sans conflit
         page.keyboard.press("Escape")
+        expect(page.locator(f"{SECTION} [data-role='block-edit']")).to_have_count(0)  # fermé avant de relire le fichier
     assert path.read_text(encoding="utf-8") == before
 
 
@@ -174,15 +191,16 @@ def test_a_conflict_restores_the_box_and_shows_the_usual_panel(browser: Browser,
         page.locator(f"{SECTION} .at-tasks input[data-line='0']").click()
         panel = page.locator(f"{SECTION} [data-role='block-conflict']")
         panel.wait_for(timeout=APPEAR_MS)
-        assert panel.is_visible() and "Version actuelle" in panel.inner_text()
-        assert "(version de l'agent)" in panel.locator("[data-role='conflict-theirs']").inner_text()
-        assert "[x] écrire la spec" in panel.locator("[data-role='conflict-mine']").inner_text()
+        expect(panel).to_be_visible()
+        expect(panel).to_contain_text("Version actuelle", use_inner_text=True)
+        expect(panel.locator("[data-role='conflict-theirs']")).to_contain_text("(version de l'agent)", use_inner_text=True)
+        expect(panel.locator("[data-role='conflict-mine']")).to_contain_text("[x] écrire la spec", use_inner_text=True)
         assert path.read_text(encoding="utf-8") == changed, "rien n'a été écrit"
         # « Prendre l'autre » : la case est à l'état du serveur.
         page.locator("[data-role='conflict-take-other']").click()
         page.locator(f"{SECTION} .at-tasks input[data-line='0']").wait_for(timeout=APPEAR_MS)
-        assert page.locator(f"{SECTION} [data-role='block-edit']").count() == 0, "l'édition est fermée"
-        assert not page.locator(f"{SECTION} .at-tasks input[data-line='0']").is_checked()
+        expect(page.locator(f"{SECTION} [data-role='block-edit']")).to_have_count(0)  # l'édition est fermée
+        expect(page.locator(f"{SECTION} .at-tasks input[data-line='0']")).not_to_be_checked()
         assert path.read_text(encoding="utf-8") == changed
 
 
@@ -192,13 +210,16 @@ def test_an_empty_template_opens_empty_and_leaves_the_file_untouched(browser: Br
     before = path.read_bytes()
     for page, errors in _open_template(browser, url, slug):
         slot = page.locator(f"{SECTION} [data-role='empty-slot']").first
-        assert slot.inner_text() == "À compléter — pistes." and slot.locator("blockquote").count() == 0
+        expect(slot).to_have_text("À compléter — pistes.", use_inner_text=True)
+        expect(slot.locator("blockquote")).to_have_count(0)
         slot.click()
         area = page.locator(f"{SECTION} [data-role='block-edit'] textarea")
         area.wait_for(timeout=APPEAR_MS)
-        assert area.input_value() == "" and area.get_attribute("placeholder") == "À compléter — pistes."
-        assert page.locator(f"{SECTION} .at-conflict").count() == 0
+        expect(area).to_have_value("")
+        expect(area).to_have_attribute("placeholder", "À compléter — pistes.")
+        expect(page.locator(f"{SECTION} .at-conflict")).to_have_count(0)
         page.keyboard.press("Escape")
+        expect(area).to_be_hidden()  # fermé avant de relire le fichier
         assert path.read_bytes() == before, "annuler laisse le gabarit"
         slot.click()
         area.wait_for(timeout=APPEAR_MS)
@@ -233,11 +254,11 @@ def test_accessible_labels_are_plain_text(browser: Browser, project_on: tuple[st
     url, root = project_on
     slug, _path = _chantier(root, "Libelles lisibles")
     for page, _errors in _open(browser, url, slug):
-        labels = page.locator(f"{SECTION} .at-blk").first.evaluate(
-            "e => [e.getAttribute('aria-label'), e.querySelector('.at-cm-add').getAttribute('aria-label')]"
-        )
-        for label in labels:
-            assert "trois jours" in label and "**" not in label and "](" not in label and "https://" not in label, label
+        block = page.locator(f"{SECTION} .at-blk").first
+        # Le libellé contient « trois jours » et ni marque Markdown ni adresse.
+        plain = re.compile(r"^(?!.*(?:\*\*|\]\(|https://))(?=.*trois jours)", re.DOTALL)
+        expect(block).to_have_attribute("aria-label", plain)
+        expect(block.locator(".at-cm-add")).to_have_attribute("aria-label", plain)
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])

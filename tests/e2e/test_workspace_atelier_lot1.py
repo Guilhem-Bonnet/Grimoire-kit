@@ -11,6 +11,7 @@ capture ne fait rien (il ne se skippe pas : le mode strict de la CI promeut tout
 from __future__ import annotations
 
 import os
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -20,7 +21,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier
@@ -89,7 +90,7 @@ def test_flag_off_no_tab_and_404(browser: Browser, project_off: tuple[str, Path]
         page.evaluate("window.GrimoireWorkspace.goto('fonctions-test')")
         switch = page.locator("[data-feature='atelier']")
         switch.wait_for(timeout=APPEAR_MS)
-        assert switch.get_attribute("aria-checked") == "false"
+        expect(switch).to_have_attribute("aria-checked", "false")
 
 
 def test_flag_on_tab_banner_library(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -97,24 +98,24 @@ def test_flag_on_tab_banner_library(browser: Browser, project_on: tuple[str, Pat
     for page in _open(browser, url):
         tab = page.locator("#tab-space-atelier")
         tab.wait_for(timeout=APPEAR_MS)
-        assert tab.locator(".badge").inner_text() == "Test"
+        expect(tab.locator(".badge")).to_have_text("Test", use_inner_text=True)
         order = page.evaluate("window.GrimoireWorkspace.spaces")
         assert order.index("atelier") == order.index("configuration") - 1
         tab.click()
         banner = page.locator("[data-role='atelier-test']")
         banner.wait_for(timeout=APPEAR_MS)
-        assert "Atelier en test." in banner.inner_text()
-        assert "Aucune tâche n'est lancée tant que tu n'as pas validé le découpage." in banner.inner_text()
+        expect(banner).to_contain_text("Atelier en test.", use_inner_text=True)
+        expect(banner).to_contain_text("Aucune tâche n'est lancée tant que tu n'as pas validé le découpage.", use_inner_text=True)
         rows = page.locator("a.at-row")
-        rows.first.wait_for(timeout=APPEAR_MS)
-        assert rows.count() == 2
-        titles = rows.locator(".at-name b").all_inner_texts()
-        assert sorted(titles) == ["Chantiers multiples du cadrage", "Dicter une idée depuis le cockpit"]
-        assert page.locator("[data-role='new-chantier']").is_visible()
+        # Les lignes se posent en place : on attend le compte voulu, on ne lit pas le premier état.
+        expect(rows).to_have_count(2, timeout=APPEAR_MS)
+        for title in ("Chantiers multiples du cadrage", "Dicter une idée depuis le cockpit"):
+            expect(rows.locator(".at-name b").filter(has_text=re.compile(f"^{re.escape(title)}$"))).to_have_count(1)
+        expect(page.locator("[data-role='new-chantier']")).to_be_visible()
         # « Désactiver » mène à la rubrique des fonctions en test.
         banner.get_by_text("Désactiver").click()
         page.locator("[data-feature='atelier']").wait_for(timeout=APPEAR_MS)
-        assert page.locator("[data-feature='atelier']").get_attribute("aria-checked") == "true"
+        expect(page.locator("[data-feature='atelier']")).to_have_attribute("aria-checked", "true")
 
 
 def test_new_chantier_and_kit_error(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -126,7 +127,7 @@ def test_new_chantier_and_kit_error(browser: Browser, project_on: tuple[str, Pat
         field.press("Enter")
         alert = page.locator("[data-role='new-form'] [role='alert']")
         alert.wait_for(timeout=APPEAR_MS)
-        assert "existe déjà" in alert.inner_text()
+        expect(alert).to_contain_text("existe déjà", use_inner_text=True)
         field.fill("Un troisième chantier")
         field.press("Enter")
         page.locator("[data-role='atelier-status']").wait_for(state="attached", timeout=APPEAR_MS)
@@ -146,6 +147,7 @@ def test_block_edit_only_changes_its_range(browser: Browser, project_on: tuple[s
         area.wait_for(timeout=APPEAR_MS)
         # Échap ferme sans rien écrire.
         area.press("Escape")
+        expect(area).to_be_hidden()  # la saisie est fermée : on lit le disque après, pas pendant
         assert path.read_bytes() == before
         block.press("Enter")
         area.fill("- Bouton maintenu pour parler, transcription locale.\n- Repli sur le navigateur.")
@@ -206,9 +208,9 @@ def test_same_block_changed_while_typing_shows_both_versions_and_keeps_the_input
         box = page.locator("[data-role='block-conflict']")
         box.wait_for(state="visible", timeout=APPEAR_MS)
         assert path.read_bytes() == concurrent  # rien d'écrit
-        assert page.locator("[data-role='conflict-mine']").inner_text() == "Ma version"
-        assert "Version de l'agent." in page.locator("[data-role='conflict-theirs']").inner_text()
-        assert area.input_value() == "Ma version"  # la saisie n'est pas perdue
+        expect(page.locator("[data-role='conflict-mine']")).to_have_text("Ma version", use_inner_text=True)
+        expect(page.locator("[data-role='conflict-theirs']")).to_contain_text("Version de l'agent.", use_inner_text=True)
+        expect(area).to_have_value("Ma version")  # la saisie n'est pas perdue
         box.locator("[data-role='conflict-keep-mine']").click()
         page.locator("[data-role='atelier-status']", has_text="Bloc enregistré").wait_for(timeout=APPEAR_MS)
         assert "Ma version" in path.read_text(encoding="utf-8")
@@ -229,9 +231,10 @@ def test_block_with_an_active_link_scheme_has_no_clickable_link(browser: Browser
     for page in _open(browser, url, f"#atelier?chantier={made.slug}"):
         block = page.locator(".at-blk", has_text="Piège").first
         block.wait_for(timeout=APPEAR_MS)
-        hrefs = block.locator("a").evaluate_all("els => els.map(e => e.getAttribute('href'))")
-        assert hrefs == ["https://example.com/ok"], hrefs
-        assert "clic" in block.inner_text() and "données" in block.inner_text()
+        expect(block.locator("a")).to_have_count(1)
+        expect(block.locator("a")).to_have_attribute("href", "https://example.com/ok")
+        expect(block).to_contain_text("clic", use_inner_text=True)
+        expect(block).to_contain_text("données", use_inner_text=True)
 
 
 @pytest.mark.parametrize("size", [(1440, 900), (1024, 768)])

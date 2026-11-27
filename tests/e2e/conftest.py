@@ -32,6 +32,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -44,6 +45,9 @@ else:
     pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
 from playwright.sync_api import Browser, Page, sync_playwright
+
+if TYPE_CHECKING:
+    from playwright.sync_api import BrowserContext
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -896,10 +900,37 @@ def browser() -> Iterator[Browser]:
         except Exception as exc:  # pragma: no cover — navigateur non installé
             pytest.skip(f"Chromium absent : {exc} — `playwright install chromium`")
         else:
+            _throttle_every_page(instance)
             try:
                 yield instance
             finally:
                 instance.close()
+
+
+def _throttle_every_page(instance: Browser) -> None:
+    """Applique ``GRIMOIRE_E2E_CPU_THROTTLE`` à toute page ouverte par ``instance``, sans que chaque fichier s'en charge.
+
+    Les fichiers qui ouvrent leur propre contexte (l'Atelier, la mascotte) n'appellent pas ``throttle_cpu`` : on
+    enveloppe ``new_context`` puis ``new_page`` pour que le ralentissement soit le même partout. Sans la variable,
+    rien n'est enveloppé.
+    """
+    if float(os.environ.get("GRIMOIRE_E2E_CPU_THROTTLE", "1")) <= 1:
+        return
+    open_context = instance.new_context
+
+    def new_context(*args: Any, **kwargs: Any) -> BrowserContext:
+        context = open_context(*args, **kwargs)
+        open_page = context.new_page
+
+        def new_page() -> Page:
+            page = open_page()
+            throttle_cpu(page)
+            return page
+
+        context.new_page = new_page  # type: ignore[method-assign]
+        return context
+
+    instance.new_context = new_context  # type: ignore[method-assign]
 
 
 @pytest.fixture

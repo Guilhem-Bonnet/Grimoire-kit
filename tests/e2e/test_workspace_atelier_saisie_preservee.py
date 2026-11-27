@@ -16,7 +16,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.tools import workspace_atelier
 
@@ -81,6 +81,13 @@ def _state(page: Page) -> list[object]:
     )
 
 
+def _drafts(page: Page, wanted: int) -> None:
+    """Les brouillons sont rangés (ou effacés) à la suite du geste : on attend leur nombre voulu dans le stockage de session."""
+    page.wait_for_function(
+        "([p, n]) => Object.keys(sessionStorage).filter((k) => k.startsWith(p)).length === n", arg=[KEY_PREFIX, wanted], timeout=APPEAR_MS
+    )
+
+
 def _accept_elsewhere(page: Page) -> None:
     """Accepte la suggestion (sur un AUTRE bloc) sans faire défiler la page : le document est rechargé."""
     page.evaluate("() => document.querySelector(\"[data-act='accept']\").click()")
@@ -97,7 +104,7 @@ def test_a_decision_elsewhere_keeps_the_block_being_edited(browser: Browser, pro
         _accept_elsewhere(page)
         assert _state(page) == [True, TYPED, 3, 10, True], "la zone de texte, son curseur et sa sélection sont restés"
         page.keyboard.type("XY")  # la saisie continue là où elle était
-        assert page.locator("[data-role='block-edit'] textarea").input_value() == TYPED[:3] + "XY" + TYPED[10:]
+        expect(page.locator("[data-role='block-edit'] textarea")).to_have_value(TYPED[:3] + "XY" + TYPED[10:])
         assert not errors
 
 
@@ -118,7 +125,7 @@ def test_a_comment_being_written_survives_a_decision_and_a_refresh(browser: Brow
             page.evaluate("() => window.dispatchEvent(new Event('focus'))")
         page.evaluate("() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))")
         assert _state(page)[:4] == [True, "Un commentaire pas encore envoyé.", 2, 9]
-        assert page.locator("[data-role='comment-form']").count() == 1
+        expect(page.locator("[data-role='comment-form']")).to_have_count(1)
         assert not errors
 
 
@@ -135,15 +142,16 @@ def test_a_block_changed_on_the_server_while_editing_says_so_and_the_conflict_st
             page.evaluate("() => window.dispatchEvent(new Event('focus'))")
         banner = page.locator("[data-role='block-stale']")
         banner.wait_for(timeout=APPEAR_MS)
-        assert banner.get_attribute("role") == "status" and "a changé" in banner.inner_text()
+        expect(banner).to_have_attribute("role", "status")
+        expect(banner).to_contain_text("a changé", use_inner_text=True)
         assert _state(page)[:4] == [True, TYPED, 3, 10], "la saisie est intacte"
-        assert page.locator(".is-editing").count() == 1, "le bloc modifié n'est pas dessiné en double"
+        expect(page.locator(".is-editing")).to_have_count(1)  # le bloc modifié n'est pas dessiné en double
         on_disk = path.read_bytes()
         page.locator("[data-role='block-edit'] textarea").press("Control+Enter")
         box = page.locator("[data-role='block-conflict']")
         box.wait_for(timeout=APPEAR_MS)
-        assert TYPED in box.locator("[data-role='conflict-mine']").inner_text()
-        assert "Version de l'agent" in box.locator("[data-role='conflict-theirs']").inner_text()
+        expect(box.locator("[data-role='conflict-mine']")).to_contain_text(TYPED, use_inner_text=True)
+        expect(box.locator("[data-role='conflict-theirs']")).to_contain_text("Version de l'agent", use_inner_text=True)
         assert path.read_bytes() == on_disk, "rien n'a été écrit : le conflit par bloc a jugé"
 
 
@@ -157,7 +165,7 @@ def test_a_block_deleted_on_the_server_while_editing_keeps_the_typing_and_says_s
         with page.expect_response(lambda r: "/atelier/chantiers/" in r.url and r.request.method == "GET", timeout=APPEAR_MS):
             page.evaluate("() => window.dispatchEvent(new Event('focus'))")
         page.locator("[data-role='block-stale']").wait_for(timeout=APPEAR_MS)
-        assert "disparu" in page.locator("[data-role='block-stale']").inner_text()
+        expect(page.locator("[data-role='block-stale']")).to_contain_text("disparu", use_inner_text=True)
         assert _state(page)[:4] == [True, TYPED, 3, 10]
 
 
@@ -174,8 +182,9 @@ def test_an_unsaved_block_draft_is_offered_after_a_page_reload_then_resumed_or_d
         _reopen(page)
         offer = page.locator(f"{BLOCK_A} [data-role='draft-offer']")
         offer.wait_for(timeout=APPEAR_MS)
-        assert offer.get_attribute("role") == "status" and "Brouillon non enregistré" in offer.inner_text()
-        assert page.locator(".is-editing").count() == 0, "jamais appliqué en silence"
+        expect(offer).to_have_attribute("role", "status")
+        expect(offer).to_contain_text("Brouillon non enregistré", use_inner_text=True)
+        expect(page.locator(".is-editing")).to_have_count(0)  # jamais appliqué en silence
         assert path.read_bytes() == before, "jamais envoyé au serveur"
         # Plus de saisie à l'écran : la page ne prévient plus.
         assert not page.evaluate("() => { const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; }")
@@ -184,31 +193,30 @@ def test_an_unsaved_block_draft_is_offered_after_a_page_reload_then_resumed_or_d
         page.keyboard.press("Enter")
         area = page.locator("[data-role='block-edit'] textarea")
         area.wait_for(timeout=APPEAR_MS)
-        assert area.input_value() == TYPED
+        expect(area).to_have_value(TYPED)
         # Rechargée encore, puis jetée : effacé du stockage, plus proposé.
         _reopen(page)
         page.locator(f"{BLOCK_A} [data-role='draft-offer']").get_by_role("button", name="Jeter").click()
-        assert page.locator("[data-role='draft-offer']").count() == 0
-        assert page.evaluate("(p) => Object.keys(sessionStorage).filter((k) => k.startsWith(p)).length", KEY_PREFIX) == 0
+        expect(page.locator("[data-role='draft-offer']")).to_have_count(0)
+        _drafts(page, 0)
         _reopen(page)
-        assert page.locator("[data-role='draft-offer']").count() == 0
+        expect(page.locator("[data-role='draft-offer']")).to_have_count(0)
         assert not errors
 
 
 def test_cancelling_or_saving_clears_the_draft(browser: Browser, project_on: tuple[str, Path]) -> None:
     url, root = project_on
     slug = _chantier(root, "Brouillon efface")
-    count = "(p) => Object.keys(sessionStorage).filter((k) => k.startsWith(p)).length"
     for page, _errors in _open(browser, url, slug):
         _edit_a(page)
-        assert page.evaluate(count, KEY_PREFIX) == 1
+        _drafts(page, 1)
         page.locator("[data-role='block-edit'] textarea").press("Escape")
-        assert page.evaluate(count, KEY_PREFIX) == 0
+        _drafts(page, 0)
         _edit_a(page)
-        assert page.evaluate(count, KEY_PREFIX) == 1
+        _drafts(page, 1)
         page.locator("[data-role='block-edit'] textarea").press("Control+Enter")
         page.locator("[data-role='atelier-status']", has_text="Bloc enregistré").wait_for(timeout=APPEAR_MS)
-        assert page.evaluate(count, KEY_PREFIX) == 0
+        _drafts(page, 0)
 
 
 def test_an_unsent_comment_draft_is_offered_on_the_block_after_a_reload(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -220,9 +228,9 @@ def test_an_unsent_comment_draft_is_offered_on_the_block_after_a_reload(browser:
         _reopen(page)
         offer = page.locator(f"{BLOCK_A} [data-role='draft-offer'][data-kind='comment']")
         offer.wait_for(timeout=APPEAR_MS)
-        assert page.locator("[data-role='comment-form']").count() == 0, "jamais appliqué en silence"
+        expect(page.locator("[data-role='comment-form']")).to_have_count(0)  # jamais appliqué en silence
         offer.get_by_role("button", name="Reprendre").click()
-        assert page.locator("[data-role='comment-form'] textarea").input_value() == "Mon commentaire commencé."
+        expect(page.locator("[data-role='comment-form'] textarea")).to_have_value("Mon commentaire commencé.")
 
 
 def test_scroll_position_and_open_details_survive_a_reload_of_the_document(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -233,15 +241,15 @@ def test_scroll_position_and_open_details_survive_a_reload_of_the_document(brows
         page.wait_for_function("() => document.querySelector('[data-role=\"live-summary\"]')?.textContent.includes('REQ-001')", timeout=APPEAR_MS)
         toggle = page.locator("[data-live='REQ-001'] [data-act='toggle-detail']")
         toggle.click()
-        assert toggle.get_attribute("aria-expanded") == "true"
+        expect(toggle).to_have_attribute("aria-expanded", "true")
         page.evaluate(f"{CANVAS}.scrollTop = 900")
+        page.wait_for_function(f"() => {CANVAS}.scrollTop > 400", timeout=APPEAR_MS)  # le défilement est posé avant d'en retenir la valeur
         top = page.evaluate(f"{CANVAS}.scrollTop")
-        assert top > 400
         page.evaluate("() => { window.__line = document.querySelector('[data-live=\"REQ-001\"]'); window.__last = document.querySelector('.at-sec:last-of-type .at-blk'); }")
         _accept_elsewhere(page)
         assert page.evaluate(f"{CANVAS}.scrollTop") == top, "la lecture n'a pas sauté"
         assert page.evaluate("() => document.querySelector('[data-live=\"REQ-001\"]') === window.__line"), "la ligne dépliée est le même nœud"
-        assert page.locator("[data-live='REQ-001'] [data-act='toggle-detail']").get_attribute("aria-expanded") == "true"
+        expect(page.locator("[data-live='REQ-001'] [data-act='toggle-detail']")).to_have_attribute("aria-expanded", "true")
         assert page.evaluate("() => !window.__last || document.querySelector('.at-sec:last-of-type .at-blk') === window.__last"), (
             "un bloc dont les données n'ont pas changé garde son nœud"
         )

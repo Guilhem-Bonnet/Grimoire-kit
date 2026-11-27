@@ -18,7 +18,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Locator, Page, expect
 
 from grimoire.core import atelier_comments as store
 from grimoire.core.chantiers import new_chantier
@@ -128,7 +128,7 @@ def _select(page: Page, quote: str) -> None:
     assert done, quote
 
 
-def _thread(page: Page, comment_id: str) -> object:
+def _thread(page: Page, comment_id: str) -> Locator:
     return page.locator(f"[data-com='{comment_id}']")
 
 
@@ -141,16 +141,17 @@ def test_an_orphan_is_attached_to_the_selection_and_keeps_the_trace(browser: Bro
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         thread = _thread(page, cid)
         thread.wait_for(timeout=APPEAR_MS)
-        assert thread.get_attribute("data-anchor") == "orphelin"
+        expect(thread).to_have_attribute("data-anchor", "orphelin")
         page.locator(".at-blk", has_text=NEW_PICK).wait_for(timeout=APPEAR_MS)
         _select(page, NEW_PICK)
         thread.get_by_role("button", name="Rattacher ce commentaire à la sélection du document ou au bloc courant").click()
         page.locator("[data-role='atelier-status']", has_text="rattaché à la sélection").wait_for(timeout=APPEAR_MS)
         thread = _thread(page, cid)
-        assert thread.get_attribute("data-anchor") == "ancre"
-        assert thread.locator("[data-role='quote']").inner_text() == NEW_PICK
-        assert "Rattaché" in thread.locator("[data-role='attach-history']").inner_text()
-        assert page.evaluate("CSS.highlights.has('at-cm')") is True  # le passage est surligné de nouveau
+        expect(thread).to_have_attribute("data-anchor", "ancre")
+        expect(thread.locator("[data-role='quote']")).to_have_text(NEW_PICK, use_inner_text=True)
+        expect(thread.locator("[data-role='attach-history']")).to_contain_text("Rattaché", use_inner_text=True)
+        # Le passage est surligné de nouveau : le surlignage suit le rendu en place, on attend l'état.
+        page.wait_for_function("() => CSS.highlights.has('at-cm')", timeout=APPEAR_MS)
     (saved,) = store.load(_folder(root, slug))
     assert saved.quote == NEW_PICK and saved.orphelin is False
     (trace,) = saved.historique
@@ -169,18 +170,18 @@ def test_without_a_selection_the_orphan_is_attached_to_the_current_block(browser
         attach = thread.get_by_role("button", name="Rattacher ce commentaire à la sélection du document ou au bloc courant")
         attach.click()
         # Mode explicite « choisis le bloc » : rien n'est écrit, les blocs deviennent des cibles.
-        assert "Choisis le bloc" in thread.locator("[data-role='attach-pick']").inner_text()
-        assert page.locator(".at-sheet.is-picking").count() == 1
+        expect(thread.locator("[data-role='attach-pick']")).to_contain_text("Choisis le bloc", use_inner_text=True)
+        expect(page.locator(".at-sheet.is-picking")).to_have_count(1)
         assert store.load(_folder(root, slug))[0].historique == []
         page.keyboard.press("Escape")  # Échap annule : plus de cibles, rien d'écrit, le focus revient au bouton
-        assert page.locator(".at-sheet.is-picking").count() == 0
-        assert thread.locator("[data-role='attach-pick']").count() == 0
+        expect(page.locator(".at-sheet.is-picking")).to_have_count(0)
+        expect(thread.locator("[data-role='attach-pick']")).to_have_count(0)
         assert store.load(_folder(root, slug))[0].historique == []
         attach.click()
         page.locator(".at-blk", has_text=PARA_B).click()  # le clic choisit le bloc, il ne l'ouvre pas en édition
         page.locator("[data-role='atelier-status']", has_text="rattaché au bloc").wait_for(timeout=APPEAR_MS)
-        assert page.locator(".is-editing").count() == 0
-        assert _thread(page, cid).get_attribute("data-anchor") == "ancre"
+        expect(page.locator(".is-editing")).to_have_count(0)
+        expect(_thread(page, cid)).to_have_attribute("data-anchor", "ancre")
     assert store.load(_folder(root, slug))[0].quote == f"{PARA_B} (revu)"
 
 
@@ -195,9 +196,9 @@ def test_a_drifted_requirement_shows_what_changed(browser: Browser, project_on: 
         line.get_by_role("button", name="Détail de REQ-001").click()
         diff = line.locator("[data-role='drift-diff']")
         diff.wait_for(timeout=APPEAR_MS)
-        assert "- critère : la transcription apparaît en moins de 2 secondes" in diff.inner_text()
-        assert "+ critère : la transcription apparaît en moins de 1 seconde" in diff.inner_text()
-        assert line.locator("[data-role='drift-note']").count() == 0
+        expect(diff).to_contain_text("- critère : la transcription apparaît en moins de 2 secondes", use_inner_text=True)
+        expect(diff).to_contain_text("+ critère : la transcription apparaît en moins de 1 seconde", use_inner_text=True)
+        expect(line.locator("[data-role='drift-note']")).to_have_count(0)
 
 
 def test_a_requirement_validated_before_the_text_was_kept_drifts_without_detail(
@@ -214,9 +215,9 @@ def test_a_requirement_validated_before_the_text_was_kept_drifts_without_detail(
         line.get_by_role("button", name="Détail de REQ-001").click()
         note = line.locator("[data-role='drift-note']")
         note.wait_for(timeout=APPEAR_MS)
-        assert "validée avant la conservation du texte validé" in note.inner_text()
-        assert line.locator("[data-role='drift-diff']").count() == 0
-        assert line.get_by_text("modifiée depuis la validation").count() >= 1
+        expect(note).to_contain_text("validée avant la conservation du texte validé", use_inner_text=True)
+        expect(line.locator("[data-role='drift-diff']")).to_have_count(0)
+        expect(line.get_by_text("modifiée depuis la validation").first).to_be_visible()
 
 
 @pytest.mark.parametrize("size", [(1440, 900), (1024, 768)])

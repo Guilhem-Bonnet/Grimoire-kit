@@ -50,13 +50,19 @@ def _own_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(key)
 
 
+# Aucune maintenance en arrière-plan : un `git commit` lancerait sinon `maintenance run --auto` détaché, dont le verrou
+# (`.git/objects/maintenance.lock`) paraît ou disparaît pendant que le test compare `.git` avant/après.
+_GIT_QUIET = ["git", "-c", "commit.gpgsign=false", "-c", "gc.auto=0", "-c", "gc.autoDetach=false",
+              "-c", "maintenance.auto=false"]
+
+
 def _env() -> dict[str, str]:
     return {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_AUTHOR_NAME": "A",
             "GIT_AUTHOR_EMAIL": "a@x", "GIT_COMMITTER_NAME": "A", "GIT_COMMITTER_EMAIL": "a@x"}
 
 
 def git(root: Path, *args: str, stdin: str | None = None) -> str:
-    done = subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=root, capture_output=True, text=True, check=True,
+    done = subprocess.run([*_GIT_QUIET, *args], cwd=root, capture_output=True, text=True, check=True,
                           env=_env(), input=stdin, stdin=None if stdin else subprocess.DEVNULL)
     return done.stdout.strip()
 

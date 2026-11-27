@@ -19,7 +19,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Locator, Page, expect
 
 from grimoire.core import atelier_comments as store
 from grimoire.core.chantiers import new_chantier
@@ -124,8 +124,13 @@ def _refresh(page: Page) -> None:
     page.evaluate("window.dispatchEvent(new Event('focus'))")
 
 
-def _thread(page: Page, comment_id: str) -> object:
+def _thread(page: Page, comment_id: str) -> Locator:
     return page.locator(f"[data-com='{comment_id}']")
+
+
+def _highlighted(page: Page, wanted: bool) -> None:
+    """Le surlignage suit le rendu en place : on attend l'état voulu au lieu de lire ``CSS.highlights`` d'emblée."""
+    page.wait_for_function("(wanted) => CSS.highlights.has('at-cm') === wanted", arg=wanted, timeout=APPEAR_MS)
 
 
 def test_flag_off_routes_are_404(browser: Browser, project_off: tuple[str, Path]) -> None:
@@ -156,7 +161,7 @@ def test_the_human_comments_a_selected_passage_then_replies_resolves_and_reopens
         _select(page, QUOTE)
         page.locator(".at-blk", has_text=QUOTE).get_by_role("button", name="Commenter").click()
         form = page.locator("[data-role='comment-form']")
-        assert form.locator("[data-role='quote']").inner_text() == QUOTE
+        expect(form.locator("[data-role='quote']")).to_have_text(QUOTE, use_inner_text=True)
         form.get_by_label("Ton commentaire").fill("Pourquoi tenue plutôt que maintenue ?")
         form.get_by_role("button", name="Commenter").click()
         page.locator("[data-role='atelier-status']", has_text="Commentaire ajouté").wait_for(timeout=APPEAR_MS)
@@ -165,27 +170,28 @@ def test_the_human_comments_a_selected_passage_then_replies_resolves_and_reopens
         thread.wait_for(timeout=APPEAR_MS)
         assert made.auteur == "humain" and made.quote == QUOTE
         # Aucun nom déclaré (« Developer » est le repli de `grimoire init`) : l'auteur humain s'affiche « Toi ».
-        assert "Toi" in thread.inner_text() and "Pourquoi tenue" in thread.inner_text()
-        assert thread.locator("[data-role='quote']").inner_text() == QUOTE
-        assert thread.get_attribute("data-anchor") == "ancre"
-        assert page.evaluate("CSS.highlights.has('at-cm')") is True  # le passage est surligné, sans toucher au DOM du bloc
+        expect(thread).to_contain_text("Toi", use_inner_text=True)
+        expect(thread).to_contain_text("Pourquoi tenue", use_inner_text=True)
+        expect(thread.locator("[data-role='quote']")).to_have_text(QUOTE, use_inner_text=True)
+        expect(thread).to_have_attribute("data-anchor", "ancre")
+        _highlighted(page, True)  # le passage est surligné, sans toucher au DOM du bloc
         assert path.read_bytes() == before  # commenter n'écrit jamais dans la phase
-        assert page.locator("[data-role='doc-comment-count']").inner_text().strip() == "1 commentaire ouvert."
+        expect(page.locator("[data-role='doc-comment-count']")).to_have_text("1 commentaire ouvert.", use_inner_text=True)
         # Répondre, au clavier : le bouton, puis Ctrl+Entrée.
         thread.get_by_role("button", name="Répondre").click()
         page.get_by_label("Ta réponse").fill("Parce que tenue dit l'action, maintenue dit l'état.")
         page.get_by_label("Ta réponse").press("Control+Enter")
         page.locator("[data-role='atelier-status']", has_text="Réponse ajoutée").wait_for(timeout=APPEAR_MS)
-        assert "l'action" in _thread(page, made.id).inner_text()
+        expect(_thread(page, made.id)).to_contain_text("l'action", use_inner_text=True)
         # Résoudre replie le fil ; rouvrir le rend.
         _thread(page, made.id).get_by_role("button", name="Résoudre").click()
         page.locator("[data-role='atelier-status']", has_text="Fil résolu").wait_for(timeout=APPEAR_MS)
-        assert _thread(page, made.id).get_attribute("data-etat") == "resolu"
-        assert page.evaluate("CSS.highlights.has('at-cm')") is False  # un fil résolu ne surligne plus
+        expect(_thread(page, made.id)).to_have_attribute("data-etat", "resolu")
+        _highlighted(page, False)  # un fil résolu ne surligne plus
         _thread(page, made.id).locator("summary").click()
         _thread(page, made.id).get_by_role("button", name="Rouvrir").click()
         page.locator("[data-role='atelier-status']", has_text="Fil rouvert").wait_for(timeout=APPEAR_MS)
-        assert _thread(page, made.id).get_attribute("data-etat") == "ouvert"
+        expect(_thread(page, made.id)).to_have_attribute("data-etat", "ouvert")
     (saved,) = _stored(root, slug)
     assert saved.etat == "ouvert" and [r["auteur"] for r in saved.replies] == ["humain"]
     assert path.read_bytes() == before
@@ -200,16 +206,16 @@ def test_the_comment_button_is_reachable_from_the_keyboard(browser: Browser, pro
         block.focus()
         page.keyboard.press("Tab")
         button = block.get_by_role("button", name="Commenter")
-        assert button.evaluate("el => el === document.activeElement")  # Tab depuis le bloc : le bouton, sans souris
-        assert button.evaluate("el => getComputedStyle(el).opacity") == "1"  # visible au focus
-        assert button.evaluate("el => getComputedStyle(el).outlineStyle") != "none"  # focus visible
+        expect(button).to_be_focused()  # Tab depuis le bloc : le bouton, sans souris
+        expect(button).to_have_css("opacity", "1")  # visible au focus
+        expect(button).not_to_have_css("outline-style", "none")  # focus visible
         page.keyboard.press("Enter")
         area = page.get_by_label("Ton commentaire")
-        assert area.evaluate("el => el === document.activeElement")
-        assert page.locator("[data-role='comment-form'] [data-role='quote']").inner_text() == PARA_A  # sans sélection : le bloc
+        expect(area).to_be_focused()
+        expect(page.locator("[data-role='comment-form'] [data-role='quote']")).to_have_text(PARA_A, use_inner_text=True)  # sans sélection : le bloc
         page.keyboard.press("Escape")
-        assert page.locator("[data-role='comment-form']").count() == 0
-        assert button.evaluate("el => el === document.activeElement")
+        expect(page.locator("[data-role='comment-form']")).to_have_count(0)
+        expect(button).to_be_focused()
     assert _stored(root, slug) == []
 
 
@@ -224,10 +230,10 @@ def test_the_anchor_survives_a_change_of_the_neighbouring_block(browser: Browser
         _refresh(page)
         page.locator(".at-blk", has_text="réécrit de fond en comble").wait_for(timeout=APPEAR_MS)
         thread = _thread(page, str(made["id"]))
-        assert thread.get_attribute("data-anchor") == "ancre"
+        expect(thread).to_have_attribute("data-anchor", "ancre")
         # Toujours dans la marge du bloc d'origine, et le passage est toujours surligné.
-        assert page.locator(".at-cmrow", has_text=PARA_A).locator(f"[data-com='{made['id']}']").count() == 1
-        assert page.evaluate("CSS.highlights.has('at-cm')") is True
+        expect(page.locator(".at-cmrow", has_text=PARA_A).locator(f"[data-com='{made['id']}']")).to_have_count(1)
+        _highlighted(page, True)
 
 
 def test_a_changed_block_gives_its_quote_back(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -241,8 +247,9 @@ def test_a_changed_block_gives_its_quote_back(browser: Browser, project_on: tupl
         page.locator(".at-blk", has_text="enfoncé").wait_for(timeout=APPEAR_MS)
         thread = _thread(page, str(made["id"]))
         thread.wait_for(timeout=APPEAR_MS)
-        assert thread.get_attribute("data-anchor") == "retrouve" and "Le passage commenté a été modifié" in thread.inner_text()
-        assert page.locator(".at-cmrow", has_text="enfoncé").locator(f"[data-com='{made['id']}']").count() == 1
+        expect(thread).to_have_attribute("data-anchor", "retrouve")
+        expect(thread).to_contain_text("Le passage commenté a été modifié", use_inner_text=True)
+        expect(page.locator(".at-cmrow", has_text="enfoncé").locator(f"[data-com='{made['id']}']")).to_have_count(1)
 
 
 def test_a_deleted_quote_becomes_a_visible_orphan_with_its_original_quote(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -257,11 +264,14 @@ def test_a_deleted_quote_becomes_a_visible_orphan_with_its_original_quote(browse
         orphans = page.locator("[data-role='orphans']")
         orphans.wait_for(timeout=APPEAR_MS)
         thread = orphans.locator(f"[data-com='{made['id']}']")
-        assert thread.get_attribute("data-anchor") == "orphelin" and "Orphelin" in thread.inner_text()
-        assert thread.locator("[data-role='quote']").inner_text() == QUOTE  # l'extrait d'origine reste dit
-        assert page.locator(".at-cmrow", has_text="selon le contexte d'usage").locator("[data-com]").count() == 0  # jamais rattaché ailleurs
-        assert page.evaluate("CSS.highlights.has('at-cm')") is False
-        assert page.locator("[data-role='doc-comment-count']").inner_text().strip() == "1 commentaire ouvert."
+        expect(thread).to_have_attribute("data-anchor", "orphelin")
+        expect(thread).to_contain_text("Orphelin", use_inner_text=True)
+        expect(thread.locator("[data-role='quote']")).to_have_text(QUOTE, use_inner_text=True)  # l'extrait d'origine reste dit
+        # Le bloc réécrit est attendu avant de constater que rien ne s'y est rattaché (sinon on lirait l'ancien rendu).
+        expect(page.locator(".at-blk", has_text="selon le contexte d'usage")).to_have_count(1)
+        expect(page.locator(".at-cmrow", has_text="selon le contexte d'usage").locator("[data-com]")).to_have_count(0)  # jamais rattaché ailleurs
+        _highlighted(page, False)
+        expect(page.locator("[data-role='doc-comment-count']")).to_have_text("1 commentaire ouvert.", use_inner_text=True)
 
 
 def test_the_agent_comments_replies_links_a_suggestion_and_cannot_resolve(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -274,13 +284,16 @@ def test_the_agent_comments_replies_links_a_suggestion_and_cannot_resolve(browse
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         agent = _thread(page, str(made["id"]))
         agent.wait_for(timeout=APPEAR_MS)
-        assert agent.get_attribute("data-author") == "agent" and "Agent" in agent.inner_text()
+        expect(agent).to_have_attribute("data-author", "agent")
+        expect(agent).to_contain_text("Agent", use_inner_text=True)
         human = _thread(page, str(asked_by_human["comment"]["id"]))
-        assert human.get_attribute("data-author") == "humain" and "Voici ma réponse." in human.inner_text()
-        assert human.locator(".at-cm-who.is-agent").count() == 1 and human.locator(".at-cm-who.is-humain").count() == 1
+        expect(human).to_have_attribute("data-author", "humain")
+        expect(human).to_contain_text("Voici ma réponse.", use_inner_text=True)
+        expect(human.locator(".at-cm-who.is-agent")).to_have_count(1)
+        expect(human.locator(".at-cm-who.is-humain")).to_have_count(1)
         # L'interface relie le commentaire à la suggestion.
         agent.get_by_role("button", name="Voir la suggestion liée").click()
-        assert page.evaluate("document.activeElement.getAttribute('data-sugg')") == filed["suggestion"]["id"]
+        expect(page.locator(f"[data-sugg='{filed['suggestion']['id']}']")).to_be_focused()
         # L'humain résout ; l'agent ne peut ni répondre dans un fil résolu, ni le rouvrir : aucune fonction pour ça.
         human.get_by_role("button", name="Résoudre").click()
         page.locator("[data-role='atelier-status']", has_text="Fil résolu").wait_for(timeout=APPEAR_MS)
@@ -300,17 +313,17 @@ def test_an_open_thread_on_a_requirement_shows_on_its_status_line_and_in_the_lib
     for page in _open(browser, url, "#atelier"):
         row = page.locator(f"a.at-row[data-slug='{slug}']")
         row.wait_for(timeout=APPEAR_MS)
-        assert row.locator("[data-role='comment-count']").inner_text() == "1 commentaire"
+        expect(row.locator("[data-role='comment-count']")).to_have_text("1 commentaire", use_inner_text=True)
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         line = page.locator(".at-live[data-live='REQ-001']:not([hidden])")
         line.wait_for(timeout=APPEAR_MS)
-        assert line.locator("[data-role='live-comments']").inner_text() == "1 commentaire ouvert"
+        expect(line.locator("[data-role='live-comments']")).to_have_text("1 commentaire ouvert", use_inner_text=True)
         _thread(page, str(made["id"])).get_by_role("button", name="Résoudre").click()
         page.locator("[data-role='atelier-status']", has_text="Fil résolu").wait_for(timeout=APPEAR_MS)
         page.locator(".at-live[data-live='REQ-001']:not([hidden])").wait_for(timeout=APPEAR_MS)
         # La ligne d'état se met à jour en place après le rechargement : on attend la disparition, on ne la suppose pas.
         page.locator("[data-role='live-comments']").wait_for(state="detached", timeout=APPEAR_MS)
-        assert page.locator("[data-role='live-comments']").count() == 0
+        expect(page.locator("[data-role='live-comments']")).to_have_count(0)
 
 
 @pytest.mark.parametrize("size", [(1440, 900), (1024, 768)])

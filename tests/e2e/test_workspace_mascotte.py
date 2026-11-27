@@ -19,6 +19,7 @@ import io
 import json
 import math
 import os
+import re
 import struct
 import time
 import wave
@@ -29,7 +30,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, BrowserContext, Page, Route
+from playwright.sync_api import Browser, BrowserContext, Page, Route, expect
 
 from grimoire.tools import workspace_atelier
 
@@ -175,10 +176,6 @@ def _open(
     return page, context, requests, errors
 
 
-def _label(page: Page) -> str:
-    return page.locator(CANVAS).get_attribute("aria-label") or ""
-
-
 def _draws(page: Page) -> int:
     return int(page.evaluate("() => window.__draws"))
 
@@ -227,19 +224,16 @@ def test_flag_off_nothing_visible_and_module_never_requested(browser: Browser, p
     page, context, requests, errors = _open(browser, project_off)
     try:
         page.wait_for_selector(".chat-voice-out, .chat-form", state="attached")
+        # Assertion négative (« rien ne se charge, rien ne se pose ») : fenêtre d'observation bornée et explicite.
         page.wait_for_timeout(800)
-        assert page.locator(CANVAS).count() == 0
-        assert page.locator(FIGURE).is_hidden()
+        expect(page.locator(CANVAS)).to_have_count(0)
+        expect(page.locator(FIGURE)).to_be_hidden()
         assert not [
             r for r in requests if "mascotte" in r and "mascotte_lazy.js" not in r and "mascotte_bus.js" not in r
         ], "drapeau éteint : seule la porte (mascotte_lazy.js) peut être demandée"
         assert not errors
     finally:
         context.close()
-
-
-def _caption(page: Page) -> str:
-    return (page.locator(CAPTION).text_content() or "").strip()
 
 
 def _wait_caption(page: Page, text: str, timeout: int = READY_MS) -> None:
@@ -258,11 +252,12 @@ def test_flag_on_without_voice_shows_canvas_and_rest_caption_and_the_loop_stops(
     try:
         page.locator(CANVAS).wait_for(state="visible", timeout=READY_MS)
         _wait_caption(page, "au repos")
-        assert page.locator(CAPTION).get_attribute("aria-live") == "polite"
-        assert page.locator(CAPTION).is_visible()
+        expect(page.locator(CAPTION)).to_have_attribute("aria-live", "polite")
+        expect(page.locator(CAPTION)).to_be_visible()
         page.wait_for_function("() => window.__draws >= 1", timeout=10_000)
         _settle(page)
         before = _draws(page)
+        # Assertion négative (« au repos, aucune image n'est dessinée ») : fenêtre d'observation bornée et explicite.
         page.wait_for_timeout(700)
         assert _draws(page) == before, "au repos stable la boucle de rendu doit être arrêtée"
         assert not errors
@@ -336,9 +331,10 @@ def test_a_pending_question_waits_for_the_human_and_rendering_stops_after_the_en
         _rendering_stopped(page)
         before = _draws(page)
         assert before < 400, f"l'entrée ne doit pas durer : {before} images"
+        # Assertion négative (« aucune image de plus ») : fenêtre d'observation bornée et explicite.
         page.wait_for_timeout(1500)
         assert _draws(page) == before, "une question en attente ne fait pas tourner le rendu en continu"
-        assert _caption(page) == "attend ta réponse"
+        expect(page.locator(CAPTION)).to_have_text("attend ta réponse", use_inner_text=True)
         assert not errors
     finally:
         context.close()
@@ -369,9 +365,9 @@ def test_without_webgl2_the_caption_stays_with_a_dot_instead_of_the_canvas(brows
     try:
         _wait_caption(page, "réfléchit")
         page.locator(".chat-mascotte-dot").wait_for(state="visible", timeout=READY_MS)
-        assert page.locator(FIGURE).is_visible(), "pas de bande cachée"
-        assert page.locator(CANVAS).count() == 0, "pas de canevas vide"
-        assert "WebGL" in (page.locator(".chat-mascotte-dot").get_attribute("title") or "")
+        expect(page.locator(FIGURE)).to_be_visible()  # pas de bande cachée
+        expect(page.locator(CANVAS)).to_have_count(0)  # pas de canevas vide
+        expect(page.locator(".chat-mascotte-dot")).to_have_attribute("title", re.compile("WebGL"))
         assert not errors, errors
     finally:
         context.close()
@@ -382,15 +378,19 @@ def test_flag_on_voice_mode_shows_the_mascotte_at_rest_and_the_loop_stops(browse
     try:
         canvas = page.locator(CANVAS)
         canvas.wait_for(state="visible", timeout=READY_MS)
-        assert canvas.get_attribute("role") == "img"
-        assert _label(page) == "Mascotte : au repos"
+        expect(canvas).to_have_attribute("role", "img")
+        expect(canvas).to_have_attribute("aria-label", "Mascotte : au repos")
         page.wait_for_function("() => window.__draws >= 1", timeout=10_000)  # une image est posée : pas de canevas vide
         _settle(page)
         before = _draws(page)
+        # Assertion négative (« aucune image de plus ») : fenêtre d'observation bornée et explicite.
         page.wait_for_timeout(700)
         assert _draws(page) == before, "au repos stable la boucle de rendu doit être arrêtée"
-        box = canvas.bounding_box()
-        assert box and 60 <= box["width"] <= 200 and 40 <= box["height"] <= 140, "petite, dans le panneau du chat"
+        # Petite, dans le panneau du chat : la mise en page se pose en place, on attend la taille voulue.
+        page.wait_for_function(
+            "() => { const r = document.querySelector('.chat-mascotte canvas').getBoundingClientRect(); return r.width >= 60 && r.width <= 200 && r.height >= 40 && r.height <= 140; }",
+            timeout=READY_MS,
+        )
         assert not errors
     finally:
         context.close()
@@ -417,9 +417,8 @@ def test_dictation_listens_then_returns_to_rest_and_the_mascotte_never_holds_the
         page.wait_for_function(
             "() => document.querySelector('.chat-mascotte canvas').getAttribute('aria-label') === 'Mascotte : au repos'"
         )
-        assert page.evaluate("() => window.__mic.tracks.every((t) => t.readyState === 'ended')"), (
-            "le micro reste ouvert"
-        )
+        # Le micro est fermé : les pistes passent à « ended » à la suite de l'arrêt, on attend l'état.
+        page.wait_for_function("() => window.__mic.tracks.every((t) => t.readyState === 'ended')", timeout=READY_MS)
         assert page.evaluate("() => window.__mic.calls") == 1
         _settle(page)  # puis la boucle s'arrête de nouveau
         posts = [r for r in requests if r.startswith("POST ")]
@@ -483,7 +482,7 @@ def test_without_webgl2_with_voice_the_form_still_works(browser: Browser, projec
     try:
         _wait_caption(page, "au repos")
         page.locator(".chat-mascotte-dot").wait_for(state="visible", timeout=READY_MS)
-        assert page.locator(".chat-form").is_visible()
+        expect(page.locator(".chat-form")).to_be_visible()
         assert not errors, errors
     finally:
         context.close()

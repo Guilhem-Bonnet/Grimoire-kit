@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser
+from playwright.sync_api import Browser, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.core.standard_state import AGENT_MARKER_ENVS, HOST_SESSION_ENVS, SESSION_ENV
@@ -93,24 +93,24 @@ def test_cadrage_guide_sans_agent_de_bout_en_bout(browser: Browser, sans_agent: 
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         # Le moteur est dit en mots simples ; le bouton est vivant (plus de commandes de terminal seules).
         page.locator("[data-role='engine-label']").wait_for(timeout=APPEAR_MS)
-        assert "Questions guidées, sans IA" in page.locator("[data-role='engine-label']").inner_text()
+        expect(page.locator("[data-role='engine-label']")).to_contain_text("Questions guidées, sans IA", use_inner_text=True)
         start = page.locator("[data-act='start']")
-        assert start.is_enabled()
+        expect(start).to_be_enabled()
         start.click()
 
         # Une question à la fois, avec sa place dans l'entretien.
         question = page.locator("[data-role='guided-question']")
         question.wait_for(timeout=APPEAR_MS)
-        assert "Question 1 sur" in question.inner_text()
+        expect(question).to_contain_text("Question 1 sur", use_inner_text=True)
         first = page.locator("[data-role='guided-text']").inner_text()
-        assert page.locator("[data-act='previous']").is_disabled()  # rien à corriger avant la première
+        expect(page.locator("[data-act='previous']")).to_be_disabled()  # rien à corriger avant la première
 
         # Une réponse : consignée dans le bon bloc du document, puis la question suivante.
         page.locator(".at-asst-area").fill("Les mainteneurs du kit.")
         page.locator(".at-asst-area").press("Enter")
         page.locator(".at-sheet", has_text="Les mainteneurs du kit.").wait_for(timeout=APPEAR_MS)
         page.locator("[data-role='guided-question']", has_text="Question 2 sur").wait_for(timeout=APPEAR_MS)
-        assert page.locator("[data-role='guided-text']").inner_text() != first
+        expect(page.locator("[data-role='guided-text']")).not_to_have_text(first, use_inner_text=True)
         assert "* Les mainteneurs du kit." in _read(root, slug, "01-brief.md")  # la question en italique, puis la réponse
 
         # Retour à la question précédente : la ligne quitte le document, la réponse revient dans le champ.
@@ -138,9 +138,9 @@ def test_cadrage_guide_sans_agent_de_bout_en_bout(browser: Browser, sans_agent: 
         page.reload(wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=APPEAR_MS)
         page.locator("[data-role='guided-text']").wait_for(timeout=APPEAR_MS)
-        assert page.locator("[data-role='guided-text']").inner_text() == before
+        expect(page.locator("[data-role='guided-text']")).to_have_text(before, use_inner_text=True)
         # L'avancement dit la vérité : « je ne sais pas » est couvert, mais des blocs restent au gabarit.
-        assert "au gabarit" in page.locator("[data-role='avancement']").inner_text()
+        expect(page.locator("[data-role='avancement']")).to_contain_text("au gabarit", use_inner_text=True)
 
 
 def test_boucle_apres_le_decoupage(browser: Browser, avec_moa: tuple[str, Path]) -> None:
@@ -152,7 +152,7 @@ def test_boucle_apres_le_decoupage(browser: Browser, avec_moa: tuple[str, Path])
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         page.locator("[data-act='split']").wait_for(timeout=APPEAR_MS)
         page.wait_for_function("() => !document.querySelector('[data-act=\"split\"]').disabled", timeout=APPEAR_MS)
-        assert "Aucune tâche" not in page.locator("[data-role='chantier-taches']").inner_text()
+        expect(page.locator("[data-role='chantier-taches']")).not_to_contain_text("Aucune tâche", use_inner_text=True)
         page.locator("[data-act='split']").click()
         page.locator("[data-act='split-confirm']").click()
         # Le bandeau donne l'identifiant COMPLET de chaque tâche, avec un lien ; la page du chantier les liste.
@@ -162,8 +162,8 @@ def test_boucle_apres_le_decoupage(browser: Browser, avec_moa: tuple[str, Path])
         assert len(task_id) > 4 and "…" not in task_id
         listed = page.locator("[data-role='chantier-taches'] [data-task]")
         listed.first.wait_for(timeout=APPEAR_MS)
-        assert listed.first.get_attribute("data-task") == task_id
-        assert page.locator(".at-title .badge").first.inner_text().strip() == "En cours"
+        expect(listed.first).to_have_attribute("data-task", task_id)
+        expect(page.locator(".at-title .badge").first).to_have_text("En cours", use_inner_text=True)
         page.locator(".at-title").scroll_into_view_if_needed()
         _capture(page, "03-apres-decoupage")
         # Le lien ouvre l'espace Travail sur cette tâche.
@@ -173,8 +173,8 @@ def test_boucle_apres_le_decoupage(browser: Browser, avec_moa: tuple[str, Path])
         page.evaluate("() => { location.hash = '#atelier'; }")
         row = page.locator(f"[data-slug='{slug}']")
         row.wait_for(timeout=APPEAR_MS)
-        assert "En cours" in row.inner_text()
-        assert "à valider" not in row.inner_text()
+        expect(row).to_contain_text("En cours", use_inner_text=True)
+        expect(row).not_to_contain_text("à valider", use_inner_text=True)
     chantier = (root / "_grimoire" / "cadrage" / slug / "chantier.yaml").read_text(encoding="utf-8")
     assert 'etat: "en-cours"' in chantier  # l'état écrit suit le fait, pas une saisie
 
@@ -187,15 +187,17 @@ def test_sans_moa_la_page_donne_la_cle_a_poser(browser: Browser, sans_moa: tuple
         help_ = page.locator("[data-role='moa-help']")
         # Repliée par défaut derrière un lien court ; le lien l'ouvre sur place.
         page.locator("[data-act='moa-why']").wait_for(timeout=APPEAR_MS)
-        assert not help_.is_visible()
+        expect(help_).to_be_hidden()
         page.locator("[data-act='moa-why']").click()
         help_.wait_for(state="visible", timeout=APPEAR_MS)
-        assert "governance.roles.moa" in help_.inner_text() and "project-context.yaml" in help_.inner_text()
-        assert "moa: " in page.locator("[data-role='moa-example']").inner_text()
-        assert help_.get_by_role("button").count() == 1  # copier l'exemple : aucun bouton n'écrit la MOA
+        expect(help_).to_contain_text("governance.roles.moa", use_inner_text=True)
+        expect(help_).to_contain_text("project-context.yaml", use_inner_text=True)
+        expect(page.locator("[data-role='moa-example']")).to_contain_text("moa: ", use_inner_text=True)
+        expect(help_.get_by_role("button")).to_have_count(1)  # copier l'exemple : aucun bouton n'écrit la MOA
         # La consigne de validation dit où lancer la commande et ce que l'écran affichera.
         page.locator("[data-act='validate']").first.click()
         guidance = page.locator("[data-role='validation-help']").first
         guidance.wait_for(timeout=APPEAR_MS)
-        assert "toi-même" in guidance.inner_text() and "hors de toute session d’agent" in guidance.inner_text()
-        assert "validée" in guidance.inner_text()
+        expect(guidance).to_contain_text("toi-même", use_inner_text=True)
+        expect(guidance).to_contain_text("hors de toute session d’agent", use_inner_text=True)
+        expect(guidance).to_contain_text("validée", use_inner_text=True)

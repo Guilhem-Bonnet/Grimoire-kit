@@ -24,7 +24,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Locator, Page, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier, workspace_atelier_assistant
@@ -166,7 +166,7 @@ def _state(root: Path, slug: str) -> dict[str, object]:
     return dict(json.loads((root / "_grimoire" / "cadrage" / slug / "entretien.json").read_text(encoding="utf-8")))
 
 
-def _question(page: Page) -> object:
+def _question(page: Page) -> Locator:
     return page.locator("[data-role='assistant-question']")
 
 
@@ -186,10 +186,11 @@ def test_parcours_de_l_assistant(
         page.locator("[data-act='start']").click()
         # L'assistant parle en premier : la première question arrive dans la barre, avec l'angle et l'avancement.
         _question(page).wait_for(timeout=APPEAR_MS)
-        assert "Qui utilisera cela" in _question(page).inner_text()  # type: ignore[attr-defined]
-        assert "Utilisateurs et usage réel" in _question(page).inner_text()  # type: ignore[attr-defined]
-        before = page.locator("[data-role='assistant'] .at-asst-head").inner_text()
-        assert "au gabarit" in before  # l'avancement honnête, jamais « complet » avec des blocs au gabarit
+        expect(_question(page)).to_contain_text("Qui utilisera cela", use_inner_text=True)
+        expect(_question(page)).to_contain_text("Utilisateurs et usage réel", use_inner_text=True)
+        head = page.locator("[data-role='assistant'] .at-asst-head")
+        expect(head).to_contain_text("au gabarit", use_inner_text=True)  # l'avancement honnête, jamais « complet » avec des blocs au gabarit
+        before = head.inner_text()
         first = _prompts(agent_log)[0]
         assert first.startswith(workspace_atelier_assistant.GESTES["demarrer"])  # la consigne fixe, choisie côté serveur
         assert f"chantier: {slug}\nphase: brief" in first
@@ -225,14 +226,15 @@ def test_parcours_de_l_assistant(
         _question(page).wait_for(timeout=APPEAR_MS)
 
         # 5. « Sans objet » écarte l'angle avec sa raison.
-        assert "Hors périmètre" in _question(page).inner_text()  # type: ignore[attr-defined]
+        expect(_question(page)).to_contain_text("Hors périmètre", use_inner_text=True)
         page.locator("[data-act='skip']").click()
         # L'angle écarté est celui que la barre affichait au clic (« Hors périmètre »), nommé dans la consigne fixe.
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            if _state(root, slug)["angles"].get("hors-perimetre", {}).get("state") == "ecarte":  # type: ignore[attr-defined]
-                break
-            time.sleep(0.2)
+        # L'agent consigne l'angle écarté AVANT de poser la question suivante : on attend à l'écran cette question (une autre que
+        # « Hors périmètre »), puis on lit le disque, au lieu de sonder le fichier d'état.
+        page.wait_for_function(
+            "() => { const q = document.querySelector(\"[data-role='assistant-question']\"); return Boolean(q) && !q.innerText.includes('Hors périmètre'); }",
+            timeout=APPEAR_MS,
+        )
         assert _state(root, slug)["angles"]["hors-perimetre"]["state"] == "ecarte"  # type: ignore[index]
         assert "sur l'angle hors-perimetre" in _prompts(agent_log)[-1]
 
@@ -240,13 +242,14 @@ def test_parcours_de_l_assistant(
         page.locator(".at-asst-area").fill("sans marqueur")
         page.locator("[data-act='answer']").click()
         page.locator("[data-role='assistant-noangle']").wait_for(timeout=APPEAR_MS)
-        assert page.locator("[data-act='unknown']").is_disabled() and page.locator("[data-act='skip']").is_disabled()
-        assert "Sans objet" in page.locator("[data-act='skip']").inner_text()
+        expect(page.locator("[data-act='unknown']")).to_be_disabled()
+        expect(page.locator("[data-act='skip']")).to_be_disabled()
+        expect(page.locator("[data-act='skip']")).to_contain_text("Sans objet", use_inner_text=True)
         _capture(page, "04b-sans-angle-1440x900")
         page.locator(".at-asst-area").fill("Les risques sont faibles.")
         page.locator("[data-act='answer']").click()
         page.locator("[data-role='assistant-noangle']").wait_for(state="detached", timeout=APPEAR_MS)
-        assert "Sans objet : " in page.locator("[data-act='skip']").inner_text()  # le libellé rappelle l'angle visé
+        expect(page.locator("[data-act='skip']")).to_contain_text("Sans objet : ", use_inner_text=True)  # le libellé rappelle l'angle visé
 
         # 6. « Challenger ce bloc » : une suggestion sous le bloc, par l'outil existant.
         block = page.locator(".at-blk", has_text="Le bouton maintenu").first
@@ -255,7 +258,7 @@ def test_parcours_de_l_assistant(
         _capture(page, "05-challenger-1440x900")
         block.locator("[data-posture='sceptique']").click()
         page.locator(".at-sugg").first.wait_for(timeout=APPEAR_MS)
-        assert "Version plus simple proposée" in page.locator(".at-sugg").first.inner_text()
+        expect(page.locator(".at-sugg").first).to_contain_text("Version plus simple proposée", use_inner_text=True)
         assert "posture « sceptique »" in _prompts(agent_log)[-1]
         assert PARA not in _prompts(agent_log)[-1]  # l'agent lit le bloc lui-même : la consigne ne le recopie pas
         _capture(page, "06-suggestion-1440x900")
@@ -264,7 +267,7 @@ def test_parcours_de_l_assistant(
         _show_dock(page)
         page.locator("[data-dock-tab='orchestrateur']").click()
         page.locator(".chat-chantier").first.wait_for(timeout=APPEAR_MS)
-        assert "Chantier : Dicter une idée" in page.locator(".chat-chantier").first.inner_text()
+        expect(page.locator(".chat-chantier").first).to_contain_text("Chantier : Dicter une idée", use_inner_text=True)
 
     for page in _open(browser, with_agent, f"#atelier?chantier={slug}", (1024, 768)):
         page.locator("[data-role='assistant-pill']").click()  # sous 1100 px l'assistant est un tiroir, replié par défaut
@@ -296,14 +299,14 @@ def test_sans_agent_d_hote_la_barre_le_dit_et_donne_la_commande(
     for page in _open(browser, without_agent, f"#atelier?chantier={slug}"):
         off = page.locator("[data-role='assistant-off']")
         off.wait_for(timeout=APPEAR_MS)
-        assert "Aucun agent n’est joignable" in off.inner_text()
+        expect(off).to_contain_text("Aucun agent n’est joignable", use_inner_text=True)
         # Sans agent, le cadrage se joue dans la page : le moteur est dit en mots simples et le bouton est vivant.
-        assert "Questions guidées, sans IA" in page.locator("[data-role='engine-label']").inner_text()
-        assert f"grimoire cadrage interview --chantier {slug}" in page.locator("[data-role='assistant']").inner_text()
+        expect(page.locator("[data-role='engine-label']")).to_contain_text("Questions guidées, sans IA", use_inner_text=True)
+        expect(page.locator("[data-role='assistant']")).to_contain_text(f"grimoire cadrage interview --chantier {slug}", use_inner_text=True)
         # L'entretien a pu être entamé par les tests précédents (même projet) : « Démarrer » ou la question en cours.
         live = page.locator("[data-act='start'], [data-role='guided-question']")
         live.first.wait_for(timeout=APPEAR_MS)
-        assert page.locator("[data-act='start']:disabled").count() == 0  # jamais de bouton mort
+        expect(page.locator("[data-act='start']:disabled")).to_have_count(0)  # jamais de bouton mort
         _capture(page, "08-sans-agent-1440x900")
 
 
@@ -345,23 +348,27 @@ def test_modele_du_kit_indique_sans_cle_que_la_fonction_est_indisponible(
     for page in _open(browser, url, f"#atelier?chantier={slug}"):
         note = page.locator("[data-role='engine-note']")
         note.wait_for(timeout=APPEAR_MS)
-        assert "sans modèle" in note.inner_text() and "aucune clé" in note.inner_text()
+        expect(note).to_contain_text("sans modèle", use_inner_text=True)
+        expect(note).to_contain_text("aucune clé", use_inner_text=True)
         block = page.locator(".at-blk", has_text="Le bouton maintenu").first
         block.hover()
         block.locator("[data-act='challenge']").click()
-        assert "sans modèle" in block.locator("[data-posture='sceptique']").inner_text()
+        expect(block.locator("[data-posture='sceptique']")).to_contain_text("sans modèle", use_inner_text=True)
         off = block.locator("[data-role='model-off']")
         off.wait_for(timeout=APPEAR_MS)
-        assert "aucune clé" in off.inner_text()
-        assert block.locator("[data-geste]").count() == 0  # pas de bouton mort
+        expect(off).to_contain_text("aucune clé", use_inner_text=True)
+        expect(block.locator("[data-geste]")).to_have_count(0)  # pas de bouton mort
         _capture(page, "09-modele-sans-cle-1440x900")
 
 
 def test_modele_du_kit_eteint_par_defaut_aucun_selecteur(browser: Browser, with_agent: str, on_root: tuple[Path, str]) -> None:
     _root, slug = on_root
     for page in _open(browser, with_agent, f"#atelier?chantier={slug}"):
-        assert "sans modèle du kit" in page.locator("[data-role='engine-note']").inner_text()
+        expect(page.locator("[data-role='engine-note']")).to_contain_text("sans modèle du kit", use_inner_text=True)
         block = page.locator(".at-blk", has_text="Le bouton maintenu").first
         block.hover()
         block.locator("[data-act='challenge']").click()
-        assert block.locator("[data-role='engine']").count() == 0 and block.locator("[data-role='model-off']").count() == 0
+        # Négatif : le menu des postures s'ouvre au clic ; on l'attend avant de constater qu'aucun sélecteur de moteur n'y figure.
+        expect(block.locator("[data-posture='sceptique']")).to_be_visible()
+        expect(block.locator("[data-role='engine']")).to_have_count(0)
+        expect(block.locator("[data-role='model-off']")).to_have_count(0)
