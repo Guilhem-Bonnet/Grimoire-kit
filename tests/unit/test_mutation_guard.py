@@ -95,6 +95,16 @@ def _flat(table: dict[str, list[str]]) -> list[str]:
 COCKPIT_POSTS = _flat(COCKPIT_LITERALS)
 ATELIER_POSTS = _flat(ATELIER_LITERALS)
 
+#: Les écritures de la page « Modèles autorisés » (épique #1477, lot B1) : nommées ici en plus de l'énumération
+#: automatique, pour qu'une route retirée de la table ne sorte pas silencieusement de la matrice.
+DIRECT_USE_POSTS = [f"{PREFIX}providers/direct-use", f"{PREFIX}providers/direct-use/verify"]
+
+
+def test_direct_use_writes_are_in_both_host_matrices() -> None:
+    for path in DIRECT_USE_POSTS:
+        assert path in COCKPIT_POSTS, path
+        assert path in ATELIER_POSTS, path
+
 # ── Serveurs ───────────────────────────────────────────────────────────────
 
 

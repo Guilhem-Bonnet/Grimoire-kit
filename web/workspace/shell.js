@@ -113,6 +113,8 @@ const SPACES = [
       { id: 'blueprints', module: 'concevoir', label: 'Blueprints', count: (api) => api.blueprintContainers().then((d) => d.count) },
       { id: 'hotes', module: 'configurer', label: 'Hôtes et hooks', skeleton: 'table', count: (api) => api.hooks().then((d) => d.total) },
       { id: 'fournisseurs', module: 'configurer', label: 'Fournisseurs et budgets' },
+      // Épique #1477, lot B1 : quels modèles Grimoire a le droit d'utiliser directement, par usage.
+      { id: 'modeles', module: 'modeles-autorises', label: 'Modèles autorisés' },
       // Lot 3 du cockpit multi-projet : mandat et pilote du projet de la portée,
       // y compris un autre projet enrôlé que celui d'ouverture.
       { id: 'mandat', module: 'configurer', label: 'Mandat et pilote' },

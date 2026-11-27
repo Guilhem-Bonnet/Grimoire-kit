@@ -329,6 +329,12 @@ corps** (`{"project": "<slug>", ...}`) :
 | `POST /api/workspace/autonomy/autopilot` | `{on: bool, control_key}` |
 | `POST /api/workspace/providers` | `{action: enable\|disable, provider_id, control_key}` |
 | `POST /api/workspace/providers/set-key` | `{provider_id, env_var, value, control_key}` |
+| `POST /api/workspace/providers` (action `add-local`) | `{action: "add-local", models: [nom Ollama détecté], control_key}` |
+| `POST /api/workspace/providers/direct-use` | `{usage, models: [{key, daily_cap_tokens?}], control_key}` — remplace la liste ordonnée d'un usage (« Modèles autorisés ») |
+
+`GET /api/workspace/providers/direct-use` lit l'inventaire détecté, les autorisations et la décision de maintenant (aucune
+requête hors de la machine) ; `POST /api/workspace/providers/direct-use/verify` (`{}`, sans clé de contrôle : il ne change
+aucun réglage) est le geste « Vérifier maintenant », la seule voie qui sonde un service distant.
 
 Le slug est résolu par le registre (`registered_root`) — jamais un chemin envoyé
 par le client. Un `project` de corps qui ne désigne pas la racine de `?project=`

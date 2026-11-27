@@ -454,6 +454,47 @@ def remove_provider(root: Path, provider_id: str) -> None:
     _save_registry(root, data)
 
 
+#: Fournisseur local par défaut des modèles Ollama détectés (voir :func:`add_local_models`).
+LOCAL_PROVIDER_ID = "ollama"
+LOCAL_INVOCATION = "ollama run {model} {prompt}"
+
+
+def add_local_models(root: Path, models: tuple[ModelSpec, ...]) -> tuple[str, ...]:
+    """Ajoute des modèles locaux au fournisseur ``ollama`` (créé ``provider_type: local``, monnaie ``local`` s'il manque).
+
+    Rend les identifiants réellement ajoutés ; un modèle déjà déclaré est ignoré, jamais dupliqué. Un palier hors
+    vocabulaire est refusé comme dans :func:`add_provider`. Aucune clé n'est en jeu : un modèle local ne sort pas de la machine.
+    """
+    for model in models:
+        if model.tier not in SUPPORTED_MODEL_TIERS:
+            msg = f"tier {model.tier!r} (modèle {model.id!r}) doit être l'un de {SUPPORTED_MODEL_TIERS}."
+            raise ProviderWriteError(msg)
+    if not models:
+        return ()
+    data = _load_registry_for_write(root)
+    providers = data.setdefault("providers", [])
+    entry = next(
+        (e for e in providers if isinstance(e, dict) and e.get("id") == LOCAL_PROVIDER_ID), None
+    )
+    if entry is None:
+        add_provider(
+            root,
+            LOCAL_PROVIDER_ID,
+            invocation=LOCAL_INVOCATION,
+            models=models,
+            currency="local",
+            provider_type="local",
+            allowed_capabilities=("chat", "code"),
+        )
+        return tuple(model.id for model in models)
+    known = {str(m.get("id")) for m in (entry.get("models") or []) if isinstance(m, dict)}
+    added = [model for model in models if model.id not in known]
+    if added:
+        entry.setdefault("models", []).extend(_model_entry(model) for model in added)
+        _save_registry(root, data)
+    return tuple(model.id for model in added)
+
+
 def read_default_data_class(root: Path) -> str:
     """``routing.default_data_class`` : la classe des données du projet, vide si elle n'est pas déclarée (#1133)."""
     routing = _load_registry_mapping(root).get("routing")

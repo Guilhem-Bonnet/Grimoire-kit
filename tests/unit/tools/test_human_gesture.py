@@ -46,6 +46,7 @@ ROUTES = {
     "autopilot": f"{PREFIX}autonomy/autopilot",
     "providers": f"{PREFIX}providers",
     "set-key": f"{PREFIX}providers/set-key",
+    "direct-use": f"{PREFIX}providers/direct-use",
     "accept-merged": f"{PREFIX}tasks/accept-merged",
 }
 
@@ -74,6 +75,7 @@ def _body(route: str) -> dict[str, Any]:
         "autopilot": {"on": True},
         "providers": {"action": "disable", "provider_id": "anthropic"},
         "set-key": {"provider_id": "anthropic", "env_var": "ANTHROPIC_API_KEY", "value": "x"},
+        "direct-use": {"usage": "conversation", "models": []},
         "accept-merged": {},
     }[route]
 
