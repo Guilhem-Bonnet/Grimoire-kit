@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,14 @@ from ruamel.yaml import YAML
 
 from grimoire.core import layout
 from grimoire.core.exceptions import GrimoireAgentError
+from grimoire.core.safe_sources import (
+    Exclusion,
+    Refused,
+    describe_exclusions,
+    list_sources,
+    read_source_text,
+    source_dir_issue,
+)
 from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 from grimoire.data import framework_path
 from grimoire.hosts.secrets import secret_read_globs
@@ -189,13 +198,18 @@ def _tool_verbs_with_rejects(raw: Any) -> tuple[tuple[ToolVerb, ...], tuple[str,
     return tuple(verbs), tuple(rejected_list)
 
 
-def _file_size(path: Path) -> int:
+def _file_size(path: Path, root: Path | None = None) -> int:
     """Size in bytes, ``0`` when the file vanished between check and read.
 
     The context path was just verified to exist; a race against a concurrent
     delete must not fail the whole surface build for a size annotation.
+    With *root*, a path that resolves outside the project is not measured
+    (``0``) : the annotation is emitted into host files and must not describe
+    anything but the project.
     """
     try:
+        if root is not None and not path.resolve().is_relative_to(root.resolve()):
+            return 0
         return path.stat().st_size
     except OSError:
         return 0
@@ -241,8 +255,52 @@ _TEMPLATE_SUFFIX = ".tpl.md"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
-def _agent_files(project_root: Path) -> list[Path]:
-    """Définitions d'agents à projeter, l'override l'emportant sur le kit.
+def _sink(excluded: list[Exclusion] | None) -> list[Exclusion]:
+    """La liste où consigner les exclusions : celle de l'appelant, ou une liste jetée."""
+    return excluded if excluded is not None else []
+
+
+def _label(path: Path) -> str:
+    """``dossier/fichier`` : de quoi reconnaître un fichier sans dire où il est sur la machine."""
+    return f"{path.parent.name}/{path.name}"
+
+
+def _project_listing(
+    directory: Path, project_root: Path, excluded: list[Exclusion], *, skip: Callable[[str], bool] | None = None
+) -> dict[str, Path]:
+    """``nom -> chemin`` des ``*.md`` d'un dossier de sources du projet, sans lien en chemin, borné, sans lecture."""
+    label = f"{directory.parent.name}/{directory.name}"
+    issue = source_dir_issue(directory, project_root)
+    if issue is not None:
+        excluded.append(Exclusion.of(label, issue))
+        return {}
+    found, issues = list_sources(directory, label, skip=skip)
+    excluded.extend(issues)
+    return found
+
+
+def _read_candidate(path: Path, root: Path | None, excluded: list[Exclusion]) -> str | None:
+    """Le texte d'un fichier de source par la lecture sûre, ou ``None`` et l'exclusion de CE fichier."""
+    try:
+        return read_source_text(path, root=root)
+    except Refused as exc:
+        excluded.append(Exclusion.of(_label(path), exc))
+    except Exception as exc:  # une erreur sur UN fichier est l'exclusion de CE fichier
+        excluded.append(Exclusion.of(_label(path), f"fichier illisible ({exc.__class__.__name__})"))
+    return None
+
+
+def _first_readable(candidates: list[Path], root: Path | None, excluded: list[Exclusion]) -> tuple[Path, str] | None:
+    """Le premier fichier lisible parmi les copies d'un même nom (l'override d'abord), les refus étant consignés."""
+    for path in candidates:
+        text = _read_candidate(path, root, excluded)
+        if text is not None:
+            return path, text
+    return None
+
+
+def _agent_candidates(project_root: Path, excluded: list[Exclusion]) -> list[list[Path]]:
+    """Définitions d'agents à projeter : par nom, les copies par ordre de priorité (l'override avant le kit).
 
     La résolution passe par :func:`layout.agent_dirs` et non par un balayage
     de répertoires : la frontière kit/overrides est ce qui rend possible
@@ -250,19 +308,19 @@ def _agent_files(project_root: Path) -> list[Path]:
     qui lirait le tier kit en direct projetterait la persona livrée par-dessus
     celle du projet. Les emplacements d'avant la frontière restent lus, en
     dernier, pour qu'un projet non migré continue de fonctionner.
+
+    Aucun dossier ne passe par un lien et aucun n'est lu au-delà de ses bornes ; une copie refusée à
+    la lecture laisse la suivante servir le même nom (:func:`_first_readable`).
     """
-    seen: dict[str, Path] = {}
+    seen: dict[str, list[Path]] = {}
     for directory in layout.agent_dirs(project_root):
-        if not directory.is_dir():
-            continue
-        for path in sorted(directory.glob("*.md")):
-            if path.name.endswith(_TEMPLATE_SUFFIX):
-                continue
-            seen.setdefault(path.stem, path)
+        names = _project_listing(directory, project_root, excluded, skip=lambda n: n.endswith(_TEMPLATE_SUFFIX))
+        for stem, path in names.items():
+            seen.setdefault(stem, []).append(path)
     return list(seen.values())
 
 
-def _agent_name(path: Path) -> str | None:
+def _agent_name(path: Path, text: str) -> str | None:
     """Usable host-side name for an agent, or ``None`` when there is none.
 
     Delegates to :func:`layout.agent_identity` — the same frontmatter tag
@@ -277,7 +335,7 @@ def _agent_name(path: Path) -> str | None:
     en attente n'est pas un agent installé pour l'un des deux lecteurs : il ne
     doit l'être pour aucun.
     """
-    identity = layout.agent_identity(path)
+    identity = layout.agent_identity_of_text(text, path.stem)
     if identity is None:
         return None
     tag, _persona = identity
@@ -369,6 +427,14 @@ def _is_override_tier_path(project_root: Path, path: Path) -> bool:
     return True
 
 
+class UnreadableSourceError(GrimoireAgentError):
+    """Le fichier kit d'un override ``extends: kit`` existe mais la lecture sûre le refuse.
+
+    Distinct d'un kit absent (qui reste une erreur de build, :class:`GrimoireAgentError`) : un fichier
+    refusé n'est que l'exclusion de CET agent, jamais la perte de la surface.
+    """
+
+
 def resolve_extends_kit(
     project_root: Path,
     override_path: Path,
@@ -393,9 +459,13 @@ def resolve_extends_kit(
     before the regenerated kit tier is on disk (issue #679). Default: the
     installed kit counterpart of the same name.
     """
+    # Le fichier kit du projet est lu comme tout fichier du projet : régulier, sans lien, borné. Un
+    # *kit_path* fourni par l'appelant (le scaffolder, qui fusionne avant que le tier kit soit sur disque)
+    # est une source du kit lui-même, hors du projet : il n'est pas confiné.
+    confine = kit_path is None
     if kit_path is None:
         kit_path = _kit_counterpart(project_root, override_path)
-    if not kit_path.is_file():
+    if not os.path.lexists(kit_path):
         try:
             override_ref = override_path.relative_to(project_root).as_posix()
         except ValueError:
@@ -405,7 +475,12 @@ def resolve_extends_kit(
             f"`extends: kit` mais aucun agent kit de même nom n'existe sous "
             f"{layout.KIT_DIR}/{layout.AGENTS_SUBDIR}/{override_path.name}."
         )
-    kit_text = kit_path.read_text(encoding="utf-8")
+    try:
+        kit_text = read_source_text(kit_path, root=project_root if confine else None)
+    except Refused as exc:
+        raise UnreadableSourceError(
+            f"L'override « {override_path.stem} » déclare `extends: kit` mais son agent kit n'est pas lisible : {exc}."
+        ) from exc
     kit_meta, kit_body = parse_frontmatter(kit_text)
     effective_meta = dict(kit_meta)
     for key in PARTIAL_OVERRIDE_FIELDS:
@@ -431,8 +506,8 @@ def effective_agent_frontmatter(project_root: Path, agent: AgentSpec) -> dict[st
     if agent.override_kind == "partial" and agent.override_ref:
         override_path = root / agent.override_ref
         try:
-            override_text = override_path.read_text(encoding="utf-8")
-        except OSError:
+            override_text = read_source_text(override_path, root=root)
+        except Refused:
             return {}
         override_meta, _ = parse_frontmatter(override_text)
         try:
@@ -441,8 +516,8 @@ def effective_agent_frontmatter(project_root: Path, agent: AgentSpec) -> dict[st
             return override_meta
         return effective_meta
     try:
-        text = (root / agent.definition_ref).read_text(encoding="utf-8")
-    except OSError:
+        text = read_source_text(root / agent.definition_ref, root=root)
+    except Refused:
         return {}
     meta, _ = parse_frontmatter(text)
     return meta
@@ -455,6 +530,7 @@ def collect_agents(
     known_skills: frozenset[str] | None = None,
     notes: list[str] | None = None,
     inline_persona: bool = True,
+    excluded: list[Exclusion] | None = None,
 ) -> tuple[AgentSpec, ...]:
     """Read the project's personas into host-neutral specs.
 
@@ -497,18 +573,21 @@ def collect_agents(
     :meth:`AgentSpec.inline_body`, so this flag only decides whether the body
     is available at all.
     """
+    sink = _sink(excluded)
     if entry_point is None:
         entry_point = entry_agent_name(project_root)
     if known_skills is None:
-        known_skills = frozenset(spec.slug for spec in collect_skills(project_root))
+        known_skills = frozenset(spec.slug for spec in collect_skills(project_root, excluded=sink))
     specs: list[AgentSpec] = []
-    for path in _agent_files(project_root):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
+    for candidates in _agent_candidates(project_root, sink):
+        # Lecture sûre : fichier régulier, sans lien, borné, UTF-8. Un fichier refusé est exclu (et dit),
+        # la copie suivante du même nom sert, les autres agents restent collectés.
+        loaded = _first_readable(candidates, project_root, sink)
+        if loaded is None:
             continue
+        path, text = loaded
         meta, body = parse_frontmatter(text)
-        name = _agent_name(path)
+        name = _agent_name(path, text)
         if name is None:
             continue
 
@@ -527,7 +606,11 @@ def collect_agents(
             except ValueError:
                 override_ref = path.as_posix()
             if str(meta.get("extends", "")).strip().lower() == "kit":
-                meta, body, body_ref = resolve_extends_kit(project_root, path, meta)
+                try:
+                    meta, body, body_ref = resolve_extends_kit(project_root, path, meta)
+                except UnreadableSourceError as exc:
+                    sink.append(Exclusion.of(_label(path), exc))
+                    continue
                 override_kind = "partial"
             else:
                 override_kind = "full"
@@ -570,7 +653,7 @@ def collect_agents(
         # #1179 : la définition émise annonce la taille de chaque document
         # déclaré, pour que le sous-agent décide de l'ouvrir ou non au lieu de
         # recevoir un ordre de lecture indifférencié.
-        context_sizes = tuple((c, _file_size(project_root / c)) for c in context)
+        context_sizes = tuple((c, _file_size(project_root / c, project_root)) for c in context)
         specs.append(
             AgentSpec(
                 name=name,
@@ -689,42 +772,48 @@ def _bundled(kind: str) -> list[Path]:
     return sorted(directory.glob("*.md"))
 
 
-def _skill_files(project_root: Path) -> list[Path]:
-    """Archetype-shipped skill definitions, overrides winning over the kit tier.
+def _skill_candidates(project_root: Path, excluded: list[Exclusion]) -> list[tuple[str, list[Path]]]:
+    """Archetype-shipped skill definitions: per slug, the copies by priority (overrides before the kit tier).
 
-    Mirrors :func:`_agent_files`: a skill an archetype attaches to one of its
+    Mirrors :func:`_agent_candidates`: a skill an archetype attaches to one of its
     agents (issue #375) is copied by the scaffolder into the project's own
     skill directory, not bundled with the package, so it must be read from
-    disk the same way agents are.
+    disk the same way agents are — through the safe reading (no link followed,
+    bounded), a refused copy leaving the next one to serve the slug.
     """
-    seen: dict[str, Path] = {}
+    seen: dict[str, list[Path]] = {}
     for directory in layout.skill_dirs(project_root):
-        if not directory.is_dir():
-            continue
-        for path in sorted(directory.glob("*.md")):
-            seen.setdefault(path.stem, path)
-    return list(seen.values())
+        for stem, path in _project_listing(directory, project_root, excluded).items():
+            seen.setdefault(stem, []).append(path)
+    return list(seen.items())
 
 
-def collect_skills(project_root: Path, *, governed: bool | None = None) -> tuple[SkillSpec, ...]:
-    """Bundled, host-wide skills plus the skills this project's archetypes ship.
+def _read_markdown(path: Path, root: Path | None, excluded: list[Exclusion]) -> tuple[dict[str, Any], str] | None:
+    """Frontmatter et corps d'un fichier de source, ou ``None`` et l'exclusion de CE fichier.
 
-    Bundled skills (``grimoire-agent-dispatch``, ``grimoire-memory``, …) are
-    always in scope; project skills come from the archetype(s) the project
-    installed and are what an agent's ``skills:`` frontmatter usually
-    references (issue #375). A slug present in both wins from the project
-    copy — the same override-over-kit precedence as agents.
+    La lecture sûre passe AVANT l'analyse, quel que soit le backend (Python ou Rust) de cette dernière.
+    Seule la configuration invalide du backend (:class:`GrimoireAgentError`) remonte.
     """
-    enrolled = is_standard_enrolled(project_root) if governed is None else governed
-    by_slug: dict[str, SkillSpec] = {}
-    for path in [*_bundled("skills"), *_skill_files(project_root)]:
-        slug = path.stem
-        if slug == "grimoire-evidence" and not enrolled:
-            # A protocol for gates a project does not have is noise in the
-            # skill list, and noise is what makes a skill list unusable.
-            continue
-        meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
-        by_slug[slug] = SkillSpec(
+    text = _read_candidate(path, root, excluded)
+    if text is None:
+        return None
+    try:
+        return parse_frontmatter(text)
+    except GrimoireAgentError:
+        raise
+    except Exception as exc:
+        excluded.append(Exclusion.of(_label(path), f"fichier illisible ({exc.__class__.__name__})"))
+        return None
+
+
+def _skill_spec(slug: str, path: Path, root: Path | None, excluded: list[Exclusion]) -> SkillSpec | None:
+    """Le skill de ce fichier, ou ``None`` (et l'exclusion de CE fichier)."""
+    parsed = _read_markdown(path, root, excluded)
+    if parsed is None:
+        return None
+    meta, body = parsed
+    try:
+        return SkillSpec(
             slug=slug,
             name=str(meta.get("name") or slug),
             description=str(meta.get("description") or slug),
@@ -736,17 +825,65 @@ def collect_skills(project_root: Path, *, governed: bool | None = None) -> tuple
             disable_model_invocation=_optional_bool(meta, "disable-model-invocation", "disable_model_invocation"),
             argument_hint=str(meta.get("argument-hint") or meta.get("argument_hint") or ""),
         )
+    except Exception as exc:  # un champ de frontmatter inattendu exclut CE skill, pas la surface
+        excluded.append(Exclusion.of(_label(path), f"fichier illisible ({exc.__class__.__name__})"))
+        return None
+
+
+def collect_skills(
+    project_root: Path, *, governed: bool | None = None, excluded: list[Exclusion] | None = None
+) -> tuple[SkillSpec, ...]:
+    """Bundled, host-wide skills plus the skills this project's archetypes ship.
+
+    Bundled skills (``grimoire-agent-dispatch``, ``grimoire-memory``, …) are
+    always in scope; project skills come from the archetype(s) the project
+    installed and are what an agent's ``skills:`` frontmatter usually
+    references (issue #375). A slug present in both wins from the project
+    copy — the same override-over-kit precedence as agents.
+
+    Project files are untrusted: each is read by :mod:`grimoire.core.safe_sources`
+    (regular file only, no link followed, bounded size and count, strict UTF-8).
+    A file that cannot be read is left out *alone* and appended to *excluded*
+    (the optional out-parameter, like ``notes`` in :func:`collect_agents`):
+    this function never raises for one bad file, and a refused project copy
+    leaves the kit's skill of the same slug served.
+    """
+    sink = _sink(excluded)
+    _use_rust_backend()  # une configuration de backend invalide reste une erreur, pas une exclusion
+    enrolled = is_standard_enrolled(project_root) if governed is None else governed
+    by_slug: dict[str, SkillSpec] = {}
+    for path in _bundled("skills"):
+        slug = path.stem
+        if slug == "grimoire-evidence" and not enrolled:
+            # A protocol for gates a project does not have is noise in the
+            # skill list, and noise is what makes a skill list unusable.
+            continue
+        spec = _skill_spec(slug, path, None, sink)
+        if spec is not None:
+            by_slug[slug] = spec
+    for slug, candidates in _skill_candidates(project_root, sink):
+        if slug == "grimoire-evidence" and not enrolled:
+            continue
+        for path in candidates:
+            spec = _skill_spec(slug, path, project_root, sink)
+            if spec is not None:
+                by_slug[slug] = spec
+                break
     return tuple(by_slug.values())
 
 
-def _prompt_commands() -> list[CommandSpec]:
+def _prompt_commands(excluded: list[Exclusion] | None = None) -> list[CommandSpec]:
     """The kit's existing Copilot prompts, read as host-neutral commands."""
+    sink = _sink(excluded)
     directory = framework_path() / "copilot" / "prompts"
     if not directory.is_dir():
         return []
     commands: list[CommandSpec] = []
     for path in sorted(directory.glob("*.prompt.md")):
-        meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
+        parsed = _read_markdown(path, None, sink)
+        if parsed is None:
+            continue
+        meta, body = parsed
         commands.append(
             CommandSpec(
                 slug=path.name.removesuffix(".prompt.md"),
@@ -759,15 +896,28 @@ def _prompt_commands() -> list[CommandSpec]:
     return commands
 
 
-def collect_commands(project_root: Path, *, governed: bool | None = None) -> tuple[CommandSpec, ...]:
-    """Bundled commands plus the kit's workflow prompts, deduplicated by slug."""
+def collect_commands(
+    project_root: Path, *, governed: bool | None = None, excluded: list[Exclusion] | None = None
+) -> tuple[CommandSpec, ...]:
+    """Bundled commands plus the kit's workflow prompts, deduplicated by slug.
+
+    Same contract as :func:`collect_skills` : each file goes through the safe
+    reading, an unreadable one is left out alone (and appended to *excluded*),
+    and this function never raises for one bad file — an MCP server builds its
+    prompts from it, and one broken file must not empty them all.
+    """
+    sink = _sink(excluded)
+    _use_rust_backend()
     enrolled = is_standard_enrolled(project_root) if governed is None else governed
     by_slug: dict[str, CommandSpec] = {}
     for path in _bundled("commands"):
         slug = path.stem
         if slug in {"grimoire-gate", "grimoire-proof", "grimoire-verify"} and not enrolled:
             continue
-        meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
+        parsed = _read_markdown(path, None, sink)
+        if parsed is None:
+            continue
+        meta, body = parsed
         by_slug[slug] = CommandSpec(
             slug=slug,
             description=str(meta.get("description") or slug),
@@ -775,7 +925,7 @@ def collect_commands(project_root: Path, *, governed: bool | None = None) -> tup
             argument_hint=str(meta.get("argument-hint") or meta.get("argument_hint") or ""),
             tools=_tool_verbs(meta.get("tools")) or (ToolVerb.READ, ToolVerb.EXECUTE),
         )
-    for command in _prompt_commands():
+    for command in _prompt_commands(sink):
         by_slug.setdefault(command.slug, command)
     return tuple(by_slug[slug] for slug in sorted(by_slug))
 
@@ -930,14 +1080,17 @@ def build_surface(
     """
     root = project_root.resolve()
     governed = is_standard_enrolled(root)
-    skills = collect_skills(root, governed=governed)
+    excluded: list[Exclusion] = []
+    skills = collect_skills(root, governed=governed, excluded=excluded)
     tool_notes: list[str] = []
     agents = collect_agents(
         root,
         known_skills=frozenset(s.slug for s in skills),
         notes=tool_notes,
         inline_persona=_inline_persona_enabled(root),
+        excluded=excluded,
     )
+    commands = collect_commands(root, governed=governed, excluded=excluded)
     # Deux régimes, parce que deux responsabilités. Un agent créé dans les
     # overrides du projet qui partage le faisceau *et* la fiche d'un autre est
     # une erreur de l'utilisateur, et le système émergent repose sur ce refus :
@@ -964,6 +1117,10 @@ def build_surface(
             "fusionnez-les ou distinguez leur périmètre réel (outils, contexte, skills ou corps)."
         )
     notes: tuple[str, ...] = tuple(tool_notes)
+    # Les fichiers du projet que la lecture sûre a refusés : dits, jamais silencieux, jamais sans borne.
+    header, lines = describe_exclusions(excluded)
+    if header:
+        notes = (*notes, header, *(f"  {line}" for line in lines))
     # #1179 : une persona au-delà du plafond garde le pointeur. Ce n'est pas
     # une erreur — la définition reste utilisable — mais l'utilisateur doit
     # savoir pourquoi celle-là seule n'est pas intégrée.
@@ -987,7 +1144,7 @@ def build_surface(
         project_name=project_name or root.name,
         agents=agents,
         skills=skills,
-        commands=collect_commands(root, governed=governed),
+        commands=commands,
         hooks=governance_hooks(governed=governed),
         permissions=default_permissions(
             active_profile_id(root, write_cache=write_cache) if governed else "starter"

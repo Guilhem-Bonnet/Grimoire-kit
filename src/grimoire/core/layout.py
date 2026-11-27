@@ -205,15 +205,24 @@ def agent_identity(path: Path) -> tuple[str, str] | None:
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, ValueError):  # ValueError : un fichier qui n'est pas de l'UTF-8 n'est pas un agent
         return None
+    return agent_identity_of_text(text, path.stem)
+
+
+def agent_identity_of_text(text: str, stem: str) -> tuple[str, str] | None:
+    """:func:`agent_identity` sur un texte déjà lu (*stem* : le nom du fichier sans suffixe).
+
+    Permet à un collecteur qui a lu le fichier par la lecture sûre
+    (:mod:`grimoire.core.safe_sources`) de ne pas le relire par un chemin qui suit les liens.
+    """
     tag_match = _AGENT_TAG_RE.search(text)
     if tag_match:
         tag = tag_match.group(1)
     elif _AGENT_NAME_KEY_RE.search(text):
         return None
     else:
-        tag = path.stem
+        tag = stem
     persona = _AGENT_PERSONA_RE.search(text)
     return tag, (persona.group(1) if persona else tag)
 
