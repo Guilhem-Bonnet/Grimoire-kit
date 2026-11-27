@@ -131,18 +131,18 @@ def test_references_become_links_and_only_where_they_point_somewhere(browser: Br
         section = page.locator(SECTION)
         req = section.locator("a.at-ref-req")
         expect(req).to_have_count(1, timeout=WAIT_MS)  # REQ-099 n'existe pas : du texte ; REQ-002 est dans du code
-        assert req.get_attribute("href") == f"#atelier?chantier={slug}&phase=exigences&req=REQ-001"
+        expect(req).to_have_attribute("href", f"#atelier?chantier={slug}&phase=exigences&req=REQ-001")
         task = section.locator("a.at-ref-task")
-        assert task.get_attribute("href") == "#travail?task=GAO-demo-001"
+        expect(task).to_have_attribute("href", "#travail?task=GAO-demo-001")
         chantier = section.locator("a.at-ref-chantier")
-        assert chantier.get_attribute("href") == f"#atelier?chantier={target}"
+        expect(chantier).to_have_attribute("href", f"#atelier?chantier={target}")
         missing = section.locator(".at-ref-missing")
         expect(missing).to_have_count(1)
-        assert missing.evaluate("e => e.tagName") == "SPAN", "jamais de lien mort"
-        assert missing.get_attribute("title") == "chantier introuvable"
-        assert "REQ-099" in section.inner_text()
-        assert section.locator("code.at-code a, pre a, code a").count() == 0, "aucun lien dans le code"
-        assert "REQ-002" in section.locator("code.at-code").inner_text()
+        expect(missing).to_have_js_property("tagName", "SPAN")  # jamais de lien mort
+        expect(missing).to_have_attribute("title", "chantier introuvable")
+        expect(section).to_contain_text("REQ-099", use_inner_text=True)
+        expect(section.locator("code.at-code a, pre a, code a")).to_have_count(0)  # aucun lien dans le code
+        expect(section.locator("code.at-code")).to_contain_text("REQ-002", use_inner_text=True)
 
 
 def test_a_requirement_link_scrolls_highlights_and_keeps_the_address(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -153,7 +153,11 @@ def test_a_requirement_link_scrolls_highlights_and_keeps_the_address(browser: Br
         row = page.locator(".at-blk[data-req='REQ-001']")
         expect(row).to_have_class(re.compile(r"is-ref-target"), timeout=WAIT_MS)
         page.wait_for_function("() => location.hash.includes('req=REQ-001') && location.hash.includes('phase=exigences')", timeout=WAIT_MS)
-        assert page.evaluate("(sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return b.top >= 0 && b.bottom <= window.innerHeight; }", ".at-blk[data-req='REQ-001']")
+        page.wait_for_function(
+            "(sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return b.top >= 0 && b.bottom <= window.innerHeight; }",
+            arg=".at-blk[data-req='REQ-001']",
+            timeout=WAIT_MS,
+        )
         expect(page.locator("[data-role='block-edit']")).to_have_count(0)  # suivre un lien n'ouvre pas l'éditeur du bloc
         expect(page.locator(".at-phase[data-phase='exigences']")).to_have_attribute("aria-current", "step", timeout=WAIT_MS)
 
@@ -295,6 +299,7 @@ def test_the_palette_goes_to_a_phase_or_a_section_of_the_open_chantier(browser: 
         expect(page.locator(".at-phase[data-phase='exigences']")).to_have_attribute("aria-current", "step", timeout=WAIT_MS)
         page.wait_for_function("() => location.hash.includes('phase=exigences')", timeout=WAIT_MS)
         rub = page.locator(f"{SECTION} > .at-rub").first
+        expect(rub).not_to_have_text("", use_inner_text=True)
         name = rub.inner_text().strip()
         _palette(page, "aller a")
         entry = page.locator("#palette-list li[role='option']", has_text=f"Brainstorm › {name}")
@@ -342,8 +347,7 @@ def test_reading_mode_hides_writing_gestures_and_is_shareable(browser: Browser, 
         page.wait_for_timeout(400)
         expect(page.locator("[data-role='block-edit']")).to_have_count(0)
         # La page est centrée et étroite.
-        width = page.locator(".at-sheet").evaluate("e => e.getBoundingClientRect().width")
-        assert width <= 46 * 16 + 1
+        page.wait_for_function("() => document.querySelector('.at-sheet').getBoundingClientRect().width <= 46 * 16 + 1", timeout=WAIT_MS)
         page.keyboard.press("Escape")
         expect(page.locator(".at-page")).not_to_have_class(re.compile(r"is-reading"), timeout=WAIT_MS)
         expect(button).to_have_text("Lecture")
@@ -419,7 +423,7 @@ def test_reading_mode_on_a_narrow_screen_has_no_horizontal_scroll(browser: Brows
     slug = _chantier(root, f"Chantier Étroit {width}")
     for page in _doc(browser, url, slug, "&lecture=1", width=width, height=900):
         expect(page.locator(".at-page")).to_have_class(re.compile(r"is-reading"), timeout=WAIT_MS)
-        assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth")
+        page.wait_for_function("() => document.documentElement.scrollWidth <= window.innerWidth", timeout=WAIT_MS)
 
 
 # ── Le document suit son fichier ────────────────────────────────────────────

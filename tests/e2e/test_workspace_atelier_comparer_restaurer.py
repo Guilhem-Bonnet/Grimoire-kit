@@ -12,6 +12,7 @@ skippe pas : le mode strict de la CI promeut tout skip en échec).
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -22,7 +23,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.core.chantiers import new_chantier
 from grimoire.tools import workspace_atelier
@@ -145,27 +146,27 @@ def test_compare_two_chosen_versions_with_checkboxes(browser: Browser, project_g
     project_git.reset()
     for page in _doc(browser, project_git.url, project_git.slug):
         _open_panel(page)
-        assert page.locator(".at-hist-row").count() == 4  # modifications en cours + trois commits
+        expect(page.locator(".at-hist-row")).to_have_count(4)  # modifications en cours + trois commits
         pair = page.locator("[data-role='hist-selection']")
-        assert pair.is_hidden()
+        expect(pair).to_be_hidden()
         _item(page, "fix: précise le brief").locator("[data-role='hist-choisir']").check()
         pair.wait_for(state="visible", timeout=APPEAR_MS)
-        assert page.locator("[data-role='hist-comparer-deux']").is_disabled()
+        expect(page.locator("[data-role='hist-comparer-deux']")).to_be_disabled()
         _item(page, "feat: premier jet").locator("[data-role='hist-choisir']").check()
         page.locator("[data-role='hist-comparer-deux']:not([disabled])").wait_for(timeout=APPEAR_MS)
         page.locator("[data-role='hist-comparer-deux']").click()
         banner = page.locator("[data-role='hist-bandeau']")
         banner.wait_for(timeout=APPEAR_MS)
-        text = banner.inner_text()
-        assert text.startswith("Tu compares la version du") and " et la version du " in text
-        assert page.locator(".at-sheet").is_hidden()
-        assert page.locator(".at-cmp-line.is-add").count() == 3 and page.locator(".at-cmp-line.is-del").count() == 1  # brief +2 −1, REQ-002 +1
+        expect(banner).to_have_text(re.compile(r"^Tu compares la version du .* et la version du ", re.DOTALL), use_inner_text=True)
+        expect(page.locator(".at-sheet")).to_be_hidden()
+        expect(page.locator(".at-cmp-line.is-add")).to_have_count(3)  # brief +2 −1, REQ-002 +1
+        expect(page.locator(".at-cmp-line.is-del")).to_have_count(1)
         # deux versions dont aucune n'est « actuelle » : on compare, on ne restaure pas
-        assert page.locator("[data-role='hist-restaurer-phase']").count() == 0
-        assert page.locator("[data-role='hist-restaurer-bloc']").count() == 0
+        expect(page.locator("[data-role='hist-restaurer-phase']")).to_have_count(0)
+        expect(page.locator("[data-role='hist-restaurer-bloc']")).to_have_count(0)
         page.locator("[data-role='hist-retour']").click()
         page.locator("[data-role='hist-comparaison']").wait_for(state="detached", timeout=APPEAR_MS)
-        assert page.locator(".at-sheet").is_visible()
+        expect(page.locator(".at-sheet")).to_be_visible()
 
 
 def test_compare_two_versions_with_shift_click(browser: Browser, project_git: Project) -> None:
@@ -173,31 +174,30 @@ def test_compare_two_versions_with_shift_click(browser: Browser, project_git: Pr
     for page in _doc(browser, project_git.url, project_git.slug):
         _open_panel(page)
         page.locator(".at-hist-row", has_text="feat: ajoute le repli").click(modifiers=["Shift"])
-        assert page.locator("[data-role='hist-comparaison']").count() == 0  # Maj+clic choisit, il n'ouvre rien
         page.locator("[data-role='hist-selection']").wait_for(state="visible", timeout=APPEAR_MS)
+        expect(page.locator("[data-role='hist-comparaison']")).to_have_count(0)  # Maj+clic choisit, il n'ouvre rien (lu après l'effet visible du clic)
         page.locator(".at-hist-row", has_text="feat: premier jet").click(modifiers=["Shift"])
         page.locator("[data-role='hist-comparer-deux']:not([disabled])").wait_for(timeout=APPEAR_MS)
         page.locator("[data-role='hist-comparer-deux']").click()
         page.locator("[data-role='hist-bandeau']").wait_for(timeout=APPEAR_MS)
         _phase(page, "exigences").wait_for(timeout=APPEAR_MS)
-        assert page.locator(".at-cmp [data-phase='brief']").count() == 0  # le brief n'a pas changé entre ces deux versions
-        assert "REQ-002" in _phase(page, "exigences").inner_text()
+        expect(page.locator(".at-cmp [data-phase='brief']")).to_have_count(0)  # le brief n'a pas changé entre ces deux versions
+        expect(_phase(page, "exigences")).to_contain_text("REQ-002", use_inner_text=True)
 
 
 def test_compare_with_the_current_version(browser: Browser, project_git: Project) -> None:
     project_git.reset()
     for page in _doc(browser, project_git.url, project_git.slug):
         _open_panel(page)
-        assert _item(page, "Modifications en cours").locator("[data-role='hist-vs-actuelle']").count() == 0
+        expect(_item(page, "Modifications en cours").locator("[data-role='hist-vs-actuelle']")).to_have_count(0)
         _compare_with_current(page, "feat: premier jet")
-        banner = page.locator("[data-role='hist-bandeau']").inner_text()
-        assert banner.startswith("Tu compares la version du") and "et la version actuelle." in banner
-        assert page.locator(".at-cmp-line.is-add").first.is_visible()
+        expect(page.locator("[data-role='hist-bandeau']")).to_have_text(re.compile(r"^Tu compares la version du .*et la version actuelle\.", re.DOTALL), use_inner_text=True)
+        expect(page.locator(".at-cmp-line.is-add").first).to_be_visible()
         # brief et exigences se restaurent ; les phases créées depuis (absentes de la version) restent en lecture seule, avec la raison
-        assert page.locator("[data-role='hist-restaurer-phase']:not([disabled])").count() == 2
-        assert page.locator("[data-role='hist-restaurer-phase'][disabled]").count() == 3
-        assert "n'a pas ce fichier" in page.locator("[data-role='hist-refus']").first.inner_text()
-        assert page.locator("[data-role='hist-restaurer-bloc']").count() >= 1
+        expect(page.locator("[data-role='hist-restaurer-phase']:not([disabled])")).to_have_count(2)
+        expect(page.locator("[data-role='hist-restaurer-phase'][disabled]")).to_have_count(3)
+        expect(page.locator("[data-role='hist-refus']").first).to_contain_text("n'a pas ce fichier", use_inner_text=True)
+        expect(page.locator("[data-role='hist-restaurer-bloc']").first).to_be_attached()
 
 
 # ── Restaurer un bloc ────────────────────────────────────────────────────────────────────────────────────
@@ -212,8 +212,8 @@ def test_restore_a_block_then_undo(browser: Browser, project_git: Project) -> No
         block.click()
         dialog = page.locator("[data-role='hist-confirmation']")
         dialog.wait_for(state="visible", timeout=APPEAR_MS)
-        assert "Restaurer ce bloc" in dialog.inner_text() and "+" in dialog.inner_text() and "−" in dialog.inner_text()
-        assert "Rien n’est commité" in dialog.inner_text()
+        for part in ("Restaurer ce bloc", "+", "−", "Rien n’est commité"):
+            expect(dialog).to_contain_text(part, use_inner_text=True)
         page.locator("[data-role='hist-renoncer']").click()
         dialog.wait_for(state="detached", timeout=APPEAR_MS)
         assert project_git.text() == BRIEF_WORKING  # renoncer n'écrit rien
@@ -222,7 +222,7 @@ def test_restore_a_block_then_undo(browser: Browser, project_git: Project) -> No
         page.locator("[data-role='hist-confirmer']").click()
         ack = page.locator("[data-role='hist-accuse']")
         ack.filter(has_text="Le bloc restauré").wait_for(timeout=APPEAR_MS)
-        assert "pas commité" in ack.inner_text()
+        expect(ack).to_contain_text("pas commité", use_inner_text=True)
         _wait_until(lambda: project_git.text() == BRIEF_1, "le bloc revient à la version choisie")
         assert _git(project_git.root, "status", "--porcelain", "--", str(project_git.brief)).startswith("M")  # non commité
         page.locator("[data-role='hist-annuler']").click()
@@ -242,7 +242,8 @@ def test_restore_a_phase_then_undo(browser: Browser, project_git: Project) -> No
         _phase(page, "brief").locator("[data-role='hist-restaurer-phase']").click()
         dialog = page.locator("[data-role='hist-confirmation']")
         dialog.wait_for(state="visible", timeout=APPEAR_MS)
-        assert "Restaurer la phase Brief" in dialog.inner_text() and "+2 −3 lignes" in dialog.inner_text()
+        expect(dialog).to_contain_text("Restaurer la phase Brief", use_inner_text=True)
+        expect(dialog).to_contain_text("+2 −3 lignes", use_inner_text=True)
         page.keyboard.press("Escape")  # Échap = renoncer
         dialog.wait_for(state="detached", timeout=APPEAR_MS)
         assert project_git.text() == BRIEF_WORKING
@@ -251,7 +252,7 @@ def test_restore_a_phase_then_undo(browser: Browser, project_git: Project) -> No
         page.locator("[data-role='hist-confirmer']").click()
         ack = page.locator("[data-role='hist-accuse']")
         ack.filter(has_text="La phase Brief restaurée").wait_for(timeout=APPEAR_MS)
-        assert "pas commité" in ack.inner_text()
+        expect(ack).to_contain_text("pas commité", use_inner_text=True)
         _wait_until(lambda: project_git.text() == BRIEF_1, "la phase revient à la version choisie")
         assert _git(project_git.root, "rev-parse", "HEAD") == head  # rien n'est commité par le kit
         page.locator("[data-role='hist-comparaison']").wait_for(state="detached", timeout=APPEAR_MS)
@@ -275,7 +276,7 @@ def test_restore_conflict_when_the_file_changed(browser: Browser, project_git: P
         page.locator("[data-role='hist-confirmer']").click()
         ack = page.locator("[data-role='hist-accuse']")
         ack.filter(has_text="a changé depuis ta lecture").wait_for(timeout=APPEAR_MS)
-        assert ack.get_attribute("data-kind") == "error"
+        expect(ack).to_have_attribute("data-kind", "error")
         assert project_git.text() == edited  # rien n'est écrit
         # la comparaison est relue : la nouvelle empreinte permet de restaurer
         page.locator(".at-cmp", has_text="Ajout d'un autre auteur.").wait_for(timeout=APPEAR_MS)
@@ -289,8 +290,8 @@ def test_no_git_stays_read_only(browser: Browser, project_nogit: tuple[str, str]
     for page in _doc(browser, url, slug):
         page.locator("[data-role='atelier-historique-bouton']").click()
         page.locator("[data-role='hist-vide']").wait_for(timeout=APPEAR_MS)
-        assert "dépôt git" in page.locator("[data-role='hist-vide']").inner_text()
-        assert page.locator("[data-role='hist-vs-actuelle'], [data-role='hist-choisir'], [data-role='hist-restaurer-phase']").count() == 0
+        expect(page.locator("[data-role='hist-vide']")).to_contain_text("dépôt git", use_inner_text=True)
+        expect(page.locator("[data-role='hist-vs-actuelle'], [data-role='hist-choisir'], [data-role='hist-restaurer-phase']")).to_have_count(0)
         status = page.evaluate(
             "async (slug) => (await fetch(`/api/workspace/atelier/chantiers/${slug}/compare?from=abcdef1&to=working`)).status", slug
         )

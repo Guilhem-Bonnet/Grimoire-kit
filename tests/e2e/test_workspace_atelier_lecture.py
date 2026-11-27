@@ -19,7 +19,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, expect
 
 from grimoire.tools import workspace_atelier
 
@@ -102,11 +102,24 @@ def _plan_open(page: Page) -> bool:
 def _ensure_plan(page: Page) -> None:
     if not _plan_open(page):
         page.locator(TOGGLE).click()
-    assert page.locator(PLAN).is_visible()
+    expect(page.locator(PLAN)).to_be_visible()
 
 
-def _canvas_overflow(page: Page) -> bool:
-    return bool(page.evaluate("() => { const c = document.getElementById('canvas'); return c.scrollWidth > c.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1; }"))
+def _no_overflow(page: Page) -> None:
+    """Attend que la toile ne déborde pas : la mise en page se fait en place, on ne la mesure pas à mi-chemin."""
+    page.wait_for_function(
+        "() => { const c = document.getElementById('canvas'); return !(c.scrollWidth > c.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1); }",
+        timeout=APPEAR_MS,
+    )
+
+
+def _plan_is(page: Page, opened: bool) -> None:
+    expect(page.locator(TOGGLE)).to_have_attribute("aria-expanded", "true" if opened else "false")
+
+
+def _stored_is(page: Page, value: str) -> None:
+    """Le choix du plan est écrit dans le stockage à la suite du geste : on attend la valeur voulue."""
+    page.wait_for_function("([k, v]) => localStorage.getItem(k) === v", arg=[PLAN_KEY, value], timeout=APPEAR_MS)
 
 
 # ── Plan du document ────────────────────────────────────────────────────────
@@ -117,16 +130,17 @@ def test_the_outline_lists_phases_and_sections_with_their_state(browser: Browser
     slug = _chantier_rempli(root, "Plan etat")
     for page in _page(browser, url, slug):
         _ensure_plan(page)
-        assert page.locator(f"{PLAN} nav").get_attribute("aria-label") == "Plan du document"
+        expect(page.locator(f"{PLAN} nav")).to_have_attribute("aria-label", "Plan du document")
         phases = page.locator(f"{PLAN} .at-plan-phase-link")
-        assert phases.count() == 5
-        assert [_flat(t) for t in phases.all_text_contents()][:3] == ["Brief — à compléter", "Brainstorm — à compléter", "Compréhension — à compléter"]
+        expect(phases).to_have_count(5)
+        for at, label in enumerate(["Brief — à compléter", "Brainstorm — à compléter", "Compréhension — à compléter"]):
+            expect(phases.nth(at)).to_have_text(label)  # espaces normalisés
         # Les rubriques viennent du fichier ; l'état, de l'avancement du serveur.
-        assert page.locator(f"{PLAN} [data-plan='brief/0']").get_attribute("data-state") == "rempli"
-        assert page.locator(f"{PLAN} [data-plan='brief/1']").get_attribute("data-state") == "vide"
-        assert "Le problème — remplie" in _flat(page.locator(f"{PLAN} [data-plan='brief/0']").text_content())
-        assert "L'utilisateur — à compléter" in _flat(page.locator(f"{PLAN} [data-plan='brief/1']").text_content())
-        assert page.locator(f"{PLAN} [data-plan='brainstorm/0']").get_attribute("data-state") == "rempli"  # « Pistes »
+        expect(page.locator(f"{PLAN} [data-plan='brief/0']")).to_have_attribute("data-state", "rempli")
+        expect(page.locator(f"{PLAN} [data-plan='brief/1']")).to_have_attribute("data-state", "vide")
+        expect(page.locator(f"{PLAN} [data-plan='brief/0']")).to_contain_text("Le problème — remplie")
+        expect(page.locator(f"{PLAN} [data-plan='brief/1']")).to_contain_text("L'utilisateur — à compléter")
+        expect(page.locator(f"{PLAN} [data-plan='brainstorm/0']")).to_have_attribute("data-state", "rempli")  # « Pistes »
 
 
 def test_a_click_scrolls_to_the_section_and_the_current_item_follows_the_scroll(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -146,7 +160,7 @@ def test_a_click_scrolls_to_the_section_and_the_current_item_follows_the_scroll(
             arg=["[data-section='brainstorm'] .at-rub", bar["y"] + bar["height"]],
             timeout=APPEAR_MS,
         )
-        assert heading.inner_text().strip().startswith("Questions")
+        expect(heading).to_have_text(re.compile(r"^\s*Questions"), use_inner_text=True)
         page.wait_for_function(current_is, arg=[current, "brainstorm/1"], timeout=APPEAR_MS)
         # Le focus arrive sur la rubrique à la fin du défilement : on l'attend, on ne le suppose pas déjà posé.
         page.wait_for_function("() => document.activeElement.classList.contains('at-rub')", timeout=APPEAR_MS)
@@ -160,7 +174,7 @@ def test_a_click_scrolls_to_the_section_and_the_current_item_follows_the_scroll(
         last = page.evaluate("() => [...document.querySelectorAll('.at-plan-link')].pop().getAttribute('data-plan')")
         page.wait_for_function(current_is, arg=[current, last], timeout=APPEAR_MS)
         # Un seul élément courant à la fois.
-        assert page.locator(current).count() == 1
+        expect(page.locator(current)).to_have_count(1)
 
 
 def test_the_outline_fold_is_remembered_and_follows_the_width(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -168,29 +182,34 @@ def test_the_outline_fold_is_remembered_and_follows_the_width(browser: Browser, 
     slug = _chantier_rempli(root, "Plan repli")
     # Sous 1100 px : replié d'office, rien ne déborde, le bouton le rouvre au-dessus de la feuille.
     for page in _page(browser, url, slug, viewport=(1024, 768)):
-        assert not _plan_open(page) and not page.locator(PLAN).is_visible()
-        assert page.locator(TOGGLE).get_attribute("aria-pressed") == "false"
+        _plan_is(page, False)
+        expect(page.locator(PLAN)).to_be_hidden()
+        expect(page.locator(TOGGLE)).to_have_attribute("aria-pressed", "false")
         page.locator(TOGGLE).click()
-        assert _plan_open(page) and page.locator(PLAN).is_visible()
-        assert page.evaluate("(k) => localStorage.getItem(k)", PLAN_KEY) == "open"
-        assert not _canvas_overflow(page)
+        _plan_is(page, True)
+        expect(page.locator(PLAN)).to_be_visible()
+        _stored_is(page, "open")
+        _no_overflow(page)
         page.reload()
         page.wait_for_selector("body[data-ready='1']", timeout=APPEAR_MS)
         page.locator(".at-plan-link").first.wait_for(state="attached", timeout=APPEAR_MS)
-        assert _plan_open(page), "le choix mémorisé survit au rechargement"
+        _plan_is(page, True)  # le choix mémorisé survit au rechargement
         # Replier au clavier : Échap depuis le plan rend le focus au bouton.
         page.locator(f"{PLAN} [data-plan='brief']").focus()
         page.keyboard.press("Escape")
-        assert not _plan_open(page) and page.evaluate("document.activeElement.dataset.role") == "plan-toggle"
-        assert page.evaluate("(k) => localStorage.getItem(k)", PLAN_KEY) == "closed"
+        _plan_is(page, False)
+        expect(page.locator(TOGGLE)).to_be_focused()
+        _stored_is(page, "closed")
     # Toile assez large pour le plan, la feuille (900 px) et l'assistant : déplié d'office, la feuille ne se serre pas.
     for page in _page(browser, url, slug, viewport=(1920, 1000)):
         page.wait_for_function("(s) => !document.querySelector(s).hidden", arg=PLAN, timeout=APPEAR_MS)
-        assert _plan_open(page)
-        assert _box(page, ".at-sheet")["width"] >= 800 and not _canvas_overflow(page)
+        _plan_is(page, True)
+        assert _box(page, ".at-sheet")["width"] >= 800
+        _no_overflow(page)
     # Sur 1440x900 avec l'assistant à droite, replié d'office : la feuille garde sa largeur d'avant.
     for page in _page(browser, url, slug):
-        assert not _plan_open(page) and _box(page, ".at-sheet")["width"] > 900
+        _plan_is(page, False)
+        assert _box(page, ".at-sheet")["width"] > 900
 
 
 @pytest.mark.parametrize("size", [(800, 700), (480, 800)])
@@ -200,12 +219,13 @@ def test_no_horizontal_overflow_with_the_outline_open_on_narrow_screens(browser:
     for page in _page(browser, url, slug, viewport=size):
         _ensure_plan(page)
         page.locator(TOGGLE).scroll_into_view_if_needed()
-        assert not _canvas_overflow(page)
+        _no_overflow(page)
         box = _box(page, PLAN)
         assert box["x"] >= 0 and box["x"] + box["width"] <= size[0] + 1
         # La recherche ouverte non plus ne fait déborder.
         page.keyboard.press("Control+f")
-        assert page.locator(FIND).is_visible() and not _canvas_overflow(page)
+        expect(page.locator(FIND)).to_be_visible()
+        _no_overflow(page)
 
 
 def test_the_outline_works_when_storage_is_blocked_and_in_dark_theme(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -214,11 +234,10 @@ def test_the_outline_works_when_storage_is_blocked_and_in_dark_theme(browser: Br
     for page in _page(browser, url, slug, scheme="dark", block_storage=True):
         _ensure_plan(page)
         link = page.locator(f"{PLAN} [data-plan='brief']")
-        assert link.is_visible()
-        color = page.evaluate("(s) => getComputedStyle(document.querySelector(s)).color", f"{PLAN} [data-plan='brief']")
-        assert color != "rgb(0, 0, 0)"
+        expect(link).to_be_visible()
+        expect(link).not_to_have_css("color", "rgb(0, 0, 0)")
         page.locator(TOGGLE).click()
-        assert not _plan_open(page)
+        _plan_is(page, False)
 
 
 # ── Recherche dans le document ──────────────────────────────────────────────
@@ -230,51 +249,54 @@ def test_find_counts_steps_and_leaves_no_trace(browser: Browser, project_on: tup
     slug = _chantier_rempli(root, f"Recherche {'api' if highlight_api else 'mark'}")
     for page in _page(browser, url, slug, highlight_api=highlight_api):
         before = page.evaluate(SNAPSHOT)
-        assert page.locator(FIND).is_hidden()
+        expect(page.locator(FIND)).to_be_hidden()
         page.locator("body").click(position={"x": 5, "y": 400})
         page.keyboard.press("Control+f")
-        assert page.locator(FIND).is_visible() and page.evaluate("document.activeElement.dataset.role") == "find-input"
+        expect(page.locator(FIND)).to_be_visible()
+        expect(page.locator(INPUT)).to_be_focused()
         page.locator(INPUT).fill("paragraphe")
-        label = page.locator(COUNT).inner_text()
-        found = re.fullmatch(r"1 sur (\d+)", label)
-        assert found, label
+        # Le décompte se calcule après la saisie : on attend le libellé « 1 sur N », puis on le lit.
+        expect(page.locator(COUNT)).to_have_text(re.compile(r"^1 sur \d+$"), use_inner_text=True)
+        found = re.fullmatch(r"1 sur (\d+)", page.locator(COUNT).inner_text())
+        assert found
         total = int(found.group(1))
         assert total >= 5
         if highlight_api:
-            assert page.evaluate("CSS.highlights.get('at-find').size") == total
-            assert page.evaluate("CSS.highlights.get('at-find-current').size") == 1
-            assert page.locator(".at-hit").count() == 0
+            page.wait_for_function("(n) => CSS.highlights.get('at-find')?.size === n && CSS.highlights.get('at-find-current')?.size === 1", arg=total, timeout=APPEAR_MS)
+            expect(page.locator(".at-hit")).to_have_count(0)
         else:
             assert page.evaluate("CSS.highlights") is None
-            assert page.locator(".at-hit").count() == total and page.locator(".at-hit.is-current").count() == 1
+            expect(page.locator(".at-hit")).to_have_count(total)
+            expect(page.locator(".at-hit.is-current")).to_have_count(1)
         # Entrée : suivante ; Maj+Entrée : précédente, en boucle.
         page.keyboard.press("Enter")
-        assert page.locator(COUNT).inner_text() == f"2 sur {total}"
+        expect(page.locator(COUNT)).to_have_text(f"2 sur {total}", use_inner_text=True)
         page.keyboard.press("Shift+Enter")
         page.keyboard.press("Shift+Enter")
-        assert page.locator(COUNT).inner_text() == f"{total} sur {total}"
+        expect(page.locator(COUNT)).to_have_text(f"{total} sur {total}", use_inner_text=True)
         page.keyboard.press("Enter")
-        assert page.locator(COUNT).inner_text() == f"1 sur {total}"
-        # L'occurrence courante est à l'écran.
-        assert page.evaluate("(() => { const r = (document.querySelector('.at-hit.is-current') || {getBoundingClientRect: () => ({top: 300, bottom: 320})}).getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })()")
+        expect(page.locator(COUNT)).to_have_text(f"1 sur {total}", use_inner_text=True)
+        # L'occurrence courante est à l'écran (le défilement vers elle peut durer : on attend l'état).
+        page.wait_for_function("(() => { const r = (document.querySelector('.at-hit.is-current') || {getBoundingClientRect: () => ({top: 300, bottom: 320})}).getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })()", timeout=APPEAR_MS)
         # Insensible à la casse et aux accents.
         page.locator(INPUT).fill("ECARTE")
-        assert re.fullmatch(r"1 sur \d+", page.locator(COUNT).inner_text())
+        expect(page.locator(COUNT)).to_have_text(re.compile(r"^1 sur \d+$"), use_inner_text=True)
         page.locator(INPUT).fill("zzzzintrouvable")
-        assert page.locator(COUNT).inner_text() == "Aucun résultat"
+        expect(page.locator(COUNT)).to_have_text("Aucun résultat", use_inner_text=True)
         page.locator(INPUT).fill("paragraphe")
         # Les boutons font comme le clavier.
+        expect(page.locator(COUNT)).to_have_text(f"1 sur {total}", use_inner_text=True)
         page.locator("[data-act='find-next']").click()
-        assert page.locator(COUNT).inner_text() == f"2 sur {total}"
+        expect(page.locator(COUNT)).to_have_text(f"2 sur {total}", use_inner_text=True)
         page.locator("[data-act='find-prev']").click()
-        assert page.locator(COUNT).inner_text() == f"1 sur {total}"
+        expect(page.locator(COUNT)).to_have_text(f"1 sur {total}", use_inner_text=True)
         # Échap ferme, retire tout, rend le focus ; la feuille est identique à celle d'avant.
         page.keyboard.press("Escape")
-        assert page.locator(FIND).is_hidden()
-        assert page.evaluate(SNAPSHOT) == before
-        assert page.locator(".at-hit").count() == 0
+        expect(page.locator(FIND)).to_be_hidden()
+        page.wait_for_function(f"(before) => ({SNAPSHOT})() === before", arg=before, timeout=APPEAR_MS)
+        expect(page.locator(".at-hit")).to_have_count(0)
         if highlight_api:
-            assert page.evaluate("CSS.highlights.has('at-find') || CSS.highlights.has('at-find-current')") is False
+            page.wait_for_function("() => !CSS.highlights.has('at-find') && !CSS.highlights.has('at-find-current')", timeout=APPEAR_MS)
 
 
 def test_find_only_takes_ctrl_f_inside_the_document_and_leaves_the_browser_a_second_press(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -283,19 +305,21 @@ def test_find_only_takes_ctrl_f_inside_the_document_and_leaves_the_browser_a_sec
     probe = "(el) => { const e = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }); el.dispatchEvent(e); return e.defaultPrevented; }"
     for page in _page(browser, url, slug):
         assert page.evaluate(probe, page.locator("body").element_handle()) is True  # le document est affiché : la barre s'ouvre
-        assert page.locator(FIND).is_visible()
+        expect(page.locator(FIND)).to_be_visible()
         # Barre déjà active : le second appui est laissé au navigateur (recherche native).
         assert page.evaluate(probe, page.locator(INPUT).element_handle()) is False
         # Maj+Ctrl+F (plein écran de la coque) n'ouvre pas la barre.
         page.locator(INPUT).press("Escape")
-        assert page.locator(FIND).is_hidden()
+        expect(page.locator(FIND)).to_be_hidden()
         page.evaluate("() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))")
-        assert page.locator(FIND).is_hidden()
+        # Assertion négative : le gestionnaire est synchrone (dispatchEvent revient après lui), un aller-retour de page borne l'attente.
+        page.evaluate("() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))")
+        expect(page.locator(FIND)).to_be_hidden()
         # Hors de l'Atelier : rien n'est capturé.
         page.evaluate("() => { location.hash = '#hotes'; }")
         page.wait_for_function("() => document.body.dataset.activeArea === 'configuration'", timeout=APPEAR_MS)
         assert page.evaluate(probe, page.locator("body").element_handle()) is False
-        assert page.locator(FIND).count() == 0
+        expect(page.locator(FIND)).to_have_count(0)
 
 
 def test_find_follows_a_redraw_of_the_sheet(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -304,11 +328,12 @@ def test_find_follows_a_redraw_of_the_sheet(browser: Browser, project_on: tuple[
     for page in _page(browser, url, slug):
         page.keyboard.press("Control+f")
         page.locator(INPUT).fill("paragraphe")
+        expect(page.locator(COUNT)).to_have_text(re.compile(r"^1 sur \d+$"), use_inner_text=True)
         total = int(page.locator(COUNT).inner_text().split(" sur ")[1])
         # Un rechargement du document (une section redessinée) : les occurrences sont relues, rien ne se perd.
         page.evaluate("() => { const s = document.querySelector('.at-sheet'); const sec = s.querySelector('[data-section=\"brainstorm\"]'); sec.replaceWith(sec.cloneNode(true)); }")
         page.wait_for_function("(t) => document.querySelector('[data-role=find-count]').textContent.endsWith(' sur ' + t)", arg=str(total), timeout=APPEAR_MS)
-        assert page.locator(FIND).is_visible()
+        expect(page.locator(FIND)).to_be_visible()
 
 
 # ── Menu « Document » : compteur, copie, fichier, impression ────────────────
@@ -321,9 +346,11 @@ def test_the_document_menu_counts_words_and_copies_the_stored_markdown(browser: 
     for page in _page(browser, url, slug):
         page.context.grant_permissions(["clipboard-read", "clipboard-write"])
         button = page.locator(MENU)
-        assert button.get_attribute("aria-expanded") == "false" and page.locator("#at-docmenu-panel").is_hidden()
+        expect(button).to_have_attribute("aria-expanded", "false")
+        expect(page.locator("#at-docmenu-panel")).to_be_hidden()
         button.click()
-        assert button.get_attribute("aria-expanded") == "true"
+        expect(button).to_have_attribute("aria-expanded", "true")
+        expect(page.locator("[data-role='doc-stats']")).to_have_text(re.compile(r"^.+ mots · \d+ min de lecture$"), use_inner_text=True)
         stats = page.locator("[data-role='doc-stats']").inner_text()
         words = _words(expected)
         found = re.fullmatch(r"([\d\s  ]+) mots · (\d+) min de lecture", stats)
@@ -337,15 +364,19 @@ def test_the_document_menu_counts_words_and_copies_the_stored_markdown(browser: 
         assert copied.startswith("# Menu copie\n") and "Les équipes perdent le fil des décisions de cadrage." in copied
         assert "phase:" not in copied and "À compléter" not in copied
         # Le menu s'est refermé après l'action et le focus est revenu au bouton.
-        assert page.locator("#at-docmenu-panel").is_hidden()
+        expect(page.locator("#at-docmenu-panel")).to_be_hidden()
+        expect(button).to_be_focused()
         button.click()
+        expect(page.locator("#at-docmenu-panel")).to_be_visible()
         # Échap referme le menu et rend le focus au bouton.
         page.keyboard.press("Escape")
-        assert page.locator("#at-docmenu-panel").is_hidden() and page.evaluate("document.activeElement.dataset.role") == "document-menu"
+        expect(page.locator("#at-docmenu-panel")).to_be_hidden()
+        expect(page.locator(MENU)).to_be_focused()
         # Un clic ailleurs le referme aussi.
         button.click()
+        expect(page.locator("#at-docmenu-panel")).to_be_visible()
         page.locator(".at-sheet").click(position={"x": 4, "y": 4})
-        assert page.locator("#at-docmenu-panel").is_hidden()
+        expect(page.locator("#at-docmenu-panel")).to_be_hidden()
 
 
 def test_the_document_menu_downloads_the_same_markdown(browser: Browser, project_on: tuple[str, Path], tmp_path: Path) -> None:
@@ -378,18 +409,18 @@ def test_the_print_sheet_keeps_only_the_document(browser: Browser, project_on: t
             "[data-role='assistant']", "[data-role='atelier-toasts']", ".at-cm-add", ".at-ch",
         ]
         for selector in hidden:
-            shown = page.evaluate("(s) => [...document.querySelectorAll(s)].filter((n) => n.checkVisibility()).length", selector)
-            assert shown == 0, selector
+            # Le média ``print`` s'applique avec la mise en page : on attend l'état voulu, par sélecteur (le message nomme celui qui reste).
+            page.wait_for_function("(s) => [...document.querySelectorAll(s)].filter((n) => n.checkVisibility()).length === 0", arg=selector, timeout=APPEAR_MS)
         # Tout ce qui est posé sur le corps de la page (mascotte, fenêtres) disparaît, la coque seule reste.
-        stray = page.evaluate("[...document.body.children].filter((n) => n.id !== 'shell' && getComputedStyle(n).display !== 'none' && n.tagName !== 'SCRIPT').map((n) => n.tagName + '#' + n.id + '.' + n.className)")
-        assert stray == [], stray
-        assert page.locator(".at-sheet").is_visible()
+        page.wait_for_function("() => [...document.body.children].filter((n) => n.id !== 'shell' && getComputedStyle(n).display !== 'none' && n.tagName !== 'SCRIPT').length === 0", timeout=APPEAR_MS)
+        expect(page.locator(".at-sheet")).to_be_visible()
         title = page.locator(".at-print-title")
-        assert title.is_visible() and title.inner_text().strip() == "Menu impression"
+        expect(title).to_be_visible()
+        expect(title).to_have_text("Menu impression", use_inner_text=True)
         sheet = _box(page, ".at-sheet")
         assert sheet["x"] <= 2 and sheet["width"] > 600
-        paper = page.evaluate("() => [getComputedStyle(document.body).backgroundColor, getComputedStyle(document.querySelector('.at-sheet p, .at-sheet .at-rub')).color]")
-        assert paper == ["rgb(255, 255, 255)", "rgb(0, 0, 0)"], paper
+        expect(page.locator("body")).to_have_css("background-color", "rgb(255, 255, 255)")
+        expect(page.locator(".at-sheet p, .at-sheet .at-rub").first).to_have_css("color", "rgb(0, 0, 0)")
         # Un vrai PDF : les phases s'enchaînent (aucun saut forcé), un document long tient sur plusieurs pages.
         pdf = tmp_path / "atelier.pdf"
         page.pdf(path=str(pdf), format="A4", print_background=True)
@@ -397,8 +428,8 @@ def test_the_print_sheet_keeps_only_the_document(browser: Browser, project_on: t
         pages = len(re.findall(rb"/Type\s*/Page[^s]", data))
         assert 2 <= pages <= 5, pages
         page.emulate_media(media="screen")
-        assert page.locator(".at-phasebar").is_visible()
-        assert page.locator(".at-print-title").is_hidden()
+        expect(page.locator(".at-phasebar")).to_be_visible()
+        expect(page.locator(".at-print-title")).to_be_hidden()
 
 
 def test_ctrl_p_outside_the_atelier_is_left_alone(browser: Browser, project_on: tuple[str, Path]) -> None:
@@ -408,7 +439,7 @@ def test_ctrl_p_outside_the_atelier_is_left_alone(browser: Browser, project_on: 
         page.evaluate("() => { location.hash = '#hotes'; }")
         page.wait_for_function("document.body.dataset.activeArea === 'configuration'", timeout=APPEAR_MS)
         page.emulate_media(media="print")
-        assert page.locator("#appbar").is_visible()
+        expect(page.locator("#appbar")).to_be_visible()
 
 
 def test_capture_lecture(browser: Browser, project_on: tuple[str, Path]) -> None:

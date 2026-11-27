@@ -32,7 +32,8 @@ def git(root: Path, *args: str) -> str:
         "GIT_COMMITTER_NAME": "Ada", "GIT_COMMITTER_EMAIL": "ada@example.org",
     })
     done = subprocess.run(
-        ["git", "-c", "user.name=Ada", "-c", "user.email=ada@example.org", "-c", "commit.gpgsign=false", *args],
+        ["git", "-c", "user.name=Ada", "-c", "user.email=ada@example.org", "-c", "commit.gpgsign=false",
+         "-c", "gc.auto=0", "-c", "gc.autoDetach=false", "-c", "maintenance.auto=false", *args],
         cwd=root, capture_output=True, text=True, check=True, env=env,
     )
     return done.stdout.strip()
