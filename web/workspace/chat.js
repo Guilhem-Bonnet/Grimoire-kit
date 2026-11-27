@@ -459,6 +459,24 @@ export function createChat({ readOnly = () => false } = {}) {
         mk('span', { text: 'Ce mode dépose votre message en consigne sur une tâche vivante ; les sessions y répondent par leurs notes, en différé. ' }),
         mk('span', { text: state.reason || '' }),
       );
+      // Les autres hôtes de la machine qui répondent : PROPOSÉS sur une ligne à part, jamais pris d'office.
+      for (const offer of state.offers || []) {
+        const choose = mk('button', {
+          type: 'button', class: 'btn chat-offer-btn', 'data-offer': offer.alias, text: 'Le choisir pour ce projet',
+        });
+        choose.addEventListener('click', async () => {
+          choose.disabled = true;
+          try {
+            await api.chatHost(offer.alias);
+            note(`Hôte changé : ${offer.display_name} pour ce projet.`);
+          } catch (error) {
+            note(`Hôte non changé : ${error.message}`, 'error');
+          }
+          loadHosts();
+        });
+        banner.append(mk('div', { class: 'chat-offer', 'data-role': 'chat-offer' },
+          mk('span', { text: `${offer.display_name} est installé et répond : ` }), choose));
+      }
     }
     announce();
     if (state.mode === 'kanban') {
