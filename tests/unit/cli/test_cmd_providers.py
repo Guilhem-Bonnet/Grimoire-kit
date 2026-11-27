@@ -19,6 +19,7 @@ from grimoire.cli.app import app
 
 pytestmark = pytest.mark.covers(
     "cli:providers audit",
+    "cli:providers direct",
     "cli:providers cooldown",
     "cli:providers history",
     "cli:providers status",
@@ -450,3 +451,49 @@ def test_secrets_json_output(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert payload[0]["provider"] == "deepseek"
     assert "sk-test-abc" not in result.stdout
+
+
+# ── `providers direct` : lecture seule des autorisations d'usage direct (épique #1477, lot B1) ──
+
+
+@pytest.fixture
+def direct_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from grimoire.providers import availability as av
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _n, *a, **k: None)
+    monkeypatch.setattr(av, "_fetch", lambda _u, _t, _l: b'{"models": [{"name": "qwen3-coder"}]}')
+    av.clear_cache()
+    return _project(tmp_path / "p")
+
+
+def test_direct_sans_autorisation_dit_que_grimoire_fonctionne_sans_modele(direct_env: Path) -> None:
+    result = runner.invoke(app, ["providers", "direct", "--project-root", str(direct_env)])
+
+    assert result.exit_code == 0, result.stdout
+    assert "Aucun modèle autorisé" in result.stdout
+    assert "sans modèle" in result.stdout
+    assert "Brainstorm" in result.stdout
+
+
+def test_direct_json_et_texte_montrent_l_autorisation_et_la_trace(direct_env: Path) -> None:
+    from grimoire.providers import availability as av
+    from grimoire.providers import direct_use_settings as ds
+
+    inventory = av.detect(direct_env, use_cache=False, which=lambda n: f"/usr/bin/{n}", fetch=lambda *_a: b'{"models": [{"name": "qwen3-coder"}]}')
+    ds.write_usage(direct_env, "conversation", [{"key": "ollama:qwen3-coder", "daily_cap_tokens": 500}], inventory.by_key())
+
+    as_json = runner.invoke(app, ["providers", "direct", "--project-root", str(direct_env), "--json"])
+    assert as_json.exit_code == 0, as_json.stdout
+    payload = json.loads(as_json.stdout)
+    conversation = next(u for u in payload["usages"] if u["id"] == "conversation")
+    assert conversation["authorized"][0]["key"] == "ollama:qwen3-coder"
+    assert conversation["decision"]["kind"] in {"use", "none"}
+
+    text = runner.invoke(app, ["providers", "direct", "--project-root", str(direct_env)])
+    assert text.exit_code == 0, text.stdout
+    assert "ollama:qwen3-coder" in text.stdout
+    assert "plafond 500" in text.stdout
+    assert "maintenant" in text.stdout

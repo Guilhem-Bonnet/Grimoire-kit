@@ -250,7 +250,13 @@ def test_une_cle_de_controle_fausse_est_refusee_sur_le_second_projet(
     assert MandateStore(foreign).state().active is False
 
 
-@pytest.mark.parametrize("route", [GRANT, REVOKE, AUTOPILOT, PROVIDERS, f"{PREFIX}providers/set-key"])
+@pytest.mark.parametrize(
+    "route",
+    [
+        GRANT, REVOKE, AUTOPILOT, PROVIDERS, f"{PREFIX}providers/set-key", f"{PREFIX}providers/direct-use",
+        f"{PREFIX}providers/direct-use/verify-remote",
+    ],
+)
 def test_la_route_refuse_un_corps_qui_nomme_un_autre_projet(
     duo_server: tuple[int, Path, Path], route: str
 ) -> None:

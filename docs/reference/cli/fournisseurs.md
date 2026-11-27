@@ -20,6 +20,34 @@ appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
 | `grimoire providers capabilities [<id>] [--json]` | Capacités connues de chaque fournisseur et modèle, avec leur provenance, sans réseau |
 | `grimoire providers quota [--json]` | Fenêtre de forfait lue dans les flux d'appel : `lower_bound` (minorant daté) ou `unknown`, jamais 0 |
 | `grimoire providers history [--ledger-root <chemin>] [--json]` | Historique des dispatchs par couple (type de tâche, classe) et palier de départ recommandé |
+| `grimoire providers direct [--json]` | Modèles autorisés pour l'usage direct, par usage, et celui que Grimoire choisirait maintenant, avec la trace (lecture seule) |
+
+`providers direct` (épique #1477, lot B1) lit la page « Modèles autorisés » du cockpit : ce qui est détecté
+(fournisseurs du registre, modèles d'Ollama sur une adresse de la machine, agents installés), ce que l'humain a autorisé
+par usage (`conversation`, `brainstorm`, `redaction`, `autres`) et la décision de maintenant. Par défaut aucun modèle n'est
+autorisé : Grimoire fonctionne sans modèle. Les autorisations (ordre de préférence, plafond de jetons par jour) vivent
+dans la zone de contrôle de l'humain, un fichier par projet, jamais dans le dépôt ; elles se posent dans le cockpit, sous
+la clé de contrôle. Le repli automatique ne va jamais vers un modèle plus coûteux (`gratuit-local` < `abonnement` <
+`payant`) ni plus exposé (`rien` < `texte`) que le modèle courant : il le propose. La clé d'API d'un fournisseur se pose au
+terminal (`grimoire providers set-key <fournisseur> <VARIABLE>`), jamais dans la page.
+
+« Vérifier les connexions » n'envoie une clé d'API qu'aux points d'accès que la page a montrés à l'humain : la page
+renvoie la liste affichée (`confirmed_endpoints`, vide comprise), le serveur lit le registre une seule fois et refuse
+(« la liste a changé, relis-la ») si cette lecture donne une autre liste ; rien n'est alors envoyé. Un modèle que
+l'Ollama de la machine liste mais exécute à distance (entrée portant `remote_host` ou `remote_model`, nom en `-cloud` ou
+`:cloud`) est toujours étiqueté exposé et payant, jamais « rien ne sort de la machine ». Un exécutable `ollama` qui se
+trouve sous la racine du projet n'est pas reconnu comme l'Ollama local.
+
+Limites connues du lot :
+
+- L'empreinte d'une autorisation lie l'autorisation à ce que le nom désigne, mais elle n'authentifie pas le fichier
+  d'autorisations lui-même : la protection de ce fichier est la zone de contrôle de l'humain, hors du dépôt.
+- L'empreinte d'« Ollama local » retient le chemin réel du binaire, pas son contenu : un binaire remplacé sur place à
+  la même adresse garde la même empreinte.
+- La liste confirmée de « Vérifier les connexions » lie un fournisseur et une URL, pas la résolution de leurs noms de
+  domaine : ce que le nom désigne au moment de l'envoi relève du réseau.
+- Une course résiduelle subsiste sur les dossiers parents du fichier d'autorisations : la vérification de droits et de
+  liens se fait au moment de la lecture, pas de façon atomique avec elle.
 
 `providers audit` ne fait jamais l'appel réel : présence du premier mot de
 `invocation` sur le `PATH`, `--version` pour un exécutable reconnu (claude,

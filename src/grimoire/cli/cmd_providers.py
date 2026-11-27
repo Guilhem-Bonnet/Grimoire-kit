@@ -196,6 +196,46 @@ def providers_status(
         console.print(f"  {tier}: {label}")
 
 
+@providers_app.command("direct")
+def providers_direct(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Modèles autorisés pour l'usage direct, par usage, et celui que Grimoire choisirait maintenant (lecture seule).
+
+    Aucune écriture, aucun appel de modèle, aucune requête hors de la machine : la détection est locale (PATH, Ollama sur
+    cette machine). Autoriser un modèle se fait dans le cockpit (« Modèles autorisés », avec la clé de contrôle).
+    """
+    from grimoire.providers import direct_use_settings
+
+    payload = direct_use_settings.view(project_root.resolve())
+    if json_output or _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    inventory = payload["inventory"]
+    console.print(f"[bold]Modèles détectés[/bold] : {len(inventory['models'])}")
+    if not payload["any_authorized"]:
+        console.print("[dim]Aucun modèle autorisé : Grimoire fonctionne sans modèle.[/dim]")
+    for problem in payload["problems"]:
+        console.print(f"[yellow]●[/yellow] {problem}")
+    for usage in payload["usages"]:
+        console.print(f"\n[bold]{usage['label']}[/bold]")
+        if not usage["authorized"]:
+            console.print("  [dim]aucun modèle autorisé[/dim]")
+        for rank, item in enumerate(usage["authorized"], start=1):
+            cap = f" · plafond {item['daily_cap_tokens']} jetons/jour" if item["daily_cap_tokens"] else ""
+            console.print(f"  {rank}. {item['key']}{cap}")
+        decision = usage["decision"]
+        verb = {"use": "utiliser", "propose": "proposer", "none": "aucun modèle"}[decision["kind"]]
+        target = f" : {decision['label']}" if decision["label"] else ""
+        console.print(f"  [cyan]maintenant → {verb}{target}[/cyan] — {decision['reason']}")
+        if decision["warning"]:
+            console.print(f"  [yellow]attention : {decision['warning']}[/yellow]")
+        for line in decision["trace"]:
+            console.print(f"    - {line['label']} ({line['verdict']}) : {line['why']}")
+
+
 @providers_app.command("cooldown")
 def providers_cooldown(
     provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur (voir `grimoire providers status`).")],
