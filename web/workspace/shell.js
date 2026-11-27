@@ -61,6 +61,8 @@ import { createChat } from './chat.js';
 import { createNotify } from './notify.js';
 import { createAutopilot } from './autopilot.js';
 import { focusForPref, focusStep, readWidthPref, writeWidthPref } from './spaces/atelier-layout-logic.js';
+import { CHANTIER_SECTION, OUTLINE_SECTION, chantierEntries, outlineEntries } from './spaces/atelier-palette-logic.js';
+import { getAtelierOutline } from './atelier-context.js';
 
 // Fin du premier montage d'espace : la première lecture du compteur d'attention
 // l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
@@ -2714,7 +2716,7 @@ let paletteOnly = false;
 
 // Ordre par défaut des sections titrées ; ne pas fusionner en une liste
 // plate (30+ entrées sans repère) comme avant.
-const PALETTE_SECTION_ORDER = ['Espaces', 'Affichage', 'Commandes', 'Projets', 'Tâches', 'Workflows', 'Fichiers'];
+const PALETTE_SECTION_ORDER = ['Espaces', 'Affichage', OUTLINE_SECTION, 'Commandes', 'Projets', 'Tâches', CHANTIER_SECTION, 'Workflows', 'Fichiers'];
 const PALETTE_SECTION_CAP = 12;
 // Le sélecteur de portée n'a pas de plafond : un projet que l'on ne voit pas
 // sans le taper n'est pas choisissable (M6, 4 projets sur 16 cachés).
@@ -2841,6 +2843,41 @@ function ensurePaletteFiles() {
   return paletteFilesLoading;
 }
 
+// Chantiers de l'Atelier (fonction en test) : la liste est lue à l'ouverture de la palette (au plus une fois par minute), puis
+// filtrée localement à chaque frappe, sans requête. Le plan du chantier ouvert (« Aller à : … ») vient de l'espace lui-même.
+const CHANTIERS_FRESH_MS = 60000;
+let paletteChantiers = [];
+let paletteChantiersAt = 0;
+let paletteChantiersLoading = false;
+
+function ensurePaletteChantiers() {
+  if (paletteChantiersLoading || !SPACES.includes(ATELIER_SPACE) || Date.now() - paletteChantiersAt < CHANTIERS_FRESH_MS) return;
+  paletteChantiersLoading = true;
+  api.atelierChantiers()
+    .then((data) => {
+      paletteChantiers = chantierEntries(data.chantiers).map((entry) => ({
+        section: CHANTIER_SECTION, label: entry.label, hint: entry.hint,
+        command: `grimoire cockpit serve # atelier?chantier=${entry.slug}`,
+        run: () => goto('atelier', { chantier: entry.slug }),
+      }));
+      paletteChantiersAt = Date.now();
+      if ($('palette').open) renderPalette($('palette-input').value, { keepSelection: true });
+    })
+    .catch(() => { /* route absente ou en erreur : la section reste vide, la prochaine ouverture réessaiera */ })
+    .finally(() => { paletteChantiersLoading = false; });
+}
+
+/** Les entrées de l'Atelier : les chantiers lus, et (chantier ouvert) ses phases et rubriques. */
+function atelierPaletteItems() {
+  const open = getAtelierOutline();
+  const outline = open ? outlineEntries(open.outline()).map((entry) => ({
+    section: OUTLINE_SECTION, label: entry.label, hint: entry.hint,
+    command: `grimoire cockpit serve # atelier?chantier=${open.slug}&phase=${entry.phase}`,
+    run: () => open.go(entry.phase, entry.rub),
+  })) : [];
+  return [...outline, ...paletteChantiers];
+}
+
 /** Pastille d'un projet : suivi par Grimoire, dossier sans Grimoire, ou disparu. */
 function projectState(entry) {
   if (entry.exists === false) return 'missing';
@@ -2908,6 +2945,7 @@ function openPalette(sectionFirst = null, { only = false } = {}) {
   // Première ouverture : les fichiers de Source arrivent après coup et sont
   // ajoutés à la liste, sans bloquer l'ouverture ni les autres sections.
   void ensurePaletteFiles();
+  if (!paletteOnly) ensurePaletteChantiers();
 }
 
 function closePalette() {
@@ -3035,7 +3073,7 @@ function renderPalette(query, { keepSelection = false } = {}) {
   list.scrollTop = 0;
 
   const bySection = new Map();
-  for (const item of [...paletteItems, ...displayItems()]) {
+  for (const item of [...paletteItems, ...atelierPaletteItems(), ...displayItems()]) {
     if (!paletteMatches(item, words)) continue;
     if (!bySection.has(item.section)) bySection.set(item.section, []);
     bySection.get(item.section).push(item);
