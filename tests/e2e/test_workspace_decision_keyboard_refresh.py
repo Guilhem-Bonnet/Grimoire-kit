@@ -114,7 +114,9 @@ def test_les_raccourcis_survivent_a_un_rafraichissement_du_ledger(workspace: Pag
     # Rafraîchissement réel : une écriture du ledger hors de la page déplace
     # l'empreinte du pouls ; la vue redessine et REMPLACE le nœud de la carte.
     _remember_card(workspace, tid, "dcAvant")
-    decoy = service.add(f"Témoin de rafraîchissement pour {tid}", ("critère",), actor="t", owner="amelia").task.id
+    # La priorité de LA tâche change : sa carte n'est plus la même, elle est reconstruite (une carte inchangée,
+    # elle, garde son nœud d'un pouls à l'autre).
+    service.prioritize(tid, "high", "t")
     _wait_for_redraw(workspace, tid, "dcAvant")
 
     # La carte redessinée a repris le focus clavier ; sans ce focus, « r » part
@@ -131,7 +133,7 @@ def test_les_raccourcis_survivent_a_un_rafraichissement_du_ledger(workspace: Pag
     card.locator("[data-role='answer-option']").nth(1).focus()
     assert workspace.evaluate("() => document.activeElement?.dataset?.value") == "abandonner"
     _remember_card(workspace, tid, "dcAvant2")
-    service.ledger.transition_task(decoy, TaskState.READY, actor_id="t")
+    service.prioritize(tid, "critical", "t")
     _wait_for_redraw(workspace, tid, "dcAvant2")
     assert workspace.evaluate("() => document.activeElement?.dataset?.role") == "decision"
     workspace.keyboard.press("2")
