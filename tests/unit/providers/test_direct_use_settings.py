@@ -494,6 +494,66 @@ def test_dossier_direct_use_en_lien_symbolique_est_refuse(project: Path, tmp_pat
     assert "lien symbolique" in ds.read_settings(project).problems[0]
 
 
+POLICY_REG = """providers:
+  - id: "anthropic"
+    enabled: true
+    provider_type: "hosted"
+    currency: "api"
+    invocation: "claude -p {{prompt}}"
+    data_policy: {{allowed_data_classes: ["public-docs"], forbidden_data_classes: ["secret"]}}
+{ollama}"""
+OLLAMA_CONFIGURED = """  - id: "ollama"
+    enabled: true
+    provider_type: "local"
+    currency: "local"
+    invocation: "ollama run {model} {prompt}"
+    models:
+      - {id: "gpt-oss:120b-cloud", tier: "strong"}
+      - {id: "llama3.2:3b", tier: "cheap"}
+"""
+CLOUD_TAGS = json.dumps({"models": [{"name": "gpt-oss:120b-cloud"}, {"name": "llama3.2:3b"}]}).encode()
+
+
+def _policy_decision(project: Path, key: str, **detect_kw: Any) -> tuple[str, str, str]:
+    kw: dict[str, Any] = {
+        "which": lambda n: f"/usr/bin/{n}", "fetch": lambda *_a: CLOUD_TAGS, "acp": lambda _p, _r: (True, ""),
+        "use_cache": False,
+    }
+    inv = detect(project, **{**kw, **detect_kw})
+    ds.write_usage(project, "conversation", [{"key": key}], inv.by_key())
+    state = ds.build_state(project, inv, data_class="secret", hold="")
+    decision = choose_for("conversation", state)
+    return state.data_refusals.get(key, ""), decision.kind, decision.key
+
+
+def test_modele_ollama_distant_non_configure_subit_la_politique_de_donnees_des_modeles_heberges(project: Path) -> None:
+    _registry(project, POLICY_REG.format(ollama=""))
+    refusal, kind, _key = _policy_decision(project, "ollama:gpt-oss:120b-cloud")
+    assert refusal and kind != "use"
+
+
+def test_modele_ollama_distant_configure_subit_la_politique_de_donnees_des_modeles_heberges(project: Path) -> None:
+    _registry(project, POLICY_REG.format(ollama=OLLAMA_CONFIGURED))
+    refusal, kind, _key = _policy_decision(project, "ollama:gpt-oss:120b-cloud")
+    assert refusal and kind != "use"
+
+
+def test_binaire_ollama_sous_la_racine_subit_la_politique_de_donnees_des_modeles_heberges(project: Path) -> None:
+    _registry(project, POLICY_REG.format(ollama=OLLAMA_CONFIGURED))
+    inside = str(project / "bin" / "ollama")
+    refusal, kind, _key = _policy_decision(project, "registre:ollama/llama3.2:3b", which=lambda _n: inside)
+    assert refusal and kind != "use"
+
+
+def test_vrai_ollama_local_reste_admis_avec_une_classe_secrete(project: Path) -> None:
+    _registry(project, POLICY_REG.format(ollama=OLLAMA_CONFIGURED))
+    refusal, kind, key = _policy_decision(project, "ollama:llama3.2:3b")
+    assert refusal == "" and (kind, key) == ("use", "ollama:llama3.2:3b")
+    _registry(project, POLICY_REG.format(ollama=""))  # détecté non configuré : même chose
+    refusal, kind, key = _policy_decision(project, "ollama:llama3.2:3b")
+    assert refusal == "" and (kind, key) == ("use", "ollama:llama3.2:3b")
+
+
 def test_empreinte_invalide_dans_le_fichier_ignore_l_entree(project: Path) -> None:
     _write_raw(project, json.dumps({"usages": {"autres": {"models": [{"key": "ollama:x", "fingerprint": "pas-hex"}]}}}))
     settings = ds.read_settings(project)

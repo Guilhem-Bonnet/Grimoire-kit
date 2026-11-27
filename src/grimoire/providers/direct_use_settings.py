@@ -285,9 +285,15 @@ def _data_refusals(root: Path, models: Iterable[ModelAvailability], data_class: 
         specs = {}
     refusals: dict[str, str] = {}
     for model in models:
-        if model.source == "hote":
+        spec = specs.get(model.provider_id)
+        # Une ligne exposée (hôte, modèle d'Ollama exécuté ailleurs, binaire non reconnu) vaut un modèle hébergé : la
+        # spec « local » ne l'exempte pas. Les vrais modèles locaux (egress « rien ») gardent l'exemption.
+        exposed_local = model.egress == "texte" and (
+            (model.source == "ollama" and not model.configured) or (spec is not None and spec.provider_type == "local")
+        )
+        if model.source == "hote" or exposed_local:
             reason = hosted_fallback_refusal(root, data_class)
-        elif model.configured and model.provider_id in specs:
+        elif model.configured and spec is not None:
             reason = data_policy_refusal(root, specs[model.provider_id], data_class)
         else:
             reason = ""

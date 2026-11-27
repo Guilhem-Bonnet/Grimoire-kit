@@ -42,6 +42,10 @@ Limites connues du lot :
 
 - L'empreinte d'une autorisation lie l'autorisation à ce que le nom désigne, mais elle n'authentifie pas le fichier
   d'autorisations lui-même : la protection de ce fichier est la zone de contrôle de l'humain, hors du dépôt.
+- L'empreinte d'« Ollama local » retient le chemin réel du binaire, pas son contenu : un binaire remplacé sur place à
+  la même adresse garde la même empreinte.
+- La liste confirmée de « Vérifier les connexions » lie un fournisseur et une URL, pas la résolution de leurs noms de
+  domaine : ce que le nom désigne au moment de l'envoi relève du réseau.
 - Une course résiduelle subsiste sur les dossiers parents du fichier d'autorisations : la vérification de droits et de
   liens se fait au moment de la lecture, pas de façon atomique avec elle.
 
