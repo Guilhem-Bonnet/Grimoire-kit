@@ -158,6 +158,7 @@ nav:
       - Rendre la preuve bloquante: guides/rendre-la-preuve-bloquante.md
       - VS Code: guides/vscode.md
       - Serveur MCP: guides/mcp.md
+      - Skills servis par MCP: guides/mcp-skills.md
       - SDK Python: guides/sdk-python.md
       - Extensions: guides/extensions.md
       - Développer un plugin: guides/developper-un-plugin.md
