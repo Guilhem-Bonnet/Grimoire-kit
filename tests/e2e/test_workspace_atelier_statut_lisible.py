@@ -177,6 +177,9 @@ def test_attaching_an_orphan_thread_announces_in_status_and_notification(browser
         path.write_text(path.read_text(encoding="utf-8").replace(first, "Un tout autre texte.").replace(second, f"{second} (revu)"), encoding="utf-8")
         page.evaluate("window.dispatchEvent(new Event('focus'))")
         page.wait_for_function(f"() => document.querySelector(\"[data-com='{cid}']\")?.getAttribute('data-anchor') === 'orphelin'", timeout=WAIT_MS)
+        # La modification extérieure peut encore valoir UNE relecture légitime (un pouls parti après l'écriture, avant le retour de
+        # focus) : on laisse passer deux pouls avant de commencer à choisir, pour que la fenêtre observée soit celle du choix seul.
+        _after_two_pulses(page, pulses, len(pulses))
         page.locator(f"[data-com='{cid}'] [data-act='attach']").click()
         expect(page.locator(".at-sheet.is-picking")).to_have_count(1)
         # Le mode de choix dure : aucune lecture du document (pouls, synchro) ne le défait ni ne remplace le bloc à choisir.
@@ -214,7 +217,10 @@ def test_a_message_repeated_identically_is_announced_again(browser: Browser, pro
             page.get_by_role("button", name="Confirmer le refus").click()
             expect(card).to_have_count(0, timeout=WAIT_MS)
             expect(page.locator(TOASTS)).to_contain_text(message, timeout=WAIT_MS)
-            toast_ids.append(str(page.locator(f"{TOASTS} [data-toast]", has_text=message).get_attribute("data-toast")))
+            toast = page.locator(f"{TOASTS} [data-toast]", has_text=message)
+            if toast_ids:  # le second : une NOUVELLE notification (autre identifiant) remplace la première
+                expect(toast).not_to_have_attribute("data-toast", toast_ids[0], timeout=WAIT_MS)
+            toast_ids.append(str(toast.get_attribute("data-toast")))
             expect(page.locator(STATUS)).to_have_text(message)
         assert toast_ids[0] != toast_ids[1], "le second message identique n'a pas été ré-annoncé en notification"
         seen: list[str] = page.evaluate("() => window.__seen")
