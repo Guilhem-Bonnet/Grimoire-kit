@@ -225,7 +225,16 @@ def _open_entry(page: Page, srv: dict[str, Any], word: str) -> None:
         " && document.querySelector('.kn-summary')?.textContent.includes('résultat')",
         arg=word, timeout=30_000,
     )
-    page.locator(".kn-res", has_text=word).first.click()
+    # Le détail se dessine deux fois : d'abord depuis la ligne de la liste, puis
+    # une seconde fois quand la lecture de l'entrée (`memory/entry`, avec son
+    # journal) arrive — le second dessin remplace tout l'inspecteur. Un geste
+    # engagé entre les deux (« Supprimer… » → confirmation) serait balayé et son
+    # bouton détaché : on attend donc la lecture, puis un cycle d'affichage où
+    # son rendu a eu lieu, avant de rendre la main.
+    with page.expect_response(lambda r: "/memory/entry?" in r.url, timeout=30_000) as read:
+        page.locator(".kn-res", has_text=word).first.click()
+    read.value.finished()
+    page.evaluate("() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())))")
     page.wait_for_function("(t) => document.querySelector('#inspector-body .kn-detail h2')?.textContent.includes(t)", arg=word)
 
 
