@@ -58,6 +58,7 @@ from grimoire.core.cadrage_conversation import (
     Tour,
     angle_pour,
     clean_text,
+    confirmable_en_groupe,
     mots_de_l_humain,
     rubrique_key,
 )
@@ -255,9 +256,20 @@ def _a_confirmer(conv: Conversation, ids: tuple[str, ...]) -> list[dict[str, Any
     return out
 
 
+def _a_confirmer_vue(conv: Conversation, cadre: Cadre, etape: Etape) -> list[dict[str, Any]]:
+    """``a_confirmer`` recalculé à l'identique depuis l'état, TEXTE ENTIER : le tour enregistré (1500 caractères) et la question
+    en cours (600) sont coupés, pas cette liste. En pause aussi : elle suspend les gestes, pas la relecture de ce qui attend."""
+    if etape.kind == "confirmer":
+        return _a_confirmer(conv, etape.ids)
+    if etape.kind == "pause" and conv.en_attente() and cadre.interview and cadre.blocking:
+        return _a_confirmer(conv, groupe_a_confirmer(conv))
+    return []
+
+
 def _liste_exacte(items: list[dict[str, Any]]) -> str:
     shown = [f"« {i['texte']} » ({i['action']} : {i['rubrique']['nom']}"
-             + (", reformulé par le moteur" if i["origine"] == "moteur" else "") + ")" for i in items]
+             + {"moteur": ", reformulé par le moteur", "document": ", texte relu dans le document"}.get(i["origine"], "") + ")"
+             for i in items]
     return "; ".join(shown)  # tout le groupe, jamais « et N autres » : le groupe est borné à ce qui s'affiche
 
 
@@ -331,7 +343,7 @@ def _conclure(ctx: Contexte, conv: Conversation, accuse: str, lourd: bool, modif
         "accuse": accuse, "message": message, "lourd": lourd, "rev": conv.rev, "document_modifie": modifie,
         "etape": {"kind": etape.kind, "pourquoi": etape.pourquoi, "angle": etape.angle, "manque": list(etape.manque)},
         "question": None if conv.question is None else _question_public(conv.question),
-        "a_confirmer": _a_confirmer(conv, etape.ids) if etape.kind == "confirmer" else [],
+        "a_confirmer": _a_confirmer_vue(conv, cadre, etape),
         "moteur": {"id": ctx.moteur.id, "degrade": ctx.moteur.degrade, "notes": list(ctx.moteur.notes)},
     }
 
@@ -365,6 +377,9 @@ def _confirmer(ctx: Contexte, conv: Conversation, items: list[Element]) -> bool:
     if not items:
         return False
     old = conv.element(items[0].remplace) if items[0].remplace else None
+    # Un ancien élément redevenu « à confirmer » par une reprise (panne en plein remplacement) n'est pas dans le document :
+    # son remplaçant confirmé, il est écarté sans nouvelle question.
+    depose = old if old is not None and old.statut == "propose" and not old.ecrit else None
     if old is not None and old.statut not in ("confirme", "corrige"):
         old = None
     store.check_room(conv)
@@ -372,14 +387,16 @@ def _confirmer(ctx: Contexte, conv: Conversation, items: list[Element]) -> bool:
     for item in items:
         item.statut, item.intention = "confirme", "ecrire"
     defaits = _journaliser(ctx, conv, old)  # le journal d'intention : une panne en route est reprise par la trace de l'entretien
-    rangement.ecrire(ctx.root, ctx.slug, conv, items, remplace=old)
+    ecrit = rangement.ecrire(ctx.root, ctx.slug, conv, items, remplace=old)  # vrai seulement si un fichier a changé
     for item in [*items, *defaits]:
         item.intention = ""
         if item.genre == "inconnu":
             conv.note(conv.ouvertes, item.question, item.source)
     if old is not None:
         old.statut = "ecarte"
-    return any(i.ecrit for i in items) or old is not None
+    if depose is not None:
+        depose.statut = "ecarte"
+    return ecrit
 
 
 def _proposer(conv: Conversation, ctx: Contexte, tour: Tour, texte: str, cible: tuple[str, str], angle: str, label: str,
@@ -390,12 +407,16 @@ def _proposer(conv: Conversation, ctx: Contexte, tour: Tour, texte: str, cible: 
     confirment seuls (``individuel``) ; aucun ne marque un angle couvert tant qu'il n'est pas confirmé.
     """
     made: list[Element] = []
-    for x in ctx.moteur.extraire_elements(EntreeExtraction(texte, rubrique_key(*cible), mode=conv.mode)):
+    extraits = ctx.moteur.extraire_elements(EntreeExtraction(texte, rubrique_key(*cible), mode=conv.mode))
+    # Une autre proposition du tour hors du groupe peut retirer ou restreindre ce qu'il accorde : confirmation individuelle.
+    groupable = confirmable_en_groupe([(x.texte, x.tronque) for x in extraits], texte)
+    for x in extraits:
         phase, section = _KEY[x.rubrique]
-        origine = "humain" if mots_de_l_humain(x.texte, texte) else "moteur"
+        origine = "humain" if mots_de_l_humain(x.texte, texte, tronque=x.tronque) else "moteur"
+        seul = (phase, section) != cible or origine == "moteur" or not groupable
         made.append(conv.new_element(
             "element", x.texte, phase, section, angle_pour(phase, section, angle), tour.n, question=label,
-            remplace=remplace if not made else "", origine=origine, individuel=(phase, section) != cible or origine == "moteur"))
+            remplace=remplace if not made else "", origine=origine, individuel=seul))
     return made
 
 
@@ -538,10 +559,11 @@ def _demarrer(ctx: Contexte) -> dict[str, Any]:
         out = _conclure(ctx, conv, "", False, False)
         out.update(cree=False, resume=resume(conv, _cadre(ctx)))
         return out
+    etape = prochaine_etape(conv, cadre)
     return {"cree": False, "resume": resume(conv, cadre), "rev": conv.rev, "document_modifie": False,
-            "etape": {"kind": prochaine_etape(conv, cadre).kind}, "moteur": {"id": ctx.moteur.id, "degrade": False, "notes": []},
+            "etape": {"kind": etape.kind}, "moteur": {"id": ctx.moteur.id, "degrade": False, "notes": []},
             "question": None if conv.question is None else _question_public(conv.question), "accuse": "", "message": "",
-            "lourd": False, "a_confirmer": []}
+            "lourd": False, "a_confirmer": _a_confirmer_vue(conv, cadre, etape)}  # la même liste que la vue
 
 
 def recevoir(ctx: Contexte, rev: int, texte: Any) -> dict[str, Any]:
@@ -594,18 +616,20 @@ def _decider(ctx: Contexte, rev: int, element_id: str, decision: str, texte: Any
             raise ConversationError("ce point n'a pas de texte à corriger : écarte-le, ou réponds à nouveau")
         new = clean_text(texte, MAX_ELEMENT_CHARS, what="texte corrigé")
         old = el.texte
-        if el.statut in ("confirme", "corrige"):
+        if el.statut in ("confirme", "corrige") or el.ecrit:  # « ecrit » : sa ligne est dans le document, même à reconfirmer (reprise)
             store.check_room(conv)
             defaits = _journaliser(ctx, conv, el)
             rangement.corriger(ctx.root, ctx.slug, conv, el, new)
             for d in defaits:
                 d.intention = ""
+            modifie = True
+            el.origine = "humain"  # c'est la frappe de l'humain, même si le texte relu venait du document
         else:
             el.texte, el.origine, el.individuel = new, "humain", False  # c'est la frappe de l'humain : ses mots exacts
-            _confirmer(ctx, conv, [el])
+            modifie = _confirmer(ctx, conv, [el])
         el.avant = [*el.avant, old][-10:]
         el.statut = "corrige"
-        return _conclure(ctx, conv, "C'est corrigé.", False, True)
+        return _conclure(ctx, conv, "C'est corrigé.", False, modifie)
     if decision == "ecarter":
         if el.statut == "ecarte":
             raise ConversationConflictError("cet élément est déjà écarté", "deja-tranche")
@@ -710,7 +734,7 @@ def vue(ctx: Contexte) -> dict[str, Any]:
         "tours": [{"n": t.n, "auteur": t.auteur, "texte": t.texte, "date": t.date, "geste": t.geste} for t in conv.tours[-VUE_TOURS:]],
         "tours_total": len(conv.tours),
         "question": None if conv.question is None else _question_public(conv.question),
-        "a_confirmer": _a_confirmer(conv, etape.ids) if etape.kind == "confirmer" else [],
+        "a_confirmer": _a_confirmer_vue(conv, cadre, etape),
         "elements": [_element_public(e) for e in conv.elements],
         "ouvertes": [{"texte": n.texte, "tour": n.tour} for n in conv.ouvertes],
         "plus_tard": [{"texte": n.texte, "tour": n.tour} for n in conv.plus_tard],

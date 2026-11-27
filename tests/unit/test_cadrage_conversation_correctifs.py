@@ -144,7 +144,6 @@ def test_un_fragment_sorti_de_son_contexte_n_est_pas_les_mots_de_l_humain(elemen
         ("Les relecteurs", "Les mainteneurs. Les relecteurs"),
         ("Les mainteneurs", "Les mainteneurs ; les relecteurs\nles testeurs"),
         ("je ne veux pas d'export CSV", "Les mainteneurs. Je ne veux pas d'export CSV !"),
-        ("une phrase coupée…", "Une phrase coupée au bout de mille mots"),
     ],
 )
 def test_le_tour_entier_ou_une_proposition_entiere_est_les_mots_de_l_humain(element: str, tour: str) -> None:

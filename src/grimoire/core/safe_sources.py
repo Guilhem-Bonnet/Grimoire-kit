@@ -42,6 +42,9 @@ REASON_DISPLAY_MAX = 300
 MAX_EXCLUSION_LINES = 10
 
 
+_NAME_UNSAFE_RE = re.compile(r"[^\w ./:()'’,+@-]")
+
+
 def safe_text(value: object, limit: int = NAME_DISPLAY_MAX) -> str:
     """Un texte venu d'un fichier, rendu sûr pour un affichage : borné, sans contrôle, sans crochets.
 
@@ -63,7 +66,8 @@ class Exclusion:
 
     @classmethod
     def of(cls, name: object, reason: object) -> Exclusion:
-        return cls(safe_text(name), safe_text(reason, REASON_DISPLAY_MAX))
+        # Le nom vient d'un nom de fichier : borné aux caractères d'un nom ordinaire, balisage neutralisé.
+        return cls(_NAME_UNSAFE_RE.sub("?", safe_text(name)), safe_text(reason, REASON_DISPLAY_MAX))
 
     def line(self) -> str:
         return f"{self.name} ({self.reason})"

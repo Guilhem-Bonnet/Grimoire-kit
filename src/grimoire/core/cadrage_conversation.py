@@ -42,6 +42,7 @@ __all__ = [
     "Tour",
     "angle_pour",
     "clean_text",
+    "confirmable_en_groupe",
     "mots_de_l_humain",
     "parse_date",
     "rubrique_key",
@@ -67,7 +68,8 @@ GESTES_TOUR: tuple[str, ...] = (
 MAX_TURNS = 500
 #: Au-delà, la conversation se termine d'elle-même en le disant (il reste de la place pour ses dernières paroles).
 PLEINE_A = MAX_TURNS - 3
-ORIGINES: tuple[str, ...] = ("humain", "moteur")
+#: ``document`` : le texte a été relu dans le fichier de phase par le programme (reprise après panne), ni dit ni reformulé.
+ORIGINES: tuple[str, ...] = ("humain", "moteur", "document")
 MAX_TURN_CHARS = 4000
 MAX_BOT_CHARS = 1500
 MAX_ELEMENTS = 200
@@ -163,8 +165,11 @@ _FIN_DE_PROPOSITION = re.compile(r"[.!?;…。？！；\n\r]+")
 #: Les mots qui renversent ou restreignent ce qui précède ou suit : une partie retirée qui en contient un change le sens.
 _RESTRICTIONS = frozenset({"ne", "n", "pas", "jamais", "aucun", "aucune", "aucunement", "sans", "sauf", "ni", "non", "plus", "rien",
                            "personne", "nul", "nulle", "hormis", "excepte", "exceptes", "exceptee", "exceptees", "plutot", "que",
-                           "contre", "moins", "seulement", "uniquement", "excluant", "exclure", "exclu"})
-_RESTRICTIONS_EXPRESSIONS = ("a l exception", "en dehors de", "a part", "pas question", "hors de", "au lieu de")
+                           "contre", "moins", "seulement", "uniquement", "excluant", "exclure", "exclu", "mais", "hors",
+                           "condition", "exclus", "exclue", "exclues", "exclusion", "interdit", "interdite", "interdits",
+                           "interdites"})
+_RESTRICTIONS_EXPRESSIONS = ("a l exception", "en dehors de", "a part", "pas question", "hors de", "au lieu de",
+                             "a condition", "seulement si", "a l exclusion")
 
 
 def _restreint(reste: str) -> bool:
@@ -173,19 +178,47 @@ def _restreint(reste: str) -> bool:
     return any(w in _RESTRICTIONS for w in reste.split()) or any(f" {p} " in flat for p in _RESTRICTIONS_EXPRESSIONS)
 
 
-def mots_de_l_humain(element: str, tour: str) -> bool:
+def _propositions(tour: str) -> list[str]:
+    """Les propositions du tour, à plat (casse, accents, ponctuation), sans les vides."""
+    return [p for p in (_plat(m) for m in _FIN_DE_PROPOSITION.split(tour)) if p]
+
+
+def confirmable_en_groupe(elements: list[tuple[str, bool]], tour: str) -> bool:
+    """Les éléments tirés de ce tour peuvent-ils se confirmer par le « oui » d'un groupe ?
+
+    Règle simple et sûre, sans liste de mots : oui seulement si le tour ne contient QUE ces éléments, c'est-à-dire si l'un
+    d'eux est le tour entier, ou si chaque proposition du tour est elle-même un de ces éléments. Dès qu'une autre
+    proposition du tour n'est pas dans le groupe (« Sauf les bots », « Uniquement en lecture », « Jamais le week-end »…),
+    elle peut retirer ou restreindre ce que les autres accordent : confirmation individuelle. ``(texte, tronque)`` : un
+    élément tronqué par le programme couvre la proposition dont il est le début.
+    """
+    whole = _plat(tour)
+    wanted = [(_plat(t.rstrip("…").rstrip() if cut else t), cut) for t, cut in elements]
+    if any(w == whole for w, _cut in wanted):
+        return True
+    props = _propositions(tour)
+    return bool(props) and all(any(p == w or (cut and p.startswith(w + " ")) for w, cut in wanted) for p in props)
+
+
+def mots_de_l_humain(element: str, tour: str, *, tronque: bool = False) -> bool:
     """L'élément reprend-il, mot pour mot, le tour ENTIER de l'humain ou une proposition ENTIÈRE de ce tour ?
 
     La comparaison se fait à la casse, aux accents et à la ponctuation près. Une proposition va d'une ponctuation forte
     (``. ! ? ; …``) ou d'un retour à la ligne à l'autre. Un fragment plus court qu'une proposition (« export CSV » tiré de
     « je ne veux pas d'export CSV ») n'est PAS « les mots de l'humain » : il a perdu son contexte, donc peut-être sa
-    négation ou sa restriction. Seule exception : un élément tronqué par le programme (terminé par « … ») reprend le début
-    d'une proposition, à condition que la suite coupée ne contienne ni négation ni restriction. Dans le doute : non.
+    négation ou sa restriction. Seule exception : un élément que le PROGRAMME a tronqué (``tronque``, drapeau posé à
+    l'instant de la coupe, jamais déduit du texte) reprend le début d'une proposition, à condition que la suite coupée ne
+    contienne ni négation ni restriction. Un texte qui finit par « … » sans ce drapeau (venu d'un moteur) n'est « les mots
+    de l'humain » que si l'humain a lui-même écrit ces points de suspension. Dans le doute : non.
     """
     wanted = _plat(element.rstrip("…").rstrip())
     if not wanted:
         return False
-    tronque = element.rstrip().endswith("…")
+    if element.rstrip().endswith("…"):
+        if not tronque and " ".join(element.split()) not in " ".join(tour.split()):
+            return False
+    else:
+        tronque = False
     morceaux = [tour, *_FIN_DE_PROPOSITION.split(tour)]
     for morceau in morceaux:
         plat = _plat(morceau)
