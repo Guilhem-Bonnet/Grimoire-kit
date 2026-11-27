@@ -30,6 +30,7 @@ import typer
 from rich.console import Console
 
 from grimoire.cli import cmd_setup
+from grimoire.cli.cmd_up_identity import set_config_user_name as _set_config_user_name
 from grimoire.cli.doctor_acp import check_acp_hosts
 from grimoire.cli.doctor_codex import check_codex_hooks
 from grimoire.cli.doctor_copilot import check_copilot_hooks
@@ -615,26 +616,6 @@ class _UpState:
     @property
     def failed(self) -> bool:
         return any(s.status == "failed" for s in self.steps)
-
-
-def _set_config_user_name(config_path: Path, user_name: str) -> bool:
-    """Update ``user.name`` in project-context.yaml (round-trip safe)."""
-    from ruamel.yaml import YAML
-
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    with open(config_path, encoding="utf-8") as fh:
-        data = yaml.load(fh)
-    if not isinstance(data, dict):
-        return False
-    user = data.get("user") or {}
-    if str(user.get("name", "")) == user_name:
-        return False
-    user["name"] = user_name
-    data["user"] = user
-    with open(config_path, "w", encoding="utf-8") as fh:
-        yaml.dump(data, fh)
-    return True
 
 
 def _split_csv(values: list[str] | None) -> list[str]:
