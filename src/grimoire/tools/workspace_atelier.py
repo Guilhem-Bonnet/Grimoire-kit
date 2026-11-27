@@ -29,6 +29,9 @@ Routes (préfixe ``/api/workspace/``) :
   :mod:`grimoire.tools.workspace_atelier_assistant` (le geste est un tour du chat ; la consigne vient d'une liste fermée).
 - ``GET atelier/chantiers/<slug>/trace``, ``GET|POST …/decoupage`` : lot 4, le document vivant, voir
   :mod:`grimoire.tools.workspace_atelier_trace`. Aucune route ne valide une exigence : c'est un geste de la MOA, au terminal.
+- ``GET atelier/chantiers/<slug>/history[?page=n]``, ``GET …/history/<id>`` : l'historique des versions du chantier (commits
+  git qui ont touché ses fichiers de phase, plus ``working`` = modifications non commitées), en lecture seule, voir
+  :mod:`grimoire.tools.workspace_atelier_history`.
 """
 
 from __future__ import annotations
@@ -570,6 +573,13 @@ def get(root: Path, path: str, query: dict[str, list[str]]) -> Any:
             if rest[2] == "trace"
             else live.decoupage_preview(root, rest[1])
         )
+    if len(rest) in (3, 4) and rest[0] == "chantiers" and rest[2] == "history":
+        from grimoire.tools import workspace_atelier_history as history
+
+        # L'historique des versions (git, lecture seule) : un seul paramètre libre, `page` ; l'identifiant est revérifié.
+        if len(rest) == 3:
+            return history.listing(root, rest[1], (query.get("page") or ["1"])[0])
+        return history.detail(root, rest[1], rest[3])
     raise FileNotFoundError(f"route inconnue : {path}")
 
 
