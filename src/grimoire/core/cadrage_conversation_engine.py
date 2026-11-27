@@ -28,6 +28,7 @@ from grimoire.core.cadrage_conversation import (
     clean_text,
     rubrique_key,
 )
+from grimoire.core.cadrage_conversation_moteur_vue import Presentation, Rendu
 
 __all__ = [
     "CLASSES",
@@ -393,7 +394,9 @@ class Garde:
     """
 
     def __init__(self, moteur: Any, *, delai_s: float = DELAI_MOTEUR_S, repli: MoteurSansModele | None = None,
-                 rejeu: dict[tuple[str, str], Any] | None = None) -> None:
+                 rejeu: dict[tuple[str, str], Any] | None = None, presentation: Presentation | None = None) -> None:
+        #: Ce que la vue dit du moteur (modèle, sortie de texte, raison) : posé par le programme, jamais par le moteur.
+        self.presentation = presentation
         #: Le moteur sans modèle est du programme : le gardien en construit LUI-MÊME une instance neuve (une instance fournie
         #: peut avoir une méthode remplacée) ; seul ce moteur interne est cru sur le drapeau de troncature.
         self.interne = type(moteur) is MoteurSansModele
@@ -411,7 +414,10 @@ class Garde:
         """Un gardien autour de ce que rend ``fabrique`` ; une fabrique qui lève ou tarde donne le moteur sans modèle, avec une note."""
         essai = cls(MoteurSansModele(), delai_s=delai_s)
         made = essai._appel("fabrique", "", lambda _m: fabrique(), lambda out: out, lambda: None)
-        garde = cls(MoteurSansModele() if made is None else made)
+        presentation: Presentation | None = None
+        if isinstance(made, Rendu):  # la fabrique dit aussi ce que la vue montrera ; seul un ``Rendu`` du programme compte
+            made, presentation = made.moteur, made.presentation
+        garde = cls(MoteurSansModele() if made is None else made, presentation=presentation)
         garde.notes = list(essai.notes)
         if made is None and not garde.notes:
             garde.notes.append("fabrique : aucun moteur rendu, je reprends sans modèle")
@@ -419,13 +425,13 @@ class Garde:
 
     def enregistreur(self) -> Garde:
         """Une copie qui APPELLE le moteur et se souvient : le calcul à blanc, hors du verrou du fichier."""
-        copie = Garde(self.moteur, delai_s=self.delai_s, repli=self.repli)
+        copie = Garde(self.moteur, delai_s=self.delai_s, repli=self.repli, presentation=self.presentation)
         copie.notes = list(self.notes)
         return copie
 
     def rejouer(self, enregistre: Garde) -> Garde:
         """Un gardien qui rend ce que ``enregistre`` a calculé, sans rappeler le moteur (sous le verrou) ; hors mémo : repli."""
-        garde = Garde(self.moteur, delai_s=self.delai_s, repli=self.repli, rejeu=enregistre.memo)
+        garde = Garde(self.moteur, delai_s=self.delai_s, repli=self.repli, rejeu=enregistre.memo, presentation=self.presentation)
         garde.notes = list(enregistre.notes)
         return garde
 

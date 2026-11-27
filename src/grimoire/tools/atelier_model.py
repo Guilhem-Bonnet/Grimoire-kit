@@ -49,6 +49,7 @@ __all__ = [
     "DEFAULT_ALIASES",
     "GESTES",
     "ModelError",
+    "account_response",
     "api_key",
     "run",
     "settings",
@@ -359,6 +360,26 @@ def _record_billed(root: Path, slug: str, model: str, raw: bytes, local_id: str)
     )
     logging.getLogger(__name__).warning("atelier_model : %s", message)
     return message
+
+
+def account_response(root: Path, slug: str, model: str, raw: bytes) -> str:
+    """Inscrit la consommation déclarée d'une réponse 200 de l'API (compteur du jour, quota du kit) ; rend l'avertissement.
+
+    Pour un autre appelant que :func:`run` (la conversation de cadrage, lot B2 de l'épique #1477) : sans cela, le plafond
+    de jetons posé par l'humain ne verrait pas ses appels. Une réponse sans usage lisible n'inscrit rien et le dit.
+    """
+    try:
+        used = json.loads(raw)["usage"]
+        counts = (used["input_tokens"], used["output_tokens"])
+    except Exception:
+        return "consommation illisible : non comptée"
+    if not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in counts):
+        return "consommation illisible : non comptée"
+    tokens = counts[0] + counts[1]
+    warning = _record_billed(root, slug, model, raw, uuid.uuid4().hex)
+    with contextlib.suppress(ModelError):
+        _adjust(root, slug, tokens, cfg=None, now=None)
+    return warning
 
 
 def status(root: Path, slug: str) -> dict[str, Any]:
