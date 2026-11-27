@@ -91,6 +91,7 @@ from grimoire.providers.data_policy import split_by_data_policy
 from grimoire.providers.quota import QuotaSignal, classify_failure, observe_window
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
 from grimoire.providers.routing import candidates as provider_candidates
+from grimoire.providers.secrets import KeyEndpointError
 from grimoire.providers.state import (
     available_models,
     load_state,
@@ -849,7 +850,10 @@ def _run_provider_call(
     """
     argv = render_invocation(provider.invocation or "", prompt=prompt, model=model)
     started = time.monotonic()
-    env = provider_env(provider.id)
+    try:
+        env = provider_env(provider)
+    except KeyEndpointError as exc:  # clé saisie pour une autre adresse : le sous-processus n'est pas lancé
+        return 1, "", f"{provider.id} : {exc}", time.monotonic() - started, "error", None
     try:
         completed = subprocess.run(
             argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace",

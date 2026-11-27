@@ -18,6 +18,7 @@ from grimoire.providers.registry import read_registry
 from grimoire.providers.secrets import env_for_provider
 from grimoire.tools.workspace_routes import POST_ROUTES, PREFIX
 
+_DEEPSEEK = "https://api.deepseek.com"
 STANDARD = Path("_grimoire/standard")
 REGISTRY_PATH = STANDARD / "llm-provider-registry.yaml"
 
@@ -127,7 +128,7 @@ def test_set_key_without_control_key_is_refused(tmp_path: Path) -> None:
     with pytest.raises(PermissionError):
         handler(root, {"provider_id": "deepseek", "env_var": "DEEPSEEK_API_KEY", "value": "sk-test"})
 
-    assert env_for_provider("deepseek") == {}
+    assert env_for_provider("deepseek", endpoints=[_DEEPSEEK]) == {}
 
 
 def test_set_key_with_control_key_writes_to_the_store_not_the_registry(tmp_path: Path) -> None:
@@ -144,7 +145,7 @@ def test_set_key_with_control_key_writes_to_the_store_not_the_registry(tmp_path:
         },
     )
 
-    assert env_for_provider("deepseek") == {"DEEPSEEK_API_KEY": "sk-test-abc"}
+    assert env_for_provider("deepseek", endpoints=[_DEEPSEEK]) == {"DEEPSEEK_API_KEY": "sk-test-abc"}
     registry_text = (root / REGISTRY_PATH).read_text(encoding="utf-8")
     assert "sk-test-abc" not in registry_text  # jamais dans le registre du projet
 

@@ -51,7 +51,7 @@ from grimoire.providers.capabilities import (
     resolve_capabilities,
 )
 from grimoire.providers.registry import ProviderSpec, read_registry
-from grimoire.providers.secrets import env_for_provider, is_valid_provider_id, provider_key_var
+from grimoire.providers.secrets import KeyEndpointError, env_for_provider, is_valid_provider_id, provider_key_var
 
 PROVIDERS_CAPABILITIES_FILE = Path("_grimoire-output/providers-capabilities.json")
 _SCHEMA = "grimoire-provider-capabilities/v1"
@@ -114,13 +114,24 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NoRedirect())
 
 
+def _key_target(endpoint: _Endpoint) -> str:
+    """Le point d'accès où la clé part : la base déclarée au registre, ou l'origine d'une adresse documentée."""
+    if endpoint.store_only:
+        return endpoint.url.removesuffix("/v1/models")
+    parts = urlsplit(endpoint.url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
 def _key_value(provider_id: str, endpoint: _Endpoint) -> str:
     """La clé de *provider_id* ; vide si absente.
 
     Fournisseur documenté : magasin de secrets, puis environnement. Hôte venu du registre :
     magasin seulement — l'environnement porte les clés d'autres fournisseurs.
+
+    Lève :class:`~grimoire.providers.secrets.KeyEndpointError` si la clé du magasin n'a pas été saisie pour
+    ce point d'accès : elle n'est alors rendue à personne, l'environnement non plus n'est pas consulté.
     """
-    stored = env_for_provider(provider_id).get(endpoint.key_var, "")
+    stored = env_for_provider(provider_id, endpoints=[_key_target(endpoint)]).get(endpoint.key_var, "")
     if endpoint.store_only:
         return stored.strip()
     return (stored or os.environ.get(endpoint.key_var, "")).strip()
@@ -333,7 +344,10 @@ def _probe_litellm(provider: ProviderSpec, probed_at: str) -> CapabilityProbe:
         return CapabilityProbe(provider.id, False, note, probed_at)
     # Les variables réservées (`_reserved_key_vars`) sont toutes celles d'un id refusé ci-dessus.
     endpoint = _Endpoint(f"{base}/v1/models", provider_key_var(provider.id), "bearer", store_only=True)
-    key = _key_value(provider.id, endpoint)
+    try:
+        key = _key_value(provider.id, endpoint)
+    except KeyEndpointError as exc:
+        return CapabilityProbe(provider.id, False, f"non mesuré : {exc}", probed_at, endpoint.url)
     if not key:
         note = f"non mesuré : clé absente ({endpoint.key_var}, voir `grimoire providers set-key`)"
         return CapabilityProbe(provider.id, False, note, probed_at, endpoint.url)
@@ -389,7 +403,10 @@ def probe_provider_capabilities(provider: ProviderSpec, *, now: datetime | None 
     if endpoint.store_only and endpoint.key_var in _reserved_key_vars():
         note = f"non mesuré : variable de clé réservée à un autre fournisseur ({endpoint.key_var})"
         return CapabilityProbe(provider.id, False, note, probed_at, endpoint.url)
-    key = _key_value(provider.id, endpoint)
+    try:
+        key = _key_value(provider.id, endpoint)
+    except KeyEndpointError as exc:
+        return CapabilityProbe(provider.id, False, f"non mesuré : {exc}", probed_at, endpoint.url)
     if not key:
         note = f"non mesuré : clé absente ({endpoint.key_var}, voir `grimoire providers set-key`)"
         return CapabilityProbe(provider.id, False, note, probed_at, endpoint.url)

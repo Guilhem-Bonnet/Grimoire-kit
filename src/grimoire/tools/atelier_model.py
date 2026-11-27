@@ -170,14 +170,17 @@ def resolve_model(cfg: Settings, geste: str, choice: str = "") -> tuple[str, str
 
 
 def api_key() -> str:
-    """La clé : l'environnement, sinon le magasin de clés du kit. Vide si absente ou de forme impropre à un en-tête."""
+    """La clé : l'environnement, sinon le magasin de clés du kit. Vide si absente ou de forme impropre à un en-tête.
+
+    Une clé du magasin n'est rendue que si elle a été saisie pour l'adresse de :data:`API_URL` (la sienne, officielle).
+    """
     value = os.environ.get(KEY_VAR, "").strip()
     if not value:
         try:
             from grimoire.providers.secrets import env_for_provider
 
-            value = env_for_provider("anthropic").get(KEY_VAR, "").strip()
-        except Exception:  # un magasin illisible = pas de clé, rien de plus
+            value = env_for_provider("anthropic", endpoints=[API_URL.removesuffix("/v1/messages")]).get(KEY_VAR, "").strip()
+        except Exception:  # un magasin illisible, ou une clé saisie pour une autre adresse = pas de clé, rien de plus
             value = ""
     return value if value.isascii() and value.isprintable() and " " not in value else ""
 

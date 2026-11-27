@@ -51,7 +51,7 @@ from grimoire.providers.registry import (
     ProviderSpec,
     read_registry,
 )
-from grimoire.providers.secrets import is_valid_provider_id, list_secrets, provider_key_var
+from grimoire.providers.secrets import KeyEndpointError, is_valid_provider_id, list_secrets, provider_key_var
 from grimoire.providers.state import ProviderRuntimeState, load_state
 
 __all__ = [
@@ -684,7 +684,11 @@ def _spec_key_endpoint(spec: ProviderSpec) -> tuple[str, str] | None:
         endpoint = cp._hosted_endpoint(spec)
         if endpoint is None or (endpoint.store_only and endpoint.key_var in cp._reserved_key_vars()):
             return None
-    if not cp._key_value(spec.id, endpoint):  # présence seulement : la valeur n'en sort pas
+    try:
+        present = bool(cp._key_value(spec.id, endpoint))  # présence seulement : la valeur n'en sort pas
+    except KeyEndpointError:  # clé saisie pour une autre adresse : la sonde ne l'enverrait pas, la page ne la propose pas
+        return None
+    if not present:
         return None
     return spec.id, str(endpoint.url).split("?", 1)[0]
 

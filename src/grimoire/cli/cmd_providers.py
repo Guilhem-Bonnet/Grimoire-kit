@@ -46,7 +46,7 @@ from grimoire.providers.registry import (
     set_provider_enabled,
 )
 from grimoire.providers.routing import choose
-from grimoire.providers.secrets import list_secrets, remove_secret, set_secret
+from grimoire.providers.secrets import list_secrets, remove_secret, set_secret, unbound_secrets
 from grimoire.providers.state import ProviderRuntimeState, clear_unknown_suspensions, load_state, record_failure
 
 providers_app = typer.Typer(
@@ -104,6 +104,11 @@ def _models_by_tier(provider: ProviderSpec) -> str:
     return " · ".join(parts) if parts else "—"
 
 
+def provider_unbound_keys(provider_id: str) -> list[str]:
+    """Les variables de clé de *provider_id* saisies avant leur liaison à un point d'accès (jamais une valeur)."""
+    return sorted(entry.env_var for entry in unbound_secrets() if entry.provider == provider_id)
+
+
 def _provider_json(
     provider: ProviderSpec,
     state: dict[str, ProviderRuntimeState],
@@ -139,6 +144,8 @@ def _provider_json(
         "probe_note": entry.probe_note if entry is not None else None,
         # #1281 L3 : capacités avec leur provenance (declared / probed / documented / unknown).
         "capabilities": capabilities_for(provider, probe).to_dict(),
+        # Clés saisies avant leur liaison à un point d'accès : valables vers l'adresse officielle seulement.
+        "keys_unbound": provider_unbound_keys(provider.id),
     }
 
 
@@ -188,6 +195,12 @@ def providers_status(
             _state_label(provider.id, state, now=now),
         )
     console.print(table)
+    for provider in providers:
+        if provider_unbound_keys(provider.id):
+            console.print(
+                f"[yellow]●[/yellow] {provider.id} : clé non liée à un point d'accès — valable seulement vers l'adresse "
+                f"officielle ; `grimoire providers set-key {provider.id} <VARIABLE>` la lie."
+            )
 
     console.print("\n[bold]Prochain choix par palier[/bold]")
     for tier in SUPPORTED_MODEL_TIERS:
@@ -640,22 +653,27 @@ def providers_remove(
 def providers_set_key(
     provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur.")],
     env_var: Annotated[str, typer.Argument(help="Nom de la variable d'environnement (ex: DEEPSEEK_API_KEY).")],
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
 ) -> None:
     """Poser une clé API en saisie masquée — jamais en argument, jamais dans le registre.
 
     Écrit dans ``~/.env-store/`` (``grimoire.providers.secrets``), lu
     automatiquement par `grimoire task dispatch` au moment d'invoquer ce
-    fournisseur.
+    fournisseur. La clé est liée au point d'accès que le registre du projet déclare
+    pour ce fournisseur (et à son adresse officielle s'il est documenté) : si la
+    déclaration change d'adresse ensuite, la clé n'est plus rendue — saisis-la de nouveau.
     """
     import getpass
 
+    from grimoire.providers.key_endpoint import binding_endpoints
+
     value = getpass.getpass(f"Valeur pour {env_var} ({provider_id}) — saisie masquée : ")
     try:
-        path = set_secret(provider_id, env_var, value)
+        path = set_secret(provider_id, env_var, value, endpoints=binding_endpoints(project_root.resolve(), provider_id))
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    console.print(f"[green]✓[/green] {env_var} enregistré pour {provider_id!r} ({path}, chmod 600).")
+    console.print(f"[green]✓[/green] {env_var} enregistré pour {provider_id!r} ({path}, chmod 600), lié à son point d'accès.")
 
 
 @providers_app.command("remove-key")
@@ -687,8 +705,13 @@ def providers_secrets_list(ctx: typer.Context, json_output: Annotated[bool, _JSO
         console.print("[dim]Aucune clé posée (`grimoire providers set-key`).[/dim]")
         return
     table = Table(title="Clés posées")
-    for column in ("Fournisseur", "Variable", "Fichier", "Posée le"):
+    for column in ("Fournisseur", "Variable", "Fichier", "Posée le", "Point d'accès"):
         table.add_column(column)
     for entry in entries:
-        table.add_row(entry.provider, entry.env_var, entry.file, entry.added_at)
+        table.add_row(entry.provider, entry.env_var, entry.file, entry.added_at, "lié" if entry.bound else "non lié")
     console.print(table)
+    if any(not entry.bound for entry in entries):
+        console.print(
+            "[yellow]●[/yellow] clé non liée : valable seulement vers l'adresse officielle de son fournisseur ; "
+            "`grimoire providers set-key <fournisseur> <VARIABLE>` la lie."
+        )

@@ -28,7 +28,7 @@ from grimoire.missions.schemas import MissionTask
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.data_policy import data_policy_refusal
 from grimoire.providers.registry import ModelSpec, ProviderSpec, read_registry
-from grimoire.providers.secrets import env_for_provider, provider_key_var, store_dir
+from grimoire.providers.secrets import KeyEndpointError, env_for_provider, provider_key_var, store_dir
 from grimoire.providers.state import available_models, load_state
 
 _SUBAGENT_MODEL_VARS = (
@@ -57,10 +57,21 @@ def settings_path(provider: str) -> Path:
     return store_dir() / f"{provider}.claude-settings.json"
 
 
-def _key_var(provider: str) -> str:
-    """La variable de la clé dans le magasin, vide si elle n'y est pas."""
-    name = provider_key_var(provider)
-    return name if name and env_for_provider(provider).get(name) else ""
+def _key_var(provider: ProviderSpec, base_url: str) -> str:
+    """La variable de la clé dans le magasin, vide si elle n'y est pas.
+
+    Les réglages écrits pointent *base_url* et l'``apiKeyHelper`` y relit la clé : elle doit avoir été saisie pour
+    cette adresse. :class:`~grimoire.providers.secrets.KeyEndpointError` sinon (un fournisseur local n'en a pas
+    besoin : une clé liée ailleurs y est ignorée).
+    """
+    name = provider_key_var(provider.id)
+    try:
+        found = env_for_provider(provider.id, endpoints=[base_url]).get(name) if name else ""
+    except KeyEndpointError:
+        if provider.provider_type == "local":
+            return ""
+        raise
+    return name if found else ""
 
 
 def _enabled_provider(root: Path, provider_id: str) -> ProviderSpec | None:
@@ -171,7 +182,10 @@ def _decide(
             f"{provider.id} : contexte du modèle {models[0].id} ({window} tokens) inférieur "
             f"à celui du bundle de la tâche (~{context_tokens} tokens)"
         )
-    key_var = _key_var(provider.id)
+    try:
+        key_var = _key_var(provider, base_url)
+    except KeyEndpointError as exc:
+        return None, f"{provider.id} : {exc}"
     if provider.provider_type != "local" and not key_var:
         name = f"{provider.id.upper().replace('-', '_')}_API_KEY"
         return None, f"{provider.id} : clé absente du magasin ({name})"
@@ -262,7 +276,10 @@ def model_settings(root: Path, provider_id: str, tier: str, *, now: datetime | N
     models = available_models(provider, tier, state, now=moment) or available_models(provider, "cheap", state, now=moment)
     if not models:
         return "", None
-    key_var = _key_var(provider.id)
+    try:
+        key_var = _key_var(provider, base_url)
+    except KeyEndpointError:
+        return "", None
     if provider.provider_type != "local" and not key_var:
         return "", None
     return models[0].id, _write_settings(provider.id, base_url, models[0].id, key_var)

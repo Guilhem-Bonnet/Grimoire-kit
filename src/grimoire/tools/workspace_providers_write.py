@@ -86,8 +86,10 @@ def providers_set_key_route(project_root: Path, body: dict[str, Any]) -> Any:
     value = str(body.get("value") or "")
     if not provider_id or not env_var:
         raise ValueError("`provider_id` et `env_var` requis")
-    try:
-        path = set_secret(provider_id, env_var, value)
+    from grimoire.providers.key_endpoint import binding_endpoints
+
+    try:  # la clé est liée au point d'accès que le registre déclare maintenant (geste d'autorité vérifié ci-dessus)
+        path = set_secret(provider_id, env_var, value, endpoints=binding_endpoints(project_root, provider_id))
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
     return {"provider_id": provider_id, "env_var": env_var, "file": str(path)}

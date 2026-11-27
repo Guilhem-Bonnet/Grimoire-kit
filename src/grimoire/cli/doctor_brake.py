@@ -25,6 +25,10 @@ def apply_host_brake_check(
 
         apply_moa_moe_check(results, project_root, fmt=fmt, console=console)
 
+        from grimoire.cli.doctor_keys import apply_key_binding_check
+
+        apply_key_binding_check(results, project_root, fmt=fmt, console=console)
+
 
 def _brake(results: list[dict[str, Any]], *, fmt: str, console: Console) -> None:
     """Dit si le frein de la version d'hôte courante est prouvé, et sinon comment l'obtenir.

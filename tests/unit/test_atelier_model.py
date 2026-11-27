@@ -141,7 +141,7 @@ def test_la_cle_du_magasin_du_kit_est_lue_si_l_environnement_est_vide(
 ) -> None:
     from grimoire.providers import secrets
 
-    monkeypatch.setattr(secrets, "env_for_provider", lambda provider: {am.KEY_VAR: DUMMY_KEY} if provider == "anthropic" else {})
+    monkeypatch.setattr(secrets, "env_for_provider", lambda provider, **_kw: {am.KEY_VAR: DUMMY_KEY} if provider == "anthropic" else {})
     assert am.api_key() == DUMMY_KEY
     asst.act(project, "un", {"geste": "modele-reformuler", "block_id": _block(project)})
     assert transport.calls[0]["headers"]["x-api-key"] == DUMMY_KEY
@@ -156,7 +156,7 @@ def test_une_cle_impropre_a_un_en_tete_est_comme_absente(monkeypatch: pytest.Mon
 def test_un_magasin_de_cles_illisible_donne_pas_de_cle(monkeypatch: pytest.MonkeyPatch) -> None:
     from grimoire.providers import secrets
 
-    def boom(provider: str) -> dict[str, str]:
+    def boom(provider: str, **_kw: object) -> dict[str, str]:
         raise OSError("illisible")
 
     monkeypatch.setattr(secrets, "env_for_provider", boom)

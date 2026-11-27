@@ -439,7 +439,7 @@ def transport(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 def test_la_cle_part_vers_la_liste_confirmee_identique(project: Path, transport: list[str]) -> None:
     _write_registry(project, _gateway("https://gw.example"))
-    set_secret("gw", "GW_API_KEY", "k")
+    set_secret("gw", "GW_API_KEY", "k", endpoints=["https://gw.example"])
     shown = av.key_endpoints(project)
     assert shown == [{"provider_id": "gw", "url": "https://gw.example/v1/models"}]
     assert av.probe_remote(project, shown) == ["gw"]
@@ -449,7 +449,7 @@ def test_la_cle_part_vers_la_liste_confirmee_identique(project: Path, transport:
 
 def test_registre_reecrit_apres_confirmation_est_refuse_sans_appel_reseau(project: Path, transport: list[str]) -> None:
     _write_registry(project, _gateway("https://gw.example"))
-    set_secret("gw", "GW_API_KEY", "k")
+    set_secret("gw", "GW_API_KEY", "k", endpoints=["https://gw.example"])
     shown = av.key_endpoints(project)
     _write_registry(project, _gateway("https://evil.example"))
     with pytest.raises(av.EndpointsChangedError, match="la liste a changé, relis-la"):
@@ -459,7 +459,7 @@ def test_registre_reecrit_apres_confirmation_est_refuse_sans_appel_reseau(projec
 
 def test_liste_vide_confirmee_puis_registre_peuple_est_refuse(project: Path, transport: list[str]) -> None:
     _write_registry(project, _gateway("https://gw.example"))
-    set_secret("gw", "GW_API_KEY", "k")
+    set_secret("gw", "GW_API_KEY", "k", endpoints=["https://gw.example"])
     with pytest.raises(av.EndpointsChangedError):
         av.probe_remote(project, [])
     assert transport == []
@@ -474,7 +474,7 @@ def test_liste_vide_confirmee_et_registre_sans_cle_n_envoie_rien(project: Path, 
 @pytest.mark.parametrize("confirmed", [None, "gw", {"provider_id": "gw"}, [{"provider_id": "gw"}], [42]])
 def test_liste_absente_ou_illisible_est_refusee(project: Path, transport: list[str], confirmed: Any) -> None:
     _write_registry(project, _gateway("https://gw.example"))
-    set_secret("gw", "GW_API_KEY", "k")
+    set_secret("gw", "GW_API_KEY", "k", endpoints=["https://gw.example"])
     with pytest.raises(av.EndpointsChangedError):
         av.probe_remote(project, confirmed)
     assert transport == []
@@ -484,7 +484,7 @@ def test_le_registre_n_est_lu_qu_une_fois_et_la_sonde_suit_cette_lecture(
     project: Path, transport: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_registry(project, _gateway("https://gw.example"))
-    set_secret("gw", "GW_API_KEY", "k")
+    set_secret("gw", "GW_API_KEY", "k", endpoints=["https://gw.example"])
     shown = av.key_endpoints(project)
     real = av.read_registry
     reads: list[int] = []
@@ -551,7 +551,7 @@ def test_anthropic_base_url_non_admise_n_est_ni_listee_ni_sondee_et_est_dite_inv
 
 def test_anthropic_base_url_https_nette_reste_admise(project: Path) -> None:
     _write_registry(project, HOSTED_BASE.format(url="https://proxy.example/"))
-    set_secret("an", "AN_API_KEY", "k")
+    set_secret("an", "AN_API_KEY", "k", endpoints=["https://proxy.example"])
     assert av.key_endpoints(project) == [{"provider_id": "an", "url": "https://proxy.example/v1/models"}]
 
 

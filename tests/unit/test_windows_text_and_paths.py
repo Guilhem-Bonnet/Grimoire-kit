@@ -61,7 +61,7 @@ def test_un_fournisseur_python_ecrit_en_utf8_malgre_une_console_cp1252(
     cp1252 et « résumé » revient en ``r\\ufffdsum\\ufffd``.
     """
     _simulate_windows_encoding(monkeypatch)
-    monkeypatch.setattr(dispatch_provider_env, "env_for_provider", lambda provider_id: {})
+    monkeypatch.setattr(dispatch_provider_env, "env_for_provider", lambda provider_id, **_kw: {})
 
     script = tmp_path / "fournisseur.py"
     script.write_text(

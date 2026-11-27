@@ -38,6 +38,28 @@ l'Ollama de la machine liste mais exécute à distance (entrée portant `remote_
 `:cloud`) est toujours étiqueté exposé et payant, jamais « rien ne sort de la machine ». Un exécutable `ollama` qui se
 trouve sous la racine du projet n'est pas reconnu comme l'Ollama local.
 
+### Clés d'API liées à leur point d'accès
+
+`grimoire providers set-key <fournisseur> <VARIABLE> [--project-root <chemin>]` (et la saisie du cockpit, sous la clé
+de contrôle) lie la clé au point d'accès que le registre du projet déclare pour ce fournisseur au moment de la saisie :
+`anthropic_base_url`, `base_url`, et, pour un fournisseur documenté (`anthropic`, `openai`, `google-gemini`,
+`deepseek`, `moonshot`), son adresse officielle par défaut, qui compte comme un point d'accès explicite. Le magasin ne
+retient qu'une empreinte du point d'accès normalisé (schéma, hôte, port, chemin de base ; casse de l'hôte, port par
+défaut, `/` final et `/v1` final n'y changent rien), jamais l'adresse.
+
+Chaque chemin qui envoie une clé donne au magasin le point d'accès visé : la sonde de capacités et « Vérifier les
+connexions », l'appel d'un fournisseur par `task dispatch`, le worker compatible Anthropic, le worker opencode et
+l'assistant de l'Atelier. Si l'empreinte diffère, la clé n'est pas rendue et l'erreur dit : « l'adresse de ce
+fournisseur a changé depuis la saisie de la clé ; saisis-la de nouveau pour l'approuver », sans afficher la clé ni
+l'adresse. Une adresse en `http://` hors boucle locale, ou portant des identifiants, une requête ou un fragment, n'est
+jamais admise pour recevoir une clé.
+
+Migration : une clé saisie avant cette liaison (sans empreinte) reste utilisable vers l'adresse officielle par défaut de
+son fournisseur seulement ; vers toute autre adresse (passerelle, `base_url` ou `anthropic_base_url` personnalisés),
+elle exige une nouvelle saisie. `grimoire providers secrets` (colonne « Point d'accès »), `grimoire providers status`
+(`keys_unbound` en JSON) et `grimoire doctor` (contrôle `provider_keys_bound`, avertissement) signalent les clés non
+liées ; ressaisir la clé la lie.
+
 Limites connues du lot :
 
 - L'empreinte d'une autorisation lie l'autorisation à ce que le nom désigne, mais elle n'authentifie pas le fichier

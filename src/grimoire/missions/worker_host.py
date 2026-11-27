@@ -371,9 +371,12 @@ class OpencodeWorkerHost:
         env = self.probe_env(route, spec.kit_home)
         secret_keys: tuple[str, ...] = ()
         if route.key_var:
-            from grimoire.providers.secrets import env_for_provider
+            from grimoire.providers.secrets import KeyEndpointError, env_for_provider
 
-            value = env_for_provider(route.provider).get(route.key_var, "")
+            try:  # la clé part vers l'URL de la route : elle doit avoir été saisie pour elle
+                value = env_for_provider(route.provider, endpoints=[route.base_url]).get(route.key_var, "")
+            except KeyEndpointError as exc:
+                return f"{route.provider} : {exc}"
             if not value:
                 return f"{route.provider} : clé absente du magasin ({route.key_var})"
             env[route.key_var] = value
@@ -605,7 +608,7 @@ def opencode_route(
     from grimoire.providers.capabilities import canonical_provider
     from grimoire.providers.data_policy import data_policy_refusal
     from grimoire.providers.registry import read_registry
-    from grimoire.providers.secrets import env_for_provider, provider_key_var
+    from grimoire.providers.secrets import KeyEndpointError, env_for_provider, provider_key_var
     from grimoire.providers.state import available_models, load_state
 
     if not provider_id:
@@ -635,7 +638,11 @@ def opencode_route(
     key_var = ""
     if canonical != "local":
         key_var = provider_key_var(provider.id)
-        if not key_var or not env_for_provider(provider.id).get(key_var):
+        try:  # la clé part vers l'URL officielle du fournisseur : elle doit avoir été saisie pour elle
+            stored = env_for_provider(provider.id, endpoints=[OPENCODE_BASE_URLS[oc_provider]]).get(key_var, "")
+        except KeyEndpointError as exc:
+            return None, f"{provider.id} : {exc}"
+        if not key_var or not stored:
             return None, f"{provider.id} : clé absente du magasin ({key_var or provider.id.upper() + '_API_KEY'})"
     chosen, source = model, "policy" if model else ""
     if not chosen and tier:
