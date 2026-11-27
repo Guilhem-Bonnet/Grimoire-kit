@@ -124,6 +124,10 @@
 .at-req-id { font-family: var(--mono); font-weight: 500; }
 .at-edit { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) 0; }
 .at-edit textarea { width: 100%; min-height: 120px; box-sizing: border-box; padding: var(--sp-3); border: 1px solid var(--acc); border-radius: var(--r); background: var(--panel); font-family: var(--mono); font-size: var(--t-s); line-height: 1.5; resize: vertical; }
+.at-conflict { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--panel); }
+.at-conflict p { margin: 0; }
+.at-conflict-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-2); }
+.at-conflict-text { margin: 0; padding: var(--sp-2); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: var(--t-s); border: 1px solid var(--line); border-radius: var(--r); }
 .at-edit-bar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 .at-btn { height: var(--h-ctl); padding: 0 var(--sp-4); border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--panel); color: var(--ink); font-weight: 500; display: inline-flex; align-items: center; gap: var(--sp-1); cursor: pointer; }
 .at-btn:hover { background: var(--hover); }

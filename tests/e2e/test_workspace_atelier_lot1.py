@@ -162,23 +162,56 @@ def test_block_edit_only_changes_its_range(browser: Browser, project_on: tuple[s
         )
 
 
-def test_concurrent_write_is_409(browser: Browser, project_on: tuple[str, Path]) -> None:
+def test_other_block_changed_while_typing_does_not_block_the_edit(
+    browser: Browser, project_on: tuple[str, Path]
+) -> None:
     url, root = project_on
-    path = root / "_grimoire" / "cadrage" / "chantiers-multiples-du-cadrage" / "01-brief.md"
-    for page in _open(browser, url, "#atelier?chantier=chantiers-multiples-du-cadrage"):
+    made = new_chantier(root, "Saisie et agent sur deux blocs")
+    path = root / "_grimoire" / "cadrage" / made.slug / "01-brief.md"
+    for page in _open(browser, url, f"#atelier?chantier={made.slug}"):
         block = page.locator(".at-blk", has_text="à compléter").first
         block.wait_for(timeout=APPEAR_MS)
         block.click()
         area = page.locator("[data-role='block-edit'] textarea")
         area.wait_for(timeout=APPEAR_MS)
         area.fill("Ma version")
-        # Quelqu'un d'autre écrit le fichier entre-temps.
+        # Un agent ajoute un AUTRE bloc au fichier entre-temps : la saisie passe, les deux modifications restent.
         path.write_text(path.read_text(encoding="utf-8") + "\nAjout concurrent.\n", encoding="utf-8")
+        area.press("Control+Enter")
+        page.locator("[data-role='atelier-status']", has_text="Bloc enregistré").wait_for(timeout=APPEAR_MS)
+        written = path.read_text(encoding="utf-8")
+        assert "Ma version" in written and "Ajout concurrent." in written
+
+
+def test_same_block_changed_while_typing_shows_both_versions_and_keeps_the_input(
+    browser: Browser, project_on: tuple[str, Path]
+) -> None:
+    url, root = project_on
+    made = new_chantier(root, "Saisie et agent sur le meme bloc")
+    path = root / "_grimoire" / "cadrage" / made.slug / "01-brief.md"
+    for page in _open(browser, url, f"#atelier?chantier={made.slug}"):
+        block = page.locator(".at-blk", has_text="à compléter").first
+        block.wait_for(timeout=APPEAR_MS)
+        block.click()
+        area = page.locator("[data-role='block-edit'] textarea")
+        area.wait_for(timeout=APPEAR_MS)
+        area.fill("Ma version")
+        # L'agent réécrit LE MÊME bloc entre-temps.
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("> À compléter", "Version de l'agent. > À compléter", 1),
+            encoding="utf-8",
+        )
         concurrent = path.read_bytes()
         area.press("Control+Enter")
-        status = page.locator("[data-role='atelier-status']", has_text="a changé entre-temps")
-        status.wait_for(timeout=APPEAR_MS)
-        assert path.read_bytes() == concurrent
+        box = page.locator("[data-role='block-conflict']")
+        box.wait_for(state="visible", timeout=APPEAR_MS)
+        assert path.read_bytes() == concurrent  # rien d'écrit
+        assert page.locator("[data-role='conflict-mine']").inner_text() == "Ma version"
+        assert "Version de l'agent." in page.locator("[data-role='conflict-theirs']").inner_text()
+        assert area.input_value() == "Ma version"  # la saisie n'est pas perdue
+        box.locator("[data-role='conflict-keep-mine']").click()
+        page.locator("[data-role='atelier-status']", has_text="Bloc enregistré").wait_for(timeout=APPEAR_MS)
+        assert "Ma version" in path.read_text(encoding="utf-8")
 
 
 def test_block_with_an_active_link_scheme_has_no_clickable_link(browser: Browser, project_on: tuple[str, Path]) -> None:
