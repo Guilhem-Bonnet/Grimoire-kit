@@ -50,9 +50,12 @@ def test_the_document_starts_high_and_the_help_is_folded(browser: Browser, proje
         _ready(page)
         canvas = _box(page, "#canvas")
         sheet = _box(page, ".at-sheet")
-        assert sheet["y"] <= 260, f"la feuille commence à {sheet['y']} px"
+        # « Ce qu'il me reste à faire » ouvre le document (il pousse la feuille de sa hauteur) : l'en-tête, lui, reste compact.
+        summary = page.locator("[data-role='reste-a-faire']")
+        offset = _box(page, "[data-role='reste-a-faire']")["height"] + 24 if summary.is_visible() else 0
+        assert sheet["y"] - offset <= 260, f"la feuille commence à {sheet['y']} px, dont {offset} pour le résumé"
         # Le titre de la première section et son premier paragraphe se lisent aussi dans le premier écran.
-        assert _box(page, ".at-sec h2")["y"] < 340
+        assert _box(page, ".at-sec h2")["y"] - offset < 340
         # Rien n'a disparu : avancement, détail, étapes, phases, bouton et son état sont tous là.
         expect(page.locator("[data-role='avancement']")).to_contain_text("au gabarit", use_inner_text=True)
         expect(page.locator("[data-role='avancement-detail'] summary")).to_be_visible()

@@ -210,7 +210,8 @@ def test_an_empty_template_opens_empty_and_leaves_the_file_untouched(browser: Br
     before = path.read_bytes()
     for page, errors in _open_template(browser, url, slug):
         slot = page.locator(f"{SECTION} [data-role='empty-slot']").first
-        expect(slot).to_have_text("À compléter — pistes.", use_inner_text=True)
+        # L'emplacement vide n'est plus le gabarit nu : il dit ce qu'on y met (invite du serveur), sans citation.
+        expect(slot).to_contain_text("Les façons possibles de répondre au besoin", use_inner_text=True)
         expect(slot.locator("blockquote")).to_have_count(0)
         slot.click()
         area = page.locator(f"{SECTION} [data-role='block-edit'] textarea")

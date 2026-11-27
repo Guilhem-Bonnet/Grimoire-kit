@@ -171,7 +171,7 @@ def test_other_block_changed_while_typing_does_not_block_the_edit(
     made = new_chantier(root, "Saisie et agent sur deux blocs")
     path = root / "_grimoire" / "cadrage" / made.slug / "01-brief.md"
     for page in _open(browser, url, f"#atelier?chantier={made.slug}"):
-        block = page.locator(".at-blk", has_text="à compléter").first
+        block = page.locator(".at-blk").filter(has=page.locator("[data-role='empty-slot']")).first  # un bloc resté au gabarit (son invite)
         block.wait_for(timeout=APPEAR_MS)
         block.click()
         area = page.locator("[data-role='block-edit'] textarea")
@@ -192,7 +192,7 @@ def test_same_block_changed_while_typing_shows_both_versions_and_keeps_the_input
     made = new_chantier(root, "Saisie et agent sur le meme bloc")
     path = root / "_grimoire" / "cadrage" / made.slug / "01-brief.md"
     for page in _open(browser, url, f"#atelier?chantier={made.slug}"):
-        block = page.locator(".at-blk", has_text="à compléter").first
+        block = page.locator(".at-blk").filter(has=page.locator("[data-role='empty-slot']")).first  # un bloc resté au gabarit (son invite)
         block.wait_for(timeout=APPEAR_MS)
         block.click()
         area = page.locator("[data-role='block-edit'] textarea")

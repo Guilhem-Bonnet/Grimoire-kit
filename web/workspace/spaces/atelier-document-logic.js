@@ -261,11 +261,13 @@ export const STATE_WORDS = { rempli: 'remplie', couvert: 'couverte', vide: 'à c
 
 /**
  * L'élément courant du plan : le premier, dans l'ordre du document, qui touche la bande de lecture ; sans aucun, le précédent
- * reste. En bas de page, le dernier. `order` : identifiants dans l'ordre du document ; `inBand` : l'ensemble de ceux qui touchent.
+ * reste. En bas de page, le dernier ; tout en haut (`atTop`, le résumé « ce qu'il me reste à faire » peut repousser la première
+ * rubrique sous la bande), le premier. `order` : identifiants dans l'ordre du document ; `inBand` : l'ensemble de ceux qui touchent.
  */
-export function pickCurrent(order, inBand, previous, atBottom = false) {
+export function pickCurrent(order, inBand, previous, atBottom = false, atTop = false) {
   if (!order.length) return '';
   if (atBottom) return order[order.length - 1];
+  if (atTop) return order[0];
   const hit = order.find((id) => inBand.has(id));
   return hit !== undefined ? hit : (order.includes(previous) ? previous : order[0]);
 }

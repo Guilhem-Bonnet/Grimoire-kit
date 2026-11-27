@@ -153,10 +153,12 @@ export const INDICATOR_LABEL = { vide: 'vide', 'en-cours': 'en cours', complete:
 /**
  * La phase active au défilement. `order` : les identifiants dans l'ordre du document ; `inBand` : ceux dont la section
  * touche la bande de lecture ; `atBottom` : la fin du document est atteinte (la dernière, trop courte pour atteindre la
- * bande, est alors la phase lue). Sans rien dans la bande, la phase courante reste.
+ * bande, est alors la phase lue). Sans rien dans la bande, la phase courante reste. `atTop` : le haut de la page est atteint
+ * (le résumé « ce qu'il me reste à faire » peut repousser la première section sous la bande) : la première phase est lue.
  */
-export function activePhase(order, inBand, current, atBottom = false) {
+export function activePhase(order, inBand, current, atBottom = false, atTop = false) {
   if (atBottom && order.length) return order[order.length - 1];
+  if (atTop && order.length) return order[0];
   let found = null;
   for (const id of order) if (inBand.has(id)) found = id;
   return found || current;

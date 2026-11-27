@@ -34,6 +34,9 @@ import { createPlan } from './atelier-plan.js';
 import { createFind } from './atelier-recherche.js';
 import { createDocumentMenu } from './atelier-document-menu.js';
 import { createDrafts } from './atelier-brouillons.js';
+import { createInvites } from './atelier-invites.js';
+import { rubricOf, rubricSig } from './atelier-invites-logic.js';
+import { createRest } from './atelier-reste-a-faire.js';
 import { reconcileChildren, release, tag } from './atelier-reconcile.js';
 import { SELF, plainKey, sigOf } from './atelier-reconcile-logic.js';
 import {
@@ -336,7 +339,7 @@ function renderBlock(block, opts = {}) {
       return node;
     }
     default: {
-      if (block.placeholder || isTemplateText(block.text)) return emptySlot(block);
+      if (block.placeholder || isTemplateText(block.text)) return opts.invite ? opts.invite() : emptySlot(block); // l'invite du serveur, sinon le gabarit nu
       node.append(markdown(block.text, opts.onToggle, opts.refs));
       return node;
     }
@@ -500,10 +503,11 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   setAtelierContext({ slug, phase: focusId });
   ctx.signal.addEventListener('abort', () => setAtelierContext(null));
   // Le document suit son fichier : l'empreinte que porte chaque réponse du pouls de l'assistant décide (voir `atelier-synchro.js`).
-  const sync = createSync(ctx, { doc: () => state.doc, docAt: () => docAt, reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
+  const sync = createSync(ctx, { doc: () => state.doc, docAt: () => (writing > 0 ? Infinity : docAt), reload: () => reload(), sheet, notify: (message, options) => notifier.push(message, options) });
   const assist = createAssistant(ctx, slug, {
     focus: () => focusId,
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
+    showRubrique: (phaseId, section) => goSection(phaseId, section),
     reload: (message, kind) => reload(message, kind),
     say: (message, kind) => say(message, kind),
     // Une erreur liée à un bloc se lit aussi à son pied, là où l'on agissait.
@@ -591,6 +595,12 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     target.focus({ preventScroll: true });
   };
 
+  /** Une rubrique par son nom (le résumé « ce qu'il me reste à faire », l'accusé de rangement) : même geste que la palette. */
+  const goSection = (phaseId, section) => {
+    const found = state.doc.phases.find((p) => p.id === phaseId);
+    goOutline(phaseId, found ? (found.rubriques || []).findIndex((r) => r.section === section) : -1);
+  };
+
   // Mise à jour EN PLACE : un bouton de phase qui porte le focus n'est jamais remplacé (le suivi du défilement et le
   // rechargement de l'avancement appellent ceci à tout moment, y compris pendant que quelqu'un tabule dans la barre).
   const phaseNav = () => {
@@ -630,7 +640,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     if (Date.now() < lockUntil || !sheet.isConnected) return;
     const atBottom = root.scrollTop > 0 && root.scrollHeight - root.scrollTop - root.clientHeight < 4;
     const inBand = new Set([...touching].filter((node) => node.isConnected).map((node) => node.getAttribute('data-section')));
-    const next = activePhase(phaseIds(), inBand, focusId, atBottom);
+    const next = activePhase(phaseIds(), inBand, focusId, atBottom, root.scrollTop <= 0);
     if (next !== focusId) setFocus(next);
   };
   const spy = typeof IntersectionObserver === 'function'
@@ -651,6 +661,19 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   });
 
   let docAt = Date.now(); // quand le document affiché a été relu ou réécrit par un geste de cette page
+  // Une écriture de cette page en vol : le serveur peut avoir écrit le fichier sans que la page le sache encore. Un pouls parti avant
+  // (ou pendant) qui répond alors avec l'empreinte neuve ne dit rien d'un dépôt extérieur : tout pouls est ignoré tant qu'elle dure,
+  // et ceux partis avant sa réponse le restent après (`docAt` est avancé à sa fin).
+  let writing = 0;
+  const ownWrite = async (send) => {
+    writing += 1;
+    try {
+      return await send();
+    } finally {
+      writing -= 1;
+      docAt = Date.now();
+    }
+  };
   /** Ce que le serveur dit des suggestions et des commentaires est adopté si rien d'extérieur n'est à voir : le pouls n'y verra pas un dépôt. */
   const adoptAnnexes = (fresh) => {
     docAt = Date.now();
@@ -683,7 +706,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       if (!guard.go) return false; // renoncé : la suggestion reste en attente, rien n'est écrit
     }
     try {
-      await ctx.api.atelierDecision(slug, sug.id, decision, motif);
+      await ownWrite(() => ctx.api.atelierDecision(slug, sug.id, decision, motif));
     } catch (cause) {
       if (ctx.signal.aborted) return;
       if (cause.code === 409) {
@@ -726,6 +749,9 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
           },
         });
       }
+      // Le fichier a changé depuis notre copie (un agent, un autre onglet) : les fils d'aujourd'hui ne se posent jamais sur les
+      // blocs d'hier (un bloc choisi à l'écran aurait un identifiant périmé) ; le document entier est relu, d'un seul tenant.
+      if (next.fingerprint !== mine.fingerprint) { await reload(); return; }
       countNote();
       drawSection(mine);
       const again = mine.blocks.find((b) => b.text === written);
@@ -830,7 +856,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       if (ctx.signal.aborted) return;
       if (!guard.go) { save.disabled = false; area.focus(); return; } // renoncé : rien n'est écrit, la saisie reste
       try {
-        const result = await ctx.api.atelierBloc(slug, blockId, area.value, mark);
+        const result = await ownWrite(() => ctx.api.atelierBloc(slug, blockId, area.value, mark));
         if (ctx.signal.aborted) return;
         // La vue d'un bloc réécrit n'embarque pas les suggestions : celles des autres blocs restent, celles du
         // bloc modifié sont périmées (le serveur le dira de même au prochain chargement).
@@ -839,6 +865,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
         result.phase.suggestions = (live.suggestions || []).filter((x) => x.block_id !== block.id);
         result.phase.comments = live.comments || []; // provisoire : le serveur recalcule les ancres, relues ci-dessous
         state.doc.phases = state.doc.phases.map((p) => (p.id === phase.id ? result.phase : p));
+        adoptRest(result);
         countNote();
         phaseNav();
         drafts.clear('bloc', block.id);
@@ -894,12 +921,13 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     if (ctx.signal.aborted) return;
     if (!guard.go) { undo(); return; }
     try {
-      const result = await ctx.api.atelierBloc(slug, block.id, next, block);
+      const result = await ownWrite(() => ctx.api.atelierBloc(slug, block.id, next, block));
       if (ctx.signal.aborted) return;
       const live = state.doc.phases.find((p) => p.id === phase.id) || phase;
       result.phase.suggestions = (live.suggestions || []).filter((x) => x.block_id !== block.id);
       result.phase.comments = live.comments || [];
       state.doc.phases = state.doc.phases.map((p) => (p.id === phase.id ? result.phase : p));
+      adoptRest(result);
       countNote();
       phaseNav();
       drawSection(result.phase);
@@ -936,7 +964,8 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       ...(block.req ? { 'data-req': block.req } : {}), // la cible d'un lien `REQ-001` du texte
     });
     const onToggle = (line, checked, box) => toggleTask(host, phase, block, line, checked, box);
-    host.append(renderBlock(block, { onToggle, refs }), cm.addButton(phase, block, host, blockTitle(block)), assist.challenge(block));
+    const rub = block.placeholder || isTemplateText(block.text) ? rubricOf(phase, block) : null;
+    host.append(renderBlock(block, { onToggle, refs, invite: rub ? () => invites.node(block, rub) : null }), cm.addButton(phase, block, host, blockTitle(block)), assist.challenge(block));
     tag(host, 'host', sigOf(block));
     const edit = (resumed = null) => { if (!host.classList.contains('is-editing')) editBlock(host, phase, block, resumed); };
     // Une saisie commencée avant un rechargement de la page est PROPOSÉE ici (Reprendre / Jeter), jamais remise en silence.
@@ -984,7 +1013,8 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
         row.append(blockNode(phase, block), cm.margin(block));
         const opened = cm.threadsOf(block).filter((c) => c.etat === 'ouvert').length;
         if (opened) row.append(tag(reading.dot(opened), 'dot', sigOf(opened))); // la pastille du mode lecture (masquée hors lecture)
-        section.append(tag(row, `blk:${block.id}`, sigOf([block, cm.threadsOf(block).map(cm.threadSig), refsKey])));
+        const slot = block.placeholder || isTemplateText(block.text) ? rubricSig(rubricOf(phase, block)) : null; // l'invite suit le statut et l'état
+        section.append(tag(row, `blk:${block.id}`, sigOf([block, cm.threadsOf(block).map(cm.threadSig), refsKey, slot])));
         drawn.add(block.id);
       } else {
         section.append(tag(blockNode(phase, block), plainKey(block.kind, block.text, plain), refsKey));
@@ -1027,12 +1057,31 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   };
 
   const loop = createLoopPanel(ctx); // avancement honnête, tâches du découpage, avertissements de saisie
+  // Dire ce qui est attendu : l'invite de chaque rubrique vide, et « Ce qu'il me reste à faire » en tête du document.
+  const invites = createInvites(ctx, slug, { reload: (message, kind) => reload(message, kind) });
+  const rest = createRest({
+    phone: () => root.clientWidth < PHONE_MAX, // sous 900 px, le document d'abord : le résumé est replié sur sa phrase d'en-tête
+    goTo: (phaseId, section) => goSection(phaseId, section),
+    goSplit: () => {
+      const split = liveDoc.toolbar.querySelector('[data-act="split"]');
+      if (!split) return;
+      split.scrollIntoView({ block: 'center' });
+      split.focus({ preventScroll: true });
+    },
+  });
+  /** Une écriture de bloc rend aussi le reste à faire d'aujourd'hui : le résumé le suit sans relire tout le document. */
+  const adoptRest = (result) => {
+    if (result && result.reste_a_faire) state.doc.reste_a_faire = result.reste_a_faire;
+    rest.update(state.doc.reste_a_faire);
+  };
   /** Après un bloc écrit : l'avancement et les avertissements se relisent, sans redessiner la feuille en cours d'édition. */
   const reloadProgress = async () => {
     try {
       const fresh = await ctx.api.atelierChantier(slug);
       if (ctx.signal.aborted) return;
       state.doc.avancement = fresh.avancement;
+      state.doc.reste_a_faire = fresh.reste_a_faire;
+      rest.update(fresh.reste_a_faire);
       state.doc.taches = fresh.taches;
       state.doc.chantier = fresh.chantier;
       adoptAnnexes(fresh); // l'écriture qui précède est la nôtre : le pouls n'y verra pas un dépôt extérieur
@@ -1049,6 +1098,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   const drawAll = () => {
     paintHead();
     loop.update(state.doc);
+    rest.update(state.doc.reste_a_faire);
     countNote();
     phaseNav();
     drawSteps();
@@ -1096,7 +1146,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   phasebar.append(nav, steps, liveDoc.toolbar, plan.toggle, docMenu.element, reading.button, assist.pill);
   find.attach(phasebar);
   const main = el('div', 'at-doc-main');
-  main.append(docMenu.printTitle, status, sheet, docMenu.printNotes);
+  main.append(docMenu.printTitle, status, rest.element, sheet, docMenu.printNotes);
   const grid = el('div', 'at-doc-grid');
   grid.append(main, assist.element);
   // Historique des versions (lecture seule) : un bouton dans la barre, un volet à la place de l'assistant (voir `atelier-historique.js`).

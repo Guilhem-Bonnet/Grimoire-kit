@@ -98,3 +98,17 @@ commits = ["dff6976985f2629d76bd1d14279fd7419e033201"]
 paths = [
   '''^tests/unit/memory/test_redact_secrets_rules\.py$''',
 ]
+
+# Rubrique de cadrage citée comme cible d'un élément extrait (#1479) : le chemin
+# `comprehension/Contraintes`, voisin du mot « API » dans la phrase de test, est pris pour
+# une clé. La ligne est entrée par le premier commit de la branche, qu'un `gitleaks:allow`
+# posé après coup ne couvrirait pas. Même bornage : ce fichier ET cette valeur exacte.
+[[allowlists]]
+description = "Rubrique de cadrage prise pour une clé dans les tests du moteur de conversation"
+condition = "AND"
+paths = [
+  '''^tests/unit/test_cadrage_conversation_turn\.py$''',
+]
+regexes = [
+  '''^comprehension/Contraintes$''',
+]

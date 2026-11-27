@@ -89,6 +89,10 @@ const assignUi = { task: '', open: false };
 // cette garde, le refus s'affiche dans le bloc de retour déjà détaché par le redessin et la page ne montre rien
 // (flaky e2e de GAO-perf-cockpit-002 : lectures servies par le cache, le redessin gagne la course).
 let gateWrites = 0;
+// Le dernier refus d'un geste « Réaliser », porté par le module et non par le DOM : un dessin déjà en vol au moment du
+// clic (pouls live) remplace tout l'inspecteur et emporte le bloc de retour avec lui. Chaque dessin le repose, jusqu'à
+// ce que la sélection change ou qu'un nouveau geste parte. `{ task, project, build }`.
+let gestureFeedback = null;
 const needsHuman = (t) => isHumanWait(t) || t.board === 'review' || t.board === 'blocked';
 
 // Les vues que l'URL peut demander (`#travail?view=liste`).
@@ -2713,6 +2717,8 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   ]);
   if (ctx.signal.aborted) return false;
   if (guard.defer && guard.defer()) return false;
+  // Un autre choix de tâche fait oublier le refus ; le même (redessin du pouls) le garde.
+  if (gestureFeedback && (gestureFeedback.task !== taskId || gestureFeedback.project !== (project || ''))) gestureFeedback = null;
   const kept = snapshotFields(ctx.inspector);
   ctx.inspector.replaceChildren();
   ctx.inspector.dataset.owner = 'executer';
@@ -2825,6 +2831,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   const feedback = document.createElement('div');
   feedback.dataset.role = 'transition-feedback';
   feedback.setAttribute('aria-live', 'polite');
+  if (gestureFeedback) feedback.append(gestureFeedback.build());
   for (const target of targets) {
     const gateRow = document.createElement('div');
     gateRow.className = 'ex-gate-row';
@@ -2871,11 +2878,21 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
       // 10 s durant ; l'annulation rappelle `move` vers l'état de départ.
       const back = reverseMove(detail.status, target);
       gateWrites += 1;
+      gestureFeedback = null;
+      feedback.replaceChildren();
+      // Le refus se range dans le modèle, puis s'écrit dans le bloc de retour VIVANT : celui que ce geste a reçu a pu
+      // être remplacé par un dessin pendant l'attente.
+      const refuse = (build) => {
+        gestureFeedback = { task: taskId, project: project || '', build };
+        const into = feedback.isConnected ? feedback
+          : (ctx.inspector.dataset.task === taskId ? ctx.inspector.querySelector('[data-role="transition-feedback"]') : null);
+        if (into) into.replaceChildren(build());
+      };
       try {
         const result = await send(action, body);
         feedback.replaceChildren();
         if (result && result.blocked) {
-          feedback.append(refusalNode(result.refusals || []));
+          refuse(() => refusalNode(result.refusals || []));
         } else {
           feedback.append(text('div', 'lbl', `transition : ${result.transition}`));
           onWritten();
@@ -2895,7 +2912,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
           }
         }
       } catch (error) {
-        feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
+        refuse(() => text('div', 'ex-refusal', 'échec : ' + error.message));
       } finally {
         gateWrites -= 1;
       }
