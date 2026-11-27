@@ -10,6 +10,7 @@ Les cas hostiles utilisent un fichier témoin hors du projet, jamais un fichier 
 
 from __future__ import annotations
 
+import functools
 import os
 import time
 from collections.abc import Callable
@@ -786,6 +787,89 @@ class TestBudgetGlobal:
         budget = safe_sources.SourceBudget()
         admitted = sum(budget.admit(SOURCE_MAX_BYTES) for _ in range(1000))
         assert admitted == 32 and budget.exhausted
+
+
+def _par_nom(entries: list[os.DirEntry[str]], reverse: bool = False) -> list[os.DirEntry[str]]:
+    return sorted(entries, key=lambda entry: entry.name, reverse=reverse)
+
+
+class TestSelectionDeterministe:
+    """La sélection ne dépend jamais de l'ordre d'énumération du système de fichiers."""
+
+    @staticmethod
+    def _ordonne(monkeypatch: pytest.MonkeyPatch, rearrange: Callable[[list[os.DirEntry[str]]], list[os.DirEntry[str]]]) -> None:
+        real = os.scandir
+
+        class _Scan:
+            def __init__(self, path: object) -> None:
+                with real(path) as it:  # type: ignore[call-overload]
+                    self._entries = rearrange(list(it))
+
+            def __enter__(self) -> _Scan:
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+            def __iter__(self) -> object:
+                return iter(self._entries)
+
+            def __next__(self) -> os.DirEntry[str]:  # pragma: no cover - islice passe par __iter__
+                raise StopIteration
+
+        monkeypatch.setattr(os, "scandir", _Scan)
+
+    @pytest.mark.parametrize("ordre", ["inverse", "sain-en-dernier", "graine-1", "graine-2", "graine-3"])
+    def test_meme_resultat_dans_tous_les_ordres(self, project: Path, monkeypatch: pytest.MonkeyPatch, ordre: str) -> None:
+        import random
+
+        directory = _skills_dir(project)
+        _put(directory, "a-sain.md", SAIN)
+        for i in range(700):
+            (directory / f"z{i:04d}.md").write_text(SAIN, encoding="utf-8")
+
+        def rearrange(entries: list[os.DirEntry[str]]) -> list[os.DirEntry[str]]:
+            if ordre == "inverse":
+                return sorted(entries, key=lambda e: e.name, reverse=True)
+            if ordre == "sain-en-dernier":
+                return sorted(entries, key=lambda e: (e.name == "a-sain.md", e.name))
+            shuffled = list(entries)
+            random.Random(int(ordre.split("-")[1])).shuffle(shuffled)
+            return shuffled
+
+        self._ordonne(monkeypatch, rearrange)
+        excluded: list[Exclusion] = []
+        slugs = [s.slug for s in collect_skills(project, excluded=excluded)]
+        assert len(slugs) == safe_sources.MAX_EXAMINED
+        assert slugs[0] == "a-sain" and slugs[-1] == f"z{safe_sources.MAX_EXAMINED - 2:04d}"
+        assert [e.reason for e in excluded] == ["dossier trop fourni : 201 fichiers non examinés"]
+
+    def test_au_dela_du_plafond_dur_le_dossier_entier_est_refuse_et_le_kit_reste_servi(
+        self, project: Path, kit: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(safe_sources, "MAX_DIR_ENTRIES", 20)
+        _put(kit / "hosts" / "skills", "commun.md", "---\ndescription: KIT\n---\n\nVersion du kit.\n")
+        directory = _skills_dir(project)
+        _put(directory, "a-sain.md", SAIN)
+        _put(directory, "commun.md", SAIN)
+        for i in range(25):
+            (directory / f"z{i:02d}.md").write_text(SAIN, encoding="utf-8")
+        for ordre in (False, True):
+            self._ordonne(monkeypatch, functools.partial(_par_nom, reverse=ordre))
+            excluded: list[Exclusion] = []
+            skills = collect_skills(project, excluded=excluded)
+            assert [s.slug for s in skills] == ["commun"] and skills[0].body == "Version du kit.\n"
+            assert [e.reason for e in excluded] == ["dossier trop fourni : plus de 20 entrées, dossier refusé"]
+
+    def test_installed_agents_est_independant_de_l_ordre(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core import layout
+
+        directory = _agents_dir(project)
+        _put(directory, "a-sain.md", _agent_text("a-sain"))
+        for i in range(600):
+            (directory / f"z{i:04d}.md").write_text("x", encoding="utf-8")
+        self._ordonne(monkeypatch, lambda entries: sorted(entries, key=lambda e: e.name, reverse=True))
+        assert "a-sain" in layout.installed_agents(project)
 
 
 class TestAgentsInstalles:

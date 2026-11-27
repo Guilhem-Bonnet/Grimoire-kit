@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
 #: Entrées lues dans un dossier, et fichiers examinés : le reste est ignoré, et dit.
-MAX_DIR_ENTRIES = 5_000
+MAX_DIR_ENTRIES = 50_000  # plafond dur : au-delà, le dossier entier est refusé
 MAX_EXAMINED = 500
 #: Taille maximale d'un fichier source collecté dans un projet (au-delà : exclu, jamais tronqué).
 SOURCE_MAX_BYTES = 1_048_576
@@ -277,20 +277,26 @@ def list_sources(
 ) -> tuple[dict[str, Path], list[Exclusion]]:
     """``nom sans suffixe -> chemin`` des fichiers ``*<suffix>`` d'un dossier, sans rien lire.
 
-    Au plus :data:`MAX_DIR_ENTRIES` entrées lues et :data:`MAX_EXAMINED` retenues (par ordre de
-    nom) ; ce qui dépasse est dit dans l'exclusion rendue. Un dossier absent n'est ni une erreur ni
-    une exclusion ; un dossier illisible est l'exclusion de *label*. *skip* écarte un nom sans bruit.
+    Sélection déterministe, indépendante de l'ordre d'énumération du système de fichiers : tous les
+    noms sont lus (sans ``stat``) jusqu'au plafond dur :data:`MAX_DIR_ENTRIES`, triés, et les
+    :data:`MAX_EXAMINED` premiers sont retenus ; le reste est compté dans l'exclusion rendue. Au-delà
+    du plafond dur, le dossier ENTIER est refusé (aucun fichier pris : résultat stable). Un dossier
+    absent n'est ni une erreur ni une exclusion ; un dossier illisible est l'exclusion de *label*.
+    *skip* écarte un nom sans bruit.
     """
     try:
         with os.scandir(directory) as entries:
-            names = [e.name for e in itertools.islice(entries, MAX_DIR_ENTRIES)]
-            more = next(entries, None) is not None
+            names = [e.name for e in itertools.islice(entries, MAX_DIR_ENTRIES + 1)]
     except (FileNotFoundError, NotADirectoryError):
         return {}, []
     except OSError as exc:
         return {}, [Exclusion.of(label, f"dossier illisible ({exc.__class__.__name__})")]
+    if len(names) > MAX_DIR_ENTRIES:
+        return {}, [Exclusion.of(label, f"dossier trop fourni : plus de {MAX_DIR_ENTRIES} entrées, dossier refusé")]
     wanted = sorted(n for n in names if n.endswith(suffix) and len(n) > len(suffix) and not (skip and skip(n)))
     excluded: list[Exclusion] = []
-    if more or len(wanted) > MAX_EXAMINED:
-        excluded.append(Exclusion.of(label, f"dossier trop fourni : {MAX_EXAMINED} fichiers examinés au plus"))
+    if len(wanted) > MAX_EXAMINED:
+        excluded.append(
+            Exclusion.of(label, f"dossier trop fourni : {len(wanted) - MAX_EXAMINED} fichiers non examinés")
+        )
     return {n[: -len(suffix)]: directory / n for n in wanted[:MAX_EXAMINED]}, excluded
