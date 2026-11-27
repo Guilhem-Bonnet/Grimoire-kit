@@ -180,7 +180,8 @@ def test_parcours_de_l_assistant(
         _question(page).wait_for(timeout=APPEAR_MS)
         assert "Qui utilisera cela" in _question(page).inner_text()  # type: ignore[attr-defined]
         assert "Utilisateurs et usage réel" in _question(page).inner_text()  # type: ignore[attr-defined]
-        assert "0 angle sur" in page.locator("[data-role='assistant']").inner_text()
+        before = page.locator("[data-role='assistant'] .at-asst-head").inner_text()
+        assert "au gabarit" in before  # l'avancement honnête, jamais « complet » avec des blocs au gabarit
         first = _prompts(agent_log)[0]
         assert first.startswith(workspace_atelier_assistant.GESTES["demarrer"])  # la consigne fixe, choisie côté serveur
         assert f"chantier: {slug}\nphase: brief" in first
@@ -192,7 +193,8 @@ def test_parcours_de_l_assistant(
         page.locator(".at-asst-area").press("Enter")
         page.locator(".at-sheet", has_text="Les mainteneurs du kit.").wait_for(timeout=APPEAR_MS)
         page.locator("[data-role='assistant-question']", has_text="À quoi voit-on").wait_for(timeout=APPEAR_MS)
-        assert "1 angle sur" in page.locator("[data-role='assistant']").inner_text()
+        page.wait_for_function(
+            "(was) => document.querySelector(\"[data-role='assistant'] .at-asst-head\").innerText !== was", arg=before, timeout=APPEAR_MS)
         assert _prompts(agent_log)[1].startswith("Les mainteneurs du kit.\n\n[Contexte de l'Atelier")
         _capture(page, "03-reponse-consignee-1440x900")
 
@@ -286,9 +288,14 @@ def test_sans_agent_d_hote_la_barre_le_dit_et_donne_la_commande(
     for page in _open(browser, without_agent, f"#atelier?chantier={slug}"):
         off = page.locator("[data-role='assistant-off']")
         off.wait_for(timeout=APPEAR_MS)
-        assert "pas joignable" in off.inner_text()
+        assert "Aucun agent n’est joignable" in off.inner_text()
+        # Sans agent, le cadrage se joue dans la page : le moteur est dit en mots simples et le bouton est vivant.
+        assert "Questions guidées, sans IA" in page.locator("[data-role='engine-label']").inner_text()
         assert f"grimoire cadrage interview --chantier {slug}" in page.locator("[data-role='assistant']").inner_text()
-        assert page.locator("[data-act='start']").count() == 0  # pas de bouton mort
+        # L'entretien a pu être entamé par les tests précédents (même projet) : « Démarrer » ou la question en cours.
+        live = page.locator("[data-act='start'], [data-role='guided-question']")
+        live.first.wait_for(timeout=APPEAR_MS)
+        assert page.locator("[data-act='start']:disabled").count() == 0  # jamais de bouton mort
         _capture(page, "08-sans-agent-1440x900")
 
 

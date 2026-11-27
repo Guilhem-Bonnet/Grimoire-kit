@@ -151,7 +151,8 @@ def test_la_liste_des_gestes_est_fermee(project: Path) -> None:
     ids = asst.geste_ids()
     assert ids == ["demarrer", "reprendre", "ne-sais-pas", "sans-objet", "repondre",
                    "challenger-explorer", "challenger-sceptique", "challenger-simplificateur",
-                   "modele-reformuler", "modele-suggerer", "modele-challenger", "modele-relance"]
+                   "modele-reformuler", "modele-suggerer", "modele-challenger", "modele-relance",
+                   "guide-demarrer", "guide-repondre", "guide-ne-sais-pas", "guide-sans-objet", "guide-retour"]
     assert wa.get(project, f"{P}atelier/chantiers/un/entretien", {})["geste"] == ids
 
 

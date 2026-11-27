@@ -17,6 +17,7 @@ import { badge, icon } from '../shell.js';
 import { createLiveDoc } from './atelier-live.js';
 import { createComments } from './atelier-comments.js';
 import { createAssistant } from './atelier-assistant.js';
+import { createLoopPanel, phaseState, progressCell, waitingBadges } from './atelier-avancement.js';
 import { setAtelierContext } from '../atelier-context.js';
 import { createNotifier } from './atelier-notify.js';
 import {
@@ -83,13 +84,6 @@ const open = (ctx, slug, phase) => ctx.goto('atelier', phase ? { chantier: slug,
 
 // ── Bibliothèque (artboard « Rangement ») ───────────────────────────────────
 
-function segments(row) {
-  const done = (row.phases || []).filter((state) => state === 'rempli').length;
-  const segs = el('span', 'at-segs', null, { role: 'img', 'aria-label': `${done} étapes sur ${(row.phases || []).length || 5} terminées` });
-  for (let i = 0; i < 5; i += 1) segs.append(el('span', 'at-seg' + (i < done ? ' on' : '')));
-  return { segs, done };
-}
-
 function chantierRow(ctx, row) {
   if (row.error) {
     const node = el('div', 'at-row is-error', null, { role: 'listitem', 'data-slug': row.slug, 'data-error': 'true' });
@@ -114,9 +108,10 @@ function chantierRow(ctx, row) {
     talk.setAttribute('data-role', 'comment-count');
     name.append(talk);
   }
-  const { segs, done } = segments(row);
+  name.append(...waitingBadges(row)); // ce qui attend la personne : question, exigences à valider, question du découpage
+  const { segs, text } = progressCell(row); // le calcul unique du serveur (cadrage_progress), jamais recompté ici
   const progress = el('span', 'at-cell');
-  progress.append(segs, el('span', 'at-muted', done >= 5 ? 'Cahier des charges complet' : `${done} étape${done > 1 ? 's' : ''} sur 5`));
+  progress.append(segs, el('span', 'at-muted', text, { 'data-role': 'row-progress' }));
   link.append(
     name, progress,
     el('span', 'at-muted', row.mission ? `Mission ${row.mission}` : 'Aucune mission'),
@@ -384,7 +379,12 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   // par la zone de notification, ancrée au bas de la fenêtre visible.
   const status = el('p', 'at-status sr-only', '', { 'data-role': 'atelier-status' });
   const notifier = createNotifier(ctx);
-  const mirror = new MutationObserver(() => { if (status.textContent) notifier.push(status.textContent); });
+  // Un message peut porter son type (`data-kind` : ok, warn, error) ; sans lui, le type se déduit du texte.
+  const mirror = new MutationObserver(() => {
+    const kind = status.getAttribute('data-kind');
+    status.removeAttribute('data-kind');
+    if (status.textContent) notifier.push(status.textContent, kind ? { kind } : {});
+  });
   mirror.observe(status, { childList: true, characterData: true, subtree: true });
   ctx.signal.addEventListener('abort', () => mirror.disconnect());
   // Lot 3 : les commentaires ancrés. `reqBlock` dit quel bloc porte chaque exigence, pour compter ses fils ouverts.
@@ -394,7 +394,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   let liveTrace = null;
   const drawSteps = () => {
     steps.replaceChildren();
-    for (const step of stepsOf(state.doc.phases, liveTrace)) {
+    for (const step of stepsOf(state.doc.phases.map((p) => ({ ...p, state: phaseState(state.doc, p) })), liveTrace)) {
       const item = el('li', `at-step is-${step.status}`, null, { 'data-step': step.id });
       if (step.status === 'current') item.setAttribute('aria-current', 'step');
       const mark = el('span', 'at-step-mark', null, { 'aria-hidden': 'true' });
@@ -406,6 +406,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const liveDoc = createLiveDoc(ctx, slug, {
     sheet, status, comments: (req) => cm.openOn(reqBlock.get(req)),
     onTrace: (trace) => { liveTrace = trace; drawSteps(); },
+    onSplit: (message) => reload(message, 'ok'),
   });
   const phaseIds = () => state.doc.phases.map((p) => p.id);
   let focusId = phaseFromParams({ phase: phaseFocus }, phaseIds(), state.doc.phases[0].id);
@@ -417,8 +418,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const assist = createAssistant(ctx, slug, {
     focus: () => focusId,
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
-    reload: (message) => reload(message),
-    say: (message) => { status.textContent = message; },
+    reload: (message, kind) => reload(message, kind),
+    say: (message, kind) => { if (kind) status.setAttribute('data-kind', kind); status.textContent = message; },
     // Une erreur liée à un bloc se lit aussi à son pied, là où l'on agissait.
     blockError: (blockId, message) => {
       const host = sheet.querySelector(`[data-block="${CSS.escape(blockId)}"]`);
@@ -474,7 +475,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   const phaseNav = () => {
     nav.replaceChildren();
     for (const p of state.doc.phases) {
-      const indicator = phaseIndicator(p.state);
+      const indicator = phaseIndicator(phaseState(state.doc, p)); // le calcul d'avancement unique du serveur
       const button = el('button', 'at-phase', null, { type: 'button', 'data-phase': p.id, 'data-state': indicator, title: `${PHASE_NAMES[p.id] || p.title} : ${INDICATOR_LABEL[indicator]}` });
       if (p.id === focusId) button.setAttribute('aria-current', 'step');
       const mark = el('span', 'at-phase-mark', null, { 'aria-hidden': 'true' });
@@ -511,7 +512,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     cancelAnimationFrame(frame);
   });
 
-  const reload = async (message) => {
+  const reload = async (message, kind) => {
     try {
       state.doc = await ctx.api.atelierChantier(slug);
     } catch (cause) {
@@ -520,6 +521,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     }
     if (ctx.signal.aborted) return;
     drawAll();
+    if (message && kind) status.setAttribute('data-kind', kind);
     status.textContent = message || '';
     liveDoc.refresh();
   };
@@ -615,6 +617,8 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
         phaseNav();
         drawSection(result.phase);
         status.textContent = 'Bloc enregistré.';
+        loop.warn(result.avertissements); // un identifiant d'exigence en double dans ce fichier
+        reloadProgress();
         liveDoc.refresh(); // une exigence réécrite peut être « modifiée depuis la validation »
         const written = result.phase.blocks.find((b) => b.text === area.value.trimEnd());
         sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`)?.focus();
@@ -698,7 +702,28 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
     cm.paint();
   };
 
+  const loop = createLoopPanel(ctx); // avancement honnête, tâches du découpage, avertissements de saisie
+  /** Après un bloc écrit : l'avancement et les avertissements se relisent, sans redessiner la feuille en cours d'édition. */
+  const reloadProgress = async () => {
+    try {
+      const fresh = await ctx.api.atelierChantier(slug);
+      if (ctx.signal.aborted) return;
+      state.doc.avancement = fresh.avancement;
+      state.doc.taches = fresh.taches;
+      state.doc.chantier = fresh.chantier;
+      paintHead();
+      loop.update(fresh);
+      phaseNav(); // la barre collante lit l'avancement unique
+      drawSteps();
+      assist.refresh();
+    } catch {
+      // Le prochain chargement du document remettra l'avancement à jour.
+    }
+  };
+  let paintHead = () => {};
   const drawAll = () => {
+    paintHead();
+    loop.update(state.doc);
     countNote();
     sheet.replaceChildren();
     phaseNav();
@@ -710,13 +735,23 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   back.append(icon('i-act-back'), 'Tous les chantiers');
   back.addEventListener('click', () => ctx.goto('atelier', {}));
   const title = el('h2', 'at-title', chantier.titre || chantier.slug);
-  title.append(badge(STATE_LABEL[chantier.etat] || chantier.etat, STATE_TONE[chantier.etat] || ''));
-  const opened = formatDate(chantier.cree);
-  const meta = el('p', 'at-sub', [
-    opened ? `Ouvert le ${opened}.` : 'Chantier historique du projet.',
-    chantier.modifie ? `Modifié le ${formatDate(chantier.modifie, { withTime: true })}.` : '',
-  ].filter(Boolean).join(' '));
-  meta.append(pendingNote, commentNote);
+  // L'état et la date de modification suivent les écritures : repeints à chaque rechargement du document.
+  const metaText = (c) => [
+    formatDate(c.cree) ? `Ouvert le ${formatDate(c.cree)}.` : 'Chantier historique du projet.',
+    c.modifie ? `Modifié le ${formatDate(c.modifie, { withTime: true })}.` : '',
+  ].filter(Boolean).join(' ');
+  let stateBadge = badge(STATE_LABEL[chantier.etat] || chantier.etat, STATE_TONE[chantier.etat] || '');
+  title.append(stateBadge);
+  const metaNode = document.createTextNode(metaText(chantier));
+  const meta = el('p', 'at-sub');
+  meta.append(metaNode, pendingNote, commentNote);
+  paintHead = () => {
+    const c = state.doc.chantier;
+    const next = badge(STATE_LABEL[c.etat] || c.etat, STATE_TONE[c.etat] || '');
+    stateBadge.replaceWith(next);
+    stateBadge = next;
+    metaNode.nodeValue = metaText(c);
+  };
   const head = el('div', 'at-head');
   const left = el('div');
   left.append(back, title, meta);
@@ -729,7 +764,7 @@ function documentView(ctx, root, slug, doc, phaseFocus) {
   main.append(status, sheet);
   const grid = el('div', 'at-doc-grid');
   grid.append(main, assist.element);
-  const view = page(ctx, head, steps, liveDoc.toolbar, phasebar, grid);
+  const view = page(ctx, head, loop.element, steps, liveDoc.toolbar, phasebar, grid);
   view.querySelector('.at-body').classList.add('at-body-doc');
   view.append(notifier.element);
   root.replaceChildren(view);

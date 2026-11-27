@@ -295,3 +295,17 @@
   .at-sugg { margin-left: 0; margin-right: 0; }
   .at-diff { flex-direction: column; gap: var(--sp-1); }
 }
+/* Avancement honnête, boucle après le découpage, aide à la MOA (règles ajoutées en fin de fichier). */
+.at-loop { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0 0 var(--sp-3); }
+.at-loop-sum { margin: 0; font-weight: 600; }
+.at-loop-todo ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); }
+.at-loop-h { margin: 0 0 var(--sp-1); font-size: var(--t-m); }
+.at-loop-list { margin: 0; padding-left: var(--sp-4); }
+.at-loop-link { color: var(--acc); font-family: var(--mono, monospace); text-decoration: underline; }
+.at-loop-warn:empty, .at-loop-tasks:empty, .at-loop-detail:empty { display: none; }
+.at-loop-warn p { margin: 0; }
+.at-moa { padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); display: flex; flex-direction: column; gap: var(--sp-2); align-items: flex-start; }
+.at-moa p { margin: 0; }
+.at-moa-example { margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r); background: var(--card, var(--panel)); border: 1px solid var(--line); overflow-x: auto; max-width: 100%; }
+.at-split-done { padding: var(--sp-3); }
+.at-asst-head b { white-space: nowrap; }

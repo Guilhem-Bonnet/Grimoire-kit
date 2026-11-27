@@ -164,7 +164,8 @@ def test_the_human_comments_a_selected_passage_then_replies_resolves_and_reopens
         thread = _thread(page, made.id)
         thread.wait_for(timeout=APPEAR_MS)
         assert made.auteur == "humain" and made.quote == QUOTE
-        assert "Humain" in thread.inner_text() and "Pourquoi tenue" in thread.inner_text()
+        # Aucun nom déclaré (« Developer » est le repli de `grimoire init`) : l'auteur humain s'affiche « Toi ».
+        assert "Toi" in thread.inner_text() and "Pourquoi tenue" in thread.inner_text()
         assert thread.locator("[data-role='quote']").inner_text() == QUOTE
         assert thread.get_attribute("data-anchor") == "ancre"
         assert page.evaluate("CSS.highlights.has('at-cm')") is True  # le passage est surligné, sans toucher au DOM du bloc

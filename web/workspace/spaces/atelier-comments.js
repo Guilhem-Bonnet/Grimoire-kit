@@ -95,6 +95,8 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
   let lastPick = null;
 
   const phases = () => doc().phases;
+  // Le nom déclaré (MOA, sinon utilisateur du projet) quand il existe ; sinon « Toi ».
+  const humanName = () => (doc().auteur && doc().auteur.nom) || 'Toi';
   const all = () => phases().flatMap((p) => p.comments || []);
   const attached = (c) => c.anchor.state !== 'orphelin';
 
@@ -134,7 +136,7 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
   const author = (who) => {
     const agent = who === 'agent';
     const mark = el('span', `at-cm-who is-${agent ? 'agent' : 'humain'}`);
-    mark.append(el('span', 'at-cm-ava', null, { 'aria-hidden': 'true' }), el('b', null, agent ? AUTHOR.agent : AUTHOR.humain));
+    mark.append(el('span', 'at-cm-ava', null, { 'aria-hidden': 'true' }), el('b', null, agent ? AUTHOR.agent : humanName()));
     mark.firstChild.append(agent ? icon('agent') : icon('user')); // icônes de la famille Douce (docs/assets/icons)
     return mark;
   };
@@ -233,7 +235,7 @@ export function createComments(ctx, slug, { doc, sheet, reload }) {
     const quote = el('blockquote', 'at-cm-quote', c.quote, { 'data-role': 'quote' });
     const box = el(resolved ? 'details' : 'div', `at-cm${orphan ? ' is-orphan' : ''}${resolved ? ' is-resolved' : ''}`, null, {
       'data-com': c.id, 'data-author': c.auteur, 'data-anchor': c.anchor.state, 'data-etat': c.etat, tabindex: '-1',
-      role: 'group', 'aria-label': `Commentaire de ${(AUTHOR[c.auteur] || AUTHOR.humain).toLowerCase()},${resolved ? 'résolu' : 'ouvert'}`,
+      role: 'group', 'aria-label': `Commentaire de ${c.auteur === 'agent' ? AUTHOR.agent.toLowerCase() : humanName()},${resolved ? 'résolu' : 'ouvert'}`,
     });
     const flags = el('div', 'at-cm-flags');
     if (resolved) flags.append(badge('Résolu', 'ok'));

@@ -41,6 +41,17 @@ STATES = {
 }
 
 
+#: Où et comment la MOA se déclare (``GovernanceConfig.from_dict``, lu par ``requirement_gate.gate_mode``) : la clé
+#: ``governance.roles.moa`` de ``project-context.yaml``, à la racine du projet. Un seul humain, un nom sur une ligne ;
+#: ni compte de service ni « orchestrateur ». Texte seulement : la page ne propose aucun bouton qui l'écrit.
+MOA_HOW: dict[str, str] = {
+    "file": "project-context.yaml",
+    "key": "governance.roles.moa",
+    "example": "governance:\n  roles:\n    moa: Prénom Nom\n",
+    "rule": "Un humain, un nom sur une ligne : ni compte de service ni orchestrateur.",
+}
+
+
 def approve_command(key: str, chantier: str) -> str:
     """La commande que la MOA lance depuis son terminal pour valider *key* (``grimoire cadrage approve``)."""
     short = key.rpartition("/")[2]
@@ -73,7 +84,10 @@ def _moa(root: Path) -> dict[str, Any]:
     from grimoire.missions.requirement_gate import gate_mode, origin_root
 
     mode = gate_mode(origin_root(root))
-    return {"declared": bool(mode.declared), "name": mode.moa, "problem": mode.problem or ""}
+    out: dict[str, Any] = {"declared": bool(mode.declared), "name": mode.moa, "problem": mode.problem or ""}
+    if not mode.declared:
+        out["how"] = MOA_HOW  # comment la déclarer : la page l'affiche, rien ne l'écrit à la place de la personne
+    return out
 
 
 def _row(item: Any, slug: str, *, lean: bool = False) -> dict[str, Any]:
