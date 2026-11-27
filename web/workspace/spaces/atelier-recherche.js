@@ -8,7 +8,7 @@
 /* global NodeFilter, Highlight */
 
 import { icon } from '../shell.js';
-import { countLabel, findMatches, stepIndex } from './atelier-document-logic.js';
+import { countLabel, findAcross, matchSlices, stepIndex } from './atelier-document-logic.js';
 
 const SKIP = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'SELECT', 'NOSCRIPT']);
 
@@ -26,7 +26,7 @@ const hasHighlightApi = () => typeof CSS !== 'undefined' && Boolean(CSS.highligh
 function textNodes(sheet) {
   const walker = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
-      if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
       for (let parent = node.parentElement; parent && parent !== sheet.parentElement; parent = parent.parentElement) {
         if (SKIP.has(parent.tagName) || parent.hidden || parent.classList.contains('sr-only') || parent.classList.contains('at-edit')) return NodeFilter.FILTER_REJECT;
         if (parent === sheet) break;
@@ -37,6 +37,33 @@ function textNodes(sheet) {
   const out = [];
   for (let node = walker.nextNode(); node; node = walker.nextNode()) out.push(node);
   return out;
+}
+
+/**
+ * Les nœuds de texte de la feuille, groupés par bloc : le texte d'un bloc se cherche d'un seul tenant, à travers les nœuds
+ * inline (gras, code, lien…) qui le coupent. Un bloc est l'ancêtre le plus proche dont l'affichage n'est pas « inline » (un
+ * bouton, une pastille ou une cellule sont des blocs : une occurrence ne les traverse pas). `[[Text, …], …]`.
+ */
+function textBlocks(sheet) {
+  const display = new Map();
+  const isInline = (element) => {
+    if (!display.has(element)) display.set(element, getComputedStyle(element).display);
+    const value = display.get(element);
+    return value === 'inline' || value === 'contents';
+  };
+  const blockOf = (node) => {
+    let parent = node.parentElement;
+    while (parent && parent !== sheet && isInline(parent)) parent = parent.parentElement;
+    return parent || sheet;
+  };
+  const groups = [];
+  let last = null;
+  for (const node of textNodes(sheet)) {
+    const block = blockOf(node);
+    if (block !== last) { groups.push([]); last = block; }
+    groups[groups.length - 1].push(node);
+  }
+  return groups;
 }
 
 /**
@@ -57,7 +84,7 @@ export function createFind(ctx, { sheet }) {
   element.append(input, counter, prev, next, close);
 
   let ranges = []; // une plage par occurrence, dans l'ordre du document
-  let marks = []; // le repli : les `<mark>` posés, une plage par occurrence
+  let marks = []; // le repli : les `<mark>` posés, une liste par occurrence (une occurrence sur plusieurs nœuds en porte plusieurs)
   let index = -1;
   let opened = false;
   let returnTo = null;
@@ -65,7 +92,7 @@ export function createFind(ctx, { sheet }) {
 
   const clear = () => {
     if (hasHighlightApi()) { CSS.highlights.delete('at-find'); CSS.highlights.delete('at-find-current'); }
-    for (const mark of marks) {
+    for (const mark of marks.flat()) {
       const parent = mark.parentNode;
       if (!parent) continue;
       mark.replaceWith(...mark.childNodes);
@@ -80,7 +107,7 @@ export function createFind(ctx, { sheet }) {
     if (hasHighlightApi() && ranges.length) {
       CSS.highlights.set('at-find-current', new Highlight(ranges[index]));
     }
-    marks.forEach((mark, i) => mark.classList.toggle('is-current', i === index));
+    marks.forEach((group, i) => group.forEach((mark) => mark.classList.toggle('is-current', i === index)));
   };
 
   const reveal = () => {
@@ -98,29 +125,45 @@ export function createFind(ctx, { sheet }) {
     clear();
     const needle = input.value;
     if (opened && needle.trim()) {
-      const found = [];
-      for (const node of textNodes(sheet)) {
-        for (const { start, end } of findMatches(node.nodeValue, needle)) found.push({ node, start, end });
+      // Une occurrence se cherche dans le texte du bloc entier : elle peut commencer dans un nœud et finir dans un autre.
+      const found = []; // { nodes, segments, match }
+      for (const nodes of textBlocks(sheet)) {
+        const segments = nodes.map((node) => node.nodeValue);
+        for (const match of findAcross(segments, needle)) found.push({ nodes, segments, match });
       }
-      // Du dernier au premier dans un même nœud : poser un `<mark>` ne décale pas les index des occurrences encore à poser.
-      const made = found.map(({ node, start, end }) => {
-        const range = document.createRange();
-        range.setStart(node, start);
-        range.setEnd(node, end);
-        return range;
-      });
       if (hasHighlightApi()) {
-        ranges = made;
+        ranges = found.map(({ nodes, match }) => {
+          const range = document.createRange();
+          range.setStart(nodes[match.startSeg], match.startOffset);
+          range.setEnd(nodes[match.endSeg], match.endOffset);
+          return range;
+        });
         CSS.highlights.set('at-find', new Highlight(...ranges));
       } else {
-        const wraps = [];
-        for (let i = made.length - 1; i >= 0; i -= 1) {
-          const mark = el('mark', 'at-hit');
-          made[i].surroundContents(mark);
-          wraps[i] = mark;
+        // Un `<mark>` par nœud touché, posés de la dernière occurrence à la première (et du dernier morceau au premier) : poser
+        // un `<mark>` coupe un nœud de texte sans décaler les index de ce qui reste à poser avant lui.
+        const groups = new Array(found.length);
+        for (let i = found.length - 1; i >= 0; i -= 1) {
+          const { nodes, segments, match } = found[i];
+          const slices = matchSlices(match, segments);
+          const made = [];
+          for (let k = slices.length - 1; k >= 0; k -= 1) {
+            const range = document.createRange();
+            range.setStart(nodes[slices[k].seg], slices[k].start);
+            range.setEnd(nodes[slices[k].seg], slices[k].end);
+            const mark = el('mark', 'at-hit');
+            range.surroundContents(mark);
+            made[k] = mark;
+          }
+          groups[i] = made;
         }
-        marks = wraps;
-        ranges = wraps.map((mark) => { const r = document.createRange(); r.selectNodeContents(mark); return r; });
+        marks = groups;
+        ranges = groups.map((group) => {
+          const r = document.createRange();
+          r.setStartBefore(group[0]);
+          r.setEndAfter(group[group.length - 1]);
+          return r;
+        });
       }
       index = ranges.length ? (keep && previous >= 0 ? Math.min(previous, ranges.length - 1) : 0) : -1;
       paintCurrent();
