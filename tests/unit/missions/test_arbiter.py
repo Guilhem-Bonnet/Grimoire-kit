@@ -1399,7 +1399,7 @@ def test_un_fournisseur_nomme_mais_indisponible_ne_retombe_jamais_sur_l_hote(
     remote = SimpleNamespace(id="acme", provider_type="anthropic")
     monkeypatch.setattr(wp, "_enabled_provider", lambda *_a: remote)
     monkeypatch.setattr(wp, "available_models", lambda *_a, **_k: [SimpleNamespace(id="m")])
-    monkeypatch.setattr(wp, "_key_var", lambda _p: "")
+    monkeypatch.setattr(wp, "_key_var", lambda _p, _base_url: "")
     assert wp.model_settings(root, "acme", "strong") == ("", None)
 
 
