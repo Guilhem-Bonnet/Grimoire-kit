@@ -44,8 +44,11 @@ vérifiée (``local_token_usage`` de :mod:`grimoire.hosts.capabilities`) est dé
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -484,7 +487,39 @@ def _trace_cost(trace: TraceRecord, pricing_for: PricingLookup | None) -> Cost:
     return trace.token_usage.cost
 
 
+_USAGE_MEMO_MAX = 512
+_usage_memo: OrderedDict[tuple[str, bool | None], tuple[tuple[TraceRecord, ...], dict[str, Any]]] = OrderedDict()
+_usage_memo_lock = threading.Lock()
+
+
 def task_usage(
+    traces: Sequence[TraceRecord], *, host_usage_available: bool | None = None, pricing_for: PricingLookup | None = None
+) -> dict[str, Any]:
+    """:func:`_task_usage_uncached`, resservi tant que les traces de la tâche sont les mêmes objets (#1243).
+
+    Les ``TraceRecord`` sont immuables et l'index de traces rend les mêmes objets d'un appel à l'autre : une tâche dont
+    les traces n'ont pas changé garde sa réponse. Le cache tient les traces qu'il a vues (leur identité ne peut donc pas
+    être réattribuée) ; une trace ajoutée, retirée ou relue change la suite et recalcule. Borné, le plus ancien sort
+    d'abord. Sans mémoire quand un registre de tarifs est fourni (il peut changer sans que les traces changent).
+    """
+    if pricing_for is not None or not traces:
+        return _task_usage_uncached(traces, host_usage_available=host_usage_available, pricing_for=pricing_for)
+    key = (traces[0].id, host_usage_available)
+    with _usage_memo_lock:
+        known = _usage_memo.get(key)
+        if known is not None:
+            _usage_memo.move_to_end(key)
+    if known is not None and len(known[0]) == len(traces) and all(a is b for a, b in zip(known[0], traces, strict=True)):
+        return copy.deepcopy(known[1])
+    result = _task_usage_uncached(traces, host_usage_available=host_usage_available)
+    with _usage_memo_lock:
+        _usage_memo[key] = (tuple(traces), result)
+        while len(_usage_memo) > _USAGE_MEMO_MAX:
+            _usage_memo.popitem(last=False)
+    return copy.deepcopy(result)
+
+
+def _task_usage_uncached(
     traces: Sequence[TraceRecord], *, host_usage_available: bool | None = None, pricing_for: PricingLookup | None = None
 ) -> dict[str, Any]:
     """Les tokens et le coût d'une tâche (*traces* : celles de la tâche), avec la provenance de chaque chiffre.

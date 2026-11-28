@@ -31,12 +31,15 @@ vides. Reprendre une session reste une commande à copier, jamais exécutée ici
 from __future__ import annotations
 
 import json
+import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.missions.lease import parse_instant
 from grimoire.missions.liveness import DEFAULT_ACTIVE_WINDOW, TERMINE, VIVANT, Liveness, liveness
 from grimoire.tools.project_registry import load_registry
@@ -130,12 +133,35 @@ def recent_tool_calls(
     path = project_root / TRACES_RELPATH
     if not path.is_file():
         return None
-    lines = _tail_lines(path, tail_bytes)
-    if lines is None:
+    records = _tail_records(path, tail_bytes)
+    if records is None:
         return None
     window_start = now - ACTIVITY_WINDOW
     slice_s = ACTIVITY_WINDOW.total_seconds() / ACTIVITY_BUCKETS
     out: dict[str, _Activity] = {}
+    for run_id, agent_id, host_id, model, calls in records:
+        act = out.setdefault(run_id, _Activity())
+        act.agent = agent_id or act.agent
+        act.host = host_id or act.host
+        act.model = model or act.model
+        for at, tool in calls:
+            if act.last_at is None or at >= act.last_at:
+                act.last_at, act.last_tool = at, tool
+            if window_start <= at <= now:
+                index = min(int((at - window_start).total_seconds() // slice_s), ACTIVITY_BUCKETS - 1)
+                act.buckets[index] += 1
+    return out
+
+
+#: ``(run_id, agent_id, host_id, model, ((instant, outil), ...))`` : ce que la vue garde d'une ligne de trace.
+_TailRecord = tuple[str, str, str, str, tuple[tuple[datetime, str], ...]]
+_TAIL_MEMO_MAX = 16
+_tail_memo: dict[tuple[str, int], tuple[tuple[int, int, int], list[_TailRecord]]] = {}
+_tail_memo_lock = threading.Lock()
+
+
+def _parse_tail(lines: list[bytes]) -> list[_TailRecord]:
+    records: list[_TailRecord] = []
     for line in lines:
         if not line.strip():
             continue
@@ -145,26 +171,55 @@ def recent_tool_calls(
             continue
         if not isinstance(record, dict) or not record.get("run_id"):
             continue
-        act = out.setdefault(str(record["run_id"]), _Activity())
         raw_agent = record.get("agent")
         agent: dict[str, Any] = raw_agent if isinstance(raw_agent, dict) else {}
-        act.agent = str(agent.get("agent_id") or "") or act.agent
-        act.host = str(agent.get("host_id") or "") or act.host
-        act.model = str(agent.get("model") or "") or act.model
         raw_calls = record.get("tool_calls")
         calls: list[Any] = raw_calls if isinstance(raw_calls, list) else []
+        parsed: list[tuple[datetime, str]] = []
         for call in calls:
             if not isinstance(call, dict):
                 continue
             at = parse_instant(call.get("timestamp"))
-            if at is None:
-                continue
-            if act.last_at is None or at >= act.last_at:
-                act.last_at, act.last_tool = at, str(call.get("tool") or "")
-            if window_start <= at <= now:
-                index = min(int((at - window_start).total_seconds() // slice_s), ACTIVITY_BUCKETS - 1)
-                act.buckets[index] += 1
-    return out
+            if at is not None:
+                parsed.append((at, str(call.get("tool") or "")))
+        records.append((
+            str(record["run_id"]),
+            str(agent.get("agent_id") or ""),
+            str(agent.get("host_id") or ""),
+            str(agent.get("model") or ""),
+            tuple(parsed),
+        ))
+    return records
+
+
+def _tail_records(path: Path, tail_bytes: int) -> list[_TailRecord] | None:
+    """Les lignes de la queue du journal de traces, parsées une fois tant que le fichier n'a pas pu changer.
+
+    Les 2 Mo de queue étaient relus et parsés à chaque requête (#1243) ; la fenêtre d'activité, elle, dépend de l'heure
+    et se recalcule à chaque appel depuis ces enregistrements. Gardé par (date, taille, inode), jamais pour un fichier
+    modifié depuis moins de :data:`file_memo.COARSE_CLOCK_NS` (une réécriture dans le même pas d'horloge garderait la
+    signature), jamais pour une erreur de lecture.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    sig = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    key = (str(path), tail_bytes)
+    with _tail_memo_lock:
+        known = _tail_memo.get(key)
+    if known is not None and known[0] == sig:
+        return known[1]
+    lines = _tail_lines(path, tail_bytes)
+    if lines is None:
+        return None
+    records = _parse_tail(lines)
+    if time.time_ns() - stat.st_mtime_ns > file_memo.COARSE_CLOCK_NS:
+        with _tail_memo_lock:
+            if len(_tail_memo) >= _TAIL_MEMO_MAX:
+                _tail_memo.clear()
+            _tail_memo[key] = (sig, records)
+    return records
 
 
 @dataclass(slots=True)
