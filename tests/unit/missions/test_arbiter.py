@@ -10,6 +10,7 @@ confie son escalade au tick, qui lance une session en lecture seule bornée au c
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1542,8 +1543,15 @@ def test_les_gestes_grimoire_de_l_arbitre_sont_des_formes_exactes() -> None:
             arbiter.allowed_tools(12, task_id=bad_id, request_id="q-abc")
 
 
-def test_la_pr_lue_par_l_arbitre_vient_du_sceau(tmp_path: Path) -> None:
+def _pr_numbers(text: str) -> set[str]:
+    """Les numéros de PR visés par une commande ``gh pr <verbe> N`` dans ``text``."""
+    return set(re.findall(r"\bgh pr [a-z-]+ (\d+)", text))
+
+
+def test_la_pr_lue_par_l_arbitre_vient_du_sceau(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Une ligne forgée sous le même ``request_id`` (pr=999) ne redirige ni la session ni sa consigne."""
+    # Identifiant de requête figé au pire cas : il contient « 999 », comme le tirage aléatoire le fait parfois.
+    monkeypatch.setattr(arbiter, "new_question_id", lambda: "q-4248880ca999")
     root, service, task, policy = scene(tmp_path, provider="acme")
     _launch_event(service, task.id, root)
     request = ask(root, service, task, pr=12)
@@ -1558,8 +1566,10 @@ def test_la_pr_lue_par_l_arbitre_vient_du_sceau(tmp_path: Path) -> None:
     assert (outcome.action, outcome.status) == ("launch", "launched")
     argv = host.of("claude", "--bg")[0]
     allowed = argv[argv.index("--allowed-tools") + 1]
-    assert "Bash(gh pr diff 12)" in allowed and "999" not in allowed
-    assert "gh pr diff 12" in argv[-1] and "999" not in argv[-1] and "un critère inventé" not in argv[-1]
+    # Le numéro forgé se cherche comme numéro de PR (``gh pr <verbe> N``), pas en sous-chaîne : l'identifiant
+    # de requête (``q-<hex aléatoire>``) peut contenir « 999 » sans que la PR lue change.
+    assert "Bash(gh pr diff 12)" in allowed and _pr_numbers(allowed) == {"12"}
+    assert "gh pr diff 12" in argv[-1] and _pr_numbers(argv[-1]) == {"12"} and "un critère inventé" not in argv[-1]
 
 
 def test_un_critere_avec_apostrophe_se_vote_en_apostrophe_typographique(tmp_path: Path) -> None:
