@@ -60,7 +60,7 @@ __all__ = [
 RUBRIQUES_REDIGEABLES: tuple[tuple[str, str], ...] = tuple(r for r in RUBRIQUES if r != ("brainstorm", "Questions ouvertes"))
 _CLES = {rubrique_key(p, s): (p, s) for p, s in RUBRIQUES_REDIGEABLES}
 MAX_PHRASES = 12
-MAX_PHRASE_CHARS = MAX_ELEMENT_CHARS
+MAX_PHRASE_CHARS = MAX_ELEMENT_CHARS + 4  # la place des guillemets de la rédaction fidèle
 MAX_REDACTION_CHARS = 4000
 MAX_FONDEMENTS = 12
 #: ``attente`` (proposée, rien d'écrit), ``acceptee`` (écrite par le geste de l'humain), ``ecartee``, ``reprise`` (l'humain
@@ -114,9 +114,21 @@ class Redaction:
     phrases: tuple[PhraseRedigee, ...]
 
 
+def _exigence(texte: str) -> bool:
+    """La ligne ``- texte`` serait-elle lue comme une exigence (identifiant ou ancre ``REQ-n``) par le kit ?"""
+    from grimoire.core.cadrage_requirements import _ANCHOR
+
+    return _ANCHOR.match(f"- {texte}") is not None
+
+
 def redaction_fidele(entree: EntreeRedaction) -> Redaction:
-    """La rédaction du programme : chaque élément confirmé, tel quel, une phrase chacun (aucun modèle)."""
-    return Redaction(entree.rubrique, tuple(PhraseRedigee(f.texte, (f.id,)) for f in entree.elements))
+    """La rédaction du programme : chaque élément confirmé, tel quel, une phrase chacun (aucun modèle).
+
+    Un élément qui commence comme une exigence (``REQ-042 [Must] …``) est mis entre guillemets : la ligne écrite ne peut
+    pas devenir une exigence parsée, comme l'ancienne ligne (précédée de sa question en italique) ne le pouvait pas.
+    """
+    return Redaction(entree.rubrique, tuple(
+        PhraseRedigee(f"« {f.texte} »" if _exigence(f.texte) else f.texte, (f.id,)) for f in entree.elements))
 
 
 def valider_redaction(out: Any, entree: EntreeRedaction) -> Redaction:
@@ -133,6 +145,8 @@ def valider_redaction(out: Any, entree: EntreeRedaction) -> Redaction:
         if not isinstance(phrase, PhraseRedigee) or not isinstance(phrase.fondements, tuple | list):
             raise RedactionRefuseeError("phrase mal formée")
         texte = clean_text(phrase.texte, MAX_PHRASE_CHARS, what="phrase")
+        if _exigence(texte):  # elle deviendrait une exigence parsée : le gate et le découpage la verraient
+            raise RedactionRefuseeError("une phrase commence comme une exigence (REQ-n)")
         if texte.startswith(_MARQUES):
             raise RedactionRefuseeError("une phrase commence par une marque de mise en forme")
         cites = tuple(dict.fromkeys(phrase.fondements))

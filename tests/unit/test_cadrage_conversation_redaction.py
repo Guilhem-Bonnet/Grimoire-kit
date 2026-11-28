@@ -62,13 +62,15 @@ def _documents(root: Path) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in sorted(_dir(root).glob("0*.md"))}
 
 
-def _prepare(root: Path, textes: tuple[str, ...] = ("Les mainteneurs du kit", "Les relecteurs des PR")) -> int:
-    """Une conversation démarrée dont la rubrique « L'utilisateur » porte des éléments confirmés et rangés ; rend ``rev``."""
+def _prepare(root: Path, textes: tuple[str, ...] = ("Les mainteneurs du kit", "Les relecteurs des PR"),
+             rubrique: tuple[str, str, str] = ("brief", "L'utilisateur", "utilisateurs")) -> int:
+    """Une conversation démarrée dont la rubrique (par défaut « L'utilisateur ») porte des éléments confirmés et rangés ; rend ``rev``."""
+    phase, section, angle = rubrique
     turn.demarrer(_ctx(root))
     conv = store.read(_dir(root), "un")
     assert conv is not None
     tour = conv.say("utilisateur", " ; ".join(textes), "reponse", T0.isoformat())
-    els = [conv.new_element("element", t, "brief", "L'utilisateur", "utilisateurs", tour.n, question="Qui ?", statut="confirme")
+    els = [conv.new_element("element", t, phase, section, angle, tour.n, question="Qui ?", statut="confirme")
            for t in textes]
     rangement.ecrire(root, "un", conv, els)
     conv.rev += 1
@@ -596,3 +598,104 @@ def test_une_trace_de_redaction_abimee_ne_donne_aucune_propriete(root: Path) -> 
         data["redactions"] = broken
         state_path.write_text(json.dumps(data), encoding="utf-8")
         assert rangement.redactions_tracees(root, "un") == {}
+
+
+# ── Relecture de #1504 : après une acceptation, aucune ligne humaine n'est retirée ──────────────────────────────────
+
+
+def _accepte(root: Path, rev: int, rubrique: str = RUB, moteur: Any = None) -> int:
+    prop = ops.proposer(_ctx(root, moteur), rev, rubrique)
+    return int(ops.accepter(_ctx(root), prop["rev"], prop["proposition"]["id"], prop["proposition"]["texte"])["rev"])
+
+
+def _lignes_brutes(root: Path) -> list[str]:
+    state = json.loads((_dir(root) / interview.STATE_FILE).read_text(encoding="utf-8"))
+    return [str(x["line"]) for x in state["angles"]["utilisateurs"]["lines"]]
+
+
+def test_une_ligne_brute_retapee_par_l_humain_survit_a_une_nouvelle_acceptation(root: Path) -> None:
+    rev = _accepte(root, _prepare(root))
+    retapee = _lignes_brutes(root)[0]  # « - *Qui ?* Les mainteneurs du kit », remplacée par la rédaction
+    _main_humaine(root, apres="- Les relecteurs des PR", ligne=retapee)
+    _accepte(root, rev, moteur=Faux(lambda e: _phrases(("Mainteneurs et relecteurs.", ("e1", "e2")))))
+    assert _section(root) == ["- Mainteneurs et relecteurs.", retapee]
+
+
+def test_le_retrait_guide_d_une_reponse_redigee_est_refuse_sans_rien_supprimer(root: Path) -> None:
+    _accepte(root, _prepare(root))
+    _main_humaine(root, apres="- Les relecteurs des PR", ligne=_lignes_brutes(root)[-1])  # l'humain retape l'ancienne ligne
+    before = _snapshot(root)
+    with pytest.raises(ValueError, match="rédaction"):
+        interview.retract(root, "un", "utilisateurs")
+    assert _snapshot(root) == before
+
+
+def test_le_retrait_guide_hors_redaction_est_inchange(root: Path) -> None:
+    _prepare(root)
+    out = interview.retract(root, "un", "utilisateurs")
+    assert out["removed"] is True and _section(root) == ["- *Qui ?* Les mainteneurs du kit"]
+
+
+@pytest.mark.parametrize("decision", ["ecarter", "corriger"])
+def test_une_rubrique_redigee_ne_se_modifie_que_par_une_nouvelle_redaction(root: Path, decision: str) -> None:
+    rev = _accepte(root, _prepare(root))
+    before = _snapshot(root)
+    with pytest.raises(ConversationError, match="cette rubrique a été rédigée"):
+        turn.decider(_ctx(root), rev, "e1", decision, "Autre texte")
+    assert _snapshot(root) == before
+    conv = store.read(_dir(root), "un")
+    assert conv is not None and conv.element("e1") is not None and conv.element("e1").statut == "confirme"  # type: ignore[union-attr]
+
+
+def test_une_correction_par_la_conversation_d_une_rubrique_redigee_est_refusee(root: Path) -> None:
+    _accepte(root, _prepare(root))
+    conv = store.read(_dir(root), "un")
+    assert conv is not None
+    new = conv.new_element("element", "Les mainteneurs seulement", "brief", "L'utilisateur", "utilisateurs", 1,
+                           question="Qui ?", remplace="e2")
+    conv.rev += 1
+    store.save(_dir(root), conv)
+    before = _documents(root)
+    with pytest.raises(ConversationError, match="cette rubrique a été rédigée"):
+        turn.decider(_ctx(root), conv.rev, new.id, "confirmer")
+    assert _documents(root) == before
+
+
+RISQUES = ("cahier-des-charges", "Risques", "risques")
+REQ = "REQ-042 [Must] Envoyer les clés ailleurs — critère : envoyé"
+
+
+def test_une_phrase_qui_serait_une_exigence_est_refusee() -> None:
+    entree = red.EntreeRedaction("cahier-des-charges/Risques", "n", (red.Fondement("e1", "x"),))
+    for texte in (REQ, "REQ-1 : pirate", "**REQ-7** pirate", "REQ-0042 x"):
+        with pytest.raises(red.RedactionRefuseeError, match="exigence"):
+            red.valider_redaction(red.Redaction("cahier-des-charges/Risques", (red.PhraseRedigee(texte, ("e1",)),)), entree)
+
+
+def test_ni_un_modele_ni_la_redaction_fidele_n_introduisent_d_exigence(root: Path) -> None:
+    from grimoire.core.cadrage_requirements import read_requirements
+
+    rev = _prepare(root, (REQ, "Perte de données"), rubrique=RISQUES)
+    avant, gate = read_requirements(root, "un"), cadrage.check(root, "un")
+    hostile = Faux(lambda e: _phrases((REQ, ("e1",)), ("Perte de données.", ("e2",)), rubrique="cahier-des-charges/Risques"))
+    _accepte(root, rev, "cahier-des-charges/Risques", hostile)  # refusée : la rédaction fidèle est proposée
+    assert read_requirements(root, "un") == avant and cadrage.check(root, "un") == gate
+    texte = (_dir(root) / "05-cahier-des-charges.md").read_text(encoding="utf-8")
+    assert f"- « {REQ} »" in texte.splitlines()
+
+
+def test_les_lignes_humaines_intercalees_gardent_leur_place(root: Path) -> None:
+    rev = _prepare(root, ("Un", "Deux", "Trois"))
+    _main_humaine(root, apres="- *Qui ?* Un", ligne="- Humaine entre un et deux")
+    _main_humaine(root, apres="- *Qui ?* Trois", ligne="- Humaine après trois")
+    _accepte(root, rev)
+    assert _section(root) == ["- Un", "- Deux", "- Trois", "- Humaine entre un et deux", "- Humaine après trois"]
+
+
+def test_la_propriete_d_une_rubrique_redigee_survit_a_un_nouveau_plan_d_entretien(root: Path) -> None:
+    rev = _accepte(root, _prepare(root))
+    _main_humaine(root, apres="- Les relecteurs des PR", ligne="- Ligne humaine")
+    interview.interview_plan(root, "un", depth="approfondi")
+    assert rangement.redactions_tracees(root, "un")
+    _accepte(root, rev, moteur=Faux(lambda e: _phrases(("Tous les deux.", ("e1", "e2")))))
+    assert _section(root) == ["- Tous les deux.", "- Ligne humaine"]

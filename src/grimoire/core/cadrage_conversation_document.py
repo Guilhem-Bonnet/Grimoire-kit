@@ -42,7 +42,7 @@ from grimoire.core.regular_file import open_regular
 
 __all__ = [
     "FORMULE_INCONNU", "a_defaire", "corriger", "ecrire", "empreinte", "lignes_possedees", "lignes_presentes", "origin",
-    "reconcilier", "redactions_tracees", "remplacer_rubrique", "retirer", "traces", "verifier",
+    "reconcilier", "redactions_tracees", "remplacer_rubrique", "retirer", "traces", "verifier", "verifier_modifiable",
 ]
 
 
@@ -267,6 +267,7 @@ def _unwrite(root: Path, name: str | None, conv: Conversation, el: Element) -> l
     if el not in stack:
         raise ConversationError("cet élément n'est pas rangé dans le document")
     tail = stack[stack.index(el):]
+    verifier_modifiable(root, name or "principal", conv, tail)  # une ligne remplacée par une rédaction ne se retire pas ainsi
     answers, state, _ = _answers(root, name, el.angle)
     wanted = [_expected(e) for e in tail]
     if state == "ecarte" or answers[-len(wanted):] != wanted:
@@ -385,6 +386,8 @@ def lignes_possedees(root: Path, slug: str, conv: Conversation, phase: str, sect
             mark = str(line.get("origin") or "") if isinstance(line, dict) else ""
             if not mark.startswith(prefix) or (line.get("phase"), line.get("section")) != (phase, section):
                 continue
+            if line.get("replaced_by"):  # remplacée par une rédaction : seule la clé ``redactions`` en donne la propriété
+                continue
             text = str(line.get("line", "")).strip()
             if body.count(text) > 1:
                 raise ConversationError("une ligne de cette conversation est plusieurs fois dans la rubrique : je ne choisis pas")
@@ -442,8 +445,30 @@ def remplacer_rubrique(root: Path, slug: str, conv: Conversation, phase: str, se
         kept = [ln for i, ln in enumerate(lines[at[0]:end], at[0]) if i not in gone]
         atomic_write(path, "\n".join([*lines[:at[0]], *nouvelles, *kept, *lines[end:]]).rstrip("\n") + "\n")
         state = interview._load(root, name) or {}
+        prefix = f"conv:{conv.cree}:"
+        for rec in dict(state.get("angles") or {}).values():
+            for line in rec.get("lines", []):
+                # Les lignes brutes remplacées ne sont plus à la conversation (jamais retirables comme telles) : une ligne
+                # retapée à l'identique par l'humain reste à lui, et ``retract`` refuse d'en retirer la réponse.
+                if (isinstance(line, dict) and str(line.get("origin") or "").startswith(prefix)
+                        and (line.get("phase"), line.get("section")) == (phase, section)
+                        and (line.get("replaced_by") or str(line.get("line", "")).strip() in owned)):
+                    line["replaced_by"] = marque
         found = state.get(REDACTIONS_KEY)
         recs: dict[str, Any] = found if isinstance(found, dict) else {}
         recs[rubrique_key(phase, section)] = {"origin": marque, "lines": list(nouvelles)}
         state[REDACTIONS_KEY] = recs
         interview._save(root, name, state)
+
+
+#: Ce que dit le refus de modifier, par la conversation, un élément d'une rubrique rédigée.
+REDIGEE = "cette rubrique a été rédigée (« {section} ») : propose une nouvelle rédaction pour la modifier"
+
+
+def verifier_modifiable(root: Path, slug: str, conv: Conversation, items: list[Element]) -> None:
+    """Refuse (``ConversationError``) AVANT tout geste si l'un de ces éléments, à retirer ou réécrire, a sa ligne remplacée
+    par une rédaction acceptée : une nouvelle proposition puis acceptation est alors le seul chemin. Rien n'est écrit."""
+    angles = _angles(root, slug)
+    for el in items:
+        if any(line.get("replaced_by") for _answer, line in _consignes(angles, conv, el)):
+            raise ConversationError(REDIGEE.format(section=el.section))
