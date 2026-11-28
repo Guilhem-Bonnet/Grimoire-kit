@@ -22,7 +22,7 @@ from grimoire.tools.atelier_engines.gemini import GeminiBackend
 from grimoire.tools.atelier_engines.transport import EngineRefus, EngineSortie
 
 STANDARD = Path("_grimoire/standard")
-KEY = "AIzaFAUSSE-CLE-DE-TEST-1234567890"
+KEY = "cle-factice-gemini-test"
 CLASSER = EntreeClassement("les mainteneurs", "amorce")
 URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-neon:generateContent"
 Reponse = tuple[int, bytes]
@@ -209,7 +209,7 @@ def test_la_cle_n_apparait_dans_aucune_erreur_note_ou_vue(project: Path, caplog:
         g = garde(rendu)
         g.classer_reponse(CLASSER)
         montre = json.dumps([g.notes, vue_moteur(rendu.presentation, g.id, ""), repr(rendu.moteur.backends)], default=str)
-        assert KEY not in montre and "FAUSSE-CLE" not in montre
+        assert KEY not in montre and "cle-factice" not in montre
     assert KEY not in caplog.text
 
 
@@ -267,11 +267,11 @@ def test_la_cle_retiree_entre_la_detection_et_la_construction_n_a_pas_de_client(
 
 
 def test_la_cle_posee_comme_la_documentation_le_dit_est_celle_qui_part(project: Path) -> None:
-    poser("google-gemini", "AIzaMAGASIN-FAUSSE")
+    poser("google-gemini", "cle-factice-gemini-magasin")
     inv = inventaire(project)
     faux = Faux(gemini_dit({"classe": "reponse"}))
     garde(compose(project, inv, autorise(inv), faux)).classer_reponse(CLASSER)
-    assert faux.appels[0][1]["x-goog-api-key"] == "AIzaMAGASIN-FAUSSE"
+    assert faux.appels[0][1]["x-goog-api-key"] == "cle-factice-gemini-magasin"
 
 
 @pytest.mark.parametrize("extra", ['    base_url: "https://evil.example.com/v1"\n', '    anthropic_base_url: "https://evil.example.com"\n'])

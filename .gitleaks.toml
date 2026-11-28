@@ -47,6 +47,20 @@ regexes = [
   '''abcd1234wxyz''',
 ]
 
+# Fausse clé du test de l'adaptateur Gemini de la conversation : le premier commit de la PR la porte avec la forme d'une
+# clé Google (`AIza…`) ; le scan court sur tout l'historique, d'où l'exemption ici (le fichier ET ces valeurs exactes,
+# condition AND). La version courante du test n'a plus cette forme.
+[[allowlists]]
+description = "Fausses clés du test de l'adaptateur Gemini de la conversation de cadrage"
+condition = "AND"
+paths = [
+  '''^tests/unit/tools/test_atelier_engines_gemini\.py$''',
+]
+regexes = [
+  '''AIzaFAUSSE-CLE-DE-TEST-1234567890''',
+  '''AIzaMAGASIN-FAUSSE''',
+]
+
 # Mot de passe Neo4j factice de la carte machine (P26) : le test prouve que la valeur
 # lue dans l'environnement ou dans `docker inspect` ne sort jamais de la route. Même
 # bornage que ci-dessus : ce fichier ET cette valeur exacte.
