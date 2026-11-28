@@ -113,6 +113,32 @@ def test_force_dry_run_touches_nothing(tmp_path: Path) -> None:
     assert _backups(target) == []
 
 
+def test_force_without_a_backup_does_not_overwrite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    target = _project(tmp_path)
+    data = _load(target / REGISTRY)
+    data["error_capture"]["note_projet"] = "à garder"
+    _dump(target / REGISTRY, data)
+    before = (target / REGISTRY).read_text(encoding="utf-8")
+    real_open = os.open
+
+    def refuse_backup(path, *args, **kwargs):
+        if ".backup-" in str(path):
+            raise PermissionError("refusé")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("grimoire.core.standard_merge.os.open", refuse_backup)
+
+    result = _invoke("standard", "init", str(target), "--needs", NEEDS, "--force")
+
+    assert (target / REGISTRY).read_text(encoding="utf-8") == before  # rien écrasé
+    out = " ".join(result.output.split())
+    assert "sauvegarde impossible : registre laissé en place, rien écrasé" in out
+    assert "error_capture.note_projet" in out  # ce qui aurait été perdu
+    assert "sauvegardé dans" not in out
+
+
 def test_force_help_describes_the_backup() -> None:
     result = _invoke("standard", "init", "--help")
     assert "tool-registry" in " ".join(result.output.split())

@@ -267,26 +267,35 @@ def merge_project_registry(
     return outcome
 
 
-def _force_report(root: Path, destination: str | Path, rendered: str, dry_run: bool) -> list[str]:
-    """Sauvegarde le registre existant et dit ce que le gabarit va remplacer."""
+def _force_report(root: Path, destination: str | Path, rendered: str, dry_run: bool) -> tuple[list[str], bool]:
+    """Sauvegarde le registre existant et dit ce que le gabarit va remplacer.
+
+    Renvoie (messages, écrasement permis) : sans sauvegarde réussie, il ne l'est pas.
+    """
     path = root / destination
     name = Path(destination).name
     verb = "serait sauvegardé" if dry_run else "sauvegardé"
     saved = "" if dry_run else _backup_unreadable(path, "backup")
+    backup_failed = saved == "(sauvegarde impossible)"
     where = f"{path.parent.relative_to(root).as_posix()}/{saved}" if saved else "(à côté du registre)"
     try:
         tmpl = YAML(typ="safe").load(rendered)
         proj = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, YAMLError):
         proj = None
-    if not isinstance(proj, dict) or not isinstance(tmpl, dict) or proj.get("$schema") != tmpl.get("$schema"):
-        return [f"--force : {name} illisible ou de schéma inattendu, {verb} dans {where} puis remplacé par le gabarit du kit"]
     lost: list[str] = []
-    _diff(proj, tmpl, "", lost)
+    unreadable = not isinstance(proj, dict) or not isinstance(tmpl, dict) or proj.get("$schema") != tmpl.get("$schema")
+    if not unreadable:
+        _diff(proj, tmpl, "", lost)
+    lines = [f"  - {line}" for line in lost]
+    if backup_failed:
+        head = f"--force : sauvegarde impossible : registre laissé en place, rien écrasé ({name})"
+        return [head, *(["réglages du projet qui auraient été perdus :", *lines] if lines else [])], False
+    if unreadable:
+        return [f"--force : {name} illisible ou de schéma inattendu, {verb} dans {where} puis remplacé par le gabarit du kit"], True
     if not lost:
-        return []
-    head = f"--force : {name} remplacé par le gabarit du kit ({verb} dans {where}) ; réglages du projet non repris :"
-    return [head, *(f"  - {line}" for line in lost)]
+        return [], True
+    return [f"--force : {name} remplacé par le gabarit du kit ({verb} dans {where}) ; réglages du projet non repris :", *lines], True
 
 
 def sync_registry(
@@ -303,7 +312,11 @@ def sync_registry(
     if force and action == "write" and (root / destination).is_file():
         # ``--force`` : le kit reprend l'autorité, mais jamais en silence. Le
         # registre du projet est copié à côté et ce qui n'est pas repris est listé.
-        result.notices.extend(_force_report(root, destination, rendered, dry_run))
+        notices, may_overwrite = _force_report(root, destination, rendered, dry_run)
+        result.notices.extend(notices)
+        if not may_overwrite:
+            result.skipped.append(Path(destination))
+            return True  # sans sauvegarde, le registre reste en place
         if not dry_run:
             record_base(root, destination, rendered)
         return False  # l'appelant écrit le gabarit
