@@ -1169,7 +1169,18 @@ def _step_standard(
         if result.notices:
             activation_note += "; " + " ; ".join(result.notices)
 
-        if downgrade:
+        if result.conflicts:
+            # Conflit de sûreté : jamais noyé dans « done » ; la valeur du projet
+            # reste, la baisse de profil éventuelle reste dite aussi.
+            fields = " ; ".join(result.conflicts)
+            shift = f"profile '{existing_profile}' -> '{result.profile}'" if downgrade else f"profile '{result.profile}'"
+            state.steps.append(StepResult(
+                "standard", "warning",
+                f"{shift} — {len(result.written)} artifact(s) written{activation_note} "
+                f"— conflit de sûreté dans tool-registry.yaml, valeur du projet conservée : {fields}. "
+                "Pour s'aligner sur le kit : grimoire standard init --force (sauvegarde le registre)",
+            ))
+        elif downgrade:
             # Explicit `--needs` may legitimately shrink the profile — honor
             # it, but never call a scope reduction "done": that word is what
             # let #344 go unnoticed for a whole update cycle.
