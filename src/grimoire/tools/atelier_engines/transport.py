@@ -157,6 +157,13 @@ def _tcp(host: str, port: int, echeance: float) -> socket.socket:
     raise dernier if dernier is not None else OSError("aucune adresse")
 
 
+def _contexte_tls() -> ssl.SSLContext:
+    """Le contexte TLS du client : défauts sûrs (certificat et nom d'hôte vérifiés), jamais en dessous de TLS 1.2."""
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
 def _ouvrir(conn: http.client.HTTPConnection, contexte: ssl.SSLContext | None, echeance: float, gardes: list[threading.Timer]) -> None:
     """Ouvre ``conn`` en direct, sur le temps restant avant ``echeance`` (échéance absolue, calculée avant la connexion).
 
@@ -194,9 +201,9 @@ class _Https(http.client.HTTPSConnection):
     """``https`` : certificat et nom d'hôte vérifiés (contexte par défaut), mêmes bornes que :class:`_Http`."""
 
     def __init__(self, host: str, port: int | None, timeout: float, gardes: list[threading.Timer]) -> None:
-        self._contexte = ssl.create_default_context()
-        self._contexte.minimum_version = ssl.TLSVersion.TLSv1_2  # aucune version plus ancienne, dite explicitement
-        super().__init__(host, port, timeout=timeout, context=self._contexte)
+        ctx = _contexte_tls()
+        self._contexte = ctx
+        super().__init__(host, port, timeout=timeout, context=ctx)
         self._echeance = time.monotonic() + timeout
         self._gardes = gardes
 
