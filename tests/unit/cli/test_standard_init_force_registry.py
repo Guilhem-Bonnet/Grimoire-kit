@@ -173,3 +173,124 @@ def test_non_safety_conflict_is_noted_but_not_a_warning(tmp_path: Path) -> None:
     assert _load(tmp_path / dest)["mode"] == "projet"
     assert any("conflit" in n and "mode" in n for n in out.notices)
     assert out.conflicts == []
+
+
+class _FrozenDatetime:
+    @staticmethod
+    def now(tz=None):
+        from datetime import datetime as real
+
+        return real(2026, 1, 2, 3, 4, 5, tzinfo=tz)
+
+
+_STAMPED = "tool-registry.yaml.backup-20260102T030405"
+
+
+def _frozen_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr("grimoire.core.standard_merge.datetime", _FrozenDatetime)
+    reg = tmp_path / "proj" / REGISTRY
+    reg.parent.mkdir(parents=True)
+    reg.write_text("contenu du registre\n", encoding="utf-8")
+    return reg
+
+
+def test_backup_never_follows_a_planted_symlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.core.standard_merge import _backup_unreadable
+
+    reg = _frozen_registry(tmp_path, monkeypatch)
+    outside = tmp_path / "dehors.txt"
+    (reg.parent / _STAMPED).symlink_to(outside)
+
+    name = _backup_unreadable(reg, "backup")
+
+    assert not outside.exists()  # rien n'est écrit hors du projet
+    assert name != _STAMPED
+    assert (reg.parent / name).read_text(encoding="utf-8") == "contenu du registre\n"
+    assert not (reg.parent / name).is_symlink()
+
+
+def test_backup_never_overwrites_an_existing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.core.standard_merge import _backup_unreadable
+
+    reg = _frozen_registry(tmp_path, monkeypatch)
+    (reg.parent / _STAMPED).write_text("autre contenu\n", encoding="utf-8")
+
+    name = _backup_unreadable(reg, "backup")
+
+    assert (reg.parent / _STAMPED).read_text(encoding="utf-8") == "autre contenu\n"
+    assert name != _STAMPED
+    assert (reg.parent / name).read_text(encoding="utf-8") == "contenu du registre\n"
+
+
+def test_backup_ignores_old_backups_that_are_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.core.standard_merge import _backup_unreadable
+
+    reg = _frozen_registry(tmp_path, monkeypatch)
+    twin = tmp_path / "jumeau.txt"
+    twin.write_text("contenu du registre\n", encoding="utf-8")
+    (reg.parent / "tool-registry.yaml.backup-20250101T000000").symlink_to(twin)
+
+    name = _backup_unreadable(reg, "backup")
+
+    assert name != "tool-registry.yaml.backup-20250101T000000"
+    assert not (reg.parent / name).is_symlink()
+
+
+def _conflict_on(tmp_path: Path, key_path: tuple[str, ...], base_v: object, proj_v: object, kit_v: object) -> list[str]:
+    from grimoire.core.standard_merge import base_path, merge_project_registry
+
+    def doc(value: object) -> str:
+        node: object = value
+        for key in reversed(key_path):
+            node = {key: node}
+        data = {"$schema": "s/v1", **node}  # type: ignore[dict-item]
+        import io
+
+        buf = io.StringIO()
+        YAML().dump(data, buf)
+        return buf.getvalue()
+
+    dest = Path("_grimoire/standard/tool-registry.yaml")
+    (tmp_path / dest).parent.mkdir(parents=True)
+    (tmp_path / dest).write_text(doc(proj_v), encoding="utf-8")
+    base_path(tmp_path, dest).parent.mkdir(parents=True)
+    base_path(tmp_path, dest).write_text(doc(base_v), encoding="utf-8")
+    return merge_project_registry(tmp_path, dest, doc(kit_v)).conflicts
+
+
+@pytest.mark.parametrize("key_path", [("allowed", "risks"), ("allowed", "policies"), ("allowed", "permissions")])
+def test_allowed_vocabulary_conflict_is_a_safety_conflict(tmp_path: Path, key_path: tuple[str, ...]) -> None:
+    conflicts = _conflict_on(tmp_path, key_path, ["a"], ["a", "z"], ["a", "b"])
+    assert len(conflicts) == 1
+    assert ".".join(key_path) in conflicts[0]
+
+
+def test_mcp_server_fields_read_by_verifiers_are_safety_fields(tmp_path: Path) -> None:
+    from grimoire.core.standard_merge import _is_safety_field
+
+    for key in ("owner", "scopes", "timeout_s", "logging"):
+        assert _is_safety_field("mcp_servers[MCP-001].", key)
+    assert not _is_safety_field("tools[T].", "owner")
+
+
+def test_safety_conflict_and_profile_downgrade_keep_both_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from grimoire.core import agentic_standard
+
+    target = _project(tmp_path)
+    real = agentic_standard.setup_standard_profile
+
+    def with_conflict(*args, **kwargs):
+        result = real(*args, **kwargs)
+        result.conflicts.append("tools[X].risk : projet = 'a', kit = 'b'")
+        return result
+
+    monkeypatch.setattr(agentic_standard, "setup_standard_profile", with_conflict)
+    steps = json.loads(
+        _invoke("-o", "json", "up", str(target), "--backend", "local", "--needs", "solo-prototyping").output,
+    )["steps"]
+    std = {s["step"]: s for s in steps}["standard"]
+    assert std["status"] == "warning"
+    assert "conflit de sûreté" in std["detail"]
+    assert "->" in std["detail"]  # la baisse de profil reste dite

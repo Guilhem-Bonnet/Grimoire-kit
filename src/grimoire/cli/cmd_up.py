@@ -1170,12 +1170,13 @@ def _step_standard(
             activation_note += "; " + " ; ".join(result.notices)
 
         if result.conflicts:
-            # Un conflit sur un champ de sûreté ne se noie pas dans « done » :
-            # la valeur du projet reste, l'étape le dit, champ par champ.
+            # Conflit de sûreté : jamais noyé dans « done » ; la valeur du projet
+            # reste, la baisse de profil éventuelle reste dite aussi.
             fields = " ; ".join(result.conflicts)
+            shift = f"profile '{existing_profile}' -> '{result.profile}'" if downgrade else f"profile '{result.profile}'"
             state.steps.append(StepResult(
                 "standard", "warning",
-                f"profile '{result.profile}' — {len(result.written)} artifact(s) written{activation_note} "
+                f"{shift} — {len(result.written)} artifact(s) written{activation_note} "
                 f"— conflit de sûreté dans tool-registry.yaml, valeur du projet conservée : {fields}. "
                 "Pour s'aligner sur le kit : grimoire standard init --force (sauvegarde le registre)",
             ))

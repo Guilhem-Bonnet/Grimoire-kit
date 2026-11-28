@@ -25,6 +25,8 @@ n'est jamais touché : il est copié à côté et signalé.
 from __future__ import annotations
 
 import io
+import os
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -63,8 +65,18 @@ class _Notes(list[str]):
 _SAFETY_KEYS = frozenset({"risk", "permissions", "out_of_scope", "out_of_scope_reason"})
 
 
+#: Champs des serveurs MCP lus par les vérificateurs.
+_MCP_SAFETY_KEYS = frozenset({"owner", "scopes", "timeout_s", "logging"})
+
+
 def _is_safety_field(where: str, key: str) -> bool:
-    return key in _SAFETY_KEYS or f"{where}{key}" == "error_capture.policy"
+    path = f"{where}{key}"
+    return (
+        key in _SAFETY_KEYS
+        or path == "error_capture.policy"
+        or path.startswith("allowed.")  # vocabulaire qui sert à juger le registre
+        or (where.startswith("mcp_servers[") and key in _MCP_SAFETY_KEYS)
+    )
 
 
 def _plain(value: Any) -> Any:
@@ -197,11 +209,22 @@ def _backup_unreadable(path: Path, tag: str = "unreadable") -> str:
     try:
         data = path.read_bytes()
         for old in path.parent.glob(f"{path.name}.{tag}-*"):
-            if old.read_bytes() == data:
+            if not old.is_symlink() and old.is_file() and old.read_bytes() == data:
                 return old.name
-        target = path.with_name(f"{path.name}.{tag}-{datetime.now(UTC):%Y%m%dT%H%M%S}")
-        target.write_bytes(data)
-        return target.name
+        stamp = f"{path.name}.{tag}-{datetime.now(UTC):%Y%m%dT%H%M%S}"
+        # Création exclusive, sans suivre de lien : un nom déjà pris (fichier ou
+        # lien posé d'avance) n'est jamais écrasé ni suivi, on tire un autre nom.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        for attempt in range(8):
+            name = stamp if attempt == 0 else f"{stamp}-{secrets.token_hex(3)}"
+            try:
+                fd = os.open(path.with_name(name), flags, 0o600)
+            except FileExistsError:
+                continue
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data)
+            return name
+        return "(sauvegarde impossible)"
     except OSError:
         return "(sauvegarde impossible)"
 
