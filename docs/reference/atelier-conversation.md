@@ -237,8 +237,10 @@ appelé, la conversation fonctionne comme avant.
 
 **Quel modèle, quand.** Les usages sont ceux de `direct_use` : `conversation` (le modèle rapide : classer, extraire, formuler,
 reformuler, répondre) et `brainstorm` (le modèle plus fort : proposer des pistes ; il demande au moins un palier
-« intermédiaire »). L'usage `redaction` porte le geste « proposer une rédaction » (lot E), mais la fabrique ne lui donne
-pas encore de modèle : la rédaction est celle du programme (voir « Le document à la fin »). La décision est recalculée à CHAQUE tour et à chaque lecture,
+« intermédiaire »). L'usage `redaction` porte le geste « proposer une rédaction » (lot E) : la fabrique le décide à chaque
+appel avec les mêmes garde-fous que les autres usages (autorisation de CET usage, empreinte recalculée sur la spec utilisée,
+politique de données, jamais de bascule vers plus coûteux ou plus exposé). Sans autorisation pour `redaction` (même avec une
+pour `conversation`), la rédaction est celle du programme, la vue en dit la raison (voir « Le document à la fin »). La décision est recalculée à CHAQUE tour et à chaque lecture,
 sans mémoire : un modèle devenu indisponible, une autorisation retirée ou une empreinte périmée change le moteur au tour
 suivant, sans casser la conversation. Le modèle « courant » de chaque usage est le premier de la liste de l'humain : s'il
 tombe, on ne bascule que vers un modèle ni plus coûteux ni plus exposé ; sinon `choose_for` PROPOSE, le tour est rendu par
@@ -303,12 +305,12 @@ dans une erreur, une note, un journal ou la vue : les messages sont fixes.
 
 | Champ | Sens |
 |---|---|
-| `id`, `libelle` | le modèle qui parle (`sans-modele` sinon) |
+| `id`, `libelle` | le modèle de l'usage `conversation` (`sans-modele` sinon, même si un autre usage a un modèle : il est alors dans `par_usage`) |
 | `local`, `sortie_de_texte` | rien ne sort de la machine, ou du texte sort (vrai dès qu'UN usage actif en envoie) |
 | `raison` | pourquoi ce modèle, ou pourquoi aucun |
 | `proposition` | `{key, libelle, raison}` : un modèle proposé, jamais utilisé seul |
 | `reflexion`, `etat` | `true` / `"reflechit"` tant qu'un appel du modèle fort est en cours |
-| `par_usage` | le même détail pour `conversation` et `brainstorm` |
+| `par_usage` | le même détail pour `conversation`, `brainstorm` et `redaction` |
 
 **La réflexion.** Le moteur est synchrone par tour : l'appel du modèle fort (les pistes du brainstorm) reste synchrone. Pendant
 cet appel, un marqueur EN MÉMOIRE, borné et daté, est posé pour le chantier (levé à la fin, même en erreur, périmé tout seul) :
@@ -420,7 +422,8 @@ plus anciennes déjà tranchées partent les premières).
 - **L'entretien guidé ne retire pas une réponse rédigée.** `retract` refuse, sans rien supprimer ni modifier, quand la
   dernière réponse de l'angle a sa ligne remplacée par une rédaction (`replaced_by`) : modifier le document à la main ou
   proposer une nouvelle rédaction. Hors de ce cas, l'entretien guidé est inchangé.
-- La fabrique des moteurs ne décide pas encore de l'usage `redaction` : en service, la rédaction proposée est la rédaction
-  fidèle du programme, tant qu'un lot suivant ne branche pas cet usage.
+- La fabrique des moteurs décide l'usage `redaction` à chaque appel ; l'auteur d'une proposition est le modèle de CET usage
+  (`MoteurModeles.auteur_redaction`), `sans-modele` quand la rédaction est celle du programme ou qu'une note de repli existe.
+  Le marqueur « réfléchit » est posé pendant l'appel de rédaction comme pendant celui du brainstorm.
 
 Un essai sans interface : `python scripts/cadrage-converse.py --chantier <slug>`.

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from grimoire.core import cadrage_conversation_redaction as red
 from grimoire.core.cadrage_conversation_engine import (
     ElementExtrait,
     EntreeClassement,
@@ -96,13 +97,13 @@ def inventaire(root: Path, *, tags: bytes | None = TAGS) -> av.Inventory:
 
 
 def reglages(inv: av.Inventory, conversation: list[str] | None = None, brainstorm: list[str] | None = None,
-             *, perimee: bool = False) -> Settings:
+             *, perimee: bool = False, redaction: list[str] | None = None) -> Settings:
     rows = inv.by_key()
 
     def auths(keys: list[str] | None) -> tuple[Authorization, ...]:
         return tuple(Authorization(k, None, "0" * 64 if perimee else rows[k].fingerprint) for k in keys or ())
 
-    return Settings({"conversation": auths(conversation), "brainstorm": auths(brainstorm), "redaction": (), "autres": ()})
+    return Settings({"conversation": auths(conversation), "brainstorm": auths(brainstorm), "redaction": auths(redaction), "autres": ()})
 
 
 class Faux:
@@ -246,7 +247,7 @@ def test_vue_moteur_exacte_pour_un_modele_local(project: Path) -> None:
             "proposition": None}
     assert vue_moteur(rendu.presentation, garde(rendu).id, rendu.moteur.libelle) == {
         "id": ident, "libelle": "llama3.2:3b", "local": True, "sortie_de_texte": False, "raison": local["raison"],
-        "proposition": None, "reflexion": False, "etat": "pret", "par_usage": [local, rien]}
+        "proposition": None, "reflexion": False, "etat": "pret", "par_usage": [local, rien, {**rien, "usage": "redaction"}]}
 
 
 def test_vue_moteur_dit_que_du_texte_sort_pour_un_modele_distant(project: Path) -> None:
@@ -812,3 +813,156 @@ def test_un_element_extrait_par_le_modele_n_est_jamais_une_confirmation(project:
     rendu = compose(project, inv, reglages(inv, [LOCAL_FAST]), Faux(ollama_dit({"elements": [{"texte": "Les mainteneurs…", "rubrique": rubrique}]})))
     sortie = garde(rendu).extraire_elements(EntreeExtraction("Les mainteneurs et les bots", rubrique))
     assert sortie == [ElementExtrait("Les mainteneurs…", rubrique, False)]  # le drapeau de coupe n'est jamais cru d'un modèle
+
+
+# ── L'usage « redaction » : décidé à chaque appel, avec les mêmes garde-fous ─────────────────────
+
+RUB = "brief/L'utilisateur"
+REDIGER = red.EntreeRedaction(RUB, "Brief, partie « L'utilisateur »", (red.Fondement("e1", "Les mainteneurs"), red.Fondement("e2", "Les relecteurs")))
+REDACTION_OK = {"rubrique": RUB, "phrases": [{"texte": "Mainteneurs et relecteurs.", "fondements": ["e1", "e2"]}]}
+
+
+def _usage(rendu: Any, nom: str) -> Any:
+    return next(u for u in rendu.presentation.usages if u.usage == nom)
+
+
+def test_non_autorise_pour_la_redaction_jamais_appele_meme_autorise_pour_la_conversation(project: Path) -> None:
+    inv = inventaire(project)
+    faux = Faux(ollama_dit(REDACTION_OK))
+    rendu = compose(project, inv, reglages(inv, [LOCAL_FAST], [LOCAL_MID]), faux)
+    g = garde(rendu)
+    sortie, auteur = red.rediger(g, REDIGER)
+    assert sortie == red.redaction_fidele(REDIGER) and auteur == "sans-modele" and g.notes == []
+    assert faux.appels == []
+    vue = _usage(rendu, "redaction")
+    assert vue.id == "sans-modele" and "Aucun modèle autorisé pour cet usage" in vue.raison
+
+
+def test_autorise_pour_la_redaction_le_modele_est_appele_et_la_sortie_validee(project: Path) -> None:
+    inv = inventaire(project)
+    faux = Faux(ollama_dit(REDACTION_OK))
+    rendu = compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), faux)
+    g = garde(rendu)
+    sortie, auteur = red.rediger(g, REDIGER)
+    assert sortie == red.Redaction(RUB, (red.PhraseRedigee("Mainteneurs et relecteurs.", ("e1", "e2")),)) and g.notes == []
+    assert auteur == fab._ident(LOCAL_MID) and g.id == "sans-modele"  # l'en-tête suit la conversation, l'auteur est le modèle de la rédaction
+    assert len(faux.appels) == 1 and faux.appels[0][2]["model"] == "qwen2.5:14b"
+    assert _usage(rendu, "redaction").id == fab._ident(LOCAL_MID)
+    assert _usage(rendu, "conversation").id == "sans-modele"  # le modèle de la rédaction ne parle pas à la place de la conversation
+    assert g.classer_reponse(EntreeClassement("les mainteneurs", "amorce")) == "reponse" and len(faux.appels) == 1
+
+
+@pytest.mark.parametrize("brut", [
+    {"rubrique": RUB, "phrases": [{"texte": "x", "fondements": ["e9"]}]},
+    {"rubrique": RUB, "phrases": [{"texte": "Seulement e1.", "fondements": ["e1"]}]},
+    {"rubrique": "exigences/Fonctionnelles", "phrases": [{"texte": "x", "fondements": ["e1"]}]},
+    {"rubrique": RUB, "phrases": [{"texte": "x", "fondements": ["e1"], "ecrire": "rm -rf"}]},
+])
+def test_sortie_hostile_de_redaction_donne_la_redaction_fidele_avec_une_note(project: Path, brut: Any) -> None:
+    inv = inventaire(project)
+    rendu = compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), Faux(ollama_dit(brut)))
+    g = garde(rendu)
+    sortie, auteur = red.rediger(g, REDIGER)
+    assert sortie == red.redaction_fidele(REDIGER) and auteur == "sans-modele" and len(g.notes) == 1
+
+
+def test_empreinte_perimee_pour_la_redaction_refusee(project: Path) -> None:
+    inv = inventaire(project)
+    faux = Faux(ollama_dit(REDACTION_OK))
+    rendu = compose(project, inv, reglages(inv, redaction=[LOCAL_MID], perimee=True), faux)
+    assert type(rendu.moteur) is MoteurSansModele
+    sortie, auteur = red.rediger(garde(rendu), REDIGER)
+    assert sortie == red.redaction_fidele(REDIGER) and auteur == "sans-modele" and faux.appels == []
+    assert "a changé depuis ton autorisation" in _usage(rendu, "redaction").raison
+
+
+def test_politique_de_donnees_et_pas_de_bascule_vers_plus_expose_pour_la_redaction(project: Path) -> None:
+    (project / STANDARD / "llm-provider-registry.yaml").write_text(registre("secrets"), encoding="utf-8")
+    inv = inventaire(project)
+    faux = Faux(ollama_dit(REDACTION_OK))
+    rendu = compose(project, inv, reglages(inv, redaction=[CLAUDE]), faux, cle=KEY)
+    red.rediger(garde(rendu), REDIGER)
+    assert faux.appels == [] and "politique de données" in _usage(rendu, "redaction").raison
+    # le modèle local tombe : on propose un modèle plus coûteux, jamais substitué
+    inv2 = inventaire(project, tags=None)
+    faux2 = Faux(ollama_dit(REDACTION_OK))
+    rendu2 = compose(project, inv2, reglages(inv2, redaction=[LOCAL_MID]), faux2)
+    red.rediger(garde(rendu2), REDIGER)
+    assert faux2.appels == [] and _usage(rendu2, "redaction").id == "sans-modele"
+
+
+def test_vue_par_usage_exacte_avec_la_redaction(project: Path) -> None:
+    inv = inventaire(project)
+    rendu = compose(project, inv, reglages(inv, [LOCAL_FAST], redaction=[LOCAL_MID]), Faux(ollama_dit({"classe": "reponse"})))
+    rows = vue_moteur(rendu.presentation, garde(rendu).id, rendu.moteur.libelle)["par_usage"]
+    assert [r["usage"] for r in rows] == ["conversation", "brainstorm", "redaction"]
+    assert rows[2] == {"usage": "redaction", "id": fab._ident(LOCAL_MID), "libelle": "qwen2.5:14b", "local": True, "sortie_de_texte": False,
+                       "raison": "le modèle courant convient toujours : aucun changement", "proposition": None}
+    assert rows[1]["id"] == "sans-modele"
+
+
+def test_sans_autorisation_la_vue_dit_aussi_la_redaction(project: Path) -> None:
+    rendu = fab.composer(project, "un", reglages=Settings({}))
+    rows = vue_moteur(rendu.presentation, "sans-modele", "")["par_usage"]
+    assert [r["usage"] for r in rows] == ["conversation", "brainstorm", "redaction"]
+    assert "fonctionne sans modèle" in rows[2]["raison"]
+
+
+def test_la_mascotte_reflechit_pendant_l_appel_de_redaction_et_plus_apres(project: Path) -> None:
+    inv = inventaire(project)
+    vus: list[dict[str, Any]] = []
+    boite: list[Any] = []
+
+    def repondre(_u: str, _h: dict[str, str], _p: dict[str, Any]) -> Reponse:
+        vus.append(vue_moteur(boite[0].presentation, "", ""))
+        return ollama_dit(REDACTION_OK)
+
+    rendu = compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), Faux(repondre))
+    boite.append(rendu)
+    red.rediger(garde(rendu), REDIGER)
+    assert (vus[0]["reflexion"], vus[0]["etat"]) == (True, "reflechit")
+    assert vue_moteur(rendu.presentation, "", "")["reflexion"] is False
+    boite.clear()
+    rendu2 = compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), Faux(TimeoutError("lent")))
+    red.rediger(garde(rendu2), REDIGER)
+    assert vue_moteur(rendu2.presentation, "", "")["reflexion"] is False
+
+
+def test_l_en_tete_est_sans_modele_si_seule_la_redaction_a_un_modele(project: Path) -> None:
+    inv = inventaire(project)
+    rendu = compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), Faux(ollama_dit(REDACTION_OK)))
+    g = garde(rendu)
+    vue = vue_moteur(rendu.presentation, g.id, rendu.moteur.libelle)
+    assert (vue["id"], vue["libelle"]) == ("sans-modele", "Questions guidées, sans modèle")
+    assert [r["id"] for r in vue["par_usage"]] == ["sans-modele", "sans-modele", fab._ident(LOCAL_MID)]
+    assert red.rediger(g, REDIGER)[1] == fab._ident(LOCAL_MID)  # l'auteur de la rédaction reste le modèle de cet usage
+    assert any("llama" not in x and "qwen2.5:14b" in x for x in rendu.moteur.limites())  # les limites nomment le modèle qui rédige
+
+
+def _premiere_limite(rendu: Any) -> str:
+    return str(rendu.moteur.limites()[0])
+
+
+def test_la_premiere_limite_decrit_les_usages_reellement_actifs(project: Path) -> None:
+    inv = inventaire(project)
+    f = Faux(ollama_dit(REDACTION_OK))
+    redige = _premiere_limite(compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), f))
+    assert redige.startswith("Je parle sans modèle d'IA") and "un modèle d'IA (qwen2.5:14b) rédige les propositions" in redige
+    assert "Je parle avec" not in redige and "pistes" not in redige
+    pistes = _premiere_limite(compose(project, inv, reglages(inv, brainstorm=[LOCAL_MID]), f))
+    assert pistes.startswith("Je parle sans modèle d'IA") and "un modèle d'IA (qwen2.5:14b) propose des pistes" in pistes
+    assert "rédige" not in pistes
+    les_deux = _premiere_limite(compose(project, inv, reglages(inv, brainstorm=[LOCAL_MID], redaction=[LOCAL_MID]), f))
+    assert "rédige les propositions" in les_deux and "propose des pistes" in les_deux and "Je parle avec" not in les_deux
+    avec = _premiere_limite(compose(project, inv, reglages(inv, [LOCAL_FAST], redaction=[LOCAL_MID]), f))
+    assert avec.startswith("Je parle avec un modèle d'IA (llama3.2:3b)")
+
+
+def test_l_en_tete_suit_la_conversation_quand_les_usages_ont_des_modeles_differents(project: Path) -> None:
+    inv = inventaire(project)
+    rendu = compose(project, inv, reglages(inv, [LOCAL_FAST], redaction=[LOCAL_MID]), Faux(ollama_dit(REDACTION_OK)))
+    g = garde(rendu)
+    vue = vue_moteur(rendu.presentation, g.id, rendu.moteur.libelle)
+    assert (vue["id"], vue["libelle"]) == (fab._ident(LOCAL_FAST), "llama3.2:3b")
+    assert vue["par_usage"][2]["id"] == fab._ident(LOCAL_MID)
+    assert red.rediger(g, REDIGER)[1] == fab._ident(LOCAL_MID)
