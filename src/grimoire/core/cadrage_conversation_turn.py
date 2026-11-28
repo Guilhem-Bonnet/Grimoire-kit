@@ -84,6 +84,7 @@ from grimoire.core.cadrage_conversation_flow import (
 from grimoire.core.cadrage_conversation_hygiene import Reglages, statut
 from grimoire.core.cadrage_conversation_hygiene import classer as classer_conv
 from grimoire.core.cadrage_conversation_hygiene import rouvrir as rouvrir_conv
+from grimoire.core.cadrage_conversation_moteur_vue import vue_moteur
 from grimoire.core.regular_file import open_regular
 
 __all__ = [
@@ -344,7 +345,7 @@ def _conclure(ctx: Contexte, conv: Conversation, accuse: str, lourd: bool, modif
         "etape": {"kind": etape.kind, "pourquoi": etape.pourquoi, "angle": etape.angle, "manque": list(etape.manque)},
         "question": None if conv.question is None else _question_public(conv.question),
         "a_confirmer": _a_confirmer_vue(conv, cadre, etape),
-        "moteur": {"id": ctx.moteur.id, "degrade": ctx.moteur.degrade, "notes": list(ctx.moteur.notes)},
+        "moteur": {**_vue_moteur(ctx), "degrade": ctx.moteur.degrade, "notes": list(ctx.moteur.notes)},
     }
 
 
@@ -561,7 +562,7 @@ def _demarrer(ctx: Contexte) -> dict[str, Any]:
         return out
     etape = prochaine_etape(conv, cadre)
     return {"cree": False, "resume": resume(conv, cadre), "rev": conv.rev, "document_modifie": False,
-            "etape": {"kind": etape.kind}, "moteur": {"id": ctx.moteur.id, "degrade": False, "notes": []},
+            "etape": {"kind": etape.kind}, "moteur": {**_vue_moteur(ctx), "degrade": False, "notes": []},
             "question": None if conv.question is None else _question_public(conv.question), "accuse": "", "message": "",
             "lourd": False, "a_confirmer": _a_confirmer_vue(conv, cadre, etape)}  # la même liste que la vue
 
@@ -748,9 +749,13 @@ def vue(ctx: Contexte) -> dict[str, Any]:
 
 def _moteur_public(ctx: Contexte) -> dict[str, Any]:
     """Qui parle et ce qu'il ne sait pas faire ; ``limites`` est borné à une fraction de seconde (la lecture ne bloque jamais)."""
+    return {**_vue_moteur(ctx), "sans_modele": ctx.moteur.id == "sans-modele", "limites": list(ctx.moteur.limites())}
+
+
+def _vue_moteur(ctx: Contexte) -> dict[str, Any]:
+    """Qui parle, si du texte sort de la machine, pourquoi, et si la mascotte réfléchit : dit par le programme, jamais par le moteur."""
     libelle = getattr(ctx.moteur.moteur, "libelle", "")
-    return {"id": ctx.moteur.id, "libelle": libelle if isinstance(libelle, str) else "", "sans_modele": ctx.moteur.id == "sans-modele",
-            "limites": list(ctx.moteur.limites())}
+    return vue_moteur(ctx.moteur.presentation, ctx.moteur.id, libelle if isinstance(libelle, str) else "")
 
 
 def compris(ctx: Contexte) -> dict[str, Any]:
