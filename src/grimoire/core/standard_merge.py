@@ -124,6 +124,8 @@ def _merge_map(proj: Any, base: Any, tmpl: dict[str, Any], where: str, notes: li
             proj[key] = tv
             notes.append(f"mise à jour kit : {where}{key}")
             changed = True
+        elif bv is not _MISSING and pv != bv and tv != bv and pv != tv:
+            notes.append(f"conflit sur {where}{key} : valeur du projet conservée")
     if base is not None:
         for key in base:
             if key not in tmpl and key in proj:
@@ -182,7 +184,7 @@ def merge_project_registry(
 
 def sync_registry(
     root: Path, destination: str | Path, rendered: str, action: str,
-    refresh: bool, dry_run: bool, result: Any,
+    refresh: bool, dry_run: bool, result: Any, *, force: bool = False,
 ) -> bool:
     """Branche la fusion sur ``setup_standard_profile`` ; True si l'artefact est traité.
 
@@ -191,8 +193,15 @@ def sync_registry(
     jour (*refresh*) ; sinon l'appelant écrit ou saute comme avant, et la base
     de fusion suit ce qui vient d'être écrit ou adopté.
     """
-    if action == "keep" and refresh:
+    # ``--force`` réécrirait le registre d'un projet qui l'a complété : on
+    # fusionne à la place, le réglage du projet l'emporte et le dit.
+    forced = force and action == "write" and (root / destination).is_file()
+    if (action == "keep" and refresh) or forced:
         merged = merge_project_registry(root, destination, rendered, dry_run=dry_run)
+        if forced:
+            merged.notices.insert(
+                0, f"--force : réglages du projet conservés dans {Path(destination).name} (fusion, pas d'écrasement)",
+            )
         result.notices.extend(merged.notices)
         (result.written if merged.changed else result.skipped).append(Path(destination))
         return True

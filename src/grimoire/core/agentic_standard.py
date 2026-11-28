@@ -779,7 +779,7 @@ def setup_standard_profile(
         # the manifest is JSON, so its keys are always strings.
         key = str(artifact.destination)
         action = gen.decide(root, key, content, force=force, refresh=refresh, manifest=manifest)
-        if artifact.artifact_type == "tool_registry" and sync_registry(root, artifact.destination, content, action, refresh, dry_run, result):
+        if artifact.artifact_type == "tool_registry" and sync_registry(root, artifact.destination, content, action, refresh, dry_run, result, force=force):
             continue
         if action != "write":
             result.skipped.append(artifact.destination)

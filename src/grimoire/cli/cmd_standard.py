@@ -838,6 +838,8 @@ def init_profile(
         console.print(f"  [green][OK][/green] {path}")
     for path in result.skipped:
         console.print(f"  [yellow]↷[/yellow] {path} already exists; use --force to overwrite")
+    for notice in result.notices:
+        console.print(f"  [cyan]fusion[/cyan] {notice}")
     if provider_ids:
         console.print(f"  [cyan]providers[/cyan] {', '.join(provider_ids)} ({provider_policy})")
     if activation is not None:

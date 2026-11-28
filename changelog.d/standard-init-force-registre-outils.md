@@ -1,0 +1,1 @@
+- fix(standard): `grimoire standard init --force` fusionne `tool-registry.yaml` au lieu de l'écraser : les réglages du projet (MCP `out_of_scope`, `error_capture`) sont conservés et un message le dit ; un conflit entre une valeur changée par le projet et par le kit est tranché en faveur du projet et signalé (#702)
