@@ -11,19 +11,39 @@ Retirer ou corriger un élément déjà rangé suit la pile de l'angle (``retrac
 ce qui a été rangé après lui, puis lui, et on réécrit ce qui doit rester. Avant de toucher à quoi que ce soit, on
 vérifie que les dernières réponses de l'angle sont bien celles que cette conversation a rangées ; sinon (le document
 a été retouché ailleurs) on ne touche à rien et on le dit.
+
+Lot E (le document à la fin) : :func:`remplacer_rubrique` remplace, sur le seul geste d'acceptation de l'humain, les lignes
+qu'une conversation POSSÈDE dans une rubrique (selon la trace de l'entretien) par la rédaction acceptée ; les réponses de
+l'entretien, donc le gate, ne bougent pas, et aucune ligne de l'humain n'est touchée.
 """
 
 from __future__ import annotations
 
+import hashlib
+import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from grimoire.core import cadrage_interview as interview
 from grimoire.core.cadrage import cadrage_dir
-from grimoire.core.cadrage_conversation import MAX_ELEMENT_CHARS, Conversation, ConversationError, Element, clean_text
-from grimoire.core.fsio import locked
+from grimoire.core.cadrage_conversation import (
+    MAX_ELEMENT_CHARS,
+    MAX_FILE_BYTES,
+    Conversation,
+    ConversationConflictError,
+    ConversationError,
+    Element,
+    clean_text,
+    rubrique_key,
+)
+from grimoire.core.fsio import atomic_write, locked
+from grimoire.core.regular_file import open_regular
 
-__all__ = ["FORMULE_INCONNU", "a_defaire", "corriger", "ecrire", "origin", "reconcilier", "retirer", "traces", "verifier"]
+__all__ = [
+    "FORMULE_INCONNU", "a_defaire", "corriger", "ecrire", "empreinte", "lignes_possedees", "lignes_presentes", "origin",
+    "reconcilier", "redactions_tracees", "remplacer_rubrique", "retirer", "traces", "verifier", "verifier_modifiable",
+]
 
 
 #: Le texte d'un « je ne sais pas » sans rien d'autre : l'entretien guidé n'écrit alors aucune note.
@@ -247,6 +267,7 @@ def _unwrite(root: Path, name: str | None, conv: Conversation, el: Element) -> l
     if el not in stack:
         raise ConversationError("cet élément n'est pas rangé dans le document")
     tail = stack[stack.index(el):]
+    verifier_modifiable(root, name or "principal", conv, tail)  # une ligne remplacée par une rédaction ne se retire pas ainsi
     answers, state, _ = _answers(root, name, el.angle)
     wanted = [_expected(e) for e in tail]
     if state == "ecarte" or answers[-len(wanted):] != wanted:
@@ -278,3 +299,176 @@ def corriger(root: Path, slug: str, conv: Conversation, el: Element, texte: str)
         el.texte = texte
         for item in tail:
             _write_one(root, name, conv, item)
+
+
+# ── Le document à la fin (lot E) : remplacer les SEULES lignes que la conversation possède ─────────────────────────────
+
+#: La clé de ``entretien.json`` qui dit, par rubrique, quelles lignes une rédaction acceptée a écrites et pour quelle
+#: conversation : comme ``origin`` sur les lignes de l'entretien, c'est la trace qui fait foi, jamais ``conversation.json``.
+REDACTIONS_KEY = "redactions"
+_ORIGINE_OK = re.compile(r"[A-Za-z0-9:_.+-]{1,120}")
+
+
+def empreinte(root: Path, slug: str, phase: str) -> str:
+    """L'empreinte du fichier de phase ET de la trace de l'entretien : une rédaction ne s'accepte que sur le document qu'elle a vu."""
+    name = _name(slug)
+    try:
+        paths = (interview._phase_file(root, name, phase), cadrage_dir(root, name) / interview.STATE_FILE)
+    except ValueError as exc:
+        raise ConversationError(str(exc)) from exc
+    digest = hashlib.sha256()
+    for path in paths:
+        try:
+            with open_regular(path) as handle:
+                data = handle.read(MAX_FILE_BYTES + 1)
+        except FileNotFoundError:
+            data = b""
+        except ValueError as exc:
+            raise ConversationError(f"{path.name} illisible : je ne rédige rien") from exc
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return digest.hexdigest()
+
+
+def redactions_tracees(root: Path, slug: str) -> dict[str, dict[str, Any]]:
+    """Les rédactions acceptées que la trace de l'entretien attribue à une conversation : ``{rubrique: {"origin", "lines"}}``.
+
+    Une entrée mal formée est ignorée : sans trace lisible, la conversation ne possède aucune ligne, donc n'en retire aucune.
+    """
+    try:
+        state = interview._load(root, _name(slug)) or {}
+    except ValueError:
+        return {}
+    raw = state.get(REDACTIONS_KEY)
+    out: dict[str, dict[str, Any]] = {}
+    for key, rec in (raw.items() if isinstance(raw, dict) else ()):
+        if not isinstance(rec, dict) or set(rec) != {"origin", "lines"}:
+            continue
+        mark, lines = rec["origin"], rec["lines"]
+        if not isinstance(mark, str) or not _ORIGINE_OK.fullmatch(mark) or not isinstance(lines, list) or not 0 < len(lines) <= 20:
+            continue
+        if all(isinstance(ln, str) and ln.startswith("- ") and "\n" not in ln and "\r" not in ln and len(ln) <= 5000 for ln in lines):
+            out[str(key)] = {"origin": mark, "lines": list(lines)}
+    return out
+
+
+def _rubrique(root: Path, slug: str, phase: str, section: str) -> tuple[Path, list[str], int, int]:
+    """Le fichier de phase, ses lignes et les bornes (titre, fin) de la rubrique ; ``ConversationError`` si elle n'y est pas."""
+    try:
+        path = interview._phase_file(root, _name(slug), phase)
+        text = interview.read_regular(path, limit=MAX_FILE_BYTES)
+    except (ValueError, OSError) as exc:
+        raise ConversationError(str(exc)) from exc
+    lines = (text or "").splitlines()
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == f"## {section}"), None)
+    if start is None:
+        raise ConversationError(f"la rubrique « {section} » n'est plus dans le document : je n'y touche pas")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return path, lines, start, end
+
+
+def lignes_possedees(root: Path, slug: str, conv: Conversation, phase: str, section: str, base: list[str],
+                     cites: Mapping[str, set[str]]) -> list[str]:
+    """Les lignes de la rubrique que CETTE conversation possède, dans l'ordre du fichier : celles que la trace de l'entretien lui
+    attribue (``origin`` d'un élément), plus celles de sa dernière rédaction acceptée (``redactions`` de la trace).
+
+    Fail-closed : ``ConversationError`` si une ligne possédée est plusieurs fois dans la rubrique, si la rédaction acceptée a
+    été retouchée, ou si un élément de ``base`` n'y est plus (sa ligne a été retouchée à la main : elle est à l'humain).
+    ``cites`` : pour chaque rédaction (son identifiant), les éléments qu'elle porte. Rien n'est écrit.
+    """
+    _path, lines, start, end = _rubrique(root, slug, phase, section)
+    body = [ln.strip() for ln in lines[start + 1:end]]
+    prefix = f"conv:{conv.cree}:"
+    owned: list[str] = []
+    covered: set[str] = set()
+    for rec in _angles(root, slug).values():
+        for line in rec.get("lines", []):
+            mark = str(line.get("origin") or "") if isinstance(line, dict) else ""
+            if not mark.startswith(prefix) or (line.get("phase"), line.get("section")) != (phase, section):
+                continue
+            if line.get("replaced_by"):  # remplacée par une rédaction : seule la clé ``redactions`` en donne la propriété
+                continue
+            text = str(line.get("line", "")).strip()
+            if body.count(text) > 1:
+                raise ConversationError("une ligne de cette conversation est plusieurs fois dans la rubrique : je ne choisis pas")
+            if body.count(text) == 1:
+                owned.append(text)
+                covered.add(mark[len(prefix):])
+    rec = redactions_tracees(root, slug).get(rubrique_key(phase, section))
+    if rec is not None and rec["origin"].startswith(prefix):
+        present = [body.count(ln.strip()) for ln in rec["lines"]]
+        if all(n == 1 for n in present):
+            owned += [ln.strip() for ln in rec["lines"]]
+            covered |= cites.get(rec["origin"][len(prefix):], set())
+        elif any(present):
+            raise ConversationError("la rédaction acceptée a été retouchée à la main dans cette rubrique : je ne la réécris pas")
+    if len(set(owned)) != len(owned):
+        raise ConversationError("deux lignes de cette conversation sont identiques dans la rubrique : je ne choisis pas")
+    if any(i not in covered for i in base):
+        raise ConversationError("le document a été retouché à la main dans cette rubrique (une ligne de la conversation n'y est "
+                                "plus telle quelle) : je ne le réécris pas")
+    return sorted(owned, key=body.index)
+
+
+def lignes_presentes(root: Path, slug: str, phase: str, section: str, lignes: list[str]) -> bool:
+    """Ces lignes sont-elles toutes, une fois chacune, dans la rubrique ? Lecture seule ; faux si la rubrique est introuvable."""
+    try:
+        _path, lines, start, end = _rubrique(root, slug, phase, section)
+    except ConversationError:
+        return False
+    body = [ln.strip() for ln in lines[start + 1:end]]
+    return all(body.count(ln.strip()) == 1 for ln in lignes)
+
+
+def remplacer_rubrique(root: Path, slug: str, conv: Conversation, phase: str, section: str, base: list[str],
+                       cites: Mapping[str, set[str]], nouvelles: list[str], attendue: str, marque: str) -> None:
+    """Remplace, dans la rubrique, les SEULES lignes que la conversation possède par ``nouvelles`` (à la place de la première).
+
+    Les lignes de l'humain restent où elles sont. Sous le verrou de l'entretien : l'empreinte doit être celle de la
+    proposition (``ConversationConflictError``, raison ``document-change``), le document ne doit pas être accepté ; puis la
+    trace ``redactions`` de l'entretien attribue les nouvelles lignes à ``marque`` (``conv:<création>:<rédaction>``).
+    """
+    name = _name(slug)
+    with locked(cadrage_dir(root, name) / interview.STATE_FILE):
+        if empreinte(root, slug, phase) != attendue:
+            raise ConversationConflictError("le document a changé depuis la proposition : relis la proposition", "document-change")
+        path, lines, start, end = _rubrique(root, slug, phase, section)
+        try:
+            interview._refuse_accepted(path)
+        except ValueError as exc:
+            raise ConversationError(str(exc)) from exc
+        owned = set(lignes_possedees(root, slug, conv, phase, section, base, cites))
+        at = [i for i in range(start + 1, end) if lines[i].strip() in owned]
+        if not at:
+            raise ConversationError("aucune ligne de cette conversation dans la rubrique : rien à remplacer")
+        gone = set(at)
+        kept = [ln for i, ln in enumerate(lines[at[0]:end], at[0]) if i not in gone]
+        atomic_write(path, "\n".join([*lines[:at[0]], *nouvelles, *kept, *lines[end:]]).rstrip("\n") + "\n")
+        state = interview._load(root, name) or {}
+        prefix = f"conv:{conv.cree}:"
+        for rec in dict(state.get("angles") or {}).values():
+            for line in rec.get("lines", []):
+                # Les lignes brutes remplacées ne sont plus à la conversation (jamais retirables comme telles) : une ligne
+                # retapée à l'identique par l'humain reste à lui, et ``retract`` refuse d'en retirer la réponse.
+                if (isinstance(line, dict) and str(line.get("origin") or "").startswith(prefix)
+                        and (line.get("phase"), line.get("section")) == (phase, section)
+                        and (line.get("replaced_by") or str(line.get("line", "")).strip() in owned)):
+                    line["replaced_by"] = marque
+        found = state.get(REDACTIONS_KEY)
+        recs: dict[str, Any] = found if isinstance(found, dict) else {}
+        recs[rubrique_key(phase, section)] = {"origin": marque, "lines": list(nouvelles)}
+        state[REDACTIONS_KEY] = recs
+        interview._save(root, name, state)
+
+
+#: Ce que dit le refus de modifier, par la conversation, un élément d'une rubrique rédigée.
+REDIGEE = "cette rubrique a été rédigée (« {section} ») : propose une nouvelle rédaction pour la modifier"
+
+
+def verifier_modifiable(root: Path, slug: str, conv: Conversation, items: list[Element]) -> None:
+    """Refuse (``ConversationError``) AVANT tout geste si l'un de ces éléments, à retirer ou réécrire, a sa ligne remplacée
+    par une rédaction acceptée : une nouvelle proposition puis acceptation est alors le seul chemin. Rien n'est écrit."""
+    angles = _angles(root, slug)
+    for el in items:
+        if any(line.get("replaced_by") for _answer, line in _consignes(angles, conv, el)):
+            raise ConversationError(REDIGEE.format(section=el.section))

@@ -8,7 +8,10 @@ communes de toute écriture de l'Atelier : drapeau de l'Atelier, jeton de page, 
 - ``POST …/conversation/demarrer`` ``{}`` : démarre ou reprend ;
 - ``POST …/conversation/tour`` ``{"rev", "texte"}`` : un tour de l'humain, la réaction (accusé, étape, « tour lourd ») ;
 - ``POST …/conversation/elements/<id>`` ``{"rev", "decision": "confirmer"|"corriger"|"ecarter", "texte"?}`` ;
-- ``POST …/conversation/pause|terminer|classer|rouvrir`` ``{"rev"}``.
+- ``POST …/conversation/pause|terminer|classer|rouvrir`` ``{"rev"}`` ;
+- lot E, le document à la fin : ``GET …/conversation/redaction[/<id>]`` (propositions, passages écrits et leur trace),
+  ``POST …/conversation/redaction/proposer`` ``{"rev", "rubrique"}`` (n'écrit rien), ``POST …/redaction/<id>/accepter``
+  ``{"rev", "texte"}`` (le seul geste qui écrit, sur le texte exact affiché), ``…/<id>/ecarter|reprendre`` ``{"rev"}``.
 
 Aucune route n'accepte de contenu à écrire dans un fichier de phase : le corps ne porte que ``rev`` (la version vue :
 écrire sur une conversation qui a changé donne 409), ``texte`` (le tour de l'humain, ou le texte qu'il corrige) et
@@ -26,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core import cadrage_conversation_hygiene as hygiene
+from grimoire.core import cadrage_conversation_redaction_ops as redaction
 from grimoire.core import cadrage_conversation_turn as turn
 from grimoire.core.cadrage import PHASES
 from grimoire.core.cadrage_conversation import ConversationConflictError
@@ -45,6 +49,16 @@ _FIELDS: dict[str, frozenset[str]] = {
     "classer": frozenset({"rev"}),
     "rouvrir": frozenset({"rev"}),
 }
+#: Lot E, le document à la fin : ``rubrique`` est une clé de la liste fermée (jamais un chemin), ``texte`` le texte EXACT
+#: de la rédaction affichée, que l'acceptation compare à la proposition enregistrée (aucun contenu n'est pris du corps).
+_FIELDS_REDACTION: dict[str, frozenset[str]] = {
+    "proposer": frozenset({"rev", "rubrique"}),
+    "accepter": frozenset({"rev", "texte"}),
+    "ecarter": frozenset({"rev"}),
+    "reprendre": frozenset({"rev"}),
+}
+
+
 def _fabrique_modeles(root: Path, slug: str) -> Any:
     """La fabrique par défaut (lot B2) : décide à chaque appel, d'après les autorisations de l'humain, quel modèle parle.
 
@@ -88,8 +102,8 @@ def _context(root: Path, slug: str) -> turn.Contexte:
     return turn.Contexte(root, slug, directory, moteur_pour(root, slug), hygiene.maintenant(), reglages(root))
 
 
-def _body(action: str, body: dict[str, Any]) -> dict[str, Any]:
-    extra = set(body) - _FIELDS[action] - {"project"}  # ``project`` : le projet visé, confirmé par l'hôte comme pour les autres écritures
+def _body(action: str, body: dict[str, Any], fields: dict[str, frozenset[str]] = _FIELDS) -> dict[str, Any]:
+    extra = set(body) - fields[action] - {"project"}  # ``project`` : le projet visé, confirmé par l'hôte comme pour les autres écritures
     if extra:
         raise ValueError(f"champ(s) refusé(s) : {', '.join(sorted(extra))} — la conversation n'accepte pas de contenu de document")
     return body
@@ -118,18 +132,38 @@ def get(root: Path, rest: list[str]) -> dict[str, Any]:
         return turn.vue(_context(root, rest[1]))
     if len(rest) == 4 and rest[2] == "conversation" and rest[3] == "compris":
         return turn.compris(_context(root, rest[1]))
+    if len(rest) in (4, 5) and rest[2] == "conversation" and rest[3] == "redaction":
+        ctx = _context(root, rest[1])  # lot E : les propositions, et d'où vient chaque passage écrit
+        return redaction.lire(ctx) if len(rest) == 4 else redaction.lire_une(ctx, rest[4])
     raise FileNotFoundError(f"route inconnue : atelier/{'/'.join(rest)}")
 
 
+def _redaction(ctx: turn.Contexte, rest: list[str], body: dict[str, Any]) -> dict[str, Any]:
+    """Lot E : ``redaction/proposer`` ou ``redaction/<id>/accepter|ecarter|reprendre``. Seule l'acceptation écrit le document."""
+    if len(rest) == 5 and rest[4] == "proposer":
+        data = _body("proposer", body, _FIELDS_REDACTION)
+        return redaction.proposer(ctx, _rev(data), data.get("rubrique"))
+    if len(rest) != 6 or rest[5] not in ("accepter", "ecarter", "reprendre"):
+        raise FileNotFoundError(f"route inconnue : atelier/{'/'.join(rest)}")
+    data = _body(rest[5], body, _FIELDS_REDACTION)
+    if rest[5] == "accepter":
+        return redaction.accepter(ctx, _rev(data), rest[4], data.get("texte"))
+    return redaction.ecarter(ctx, _rev(data), rest[4]) if rest[5] == "ecarter" else redaction.reprendre(ctx, _rev(data), rest[4])
+
+
 def post(root: Path, rest: list[str], body: dict[str, Any]) -> dict[str, Any]:
-    """Écritures. ``rest`` : ``["chantiers", <slug>, "conversation", <geste>[, <id>]]``."""
-    if len(rest) not in (4, 5) or rest[2] != "conversation" or rest[3] not in _FIELDS or (len(rest) == 5) != (rest[3] == "elements"):
+    """Écritures. ``rest`` : ``["chantiers", <slug>, "conversation", <geste>[, <id>]]`` ou ``[…, "redaction", …]`` (lot E)."""
+    redige = len(rest) in (5, 6) and rest[2] == "conversation" and rest[3] == "redaction"
+    if not redige and (len(rest) not in (4, 5) or rest[2] != "conversation" or rest[3] not in _FIELDS
+                       or (len(rest) == 5) != (rest[3] == "elements")):
         raise FileNotFoundError(f"route inconnue : atelier/{'/'.join(rest)}")
     action = rest[3]
-    data = _body(action, body)
+    data = {} if redige else _body(action, body)
     ctx = _context(root, rest[1])
     try:
-        if action == "demarrer":
+        if redige:
+            result = _redaction(ctx, rest, body)
+        elif action == "demarrer":
             result = turn.demarrer(ctx)
         elif action == "tour":
             result = turn.recevoir(ctx, _rev(data), data.get("texte"))
@@ -145,4 +179,7 @@ def post(root: Path, rest: list[str], body: dict[str, Any]) -> dict[str, Any]:
         from grimoire.tools import workspace_atelier_loop as loop
 
         loop.after_write(root, ctx.slug)  # le document a changé : date de modification et état du chantier
-    return {"ok": True, "reaction": result, "conversation": turn.vue(_context(root, rest[1]))}
+    out = {"ok": True, "reaction": result, "conversation": turn.vue(_context(root, rest[1]))}
+    if redige:
+        out["redaction"] = redaction.lire(_context(root, rest[1]))
+    return out
