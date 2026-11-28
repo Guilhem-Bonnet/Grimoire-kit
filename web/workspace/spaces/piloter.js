@@ -1813,7 +1813,14 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     kitRow.textContent = 'mis à niveau, checkpoint destructif en attente';
     if (runId) kitRow.title = `grimoire flow status ${runId}`;
     const kitCell = kpi.querySelector('.kpi-item .kpi-val');
-    if (kitCell) kitCell.textContent = 'checkpoint en attente';
+    if (kitCell) {
+      // Seul le texte changeait : la tuile gardait le titre, la nature (mot ou
+      // chiffre) et le ton de son état d'avant (#883).
+      kitCell.textContent = 'checkpoint en attente';
+      kitCell.title = 'checkpoint en attente';
+      const tile = kitCell.closest('.kpi-item');
+      if (tile) { tile.dataset.kind = 'word'; tile.dataset.tone = 'warn'; }
+    }
     if (behindBlock) { behindBlock.remove(); behindBlock = null; }
   }
 
