@@ -169,6 +169,32 @@ est sondé sur `<anthropic_base_url>/v1/models` si cette URL est en `https://`.
   Le registre n'est jamais écrit. Une nouvelle sonde remplace la précédente du
   même fournisseur : une valeur qu'on ne mesure plus ne reste pas « sondée ».
 
+## Gemini dans la conversation de cadrage
+
+La conversation de cadrage de l'Atelier sait appeler Google Gemini (API native `generateContent`). Le registre par défaut du
+kit ne déclare PAS Gemini : c'est une décision du propriétaire du projet. Pour l'activer, ajouter l'entrée au registre
+du projet, poser la clé, puis autoriser le modèle sur la page « Modèles autorisés » :
+
+```yaml
+  - id: "google-gemini"        # ou l'alias "gemini" ou "google" ; aucun base_url ni anthropic_base_url
+    enabled: true
+    provider_type: "hosted"
+    currency: "api"
+    invocation: "gemini -p {prompt}"
+    models:
+      - {id: "gemini-4-neon", tier: "strong"}
+    data_policy: {allowed_data_classes: ["public-docs"], forbidden_data_classes: ["secrets"]}
+```
+
+- **Étiquettes** : le texte de la conversation SORT de la machine (vers Google) ; payant au jeton, sans offre gratuite pour
+  ce modèle. Rien ne part, et rien ne coûte, tant que l'humain n'a pas autorisé ce modèle pour un usage.
+- **Clé** : magasin de secrets (`grimoire providers set-key`) puis environnement, sous `GEMINI_API_KEY` ou
+  `<ID>_API_KEY` (`GOOGLE_GEMINI_API_KEY` pour `google-gemini`, `GEMINI_API_KEY` pour `gemini`). Elle part en en-tête
+  `x-goog-api-key` vers `https://generativelanguage.googleapis.com/v1beta/models/<modèle>:generateContent` seulement, jamais
+  dans l'URL. Un fournisseur Gemini qui déclare un `base_url` n'a pas cet adaptateur ; une adresse réécrite après
+  l'autorisation change l'empreinte : rien ne part.
+- **Limite** : la consommation de Gemini n'est pas inscrite au compteur ni au quota du kit.
+
 ## Passerelle LiteLLM
 
 Un proxy LiteLLM se déclare comme un fournisseur de type `litellm`. `base_url`

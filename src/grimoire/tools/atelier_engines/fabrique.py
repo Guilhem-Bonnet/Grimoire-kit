@@ -19,13 +19,14 @@ Règles non négociables :
 - **Ce qui est dit** : chaque usage porte ``local`` et ``sortie_de_texte`` d'après la ligne détectée (jamais déclarés par le moteur).
 
 Adaptateurs : Ollama (boucle locale reconnue), serveur au format OpenAI (passerelle admise, ou serveur local sans clé),
-API Messages d'Anthropic (client existant de l'Atelier). L'agent installé sur la machine (source « hôte ») n'a pas d'adaptateur :
+API Messages d'Anthropic (client existant de l'Atelier), API Gemini de Google (``google-gemini``, adresse officielle fixe). L'agent installé sur la machine (source « hôte ») n'a pas d'adaptateur :
 le kit ne sait que sonder sa connexion, pas lui poser une question sans lancer un agent autonome ; il n'est donc jamais appelé.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -80,6 +81,7 @@ def _backend(
     from grimoire.providers.secrets import env_for_provider, provider_key_var
     from grimoire.tools import atelier_model as am
     from grimoire.tools.atelier_engines.anthropic import AnthropicBackend
+    from grimoire.tools.atelier_engines.gemini import GeminiBackend
     from grimoire.tools.atelier_engines.ollama import OllamaBackend
     from grimoire.tools.atelier_engines.openai_compat import OpenAICompatBackend
 
@@ -112,6 +114,15 @@ def _backend(
                 row.model_id, key, timeout_s=delai, transport=transport,
                 on_response=lambda raw: am.account_response(root, slug, row.model_id, raw),
             ), ""
+        if canonical_provider(spec.id, spec.provider_type) == "google-gemini" and not spec.base_url and not spec.anthropic_base_url:
+            # Adresse officielle CONSTRUITE par l'adaptateur. Clé : magasin du fournisseur puis environnement, sous la variable
+            # documentée (GEMINI_API_KEY) ou celle que la détection attend pour cet identifiant (<ID>_API_KEY).
+            variables = ("GEMINI_API_KEY", provider_key_var(spec.id))
+            stocke = env_for_provider(spec.id)
+            key = next((v.strip() for v in (*(stocke.get(n, "") for n in variables), *(os.environ.get(n, "") for n in variables)) if v.strip()), "")
+            if not key:
+                return None, "aucune clé posée pour ce fournisseur"
+            return GeminiBackend(row.model_id, key, timeout_s=delai, transport=transport), ""
         if spec.base_url and spec.provider_type == "local":
             return OpenAICompatBackend(spec.base_url, row.model_id, timeout_s=delai, transport=transport), ""
         canon = canonical_provider(spec.id)
@@ -122,7 +133,7 @@ def _backend(
             if not key:
                 return None, "aucune clé posée pour cette passerelle"
             return OpenAICompatBackend(spec.base_url, row.model_id, key=key, timeout_s=delai, transport=transport), ""
-        return None, "aucun adaptateur pour ce fournisseur (Ollama, serveur OpenAI-compatible admis et Anthropic seulement)"
+        return None, "aucun adaptateur pour ce fournisseur (Ollama, serveur OpenAI-compatible admis, Anthropic et Gemini seulement)"
     except EngineError as exc:
         return None, str(exc)
 
