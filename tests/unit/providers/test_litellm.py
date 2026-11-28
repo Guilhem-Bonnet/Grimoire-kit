@@ -173,7 +173,7 @@ def test_other_providers_have_no_base_url(tmp_path: Path) -> None:
 
 
 def test_probe_lists_models_then_reads_model_info(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=["https://llm.example"])
     seen: list[urllib.request.Request] = []
     routes = {"https://llm.example/v1/models": _MODELS, "https://llm.example/v1/model/info": _INFO}
     monkeypatch.setattr(capability_probe._OPENER, "open", _fake(routes, seen))
@@ -212,7 +212,7 @@ def test_probe_lists_models_then_reads_model_info(tmp_path: Path, monkeypatch: p
     ],
 )
 def test_model_info_refused_keeps_listed_models(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, info: Any) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=["https://llm.example"])
     routes = {"https://llm.example/v1/models": _MODELS, "https://llm.example/v1/model/info": info}
     monkeypatch.setattr(capability_probe._OPENER, "open", _fake(routes))
 
@@ -287,7 +287,7 @@ def test_litellm_id_itself_is_a_gateway(tmp_path: Path, monkeypatch: pytest.Monk
 def test_unadmitted_base_url_is_never_contacted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_url: str | None
 ) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=["https://llm.example"])
     monkeypatch.setattr(capability_probe._OPENER, "open", _no_network)
 
     probe = probe_provider_capabilities(_spec(tmp_path, _entry(base_url)))
@@ -307,7 +307,7 @@ def test_unadmitted_base_url_is_never_contacted(
     ],
 )
 def test_admitted_base_urls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_url: str, expected: str) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=[base_url])
     info_url = expected.removesuffix("/models") + "/model/info"
     monkeypatch.setattr(capability_probe._OPENER, "open", _fake({expected: _MODELS, info_url: {"data": []}}))
 
@@ -330,7 +330,7 @@ def test_admitted_base_urls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bas
 def test_probe_failures_are_unmeasured_without_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Any, expected: str
 ) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=["https://llm.example"])
     monkeypatch.setattr(capability_probe._OPENER, "open", _fake({"https://llm.example/v1/models": failure}))
 
     probe = probe_provider_capabilities(_spec(tmp_path, _entry()))
@@ -342,7 +342,7 @@ def test_probe_failures_are_unmeasured_without_secret(
 
 
 def test_model_count_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=["https://llm.example"])
     many = {"data": [{"id": f"m-{index}"} for index in range(2500)]}
     routes = {"https://llm.example/v1/models": many, "https://llm.example/v1/model/info": {"data": []}}
     monkeypatch.setattr(capability_probe._OPENER, "open", _fake(routes))
@@ -356,7 +356,7 @@ def test_model_count_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 def test_litellm_provider_is_usable_in_the_model_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=["https://llm.example"])
     info = {"data": [{"model_name": "qwen-coder", "model_info": {"max_input_tokens": 32768}}]}
     routes = {"https://llm.example/v1/models": _MODELS, "https://llm.example/v1/model/info": info}
     monkeypatch.setattr(capability_probe._OPENER, "open", _fake(routes))
@@ -414,7 +414,7 @@ def test_verify_rejects_a_base_url_the_probe_would_refuse(tmp_path: Path, base_u
 
 
 def test_model_info_completes_listed_values_and_caps_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=["https://llm.example"])
     listed = {"data": [{"id": "claude-haiku", "context_window": 100000}, {"id": "qwen-coder"}]}
     info = {
         "data": [
@@ -439,7 +439,7 @@ def test_model_info_completes_listed_values_and_caps_context(tmp_path: Path, mon
 
 
 def test_cli_probe_capabilities_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    set_secret("proxy", KEY_VAR, SECRET)
+    set_secret("proxy", KEY_VAR, SECRET, endpoints=["https://llm.example"])
     routes = {"https://llm.example/v1/models": _MODELS, "https://llm.example/v1/model/info": _INFO}
     monkeypatch.setattr(capability_probe._OPENER, "open", _fake(routes))
     _write(tmp_path, _entry())

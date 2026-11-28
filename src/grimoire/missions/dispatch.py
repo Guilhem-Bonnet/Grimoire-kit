@@ -81,7 +81,7 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.diff_fingerprint import signal_if_stuck
 from grimoire.missions.dispatch_history import recommend_start_tier
-from grimoire.missions.dispatch_provider_env import provider_env
+from grimoire.missions.dispatch_provider_env import NO_COOLDOWN, Refusal, provider_call
 from grimoire.missions.dispatch_worktree import changed_since, worktree_fingerprint
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.route_dispatch import record_route
@@ -847,9 +847,11 @@ def _run_provider_call(
     chaîne vide rendrait de toute façon une commande vide, refusée par
     ``subprocess`` — pas de garde supplémentaire nécessaire ici.
     """
-    argv = render_invocation(provider.invocation or "", prompt=prompt, model=model)
     started = time.monotonic()
-    env = provider_env(provider.id)
+    prepared = provider_call(project_root, provider, model, prompt)
+    if isinstance(prepared, Refusal):  # liaison de la clé ou identifiant de modèle : aucun sous-processus, une tentative
+        return 1, "", prepared.message, time.monotonic() - started, prepared.kind, None
+    argv, env = prepared
     try:
         completed = subprocess.run(
             argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -892,7 +894,8 @@ def _record_call_failure(
         scoped = signal.model_hint is not None and signal.model_hint in model.lower()
         record_suspension(root, provider_id, until=signal.until, source=signal.source, model=model if scoped else None)
         return
-    record_failure(root, provider_id, kind=failure_kind)
+    if failure_kind not in NO_COOLDOWN:  # un refus de liaison ou d'identifiant n'est pas une panne : pas de refroidissement
+        record_failure(root, provider_id, kind=failure_kind)
 
 
 #: Combien de la sortie (stdout puis stderr) survit dans ``CheckResult.output_excerpt``

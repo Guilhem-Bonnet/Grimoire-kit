@@ -22,6 +22,9 @@ from grimoire.providers.secrets import (
     store_dir,
 )
 
+_DEEPSEEK ="https://api.deepseek.com"
+_OPENAI = "https://api.openai.com"
+
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,19 +63,19 @@ def test_set_secret_twice_updates_same_var_without_duplicate_entry(tmp_path: Pat
 
     entries = list_secrets()
     assert len(entries) == 1
-    assert env_for_provider("deepseek") == {"DEEPSEEK_API_KEY": "sk-second"}
+    assert env_for_provider("deepseek", endpoints=[_DEEPSEEK]) == {"DEEPSEEK_API_KEY": "sk-second"}
 
 
 def test_set_secret_two_vars_same_provider_coexist(tmp_path: Path) -> None:
     set_secret("openai", "OPENAI_API_KEY", "sk-a")
     set_secret("openai", "OPENAI_ORG_ID", "org-b")
 
-    assert env_for_provider("openai") == {"OPENAI_API_KEY": "sk-a", "OPENAI_ORG_ID": "org-b"}
+    assert env_for_provider("openai", endpoints=[_OPENAI]) == {"OPENAI_API_KEY": "sk-a", "OPENAI_ORG_ID": "org-b"}
     assert {e.env_var for e in list_secrets()} == {"OPENAI_API_KEY", "OPENAI_ORG_ID"}
 
 
 def test_env_for_provider_without_secret_returns_empty_dict(tmp_path: Path) -> None:
-    assert env_for_provider("never-configured") == {}
+    assert env_for_provider("never-configured", endpoints=[]) == {}
 
 
 def test_list_secrets_without_store_returns_empty_tuple(tmp_path: Path) -> None:
@@ -85,7 +88,7 @@ def test_remove_secret_single_var_keeps_others(tmp_path: Path) -> None:
 
     remove_secret("openai", "OPENAI_ORG_ID")
 
-    assert env_for_provider("openai") == {"OPENAI_API_KEY": "sk-a"}
+    assert env_for_provider("openai", endpoints=[_OPENAI]) == {"OPENAI_API_KEY": "sk-a"}
     assert {e.env_var for e in list_secrets()} == {"OPENAI_API_KEY"}
 
 
@@ -95,7 +98,7 @@ def test_remove_secret_without_var_drops_whole_provider_file(tmp_path: Path) -> 
 
     remove_secret("openai")
 
-    assert env_for_provider("openai") == {}
+    assert env_for_provider("openai", endpoints=[_OPENAI]) == {}
     assert list_secrets() == ()
     assert not (store_dir() / "openai.env").exists()
 
@@ -112,7 +115,7 @@ def test_env_file_skips_blank_comment_and_malformed_lines(tmp_path: Path) -> Non
     path = store_dir() / "deepseek.env"
     path.write_text(path.read_text(encoding="utf-8") + "\n# un commentaire\n\nligne-sans-egal\n", encoding="utf-8")
 
-    assert env_for_provider("deepseek") == {"DEEPSEEK_API_KEY": "sk-a"}
+    assert env_for_provider("deepseek", endpoints=[_DEEPSEEK]) == {"DEEPSEEK_API_KEY": "sk-a"}
 
 
 def test_list_secrets_tolerates_corrupted_index_json(tmp_path: Path) -> None:
@@ -127,7 +130,7 @@ def test_remove_secret_unknown_var_is_a_noop(tmp_path: Path) -> None:
 
     remove_secret("openai", "NE_EXISTE_PAS")
 
-    assert env_for_provider("openai") == {"OPENAI_API_KEY": "sk-a"}
+    assert env_for_provider("openai", endpoints=[_OPENAI]) == {"OPENAI_API_KEY": "sk-a"}
 
 
 @pytest.mark.parametrize("provider_id", ["../../x", "a/b", "anthropıc", "Deepseek", "x\n", "", "-x", "a" * 65])
@@ -138,7 +141,7 @@ def test_invalid_provider_id_never_reaches_the_store(tmp_path: Path, provider_id
         set_secret(provider_id, "X_API_KEY", "valeur")
     with pytest.raises(ValueError, match="identifiant de fournisseur invalide"):
         remove_secret(provider_id)
-    assert env_for_provider(provider_id) == {}
+    assert env_for_provider(provider_id, endpoints=[]) == {}
     assert not (tmp_path / "x.env").exists()
     assert not store_dir().exists()
 

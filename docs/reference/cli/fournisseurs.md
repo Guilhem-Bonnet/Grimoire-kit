@@ -38,6 +38,52 @@ l'Ollama de la machine liste mais exécute à distance (entrée portant `remote_
 `:cloud`) est toujours étiqueté exposé et payant, jamais « rien ne sort de la machine ». Un exécutable `ollama` qui se
 trouve sous la racine du projet n'est pas reconnu comme l'Ollama local.
 
+### Clés d'API liées à leur point d'accès
+
+`grimoire providers set-key <fournisseur> <VARIABLE> [--project-root <chemin>]` (et la saisie du cockpit, sous la clé
+de contrôle) lie la clé au point d'accès que le registre du projet déclare pour ce fournisseur au moment de la saisie :
+`anthropic_base_url`, `base_url`, et, pour un fournisseur documenté (`anthropic`, `openai`, `google-gemini`,
+`deepseek`, `moonshot`), son adresse officielle par défaut, qui compte comme un point d'accès explicite. Le magasin ne
+retient qu'une empreinte du point d'accès normalisé (schéma, hôte, port, chemin de base ; casse de l'hôte, port par
+défaut, `/` final et `/v1` final n'y changent rien), jamais l'adresse.
+
+Chaque chemin qui envoie une clé donne au magasin le point d'accès visé : la sonde de capacités et « Vérifier les
+connexions », l'appel d'un fournisseur par `task dispatch`, le worker compatible Anthropic, le worker opencode et
+l'assistant de l'Atelier. Si l'empreinte diffère, la clé n'est pas rendue et l'erreur dit : « l'adresse de ce
+fournisseur a changé depuis la saisie de la clé ; saisis-la de nouveau pour l'approuver », sans afficher la clé ni
+l'adresse. Une adresse en `http://` hors boucle locale, ou portant des identifiants, une requête ou un fragment, n'est
+jamais admise pour recevoir une clé.
+
+La saisie lie aussi la commande d'invocation du fournisseur (le gabarit `invocation` du registre, empreinte
+seulement) : un appel par `task dispatch` remet la clé à la commande du registre, qui doit donc être celle approuvée. Si
+l'adresse ou la commande a changé, la clé n'est pas remise et aucun sous-processus n'est lancé ; une clé liée à au moins
+une adresse ne vaut jamais pour une cible vide. `set-key` montre, avant de demander la clé, les adresses normalisées et
+la commande qui seront approuvées, puis demande confirmation (`--yes` pour un script : même liste, sans confirmation).
+La lecture du cockpit et `providers status --json` exposent `key_binding` (ce qui serait lié) et la réponse de la saisie
+du cockpit rend `bound`. Un `/v1` final fait partie de l'adresse (deux chemins peuvent être deux services) ; il n'est
+équivalent à son absence que pour l'adresse officielle du fournisseur.
+
+La liaison porte sur le programme réellement lancé, pas seulement sur le texte de la commande : la saisie résout le
+premier jeton (un nom nu par `shutil.which`) et, derrière un interpréteur connu (`python`, `sh`, `bash`, `node`…), le
+script lancé, puis retient leurs chemins absolus et l'empreinte de leur contenu ; `set-key` affiche ces chemins. À
+l'usage, un autre binaire du même nom plus tôt dans le `PATH`, ou un contenu réécrit, refuse la clé. Un programme ou
+un script situé sous la racine du projet ne reçoit jamais une clé (le dépôt peut le réécrire) : `set-key` refuse, il
+faut le placer hors du projet ; il en va de même si un argument de la commande (hors `{prompt}` et `{model}`, y compris
+dans une chaîne `sh -c`) désigne un chemin existant du projet. Un lanceur générique (`env`, `uv`, `uvx`, `npx`, `pnpm`,
+`yarn`, `npm`, `docker`, `podman`, `nohup`, `xargs`, `timeout`, `nice`, `sudo`, `doas`) est refusé : le programme qu'il
+lance n'est pas celui que la saisie a vu. L'identifiant d'un modèle tiré du registre doit être non vide, ne pas commencer par `-`
+et rester dans `[A-Za-z0-9._:/@-]`, sinon l'appel n'est pas lancé. Un refus de liaison est une seule tentative, dite
+avec la commande `set-key` à relancer ; il ne met pas le fournisseur en refroidissement. Le magasin n'écrit jamais à
+travers un lien symbolique (index, fichiers de clés, dossier) : écriture atomique en `0600`.
+
+Migration : une clé saisie avant cette liaison (sans empreinte) reste utilisable vers l'adresse officielle par défaut de
+son fournisseur seulement ; vers toute autre adresse (passerelle, `base_url` ou `anthropic_base_url` personnalisés),
+elle exige une nouvelle saisie. Une clé ancienne n'est en outre jamais remise à un sous-processus dont la commande vient
+du registre (`task dispatch`) tant qu'elle n'est pas ressaisie. La règle tient dans une seule fonction
+(`_legacy_may_receive`, `grimoire/providers/secrets.py`). `grimoire providers secrets` (colonne « Point d'accès »), `grimoire providers status`
+(`keys_unbound` en JSON) et `grimoire doctor` (contrôle `provider_keys_bound`, avertissement) signalent les clés non
+liées ; ressaisir la clé la lie.
+
 Limites connues du lot :
 
 - L'empreinte d'une autorisation lie l'autorisation à ce que le nom désigne, mais elle n'authentifie pas le fichier

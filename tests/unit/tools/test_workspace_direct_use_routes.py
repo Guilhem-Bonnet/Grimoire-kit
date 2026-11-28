@@ -288,7 +288,7 @@ def witness(server: tuple[int, Path]) -> Iterator[_Witness]:
         '    invocation: "gw-cli {prompt}"\n    models:\n      - {id: "g1", tier: "mid"}\n',
         encoding="utf-8",
     )
-    set_secret("gw", "GW_API_KEY", "cle-secrete-d-essai")
+    set_secret("gw", "GW_API_KEY", "cle-secrete-d-essai", endpoints=[w.url])
     try:
         yield w
     finally:

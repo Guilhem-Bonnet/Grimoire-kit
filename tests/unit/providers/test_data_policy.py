@@ -60,7 +60,7 @@ def key_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     store.mkdir()
     (store / "ext.env").write_text("EXT_API_KEY=x\n", encoding="utf-8")
     monkeypatch.setattr("grimoire.missions.worker_provider.store_dir", lambda: store)
-    monkeypatch.setattr("grimoire.missions.worker_provider.env_for_provider", lambda _p: {"EXT_API_KEY": "x"})
+    monkeypatch.setattr("grimoire.missions.worker_provider.env_for_provider", lambda _p, **_k: {"EXT_API_KEY": "x"})
     return store
 
 

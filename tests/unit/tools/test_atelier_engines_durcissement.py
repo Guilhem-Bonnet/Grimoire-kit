@@ -71,7 +71,7 @@ def ecrire(root: Path, texte: str) -> None:
 
 @pytest.fixture
 def secrets(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("grimoire.providers.secrets.env_for_provider", lambda pid: {"MYGW_API_KEY": KEY, "LITELLM_API_KEY": KEY} if pid in ("mygw", "litellm") else {})
+    monkeypatch.setattr("grimoire.providers.secrets.env_for_provider", lambda pid, **_kw: {"MYGW_API_KEY": KEY, "LITELLM_API_KEY": KEY} if pid in ("mygw", "litellm") else {})
     monkeypatch.setattr("grimoire.providers.availability.list_secrets", lambda: ())
     monkeypatch.setenv("MYGW_API_KEY", KEY)  # la détection ne lit que la PRÉSENCE de la clé
     monkeypatch.setenv("LITELLM_API_KEY", KEY)

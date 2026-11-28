@@ -86,11 +86,33 @@ def providers_set_key_route(project_root: Path, body: dict[str, Any]) -> Any:
     value = str(body.get("value") or "")
     if not provider_id or not env_var:
         raise ValueError("`provider_id` et `env_var` requis")
-    try:
-        path = set_secret(provider_id, env_var, value)
+    from grimoire.providers.key_endpoint import (
+        binding_command,
+        binding_endpoints,
+        binding_invocation,
+        binding_programs,
+        binding_view,
+    )
+
+    endpoints, invocation = binding_endpoints(project_root, provider_id), binding_invocation(project_root, provider_id)
+    try:  # la clé est liée à ce que le registre déclare maintenant (geste d'autorité vérifié ci-dessus)
+        programs = binding_programs(project_root, provider_id)
+        path = set_secret(
+            provider_id,
+            env_var,
+            value,
+            endpoints=endpoints,
+            invocation=invocation,
+            command=binding_command(project_root, provider_id),
+        )
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
-    return {"provider_id": provider_id, "env_var": env_var, "file": str(path)}
+    return {
+        "provider_id": provider_id,
+        "env_var": env_var,
+        "file": str(path),
+        "bound": binding_view(endpoints, invocation, programs),
+    }
 
 
 def _add_local_models(project_root: Path, body: dict[str, Any]) -> Any:

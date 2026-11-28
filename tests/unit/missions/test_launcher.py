@@ -1124,7 +1124,7 @@ def route_prete(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("USERPROFILE", str(home))
     (projet / "_grimoire" / "standard" / "llm-provider-registry.yaml").write_text(_REGISTRE_ROUTE, encoding="utf-8")
     write_policy(projet, extra="      provider: deepseek\n      tier: cheap\n")
-    set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-secret-de-test")
+    set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-secret-de-test", endpoints=["https://api.example.test/anthropic"])
     return projet
 
 

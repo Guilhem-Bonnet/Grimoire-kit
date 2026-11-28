@@ -34,6 +34,7 @@ from grimoire.providers.capabilities import (
     ProviderCapabilities,
 )
 from grimoire.providers.capability_probe import capabilities_for, load_probes, probe_capabilities, read_capabilities
+from grimoire.providers.key_endpoint import spec_binding_view
 from grimoire.providers.registry import (
     SUPPORTED_CURRENCIES,
     SUPPORTED_MODEL_TIERS,
@@ -46,7 +47,7 @@ from grimoire.providers.registry import (
     set_provider_enabled,
 )
 from grimoire.providers.routing import choose
-from grimoire.providers.secrets import list_secrets, remove_secret, set_secret
+from grimoire.providers.secrets import list_secrets, remove_secret, set_secret, unbound_secrets
 from grimoire.providers.state import ProviderRuntimeState, clear_unknown_suspensions, load_state, record_failure
 
 providers_app = typer.Typer(
@@ -104,12 +105,18 @@ def _models_by_tier(provider: ProviderSpec) -> str:
     return " · ".join(parts) if parts else "—"
 
 
+def provider_unbound_keys(provider_id: str) -> list[str]:
+    """Les variables de clé de *provider_id* saisies avant leur liaison à un point d'accès (jamais une valeur)."""
+    return sorted(entry.env_var for entry in unbound_secrets() if entry.provider == provider_id)
+
+
 def _provider_json(
     provider: ProviderSpec,
     state: dict[str, ProviderRuntimeState],
     *,
     now: datetime,
     probe: CapabilityProbe | None = None,
+    root: Path | None = None,
 ) -> dict[str, Any]:
     entry = state.get(provider.id)
     cooling_down = entry is not None and entry.is_cooling_down(now=now)
@@ -139,6 +146,10 @@ def _provider_json(
         "probe_note": entry.probe_note if entry is not None else None,
         # #1281 L3 : capacités avec leur provenance (declared / probed / documented / unknown).
         "capabilities": capabilities_for(provider, probe).to_dict(),
+        # Clés saisies avant leur liaison à un point d'accès : valables vers l'adresse officielle seulement.
+        "keys_unbound": provider_unbound_keys(provider.id),
+        # Ce que la saisie d'une clé lierait maintenant (adresses normalisées, commande d'invocation) : à montrer avant le geste.
+        "key_binding": spec_binding_view(provider, root),
     }
 
 
@@ -164,7 +175,8 @@ def providers_status(
     if json_output or _get_fmt(ctx) == "json":
         payload = {
             "providers": [
-                _provider_json(provider, state, now=now, probe=probes.get(provider.id)) for provider in providers
+                _provider_json(provider, state, now=now, probe=probes.get(provider.id), root=root)
+                for provider in providers
             ],
             "next_choice": {tier: (spec.id if spec else None) for tier, spec in next_choice.items()},
         }
@@ -188,6 +200,12 @@ def providers_status(
             _state_label(provider.id, state, now=now),
         )
     console.print(table)
+    for provider in providers:
+        if provider_unbound_keys(provider.id):
+            console.print(
+                f"[yellow]●[/yellow] {provider.id} : clé non liée à un point d'accès — valable seulement vers l'adresse "
+                f"officielle ; `grimoire providers set-key {provider.id} <VARIABLE>` la lie."
+            )
 
     console.print("\n[bold]Prochain choix par palier[/bold]")
     for tier in SUPPORTED_MODEL_TIERS:
@@ -640,22 +658,69 @@ def providers_remove(
 def providers_set_key(
     provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur.")],
     env_var: Annotated[str, typer.Argument(help="Nom de la variable d'environnement (ex: DEEPSEEK_API_KEY).")],
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Sans confirmation (scripts) : affiche la même liste, puis saisie masquée.")
+    ] = False,
 ) -> None:
     """Poser une clé API en saisie masquée — jamais en argument, jamais dans le registre.
 
     Écrit dans ``~/.env-store/`` (``grimoire.providers.secrets``), lu
     automatiquement par `grimoire task dispatch` au moment d'invoquer ce
-    fournisseur.
+    fournisseur. La clé est liée au point d'accès que le registre du projet déclare
+    pour ce fournisseur (et à son adresse officielle s'il est documenté) et à sa commande
+    d'invocation : la liste est montrée AVANT la saisie, qui demande confirmation (``--yes`` pour
+    un script). Si la déclaration change ensuite, la clé n'est plus rendue — saisis-la de nouveau.
     """
     import getpass
 
+    from rich.markup import escape
+
+    from grimoire.providers.key_endpoint import (
+        UNADMITTED,
+        binding_command,
+        binding_endpoints,
+        binding_invocation,
+        binding_programs,
+        binding_view,
+    )
+    from grimoire.providers.secrets import KeyEndpointError
+
+    root = project_root.resolve()
+    try:
+        programs = binding_programs(root, provider_id)
+    except KeyEndpointError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        raise typer.Exit(1) from exc
+    view = binding_view(binding_endpoints(root, provider_id), binding_invocation(root, provider_id), programs)
+    def say(text: str) -> None:
+        console.print(text, soft_wrap=True, highlight=False)  # une ligne = une information, jamais coupée
+
+    say(f"Cette clé sera liée, pour {escape(provider_id)}, à :")
+    for url in view["endpoints"] or ["(aucune adresse déclarée)"]:
+        say(f"  adresse : {escape(url)}")
+    say(f"  commande d'invocation : {escape(view['invocation']) or '(aucune)'}")
+    for program in view["programs"]:
+        say(f"  programme résolu : {escape(program)}")
+    if UNADMITTED in view["endpoints"]:
+        console.print("[red]adresse du fournisseur non admise pour une clé : corrige le registre, rien n'est saisi.[/red]")
+        raise typer.Exit(1)
+    if not yes and not typer.confirm("Approuver ces adresses, cette commande et ce programme ?"):
+        raise typer.Exit(1)
     value = getpass.getpass(f"Valeur pour {env_var} ({provider_id}) — saisie masquée : ")
     try:
-        path = set_secret(provider_id, env_var, value)
+        path = set_secret(
+            provider_id,
+            env_var,
+            value,
+            endpoints=binding_endpoints(root, provider_id),
+            invocation=binding_invocation(root, provider_id),
+            command=binding_command(root, provider_id),
+        )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    console.print(f"[green]✓[/green] {env_var} enregistré pour {provider_id!r} ({path}, chmod 600).")
+    console.print(f"[green]✓[/green] {env_var} enregistré pour {provider_id!r} ({path}, chmod 600), lié à son point d'accès.")
 
 
 @providers_app.command("remove-key")
@@ -687,8 +752,13 @@ def providers_secrets_list(ctx: typer.Context, json_output: Annotated[bool, _JSO
         console.print("[dim]Aucune clé posée (`grimoire providers set-key`).[/dim]")
         return
     table = Table(title="Clés posées")
-    for column in ("Fournisseur", "Variable", "Fichier", "Posée le"):
+    for column in ("Fournisseur", "Variable", "Fichier", "Posée le", "Point d'accès"):
         table.add_column(column)
     for entry in entries:
-        table.add_row(entry.provider, entry.env_var, entry.file, entry.added_at)
+        table.add_row(entry.provider, entry.env_var, entry.file, entry.added_at, "lié" if entry.bound else "non lié")
     console.print(table)
+    if any(not entry.bound for entry in entries):
+        console.print(
+            "[yellow]●[/yellow] clé non liée : valable seulement vers l'adresse officielle de son fournisseur ; "
+            "`grimoire providers set-key <fournisseur> <VARIABLE>` la lie."
+        )

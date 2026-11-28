@@ -101,7 +101,7 @@ def _deepseek(root: Path) -> None:
 
     (root / REGISTRY).parent.mkdir(parents=True, exist_ok=True)
     (root / REGISTRY).write_text(_REGISTRE, encoding="utf-8")
-    set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-secret-de-test")
+    set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-secret-de-test", endpoints=["https://api.example.test/anthropic"])
 
 
 def _calls(host: FakeHost, root: Path, home: Path, ids: dict[str, str]) -> list[dict[str, Any]]:

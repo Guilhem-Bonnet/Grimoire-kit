@@ -624,7 +624,7 @@ def test_registry_chosen_host_never_receives_an_environment_key(
 
 
 def test_registry_chosen_host_uses_only_the_store_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    set_secret("openrouter", "OPENROUTER_API_KEY", SECRET)
+    set_secret("openrouter", "OPENROUTER_API_KEY", SECRET, endpoints=["https://hote.example"])
     seen: list[urllib.request.Request] = []
     monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://hote.example/": {"data": []}}, seen))
     body = '  - id: "openrouter"\n    enabled: true\n    anthropic_base_url: "https://hote.example"\n'
