@@ -81,7 +81,7 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.diff_fingerprint import signal_if_stuck
 from grimoire.missions.dispatch_history import recommend_start_tier
-from grimoire.missions.dispatch_provider_env import Refusal, provider_call
+from grimoire.missions.dispatch_provider_env import NO_COOLDOWN, Refusal, provider_call
 from grimoire.missions.dispatch_worktree import changed_since, worktree_fingerprint
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.route_dispatch import record_route
@@ -894,7 +894,7 @@ def _record_call_failure(
         scoped = signal.model_hint is not None and signal.model_hint in model.lower()
         record_suspension(root, provider_id, until=signal.until, source=signal.source, model=model if scoped else None)
         return
-    if failure_kind != "key_binding":  # un refus de liaison n'est pas une panne : pas de refroidissement
+    if failure_kind not in NO_COOLDOWN:  # un refus de liaison ou d'identifiant n'est pas une panne : pas de refroidissement
         record_failure(root, provider_id, kind=failure_kind)
 
 

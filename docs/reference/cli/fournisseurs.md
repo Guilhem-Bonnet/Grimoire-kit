@@ -68,7 +68,10 @@ premier jeton (un nom nu par `shutil.which`) et, derrière un interpréteur conn
 script lancé, puis retient leurs chemins absolus et l'empreinte de leur contenu ; `set-key` affiche ces chemins. À
 l'usage, un autre binaire du même nom plus tôt dans le `PATH`, ou un contenu réécrit, refuse la clé. Un programme ou
 un script situé sous la racine du projet ne reçoit jamais une clé (le dépôt peut le réécrire) : `set-key` refuse, il
-faut le placer hors du projet. L'identifiant d'un modèle tiré du registre doit être non vide, ne pas commencer par `-`
+faut le placer hors du projet ; il en va de même si un argument de la commande (hors `{prompt}` et `{model}`, y compris
+dans une chaîne `sh -c`) désigne un chemin existant du projet. Un lanceur générique (`env`, `uv`, `uvx`, `npx`, `pnpm`,
+`yarn`, `npm`, `docker`, `podman`, `nohup`, `xargs`, `timeout`, `nice`, `sudo`, `doas`) est refusé : le programme qu'il
+lance n'est pas celui que la saisie a vu. L'identifiant d'un modèle tiré du registre doit être non vide, ne pas commencer par `-`
 et rester dans `[A-Za-z0-9._:/@-]`, sinon l'appel n'est pas lancé. Un refus de liaison est une seule tentative, dite
 avec la commande `set-key` à relancer ; il ne met pas le fournisseur en refroidissement. Le magasin n'écrit jamais à
 travers un lien symbolique (index, fichiers de clés, dossier) : écriture atomique en `0600`.

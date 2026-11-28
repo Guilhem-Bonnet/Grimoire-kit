@@ -32,9 +32,13 @@ _LOG = logging.getLogger(__name__)
 _MODEL_RE = re.compile(r"[A-Za-z0-9._:/@][A-Za-z0-9._:/@-]{0,127}", re.ASCII)
 
 
+#: Motifs de refus qui ne sont pas une panne du fournisseur : ni refroidissement ni suspension.
+NO_COOLDOWN = frozenset({"key_binding", "model_id"})
+
+
 @dataclass(frozen=True, slots=True)
 class Refusal:
-    """Pourquoi l'appel n'est pas lancé. ``key_binding`` : la liaison de la clé (le fournisseur n'est pas en panne)."""
+    """Pourquoi l'appel n'est pas lancé : ``key_binding`` (liaison de la clé) ou ``model_id`` (identifiant refusé)."""
 
     kind: str
     message: str
@@ -47,7 +51,7 @@ def provider_call(
     from grimoire.missions.dispatch import render_invocation
 
     if not _MODEL_RE.fullmatch(model):
-        return Refusal("error", f"{provider.id} : identifiant de modèle refusé (vide, option ou hors [A-Za-z0-9._:/@-])")
+        return Refusal("model_id", f"{provider.id} : identifiant de modèle refusé (vide, option ou hors [A-Za-z0-9._:/@-])")
     try:
         env = provider_env(provider, root)
     except KeyEndpointError as exc:

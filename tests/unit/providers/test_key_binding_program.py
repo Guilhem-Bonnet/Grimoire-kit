@@ -165,6 +165,65 @@ def test_la_lecture_dit_pourquoi_un_programme_n_est_pas_admis(project: Path) -> 
     assert "racine du projet" in view["program_refusal"] and view["programs"] == []
 
 
+@pytest.mark.parametrize(
+    "template",
+    [
+        "env FOO=1 prog {prompt}",
+        "/usr/bin/env FOO=1 prog {prompt}",
+        "uv run x.py {prompt}",
+        "uvx tool {prompt}",
+        "npx tool {prompt}",
+        "pnpm exec tool {prompt}",
+        "yarn tool {prompt}",
+        "npm exec tool {prompt}",
+        "docker run img {prompt}",
+        "podman run img {prompt}",
+        "nohup prog {prompt}",
+        "xargs prog {prompt}",
+        "timeout 5 prog {prompt}",
+        "nice prog {prompt}",
+        "sudo prog {prompt}",
+        "doas prog {prompt}",
+    ],
+)
+def test_un_lanceur_generique_est_refuse_tant_que_la_cle_va_a_un_sous_processus(project: Path, template: str) -> None:
+    from grimoire.providers.key_command import resolve_program
+
+    with pytest.raises(KeyEndpointError, match="lanceur") as caught:
+        resolve_program(template, project, "gw")
+    assert "set-key gw GW_API_KEY" in str(caught.value)
+    _write(project, template)
+    result = set_key(project)
+    assert result.exit_code == 1 and list_secrets() == () and "lanceur" in result.output
+
+
+def test_aucun_argument_ne_designe_un_chemin_existant_sous_la_racine_du_projet(project: Path, tmp_path: Path) -> None:
+    from grimoire.providers.key_command import resolve_program
+
+    _program(project, "tool.sh")
+    (project / "conf").mkdir()
+    (project / "conf" / "x.cfg").write_text("x", encoding="utf-8")
+    outside = _program(tmp_path / "dehors", "ok.sh")
+    link = tmp_path / "dehors" / "lien"
+    link.symlink_to(project / "tool.sh")
+    base = f"{sys.executable} -c pass"
+    for argument in ("./tool.sh", "conf/x.cfg", "--config=conf/x.cfg", str(project / "tool.sh"), str(link), "conf"):
+        with pytest.raises(KeyEndpointError, match="racine du projet"):
+            resolve_program(f"{base} {argument} {{prompt}}", project, "gw")
+    assert resolve_program(f"{base} {outside} --mode=fast {{model}} {{prompt}}", project, "gw")  # hors projet : admis
+
+
+@pytest.mark.parametrize("template", ["/bin/sh -c './tool.sh x' {prompt}", "/bin/sh -c 'cat conf/x.cfg' {prompt}"])
+def test_un_interpreteur_dont_la_chaine_cite_un_chemin_du_projet_est_refuse(project: Path, template: str) -> None:
+    from grimoire.providers.key_command import resolve_program
+
+    _program(project, "tool.sh")
+    (project / "conf").mkdir()
+    (project / "conf" / "x.cfg").write_text("x", encoding="utf-8")
+    with pytest.raises(KeyEndpointError, match="racine du projet"):
+        resolve_program(template, project, "gw")
+
+
 def test_un_programme_introuvable_n_est_pas_lie(project: Path) -> None:
     _write(project, "programme-qui-n-existe-pas {prompt}")
     result = set_key(project)
@@ -180,7 +239,11 @@ def test_un_identifiant_de_modele_hors_forme_n_est_pas_rendu_dans_la_commande(
 ) -> None:
     spec = read_registry(_registry_ok(project))[0]
     code, _out, err, _dur, kind, _sig = _run_provider_call(project, spec, model, "go", call_timeout=5)
-    assert sent == [] and code != 0 and kind == "error" and "identifiant de modèle" in err
+    assert sent == [] and code != 0 and kind == "model_id" and "identifiant de modèle" in err
+    from grimoire.providers.state import load_state
+
+    dispatch_mod._record_call_failure(project, "gw", model, kind, None)  # ni une panne, ni un refroidissement
+    assert "gw" not in load_state(project) or load_state(project)["gw"].failure_count == 0
 
 
 def test_un_identifiant_de_modele_usuel_reste_admis(project: Path, sent: list[dict[str, str]]) -> None:

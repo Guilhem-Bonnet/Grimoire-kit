@@ -26,6 +26,15 @@ _UNDER_ROOT = (
     "dépôt peut le réécrire, une clé du magasin ne lui est jamais remise ; place-le hors du projet puis saisis la clé "
     "(`grimoire providers set-key {provider} {var}`)."
 )
+#: Lanceurs génériques : le programme qu'ils lancent réellement n'est pas celui que la saisie a vu.
+_LAUNCHER_RE = re.compile(
+    r"(env|uv|uvx|npx|pnpm|yarn|npm|docker|podman|nohup|xargs|timeout|nice|sudo|doas)(\.exe)?", re.IGNORECASE
+)
+_LAUNCHER = (
+    "la commande d'invocation de ce fournisseur passe par un lanceur générique (env, uv, npx, docker, timeout, sudo…) "
+    "dont le programme réel n'est pas lié : aucune clé ne lui est remise ; appelle directement un programme situé "
+    "hors du projet puis saisis la clé (`grimoire providers set-key {provider} {var}`)."
+)
 _UNRESOLVED = (
     "la commande d'invocation de ce fournisseur ne désigne pas un programme que le magasin peut résoudre "
     "(introuvable, illisible ou mal écrite) : aucune clé ne lui est remise ; corrige-la puis saisis la clé "
@@ -64,9 +73,20 @@ def resolve_program(template: str, root: Path, provider_id: str) -> tuple[Path, 
         tokens = shlex.split(template)
     except ValueError:
         tokens = []
+    if tokens and _LAUNCHER_RE.fullmatch(Path(tokens[0]).name):
+        raise KeyEndpointError(_LAUNCHER.format(**names))
     program = _resolve(tokens[0], root) if tokens else None
     if program is None:
         raise KeyEndpointError(_UNRESOLVED.format(**names))
+    base = root.resolve()
+    for token in tokens[1:]:  # aucun argument (hors `{prompt}`/`{model}`) ne désigne un chemin existant du projet
+        if "{" in token:
+            continue
+        for word in filter(None, re.split(r"[\s=]+", token)):
+            path = Path(word)
+            real = (path if path.is_absolute() else root / path).resolve()
+            if real.exists() and (real == base or base in real.parents):
+                raise KeyEndpointError(_UNDER_ROOT.format(**names))
     found = [program]
     if _INTERPRETER_RE.fullmatch(program.name) or _INTERPRETER_RE.fullmatch(Path(tokens[0]).name):
         script = None
@@ -81,7 +101,6 @@ def resolve_program(template: str, root: Path, provider_id: str) -> tuple[Path, 
                     raise KeyEndpointError(_UNRESOLVED.format(**names))
                 found.append(script)
                 break
-    base = root.resolve()
     if any(path == base or base in path.parents for path in found):
         raise KeyEndpointError(_UNDER_ROOT.format(**names))
     return tuple(found)
