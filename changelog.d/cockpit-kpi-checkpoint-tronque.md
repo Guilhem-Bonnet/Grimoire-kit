@@ -1,0 +1,1 @@
+- fix(cockpit): la tuile « kit » de la fiche Flotte n'est plus coupée en « checkpoi… » quand un checkpoint destructif attend : un mot d'état long passe à la ligne, et la tuile recalcule son titre, sa nature et son ton (#883)
