@@ -845,7 +845,7 @@ def test_autorise_pour_la_redaction_le_modele_est_appele_et_la_sortie_validee(pr
     g = garde(rendu)
     sortie, auteur = red.rediger(g, REDIGER)
     assert sortie == red.Redaction(RUB, (red.PhraseRedigee("Mainteneurs et relecteurs.", ("e1", "e2")),)) and g.notes == []
-    assert auteur == g.id != "sans-modele"
+    assert auteur == fab._ident(LOCAL_MID) and g.id == "sans-modele"  # l'en-tête suit la conversation, l'auteur est le modèle de la rédaction
     assert len(faux.appels) == 1 and faux.appels[0][2]["model"] == "qwen2.5:14b"
     assert _usage(rendu, "redaction").id == fab._ident(LOCAL_MID)
     assert _usage(rendu, "conversation").id == "sans-modele"  # le modèle de la rédaction ne parle pas à la place de la conversation
@@ -926,3 +926,24 @@ def test_la_mascotte_reflechit_pendant_l_appel_de_redaction_et_plus_apres(projec
     rendu2 = compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), Faux(TimeoutError("lent")))
     red.rediger(garde(rendu2), REDIGER)
     assert vue_moteur(rendu2.presentation, "", "")["reflexion"] is False
+
+
+def test_l_en_tete_est_sans_modele_si_seule_la_redaction_a_un_modele(project: Path) -> None:
+    inv = inventaire(project)
+    rendu = compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), Faux(ollama_dit(REDACTION_OK)))
+    g = garde(rendu)
+    vue = vue_moteur(rendu.presentation, g.id, rendu.moteur.libelle)
+    assert (vue["id"], vue["libelle"]) == ("sans-modele", "Questions guidées, sans modèle")
+    assert [r["id"] for r in vue["par_usage"]] == ["sans-modele", "sans-modele", fab._ident(LOCAL_MID)]
+    assert red.rediger(g, REDIGER)[1] == fab._ident(LOCAL_MID)  # l'auteur de la rédaction reste le modèle de cet usage
+    assert any("llama" not in x and "qwen2.5:14b" in x for x in rendu.moteur.limites())  # les limites nomment le modèle qui rédige
+
+
+def test_l_en_tete_suit_la_conversation_quand_les_usages_ont_des_modeles_differents(project: Path) -> None:
+    inv = inventaire(project)
+    rendu = compose(project, inv, reglages(inv, [LOCAL_FAST], redaction=[LOCAL_MID]), Faux(ollama_dit(REDACTION_OK)))
+    g = garde(rendu)
+    vue = vue_moteur(rendu.presentation, g.id, rendu.moteur.libelle)
+    assert (vue["id"], vue["libelle"]) == (fab._ident(LOCAL_FAST), "llama3.2:3b")
+    assert vue["par_usage"][2]["id"] == fab._ident(LOCAL_MID)
+    assert red.rediger(g, REDIGER)[1] == fab._ident(LOCAL_MID)

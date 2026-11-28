@@ -305,7 +305,7 @@ dans une erreur, une note, un journal ou la vue : les messages sont fixes.
 
 | Champ | Sens |
 |---|---|
-| `id`, `libelle` | le modèle qui parle (`sans-modele` sinon) |
+| `id`, `libelle` | le modèle de l'usage `conversation` (`sans-modele` sinon, même si un autre usage a un modèle : il est alors dans `par_usage`) |
 | `local`, `sortie_de_texte` | rien ne sort de la machine, ou du texte sort (vrai dès qu'UN usage actif en envoie) |
 | `raison` | pourquoi ce modèle, ou pourquoi aucun |
 | `proposition` | `{key, libelle, raison}` : un modèle proposé, jamais utilisé seul |

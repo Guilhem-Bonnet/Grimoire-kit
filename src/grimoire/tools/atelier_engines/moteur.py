@@ -47,7 +47,9 @@ class MoteurModeles:
     def __init__(
         self, ident: str, libelle: str, backends: Mapping[str, Backend | None], *, cle: tuple[str, str] | None = None,
         duree_reflexion_s: float = 10.0, sortie_de_texte: bool = False, idents: Mapping[str, str] | None = None,
+        libelle_limites: str | None = None,
     ) -> None:
+        self.libelle_limites = libelle_limites or libelle  # le modèle nommé dans les limites (l'en-tête peut dire « sans modèle »)
         self.idents = dict(idents or {})  # l'identifiant public du modèle de chaque usage (pour dire qui a rédigé)
         self.id = ident
         self.libelle = libelle
@@ -126,7 +128,7 @@ class MoteurModeles:
             else "Ce que tu écris reste sur ta machine."
         )
         return (
-            f"Je parle avec un modèle d'IA ({self.libelle}) : je peux me tromper ou mal te comprendre.",
+            f"Je parle avec un modèle d'IA ({self.libelle_limites}) : je peux me tromper ou mal te comprendre.",
             "Rien n'entre dans le document sans ton « oui » : je ne fais que proposer.",
             sortie,
             "Si le modèle tarde, répond n'importe quoi ou n'est plus disponible, je reprends en questions guidées, sans lui, "
