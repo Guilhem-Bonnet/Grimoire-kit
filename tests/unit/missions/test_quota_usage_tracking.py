@@ -8,6 +8,8 @@ réel ; la part consommée avant minuit UTC se compte pour la veille.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -29,6 +31,31 @@ from grimoire.missions.service import TaskService
 
 STANDARD = Path("_grimoire/standard")
 MIB = 1024 * 1024
+
+
+# Horloge épinglée : midi UTC, loin de minuit, quelle que soit l'heure réelle d'exécution (et le TZ du processus).
+PINNED = datetime(2026, 11, 27, 12, 0, 0, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def _clock(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> datetime:
+    """Fige l'heure lue par le test ET par le ledger ; un test peut la déplacer par ``indirect`` (près de minuit)."""
+    instant: datetime = getattr(request, "param", PINNED)
+
+    class _Pinned(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def,override]
+            return instant if tz is None else instant.astimezone(tz)
+
+    monkeypatch.setattr(sys.modules[__name__], "datetime", _Pinned)
+    monkeypatch.setattr("grimoire.missions.ledger._now_iso", instant.isoformat)
+    return instant
+
+
+def _touch(path: Path) -> None:
+    """Date le journal à l'instant épinglé (sinon son mtime serait l'heure réelle)."""
+    stamp = datetime.now(UTC).timestamp()
+    os.utime(path, (stamp, stamp))
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +94,12 @@ def _task(service: TaskService, titre: str = "t") -> str:
 
 def _line(n: int, stamp: datetime | None = None, pad: int = 0) -> str:
     usage = {"input_tokens": 1000, "output_tokens": 500, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
-    message = {"id": f"msg-{n}", "model": "claude-sonnet-5-5", "content": [{"type": "text", "text": "x" * pad}], "usage": usage}
+    message = {
+        "id": f"msg-{n}",
+        "model": "claude-sonnet-5-5",
+        "content": [{"type": "text", "text": "x" * pad}],
+        "usage": usage,
+    }
     return json.dumps({"type": "assistant", "timestamp": (stamp or datetime.now(UTC)).isoformat(), "message": message})
 
 
@@ -75,11 +107,18 @@ def _journal(tmp_path: Path, session: str, calls: int, *, pad: int = 0) -> Path:
     path = tmp_path / "claude" / "projects" / "wt" / f"{session}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(_line(i, pad=pad) for i in range(calls)) + "\n", encoding="utf-8")
+    _touch(path)
     return path
 
 
 def _launch(service: TaskService, tid: str, session: str) -> None:
-    service.ledger.append_event("task.session_launched", tid, "task", "worker", {"session": session[:8], "session_id": session, "model": "sonnet"})
+    service.ledger.append_event(
+        "task.session_launched",
+        tid,
+        "task",
+        "worker",
+        {"session": session[:8], "session_id": session, "model": "sonnet"},
+    )
 
 
 def _events(service: TaskService) -> list[dict[str, object]]:
@@ -120,7 +159,9 @@ def test_sessions_beyond_the_read_budget_are_followed_not_starved(service: TaskS
     assert _use(service).status == "lower_bound" and _use(service).tokens == 20 * 1500 + 2 * 75000
 
 
-def test_the_decision_follows_the_real_consumption_and_the_unknown_setting(service: TaskService, tmp_path: Path) -> None:
+def test_the_decision_follows_the_real_consumption_and_the_unknown_setting(
+    service: TaskService, tmp_path: Path
+) -> None:
     tid = _task(service)
     for n in range(4):
         _launch(service, _task(service, f"t{n}"), _sid(n))
@@ -138,7 +179,9 @@ def test_the_decision_follows_the_real_consumption_and_the_unknown_setting(servi
     assert isinstance(over, Defer) and over.reason == "quota"
 
 
-def test_an_unchanged_journal_costs_no_budget_and_the_oldest_read_goes_first(service: TaskService, tmp_path: Path) -> None:
+def test_an_unchanged_journal_costs_no_budget_and_the_oldest_read_goes_first(
+    service: TaskService, tmp_path: Path
+) -> None:
     for n in range(3):
         _launch(service, _task(service, f"t{n}"), _sid(n))
         _journal(tmp_path, _sid(n), 1)
@@ -152,7 +195,9 @@ def test_an_unchanged_journal_costs_no_budget_and_the_oldest_read_goes_first(ser
     _journal(tmp_path, _sid(2), 2)
     order = []
     for _ in range(3):
-        order += [o.session for o in record_consumption(service, now=_later(), max_sessions=1) if o.status == "recorded"]
+        order += [
+            o.session for o in record_consumption(service, now=_later(), max_sessions=1) if o.status == "recorded"
+        ]
     assert sorted(order) == sorted(_sid(n)[:12] for n in range(3))  # chacune à son tour, aucune affamée
 
 
@@ -168,7 +213,9 @@ def test_a_lost_state_cache_rereads_without_counting_twice(service: TaskService,
     assert _use(service).tokens == 3000
 
 
-def test_a_counted_journal_that_becomes_too_big_turns_partial_with_its_reason(service: TaskService, tmp_path: Path) -> None:
+def test_a_counted_journal_that_becomes_too_big_turns_partial_with_its_reason(
+    service: TaskService, tmp_path: Path
+) -> None:
     _launch(service, _task(service), _sid(1))
     _journal(tmp_path, _sid(1), 1, pad=100_000)
     record_consumption(service, now=_later(), max_bytes=MIB)
@@ -203,37 +250,63 @@ def test_a_launch_without_an_identity_is_unknown_not_zero(service: TaskService) 
     assert tracking(service.ledger.list_events())["unknown"] == 1 and _use(service).status == "unknown"
 
 
-def test_the_part_consumed_before_midnight_counts_for_the_previous_day(service: TaskService, tmp_path: Path) -> None:
-    now = datetime.now(UTC)
+@pytest.mark.parametrize(
+    "_clock",
+    [
+        datetime(2026, 11, 27, 0, 0, 5, tzinfo=UTC),  # juste après minuit
+        datetime(2026, 11, 27, 12, 0, 0, tzinfo=UTC),
+        datetime(2026, 11, 27, 23, 59, 55, tzinfo=UTC),  # juste avant minuit
+    ],
+    indirect=True,
+)
+def test_the_part_consumed_before_midnight_counts_for_the_previous_day(
+    service: TaskService, tmp_path: Path, _clock: datetime
+) -> None:
+    now = _clock
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     _launch(service, _task(service), _sid(1))
     path = tmp_path / "claude" / "projects" / "wt" / f"{_sid(1)}.jsonl"
     path.parent.mkdir(parents=True)
     lines = [_line(0, midnight - timedelta(hours=2)), _line(1, midnight - timedelta(minutes=5)), _line(2, now)]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    record_consumption(service, now=now + timedelta(hours=1))
+    _touch(path)
+    record_consumption(
+        service, now=now
+    )  # le même instant que celui des lignes : le jour ne dépend que de l'horloge injectée
     parts = _events(service)
-    assert [(p.get("day"), p["tokens"]) for p in parts] == [((midnight - timedelta(days=1)).date().isoformat(), 3000), (None, 1500)]
+    assert [(p.get("day"), p["tokens"]) for p in parts] == [
+        ((midnight - timedelta(days=1)).date().isoformat(), 3000),
+        (None, 1500),
+    ]
     assert parts[-1]["session_total_tokens"] == 4500
     assert _use(service).tokens == 1500  # seule la part d'aujourd'hui compte pour aujourd'hui
 
 
-def test_an_ongoing_unknown_weighs_on_the_next_day_but_an_old_plain_one_does_not(service: TaskService, tmp_path: Path) -> None:
+def test_an_ongoing_unknown_weighs_on_the_next_day_but_an_old_plain_one_does_not(
+    service: TaskService, tmp_path: Path
+) -> None:
     _launch(service, _task(service), _sid(1))
     _journal(tmp_path, _sid(1), 15, pad=100_000)
     record_consumption(service, now=_later(), max_bytes=MIB)  # trop gros : inconnu « en cours »
     capacity = load_capacity(service.home_root)
     tomorrow = datetime.now(UTC) + timedelta(hours=30)
     assert derive_view(service.ledger, capacity, now=tomorrow).tokens.status == "unknown"
-    assert derive_view(service.ledger, capacity, now=datetime.now(UTC) + timedelta(days=4)).tokens.status == "unknown"  # sans limite de durée
+    assert (
+        derive_view(service.ledger, capacity, now=datetime.now(UTC) + timedelta(days=4)).tokens.status == "unknown"
+    )  # sans limite de durée
     _launch(service, _task(service), _sid(2))
     record_consumption(service, now=_later() + timedelta(hours=1))  # sans journal : inconnu simple, écrit aujourd'hui
     assert derive_view(service.ledger, capacity, now=datetime.now(UTC)).tokens.unknown_sessions == 2
-    for later in (tomorrow, datetime.now(UTC) + timedelta(days=4)):  # l'inconnu simple ne pèse que le jour où il est écrit
+    for later in (
+        tomorrow,
+        datetime.now(UTC) + timedelta(days=4),
+    ):  # l'inconnu simple ne pèse que le jour où il est écrit
         assert derive_view(service.ledger, capacity, now=later).tokens.unknown_sessions == 1
 
 
-def test_a_big_journal_that_keeps_growing_stays_partial_and_stops_weighing_only_once_still(service: TaskService, tmp_path: Path) -> None:
+def test_a_big_journal_that_keeps_growing_stays_partial_and_stops_weighing_only_once_still(
+    service: TaskService, tmp_path: Path
+) -> None:
     _launch(service, _task(service), _sid(1))
     _journal(tmp_path, _sid(1), 15, pad=100_000)
     capacity = load_capacity(service.home_root)
@@ -280,18 +353,25 @@ def test_a_journal_outside_the_host_folder_is_not_read(service: TaskService, tmp
     assert [e["status"] for e in _events(service)] == ["unknown"]  # introuvable : jamais lu hors du dossier de l'hôte
 
 
-def test_a_forged_cache_cannot_make_an_unmeasured_session_look_read(service: TaskService, projet: Path, tmp_path: Path) -> None:
+def test_a_forged_cache_cannot_make_an_unmeasured_session_look_read(
+    service: TaskService, projet: Path, tmp_path: Path
+) -> None:
     _launch(service, _task(service), _sid(1))
     path = _journal(tmp_path, _sid(1), 3)
     info = path.stat()
     cache = projet / STATE_RELPATH
     cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps({_sid(1): {"size": info.st_size, "mtime_ns": info.st_mtime_ns, "read_at": "x", "total": 0}}), encoding="utf-8")
+    cache.write_text(
+        json.dumps({_sid(1): {"size": info.st_size, "mtime_ns": info.st_mtime_ns, "read_at": "x", "total": 0}}),
+        encoding="utf-8",
+    )
     record_consumption(service, now=_later())
     assert _use(service).tokens == 4500
 
 
-def test_an_unsafe_cache_file_is_ignored_and_never_blocks_the_tick(service: TaskService, projet: Path, tmp_path: Path) -> None:
+def test_an_unsafe_cache_file_is_ignored_and_never_blocks_the_tick(
+    service: TaskService, projet: Path, tmp_path: Path
+) -> None:
     import os
     import signal
 
@@ -362,12 +442,14 @@ def test_a_journal_never_found_is_no_longer_searched_after_a_while(
     assert [o.status for o in out] == ["unchanged"] and tracking(service.ledger.list_events())["unknown"] == 1
 
 
-def test_a_deferral_caused_by_unknown_consumption_is_said_once_a_day_with_the_way_out(service: TaskService, projet: Path) -> None:
+def test_a_deferral_caused_by_unknown_consumption_is_said_once_a_day_with_the_way_out(
+    service: TaskService, projet: Path
+) -> None:
     tid = _task(service)
     service.ledger.append_event("task.session_launched", tid, "task", "worker", {"session": "ab", "model": "sonnet"})
     record_consumption(service, now=_later())  # lancement sans identité : inconnu
     (projet / STANDARD / "capacity.yaml").write_text("version: 1\nquota:\n  tokens_per_day: 1000\n", encoding="utf-8")
-    plan = service.queue_plan(autonomous=True)
+    plan = service.queue_plan(autonomous=True, now=PINNED)
     assert [d.reason for d in plan.deferred] == ["unknown"]
     lines: list[str] = []
     note_deferral(service, plan, apply=False, attention=lines)
@@ -377,7 +459,7 @@ def test_a_deferral_caused_by_unknown_consumption_is_said_once_a_day_with_the_wa
     note_deferral(service, plan, apply=True, attention=lines)
     note_deferral(service, plan, apply=True, attention=lines)
     assert len(lines) == 1 and "inconnue" in lines[0]
-    ok = service.queue_plan(autonomous=False)
+    ok = service.queue_plan(autonomous=False, now=PINNED)
     note_deferral(service, ok, apply=True, attention=lines)
     assert len(lines) == 1
 
@@ -393,9 +475,11 @@ def test_the_tick_reports_the_deferral_because_of_unknown_consumption(
     tid = _task(service)
     service.ledger.append_event("task.session_launched", tid, "task", "worker", {"session": "ab", "model": "sonnet"})
     (projet / STANDARD / "capacity.yaml").write_text("version: 1\nquota:\n  tokens_per_day: 1000\n", encoding="utf-8")
-    report = run_tick(projet)
+    report = run_tick(projet, now=PINNED)
     assert any("lancements différés" in line for line in report.attention)
-    assert not any("lancements différés" in line for line in run_tick(projet).attention)  # une fois par jour
+    assert not any(
+        "lancements différés" in line for line in run_tick(projet, now=PINNED).attention
+    )  # une fois par jour
 
 
 def test_pending_reasons_are_stable_strings() -> None:
@@ -410,6 +494,12 @@ def test_queue_rules_shows_the_tracking(projet: Path, service: TaskService, tmp_
     _launch(service, _task(service), _sid(1))
     result = CliRunner().invoke(app, ["queue", "rules", "--json", "--project-root", str(projet)])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["tracking"] == {"sessions": 1, "known": 0, "unknown": 0, "pending_reread": 0, "never_measured": 1}
+    assert json.loads(result.output)["tracking"] == {
+        "sessions": 1,
+        "known": 0,
+        "unknown": 0,
+        "pending_reread": 0,
+        "never_measured": 1,
+    }
     text = CliRunner().invoke(app, ["queue", "rules", "--project-root", str(projet)])
     assert "Sessions suivies : 1" in text.output
