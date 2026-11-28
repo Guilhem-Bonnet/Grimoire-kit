@@ -44,7 +44,7 @@ def _clock(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> d
 
     class _Pinned(datetime):
         @classmethod
-        def now(cls, tz=None):  # type: ignore[no-untyped-def,override]
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
             return instant if tz is None else instant.astimezone(tz)
 
     monkeypatch.setattr(sys.modules[__name__], "datetime", _Pinned)
