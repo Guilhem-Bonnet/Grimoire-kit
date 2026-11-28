@@ -19,6 +19,7 @@ from grimoire.traces import journal_cache
 from grimoire.traces.journal_cache import load_trace_journal
 from grimoire.traces.ledger import TraceLedger, TraceOutcome
 from grimoire.traces.schemas import TraceRecord
+from grimoire.traces.task_index import traces_by_task
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,10 +88,11 @@ def test_warm_reads_the_journal_once_for_n_requests(project: Path, parsed: list[
         if thread.name == "cockpit-warm":
             thread.join(JOIN_S)
     assert no_sheet == ["sheet", "tasks", "fleet"]
-    assert len(parsed) == LINES  # le parcours complet, une fois
+    assert len(parsed) == 2 * LINES  # un parcours complet pour l'index par tâche, un pour le journal complet
     for _ in range(5):  # cinq requêtes ensuite : aucune ligne de plus
         assert len(load_trace_journal(project / TRACES_RELPATH)) == LINES
-    assert len(parsed) == LINES
+        assert len(traces_by_task(project / TRACES_RELPATH)["GAO-1"]) == LINES
+    assert len(parsed) == 2 * LINES
     assert not stop.is_set()
 
 
@@ -106,7 +108,7 @@ def test_requests_during_warm_share_one_pass(project: Path, parsed: list[str], n
     for t in (warm, *threads):
         t.join(JOIN_S)
     assert results == [LINES] * 4
-    assert len(parsed) == LINES  # le verrou : un seul parcours pour la chauffe et les quatre requêtes
+    assert len(parsed) == 2 * LINES  # le verrou : un seul parcours par journal pour la chauffe et les quatre requêtes
 
 
 def test_stop_cancels_the_rest(project: Path, parsed: list[str], no_sheet: list[str]) -> None:
@@ -130,7 +132,7 @@ def test_stop_between_steps_skips_the_sheet(
 
     monkeypatch.setattr("grimoire.traces.journal_cache.load_trace_journal", read_then_stop)
     _run_warm(project, stop)
-    assert len(parsed) == LINES
+    assert len(parsed) == 2 * LINES  # l'index par tâche, puis le journal complet ; la fiche ne vient pas
     assert no_sheet == []
 
 
