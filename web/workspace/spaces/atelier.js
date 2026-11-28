@@ -466,7 +466,8 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   const itemParams = (extra = {}) => ({ chantier: slug, phase: focusId, ...(reading.on() ? { lecture: '1' } : {}), ...extra });
   // Les références du texte (REQ-001, tâche du kit, [[chantier]]) : liens vers l'exigence, la tâche ou le chantier.
   const refs = createRefs(ctx, { slug, doc: () => state.doc, trace: () => liveTrace, chantiers: () => state.chantiers, go: (req) => goReq(req) });
-  const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message), drafts });
+  // `ownWrite` (défini plus bas) encadre chaque écriture de la page, où qu'elle soit faite : un module n'écrit jamais sans lui.
+  const cm = createComments(ctx, slug, { doc: () => state.doc, sheet, reload: (message) => reload(message), drafts, ownWrite: (send) => ownWrite(send) });
   const steps = el('ol', 'at-steps', null, { 'aria-label': 'Déroulé du chantier', 'data-role': 'steps' });
   let stepsShown = '';
   const drawSteps = () => {
@@ -509,6 +510,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     goPhase: (id) => sheet.isConnected && nav.querySelector(`[data-phase="${id}"]`)?.click(),
     showRubrique: (phaseId, section) => goSection(phaseId, section),
     reload: (message, kind) => reload(message, kind),
+    ownWrite: (send) => ownWrite(send),
     say: (message, kind) => say(message, kind),
     // Une erreur liée à un bloc se lit aussi à son pied, là où l'on agissait.
     blockError: (blockId, message) => {
@@ -679,14 +681,21 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     docAt = Date.now();
     if (fresh && fresh.annexes && annexMessage(state.doc, fresh) === '' && annexMessage(fresh, state.doc) === '') state.doc.annexes = fresh.annexes;
   };
+  // Les lectures du document peuvent se croiser : celle qui est partie en dernier fait foi. Une réponse plus ancienne qui arrive
+  // après (lecture d'avant un dépôt extérieur) ne remplace pas un document plus récent : elle n'est que le message de son geste.
+  let readSeq = 0;
   const reload = async (message, kind) => {
+    const mine = (readSeq += 1);
+    let fresh;
     try {
-      state.doc = await ctx.api.atelierChantier(slug);
+      fresh = await ctx.api.atelierChantier(slug);
     } catch (cause) {
       if (!ctx.signal.aborted) status.textContent = `Rechargement impossible : ${cause.message || cause}`;
       return;
     }
     if (ctx.signal.aborted) return;
+    if (mine !== readSeq) { announce(message, kind); return; }
+    state.doc = fresh;
     const top = root.scrollTop;
     drawAll();
     if (root.scrollTop !== top) root.scrollTop = top; // la lecture ne saute pas
@@ -725,7 +734,10 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   };
 
   /** Après une réécriture de bloc : les fils de la phase suivent leur passage (ancres recalculées par le serveur). */
-  const syncComments = async (phaseId, written) => {
+  // Les lectures qui suivent une écriture font partie de son geste : tant qu'elles n'ont pas adopté l'état des magasins, un pouls
+  // parti après l'écriture verrait des fils « changés » et relirait le document pour rien.
+  const syncComments = (phaseId, written) => ownWrite(() => syncCommentsRead(phaseId, written));
+  const syncCommentsRead = async (phaseId, written) => {
     try {
       const fresh = await ctx.api.atelierChantier(slug);
       if (ctx.signal.aborted) return;
@@ -1058,7 +1070,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
 
   const loop = createLoopPanel(ctx); // avancement honnête, tâches du découpage, avertissements de saisie
   // Dire ce qui est attendu : l'invite de chaque rubrique vide, et « Ce qu'il me reste à faire » en tête du document.
-  const invites = createInvites(ctx, slug, { reload: (message, kind) => reload(message, kind) });
+  const invites = createInvites(ctx, slug, { reload: (message, kind) => reload(message, kind), ownWrite: (send) => ownWrite(send) });
   const rest = createRest({
     phone: () => root.clientWidth < PHONE_MAX, // sous 900 px, le document d'abord : le résumé est replié sur sa phrase d'en-tête
     goTo: (phaseId, section) => goSection(phaseId, section),
@@ -1075,7 +1087,8 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     rest.update(state.doc.reste_a_faire);
   };
   /** Après un bloc écrit : l'avancement et les avertissements se relisent, sans redessiner la feuille en cours d'édition. */
-  const reloadProgress = async () => {
+  const reloadProgress = () => ownWrite(readProgress);
+  const readProgress = async () => {
     try {
       const fresh = await ctx.api.atelierChantier(slug);
       if (ctx.signal.aborted) return;
@@ -1153,6 +1166,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   const versionsPane = createHistory(ctx, slug, {
     sheet, main, grid, say: (message) => say(message),
     reload: (message, kind) => reload(message, kind), // après une restauration (ou son annulation) : le document est relu
+    ownWrite: (send) => ownWrite(send),
     // Restaurer un bloc qui réécrit une exigence validée en défait la validation : même confirmation que pour une édition.
     guard: (before, after) => devalidation.ask(before, after),
     guarded: (guard) => devalidation.after(guard),

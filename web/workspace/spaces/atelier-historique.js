@@ -38,6 +38,7 @@ function el(tag, className, text, attrs) {
  * element, isOpen, close }` : `button` va dans la barre, `element` dans la grille.
  */
 export function createHistory(ctx, slug, hooks) {
+  const ownWrite = hooks.ownWrite || ((send) => send()); // chaque restauration (et son annulation) est une écriture de cette page
   const element = el('aside', 'at-hist', null, { 'aria-label': 'Historique des versions', 'data-role': 'atelier-historique', id: 'at-hist-panel', hidden: '' });
   const button = el('button', 'at-btn at-hist-btn', null, {
     type: 'button', 'data-role': 'atelier-historique-bouton', 'aria-expanded': 'false', 'aria-controls': 'at-hist-panel',
@@ -152,12 +153,12 @@ export function createHistory(ctx, slug, hooks) {
     });
     if (!yes) return;
     try {
-      const out = await ctx.api.atelierRestore(slug, { phase: phase.id, expected: phase.file_fp, version: data.from.id });
+      const out = await ownWrite(() => ctx.api.atelierRestore(slug, { phase: phase.id, expected: phase.file_fp, version: data.from.id }));
       leaveCompare();
       if (out.unchanged) {
         setAck(`La phase ${name} est déjà identique à cette version : rien n’a changé.`);
       } else {
-        const undo = out.undo ? async () => ctx.api.atelierRestore(slug, { phase: phase.id, undo: out.undo, expected: out.phase.fingerprint }) : null;
+        const undo = out.undo ? async () => ownWrite(() => ctx.api.atelierRestore(slug, { phase: phase.id, undo: out.undo, expected: out.phase.fingerprint })) : null;
         setAck(restoredText(`La phase ${name}`, { plus: out.added, minus: out.removed }), { undo });
       }
       hooks.say(`Phase ${name} restaurée (non commité).`);
@@ -183,9 +184,9 @@ export function createHistory(ctx, slug, hooks) {
     if (guard && !guard.go) return;
     try {
       const mark = { fp: block.fp, prev: block.prev, next: block.next, twins: block.twins, text: block.text };
-      const saved = await ctx.api.atelierBloc(slug, block.id, block.old_text, mark);
+      const saved = await ownWrite(() => ctx.api.atelierBloc(slug, block.id, block.old_text, mark));
       const back = findOnlyBlock(saved.phase && saved.phase.blocks, block.old_text);
-      const undo = back ? async () => ctx.api.atelierBloc(slug, back.id, block.text, { fp: back.fp, prev: back.prev, next: back.next, twins: back.twins, text: back.text }) : null;
+      const undo = back ? async () => ownWrite(() => ctx.api.atelierBloc(slug, back.id, block.text, { fp: back.fp, prev: back.prev, next: back.next, twins: back.twins, text: back.text })) : null;
       setAck(restoredText('Le bloc', planned), { undo });
       hooks.say('Bloc restauré (non commité).');
       if (hooks.reload) await hooks.reload('Bloc restauré (non commité).', 'ok');

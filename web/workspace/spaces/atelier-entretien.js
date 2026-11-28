@@ -40,7 +40,7 @@ export function createGuided(ctx, slug, hooks) {
   const act = async (body, done) => {
     busy = true;
     try {
-      const result = await ctx.api.atelierAssistant(slug, { phase: hooks.focus(), ...body });
+      const result = await (hooks.ownWrite || ((send) => send()))(() => ctx.api.atelierAssistant(slug, { phase: hooks.focus(), ...body }));
       if (ctx.signal.aborted) return;
       if (result && result.retracted) {
         // La réponse retirée revient dans le champ, pour être corrigée ; elle l'était pour la question précédente.

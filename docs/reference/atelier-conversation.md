@@ -212,11 +212,102 @@ liste réelle des chantiers, jamais construit depuis le slug.
 Aucun corps n'accepte un autre champ que ceux du tableau : pas de phase, de rubrique ni de chemin. Un élément déjà
 tranché ou une conversation en pause, terminée ou classée donne 409 ou 400 sans rien écrire.
 
+## Les moteurs à modèle (lot B2)
+
+Le moteur sans modèle reste le défaut. Un vrai modèle ne parle que s'il est **autorisé pour l'usage** par l'humain (page
+« Modèles autorisés », voir [Fournisseurs](cli/fournisseurs.md)) : sans aucune autorisation, rien n'est détecté, rien n'est
+appelé, la conversation fonctionne comme avant.
+
+| Module (`tools/atelier_engines/`) | Rôle |
+|---|---|
+| `fabrique.py` | À chaque tour : `choose_for(usage)` décide ; rend le moteur et ce que la vue en dira (`Rendu`) |
+| `moteur.py` | `MoteurModeles` : le protocole `Moteur`, un geste = un appel à sortie JSON validée |
+| `gestes.py`, `schema.py` | L'invite et le schéma de sortie de chaque geste ; validateur strict (aucun champ en trop) |
+| `transport.py` | Transport minimal (https, ou http vers la machine ; ni redirection ni proxy) et erreurs `Engine*` |
+| `ollama.py`, `openai_compat.py`, `anthropic.py` | Les adaptateurs |
+
+**Quel modèle, quand.** Les usages sont ceux de `direct_use` : `conversation` (le modèle rapide : classer, extraire, formuler,
+reformuler, répondre) et `brainstorm` (le modèle plus fort : proposer des pistes ; il demande au moins un palier
+« intermédiaire »). L'usage `redaction` n'a pas encore de geste. La décision est recalculée à CHAQUE tour et à chaque lecture,
+sans mémoire : un modèle devenu indisponible, une autorisation retirée ou une empreinte périmée change le moteur au tour
+suivant, sans casser la conversation. Le modèle « courant » de chaque usage est le premier de la liste de l'humain : s'il
+tombe, on ne bascule que vers un modèle ni plus coûteux ni plus exposé ; sinon `choose_for` PROPOSE, le tour est rendu par
+le moteur sans modèle, et la vue dit pourquoi et ce qui est proposé. La politique de données, la règle d'usage et les plafonds
+de jetons s'appliquent comme partout.
+
+**Adaptateurs.**
+
+- Ollama : seulement une adresse de la machine reconnue (`127.0.0.1`, `localhost`, `::1`), sortie contrainte par le schéma.
+- Serveur au format OpenAI : adresse passée par `admitted_gateway_url` ; une passerelle (`provider_type: litellm`) reçoit la
+  clé du magasin, sauf si son identifiant est celui d'un fournisseur documenté ; un serveur `local` en boucle locale n'a pas de clé.
+- API Messages d'Anthropic : le client de `atelier_model.py` (URL fixe, clé de l'environnement ou du magasin) ; la
+  consommation est inscrite au compteur du jour et au quota du kit (`account_response`), donc les plafonds la voient.
+- L'agent installé (« Claude Code » et autres hôtes ACP) n'a **pas d'adaptateur** : le kit sait sonder sa connexion, pas lui poser
+  une question sans lancer un agent autonome. Il n'est jamais appelé.
+
+**Destination liée à l'autorisation.** La fabrique relit la spec du registre UNE fois par tour, recalcule son empreinte et la
+compare à celle que l'autorisation désigne : si le registre a changé depuis (même dans la fenêtre du cache de détection ou
+entre la décision et la construction du client), rien ne part, ni texte ni clé, le tour retombe sur le moteur sans modèle et
+la vue dit « ce modèle a changé depuis ton autorisation ». L'échéance du délai vaut pour l'appel entier (lecture par morceaux),
+pas seulement pour chaque opération de socket.
+
+**Limites connues.**
+
+- Les plafonds de jetons ne voient que la consommation d'Anthropic (compteur de l'Atelier) : les appels aux passerelles et à
+  Ollama ne sont pas comptés, un plafond posé sur eux n'est pas vérifiable. Une consommation annoncée absurde ou nulle n'est
+  pas prise telle quelle : une estimation plancher est comptée et dite.
+- Le caviardage des secrets couvre les formats de clés connus ; un mot de passe écrit en clair dans un message n'est pas reconnu
+  et part avec le texte vers un modèle distant.
+- Une passerelle ne reçoit la clé du magasin que si son identifiant n'est pas celui d'un fournisseur documenté (l'identifiant
+  `litellm` est admis, comme par la sonde de capacités). La sonde connaît aussi une table d'adresses de fournisseurs qui n'est
+  pas exposée par `providers` : un identifiant que seule cette table reconnaît n'est pas refusé par la fabrique.
+- Un agent installé placé en tête d'une liste n'est jamais appelé : il est écarté de la décision, les autres modèles autorisés
+  parlent à sa place et la vue le dit.
+
+**Un geste, un appel borné.** L'entrée est caviardée des secrets puis bornée (3 000 caractères au plus), citée comme donnée
+entre `<donnee>` (balises neutralisées), sans chemin ni document. La sortie est un objet JSON validé par le schéma du geste :
+champ en trop, type faux, texte hors bornes, JSON invalide, réponse de plus de 256 Kio ou de plus de 20 000 caractères sont
+refusés. Le gardien revalide ensuite (classe et rubrique de la liste fermée) : un modèle ne peut ni rendre « oui » (le
+programme seul le reconnaît), ni viser une rubrique inconnue, ni faire écrire quoi que ce soit. Les phrases du programme
+(pause, fin, passage au document, « pourquoi ») ne passent pas par le modèle. Délai court, réglable (défaut 6 s, de 0,5 à 7,5 s ;
+le gardien abandonne un appel à 8 s) :
+
+```yaml
+cockpit:
+  atelier_conversation:
+    moteur_delai_s: 6
+```
+
+Délai dépassé, erreur réseau ou sortie hors cadre : le geste est rendu par le moteur sans modèle pour ce tour, et la note du
+tour dit la raison (`moteur.notes` : le nom de l'erreur, `EngineDelai`, `EngineReseau`, `EngineSortie`…). Aucune clé n'apparaît
+dans une erreur, une note, un journal ou la vue : les messages sont fixes.
+
+**La vue dit toujours qui parle.** L'état et chaque réaction portent `moteur` :
+
+| Champ | Sens |
+|---|---|
+| `id`, `libelle` | le modèle qui parle (`sans-modele` sinon) |
+| `local`, `sortie_de_texte` | rien ne sort de la machine, ou du texte sort (vrai dès qu'UN usage actif en envoie) |
+| `raison` | pourquoi ce modèle, ou pourquoi aucun |
+| `proposition` | `{key, libelle, raison}` : un modèle proposé, jamais utilisé seul |
+| `reflexion`, `etat` | `true` / `"reflechit"` tant qu'un appel du modèle fort est en cours |
+| `par_usage` | le même détail pour `conversation` et `brainstorm` |
+
+**La réflexion.** Le moteur est synchrone par tour : l'appel du modèle fort (les pistes du brainstorm) reste synchrone. Pendant
+cet appel, un marqueur EN MÉMOIRE, borné et daté, est posé pour le chantier (levé à la fin, même en erreur, périmé tout seul) :
+la réaction du tour porte `lourd: true` et une lecture de la conversation qui arrive pendant l'appel (le serveur est à fils)
+voit `moteur.reflexion: true`. Aucun fil de fond, aucun état sur disque. Rendre le résultat « au tour de lecture suivant »
+demanderait de changer le contrat du moteur (un appel détaché dont le résultat serait repris au tour suivant, donc un
+état partagé entre requêtes, un fil par appel et une règle de péremption) : non fait ici.
+
+Essai manuel contre l'Ollama local, jamais lancé par les tests : `python scripts/atelier-moteur-essai.py --modele <nom>`.
+
 ## Où brancher les lots suivants
 
-- **Lot B (modèles)** : `workspace_atelier_conversation.set_moteur(fabrique)` est l'unique point d'injection ; la
-  fabrique reçoit la racine et le slug et rend un objet qui respecte `Moteur`. Le gardien reste autour. Les choix
-  d'autorisation et de repli vivent dans la fabrique, pas dans le programme.
+- **Lot B (modèles)** : fait, voir ci-dessus. `workspace_atelier_conversation.set_moteur(fabrique)` reste l'unique point
+  d'injection (la fabrique par défaut est celle de `atelier_engines` ; `set_moteur(None)` rétablit le moteur sans modèle) ; la
+  fabrique reçoit la racine et le slug et rend un objet qui respecte `Moteur`, ou un `Rendu` (moteur et présentation). Le
+  gardien reste autour.
 - **Lot C (scène d'appel)** : lit `GET …/conversation` (vue Conversation) et `…/compris` (vue Document) ; `rev` est à
   renvoyer à chaque écriture. Pour que la confirmation porte sur le texte exact, l'interface affiche **`a_confirmer`**
   (dans l'état et dans la réaction d'un tour), pas seulement le message de la mascotte : pour chaque entrée, `texte` (ce
