@@ -556,7 +556,7 @@ providers:
 
 def test_adaptateurs_openai_compat_cle_du_magasin_et_serveur_local(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (project / STANDARD / "llm-provider-registry.yaml").write_text(PASSERELLES, encoding="utf-8")
-    monkeypatch.setattr("grimoire.providers.secrets.env_for_provider", lambda pid: {"PASSERELLE_API_KEY": KEY} if pid == "passerelle" else {})
+    monkeypatch.setattr("grimoire.providers.secrets.env_for_provider", lambda pid, **_kw: {"PASSERELLE_API_KEY": KEY} if pid == "passerelle" else {})
     monkeypatch.setattr("grimoire.providers.availability.list_secrets", lambda: ())
     inv = inventaire(project)
     lignes = {r.provider_id: r for r in inv.models if r.source == "registre"}
@@ -568,6 +568,25 @@ def test_adaptateurs_openai_compat_cle_du_magasin_et_serveur_local(project: Path
     assert local is not None and local.url == "http://127.0.0.1:8080/v1/chat/completions"
     inconnu, why = fab._backend(lignes["cloud"], project, "un", inv, 3.0, None, None)
     assert inconnu is None and "aucun adaptateur" in why
+
+
+def test_une_cle_de_passerelle_liee_a_une_autre_adresse_n_est_pas_rendue_au_moteur(
+    project: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from grimoire.providers.secrets import set_secret
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home-liaison"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home-liaison"))
+    (project / STANDARD / "llm-provider-registry.yaml").write_text(PASSERELLES, encoding="utf-8")
+    monkeypatch.setenv("PASSERELLE_API_KEY", KEY)  # la détection ne lit que la PRÉSENCE de la clé
+    inv = inventaire(project)
+    ligne = next(r for r in inv.models if r.source == "registre" and r.provider_id == "passerelle")
+    set_secret("passerelle", "PASSERELLE_API_KEY", KEY, endpoints=["https://autre.exemple.test"])
+    refuse, why = fab._backend(ligne, project, "un", inv, 3.0, None, None)
+    assert refuse is None and "a changé depuis la saisie de la clé" in why and KEY not in why
+    set_secret("passerelle", "PASSERELLE_API_KEY", KEY, endpoints=["https://llm.exemple.test/"])
+    ok, why = fab._backend(ligne, project, "un", inv, 3.0, None, None)
+    assert ok is not None and ok.url == "https://llm.exemple.test/v1/chat/completions" and why == ""
 
 
 def test_le_client_openai_compat_envoie_la_cle_a_la_seule_adresse_admise(project: Path) -> None:

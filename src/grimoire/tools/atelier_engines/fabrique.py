@@ -77,7 +77,7 @@ def _backend(
     """Le client de cette ligne détectée, ou ``(None, pourquoi il n'y en a pas)`` ; jamais de valeur de clé dans le motif."""
     from grimoire.providers.capabilities import DOCUMENTED_DEFAULTS, LITELLM, PROVIDER_ALIASES, canonical_provider
     from grimoire.providers.registry import ProviderRegistryError, read_registry
-    from grimoire.providers.secrets import env_for_provider, provider_key_var
+    from grimoire.providers.secrets import KeyEndpointError, env_for_provider, provider_key_var
     from grimoire.tools import atelier_model as am
     from grimoire.tools.atelier_engines.anthropic import AnthropicBackend
     from grimoire.tools.atelier_engines.ollama import OllamaBackend
@@ -118,12 +118,14 @@ def _backend(
         # Même règle que la sonde de capacités : l'id « litellm » désigne une passerelle, jamais un fournisseur documenté.
         documented = canon != LITELLM and (spec.id.lower() in PROVIDER_ALIASES or canon in DOCUMENTED_DEFAULTS)
         if spec.base_url and spec.provider_type == "litellm" and not documented:
-            key = env_for_provider(spec.id).get(provider_key_var(spec.id), "").strip()
+            # La clé part en HTTP par le kit, vers `spec.base_url` (le transport en tire l'adresse admise) : elle doit avoir été
+            # saisie pour cette adresse ; la commande d'invocation ne la concerne pas (`invocation=None`).
+            key = env_for_provider(spec.id, endpoints=[spec.base_url]).get(provider_key_var(spec.id), "").strip()
             if not key:
                 return None, "aucune clé posée pour cette passerelle"
             return OpenAICompatBackend(spec.base_url, row.model_id, key=key, timeout_s=delai, transport=transport), ""
         return None, "aucun adaptateur pour ce fournisseur (Ollama, serveur OpenAI-compatible admis et Anthropic seulement)"
-    except EngineError as exc:
+    except (EngineError, KeyEndpointError) as exc:  # le motif d'une clé non approuvée pour cette adresse ne porte ni clé ni adresse
         return None, str(exc)
 
 
