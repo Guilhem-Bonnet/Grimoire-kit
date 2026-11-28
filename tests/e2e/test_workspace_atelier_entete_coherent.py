@@ -98,6 +98,32 @@ def test_la_pastille_suit_la_fin_de_l_ecriture_sans_relire_le_document(browser: 
         assert rereads == [], rereads
 
 
+def test_le_bandeau_modifie_le_suit_l_ecriture_sans_relire_le_document(browser: Browser, guidage: tuple[str, Path]) -> None:
+    url, root = guidage
+    slug = _chantier(root, "Bandeau modifie")
+    meta = root / "_grimoire" / "cadrage" / slug / "chantier.yaml"
+    meta.write_text(re.sub(r"modifie: .*", "modifie: '2020-02-29T10:00:00Z'", meta.read_text(encoding="utf-8")), encoding="utf-8")
+    doc = re.compile(rf"/atelier/chantiers/{re.escape(slug)}(\?.*)?$")
+    for page in _open(browser, url, slug):
+        sub = page.locator(".at-sub")
+        expect(sub).to_contain_text("Modifié le 29 février", use_inner_text=True)
+        rereads: list[str] = []
+
+        def refuse(route: Route, request: Request) -> None:
+            rereads.append(request.url)
+            route.abort()
+
+        page.route(doc, refuse)
+        _invite(page, "Le problème").locator("[data-act='invite-write']").click()
+        area = page.locator("[data-role='block-edit'] textarea")
+        area.fill("Je perds mes idées en réunion.")
+        area.press("Control+Enter")
+        expect(sub).not_to_contain_text("29 février", use_inner_text=True)
+        expect(sub).to_contain_text("Modifié le", use_inner_text=True)
+        _shot(page, "entete-modifie")
+        assert rereads == [], rereads
+
+
 def test_les_deux_nombres_de_points_concordent_et_le_gate_ne_bouge_pas(browser: Browser, guidage: tuple[str, Path]) -> None:
     url, root = guidage
     slug = _chantier(root, "Nombres concordants")

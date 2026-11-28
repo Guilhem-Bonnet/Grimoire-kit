@@ -784,7 +784,9 @@ def put_http(
         edited = edit_block(root, rest[1], rest[3], body)
         from grimoire.tools import workspace_atelier_loop as loop
 
-        loop.after_write(root, rest[1])
+        noted = loop.after_write(root, rest[1])
+        if noted:
+            edited["chantier"] = noted  # état et date de modification : la page les adopte sans relire le document
         return 200, edited
     except ConflictError as exc:
         return 409, {"ok": False, "conflict": True, "reason": exc.reason, "error": str(exc), **exc.payload}

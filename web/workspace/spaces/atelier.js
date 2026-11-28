@@ -1095,6 +1095,10 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
   const adoptProgress = (result) => {
     if (!result || !result.avancement) return;
     state.doc.avancement = result.avancement;
+    if (result.chantier) { // état et date de modification d'après les faits : l'en-tête les suit (une écriture de bloc ne touche pas aux tâches)
+      state.doc.chantier = { ...state.doc.chantier, etat: result.chantier.etat, modifie: result.chantier.modifie };
+      paintHead();
+    }
     loop.progress(state.doc);
     phaseNav(); // la barre collante lit l'avancement unique
     drawSteps();
