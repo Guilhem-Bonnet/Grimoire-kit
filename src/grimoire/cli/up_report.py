@@ -21,6 +21,7 @@ _STATUS_STYLE = {
     "done": "[green]done[/green]",
     "skipped": "[yellow]skipped[/yellow]",
     "failed": "[red]failed[/red]",
+    "warning": "[yellow]warning[/yellow]",
     "planned": "[cyan]planned[/cyan]",
 }
 

@@ -167,12 +167,12 @@ class StandardSetupResult:
     skipped: list[Path] = field(default_factory=list)
     dry_run: bool = False
     notices: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
         """True when files were written or would be written."""
         return bool(self.written)
-
 
 
 @dataclass(frozen=True, slots=True)
