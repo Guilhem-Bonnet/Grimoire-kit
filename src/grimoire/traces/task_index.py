@@ -142,7 +142,9 @@ class TaskTraceIndex:
         for raw in block.split(b"\n"):
             if not raw.strip():
                 continue
-            with contextlib.suppress(json.JSONDecodeError, KeyError):
+            # Une ligne illisible (octets invalides, JSON qui n'est pas un objet, champ du mauvais type) est sautée :
+            # elle ne doit pas faire échouer toute la vue « attention ».
+            with contextlib.suppress(ValueError, KeyError, AttributeError, TypeError):
                 trace = TraceRecord.from_dict(json.loads(raw))
                 self._parsed_records += 1
                 if trace.task_id:
