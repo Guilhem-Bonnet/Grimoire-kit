@@ -617,7 +617,7 @@ def test_the_atelier_restore_route_refuses_everything_but_the_page(
         assert route.removeprefix("/api/workspace/") in [e["route"] for e in entries if e["action"] == "workspace.post"]
 
 
-# ── 6. La conversation de cadrage (épique #1477, lot A) : sept gestes, mêmes gardes que les écritures voisines ──────
+# ── 6. La conversation de cadrage (épique #1477, lots A et E) : onze gestes, mêmes gardes que les écritures voisines ──────
 
 
 def _armed_conversation(host: Host) -> tuple[Path, int, str]:
@@ -642,6 +642,11 @@ def _conversation_gestures(rev: int) -> dict[str, dict[str, Any]]:
         "terminer": {"rev": rev},
         "classer": {"rev": rev},
         "rouvrir": {"rev": rev},
+        # Lot E : le document à la fin. Seule l'acceptation écrit dans un fichier de phase.
+        "redaction/proposer": {"rev": rev, "rubrique": "brief/L'utilisateur"},
+        "redaction/r1/accepter": {"rev": rev, "texte": "- Les mainteneurs"},
+        "redaction/r1/ecarter": {"rev": rev},
+        "redaction/r1/reprendre": {"rev": rev},
     }
 
 
@@ -650,7 +655,7 @@ def _conversation_gestures(rev: int) -> dict[str, dict[str, Any]]:
 def test_the_atelier_conversation_routes_refuse_everything_but_the_page(
     fixture_name: str, request: pytest.FixtureRequest
 ) -> None:
-    """Les sept gestes : sans jeton, avec un faux, d'une origine tierce, hors JSON, par PUT ou GET : rien n'est écrit."""
+    """Les onze gestes : sans jeton, avec un faux, d'une origine tierce, hors JSON, par PUT ou GET : rien n'est écrit."""
     from grimoire.tools.request_guard import SESSION_HEADER, session_token
 
     host: Host = request.getfixturevalue(fixture_name)
@@ -699,5 +704,9 @@ def test_no_conversation_route_accepts_document_content(atelier: Host) -> None:
     for extra in ({"phase": "brief"}, {"section": "L'utilisateur"}, {"contenu": "## Pirate"}, {"chemin": "../../x"}):
         body = json.dumps({"rev": rev, "texte": "x", **extra}).encode()
         assert atelier.request("POST", f"{prefix}/tour?project={atelier.slug}", body, headers) == 400
+    # La rédaction (lot E) : proposer ne porte qu'une rubrique de la liste fermée, jamais de texte ni de chemin.
+    for extra in ({"texte": "## Pirate"}, {"phase": "brief"}, {"chemin": "../../x"}, {"phrases": ["x"]}):
+        body = json.dumps({"rev": rev, "rubrique": "brief/L'utilisateur", **extra}).encode()
+        assert atelier.request("POST", f"{prefix}/redaction/proposer?project={atelier.slug}", body, headers) == 400
     assert saved.read_bytes() == before_file
     assert {p.name: p.read_bytes() for p in saved.parent.glob("0*.md")} == before_docs
