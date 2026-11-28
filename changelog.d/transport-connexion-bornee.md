@@ -1,1 +1,0 @@
-- fix(cadrage): l'échéance totale du transport des moteurs de la conversation couvre aussi la connexion TCP et la poignée de main TLS (épique #1477) : l'échéance absolue est calculée avant la connexion, TCP et TLS n'ont que le temps restant et le gardien est armé dès que le socket existe, au lieu d'environ deux fois le délai dans le pire cas
