@@ -28,6 +28,9 @@ export function markerText(rub, reason) {
 /** Vrai si la ligne a été posée par la page (et peut être remise au gabarit d'ici) ; celle de l'entretien se défait par l'entretien. */
 export const isPageMarker = (rub, text) => String(text || '').trimStart().startsWith(rub.marqueur);
 
+/** L'invite du champ de saisie d'une rubrique vide : une phrase humaine, jamais le gabarit « À compléter — … ». */
+export const placeholderText = (rub) => (rub && rub.section ? `Écris ici, avec tes mots : ${rub.section.toLowerCase()}.` : 'Écris ici, avec tes mots.');
+
 /** Le statut en mots, avec son niveau d'importance (`high` : nécessaire pour valider ; `mid` : utile ; `low` : peut rester vide). */
 export function statusInfo(rub) {
   const level = rub.statut === 'necessaire' ? 'high' : rub.statut === 'utile' ? 'mid' : 'low';

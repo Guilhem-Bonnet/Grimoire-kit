@@ -7,7 +7,7 @@
 // « à compléter » pour lui, et la page le dit. « Remettre à compléter » réécrit le gabarit du kit, tel que le serveur le donne.
 // Les textes viennent du serveur (`src/grimoire/core/cadrage_guidance.py`) : rien n'est inventé ici.
 
-import { isPageMarker, markerText, notApplicableNote, statusInfo } from './atelier-invites-logic.js';
+import { isPageMarker, markerText, notApplicableNote, placeholderText, statusInfo } from './atelier-invites-logic.js';
 
 function el(tag, className, text, attrs) {
   const node = document.createElement(tag);
@@ -52,7 +52,8 @@ export function createInvites(ctx, slug, hooks) {
     const error = el('p', 'at-error', '', { role: 'alert' });
     error.hidden = true;
     const form = el('div', 'at-form at-inv-form', null, { 'data-role': 'na-form' });
-    form.append(input, confirm, cancel, error);
+    const help = el('p', 'at-muted at-inv-help', 'Une raison, si tu veux (facultatif). Entrée valide directement.', { 'data-role': 'na-help' });
+    form.append(help, input, confirm, cancel, error);
     const go = () => write(block, markerText(rub, input.value), `« ${rub.section} » marquée sans objet pour ce besoin.`, error, [confirm, cancel], form);
     confirm.addEventListener('click', go);
     cancel.addEventListener('click', onClose);
@@ -65,19 +66,24 @@ export function createInvites(ctx, slug, hooks) {
     return { form, input };
   };
 
-  /** Rubrique vide : ce qu'on y met, un exemple, son statut, et les deux gestes. */
-  const invite = (block, rub) => {
+  /** Ce qu'on met dans la rubrique : son statut, la phrase d'explication et l'exemple (aussi sous les yeux pendant la saisie). */
+  const explain = (rub) => {
     const info = statusInfo(rub);
-    const node = el('div', 'at-placeholder at-empty-slot at-invite', null, { 'data-role': 'empty-slot', 'data-invite': rub.section, 'data-statut': rub.statut });
     const status = el('span', 'at-inv-statut', info.label, { 'data-level': info.level, 'data-role': 'invite-statut', title: info.why });
     const head = el('p', 'at-inv-head');
     head.append(status, el('span', 'at-inv-what', rub.quoi, { 'data-role': 'invite-quoi' }));
     const example = el('p', 'at-inv-ex', null, { 'data-role': 'invite-exemple' });
     example.append(el('span', 'at-inv-ex-tag', 'Exemple'), ` ${rub.exemple}`);
-    node.append(head, example);
+    return [head, example];
+  };
+
+  /** Rubrique vide : ce qu'on y met, un exemple, son statut, et les deux gestes. */
+  const invite = (block, rub) => {
+    const node = el('div', 'at-placeholder at-empty-slot at-invite', null, { 'data-role': 'empty-slot', 'data-invite': rub.section, 'data-statut': rub.statut });
+    node.append(...explain(rub));
     if (rub.etat === 'je-ne-sais-pas') node.append(el('p', 'at-muted at-inv-note', 'Noté « je ne sais pas » : l’hypothèse est dans « Questions ouvertes ». Tu peux préciser ici quand tu sauras.'));
     const write_ = el('button', 'at-btn', 'Écrire ici', { type: 'button', 'data-act': 'invite-write' }); // le clic remonte au bloc : l'éditeur s'ouvre
-    const skip = el('button', 'at-btn ghost', 'Sans objet pour ce besoin', { type: 'button', 'data-act': 'na-open', title: 'Cette rubrique ne concerne pas ce chantier : elle se replie et sort de ce qu’il reste à faire.' });
+    const skip = el('button', 'at-btn ghost', 'Sans objet pour ce besoin…', { type: 'button', 'data-act': 'na-open', title: 'Cette rubrique ne concerne pas ce chantier : elle se replie et sort de ce qu’il reste à faire. Une raison facultative te sera proposée ; Entrée valide directement.' });
     const actions = el('div', 'at-inv-actions');
     actions.append(write_, skip);
     node.append(actions);
@@ -108,5 +114,14 @@ export function createInvites(ctx, slug, hooks) {
     return node;
   };
 
-  return { node: (block, rub) => (rub.etat === 'sans-objet' ? notApplicable(block, rub) : invite(block, rub)) };
+  return {
+    node: (block, rub) => (rub.etat === 'sans-objet' ? notApplicable(block, rub) : invite(block, rub)),
+    /** La consigne qui reste au-dessus du champ pendant la saisie d'une rubrique vide. */
+    guide: (rub) => {
+      const node = el('div', 'at-inv-guide', null, { 'data-role': 'edit-guide', 'data-invite': rub.section });
+      node.append(...explain(rub));
+      return node;
+    },
+    placeholder: (rub) => placeholderText(rub),
+  };
 }

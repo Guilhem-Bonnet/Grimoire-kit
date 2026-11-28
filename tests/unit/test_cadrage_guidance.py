@@ -249,3 +249,19 @@ def test_le_guide_dit_ou_ira_la_reponse_et_ou_elle_est_rangee(project: Path) -> 
     interview.answer(project, "un", "criteres", "sans objet", skip=True)
     stored = guide.view(project, "un")["previous"]["stored"]
     assert (stored["kind"], stored["section"]) == ("skip", "Un succès ressemble à")
+
+
+def test_le_reste_a_faire_montre_l_avancement_de_l_utile_et_l_etape_suivante(project: Path) -> None:
+    """Remplir le Brief fait bouger quelque chose de lisible, sans toucher à ce qui est nécessaire pour valider."""
+    before = _doc(project)["reste_a_faire"]
+    assert before["avancement"] == []  # aucune phase entamée : rien à compter
+    assert (before["etape"]["phase"], before["etape"]["section"]) == ("brief", "Le problème")
+    _fill(project, "brief", "Le problème")
+    after = _doc(project)["reste_a_faire"]
+    brief = next(a for a in after["avancement"] if a["phase"] == "brief")
+    assert (brief["utiles_remplies"], brief["utiles_total"]) == (1, 3)
+    assert after["etape"]["section"] == "L'utilisateur"  # la première rubrique utile vide de la phase entamée
+    assert len(after["necessaires"]) == len(before["necessaires"]) and after["pret"] is False
+    _put(project, "brief", "L'utilisateur", f"{guidance.SANS_OBJET} pour ce besoin")
+    again = next(a for a in _doc(project)["reste_a_faire"]["avancement"] if a["phase"] == "brief")
+    assert (again["utiles_remplies"], again["utiles_total"]) == (1, 2)  # le « sans objet » ne compte plus

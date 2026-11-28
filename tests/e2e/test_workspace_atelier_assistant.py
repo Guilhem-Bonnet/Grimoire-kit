@@ -299,7 +299,8 @@ def test_sans_agent_d_hote_la_barre_le_dit_et_donne_la_commande(
     for page in _open(browser, without_agent, f"#atelier?chantier={slug}"):
         off = page.locator("[data-role='assistant-off']")
         off.wait_for(timeout=APPEAR_MS)
-        expect(off).to_contain_text("Aucun agent n’est joignable", use_inner_text=True)
+        expect(off).to_contain_text("Les questions fonctionnent sans modèle", use_inner_text=True)
+        page.locator("[data-role='assistant-off-detail'] summary").click()  # le détail technique est replié d'office
         # Sans agent, le cadrage se joue dans la page : le moteur est dit en mots simples et le bouton est vivant.
         expect(page.locator("[data-role='engine-label']")).to_contain_text("Questions guidées, sans IA", use_inner_text=True)
         expect(page.locator("[data-role='assistant']")).to_contain_text(f"grimoire cadrage interview --chantier {slug}", use_inner_text=True)

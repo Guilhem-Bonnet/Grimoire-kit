@@ -1035,9 +1035,16 @@ body[data-active-space="source"] {
 
 .kpi-item[data-kind="word"] .kpi-val {
   font-size: 15px;
-  line-height: 34px;
+  line-height: 18px;
   letter-spacing: 0;
   color: var(--tone, var(--ink));
+  /* Un mot d'état long (« checkpoint en attente ») passe à la ligne au lieu
+   * d'être coupé en « checkpoi… » ; la tuile garde la hauteur des chiffres (34 px). */
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .kpi-item[data-tone="ok"] {

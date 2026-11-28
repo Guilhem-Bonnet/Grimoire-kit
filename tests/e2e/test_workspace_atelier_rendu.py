@@ -217,7 +217,7 @@ def test_an_empty_template_opens_empty_and_leaves_the_file_untouched(browser: Br
         area = page.locator(f"{SECTION} [data-role='block-edit'] textarea")
         area.wait_for(timeout=APPEAR_MS)
         expect(area).to_have_value("")
-        expect(area).to_have_attribute("placeholder", "À compléter — pistes.")
+        expect(area).to_have_attribute("placeholder", "Écris ici, avec tes mots : pistes.")  # une invite humaine, plus le gabarit
         expect(page.locator(f"{SECTION} .at-conflict")).to_have_count(0)
         page.keyboard.press("Escape")
         expect(area).to_be_hidden()  # fermé avant de relire le fichier
