@@ -16,6 +16,7 @@ from grimoire.providers import availability as av
 from grimoire.providers.availability import detect
 from grimoire.providers.direct_use import Authorization
 from grimoire.providers.direct_use_settings import Settings
+from grimoire.providers.secrets import provider_key_var, remove_secret, set_secret
 from grimoire.tools.atelier_engines import fabrique as fab
 from grimoire.tools.atelier_engines.gemini import GeminiBackend
 from grimoire.tools.atelier_engines.transport import EngineRefus, EngineSortie
@@ -69,7 +70,7 @@ def _hermetique(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Non
     monkeypatch.setenv("PATH", str(vide))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     for nom in ("GEMINI_API_KEY", "GOOGLE_GEMINI_API_KEY", "GOOGLE_API_KEY"):
-        monkeypatch.setenv(nom, KEY)
+        monkeypatch.delenv(nom, raising=False)  # l'environnement n'est JAMAIS lu : seul le magasin du kit porte la clé
     monkeypatch.setattr("shutil.which", lambda _n, *a, **k: None)
     av.clear_cache()
     yield
@@ -85,7 +86,13 @@ def ecrire(root: Path, texte: str) -> None:
 def project(tmp_path: Path) -> Path:
     root = tmp_path / "project"
     ecrire(root, registre())
+    poser("google-gemini")  # exactement la documentation : grimoire providers set-key google-gemini GOOGLE_GEMINI_API_KEY
     return root
+
+
+def poser(ident: str, valeur: str = KEY) -> None:
+    """La clé posée comme le dit la documentation : ``grimoire providers set-key <id> <ID>_API_KEY``."""
+    set_secret(ident, provider_key_var(ident), valeur)
 
 
 def inventaire(root: Path) -> av.Inventory:
@@ -117,6 +124,7 @@ def garde(rendu: Any) -> Garde:
 @pytest.mark.parametrize("ident", ["google-gemini", "gemini", "google"])
 def test_la_requete_est_construite_pour_l_adresse_officielle_avec_la_cle_en_en_tete(project: Path, ident: str) -> None:
     ecrire(project, registre(ident))
+    poser(ident)
     inv = inventaire(project)
     faux = Faux(gemini_dit({"classe": "reponse"}))
     rendu = compose(project, inv, autorise(inv), faux)
@@ -227,9 +235,8 @@ def test_une_autorisation_perimee_n_est_jamais_appelee(project: Path) -> None:
     assert faux.appels == [] and type(rendu.moteur) is MoteurSansModele
 
 
-def test_sans_cle_aucun_client(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for nom in ("GEMINI_API_KEY", "GOOGLE_GEMINI_API_KEY"):
-        monkeypatch.delenv(nom)
+def test_sans_cle_aucun_client(project: Path) -> None:
+    remove_secret("google-gemini")
     inv = inventaire(project)
     faux = Faux(gemini_dit({"classe": "reponse"}))
     rendu = compose(project, inv, autorise(inv), faux)
@@ -237,17 +244,30 @@ def test_sans_cle_aucun_client(project: Path, monkeypatch: pytest.MonkeyPatch) -
     assert faux.appels == []
 
 
-def test_la_cle_retiree_entre_la_detection_et_la_construction_n_a_pas_de_client(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("ident", ["google-gemini", "gemini", "google"])
+def test_une_cle_seulement_dans_l_environnement_n_est_jamais_envoyee(project: Path, monkeypatch: pytest.MonkeyPatch, ident: str) -> None:
+    ecrire(project, registre(ident))
+    remove_secret("google-gemini")
+    for nom in ("GEMINI_API_KEY", "GOOGLE_GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.setenv(nom, KEY)  # une variable générique exportée pour un autre service
     inv = inventaire(project)
-    for nom in ("GEMINI_API_KEY", "GOOGLE_GEMINI_API_KEY"):
-        monkeypatch.delenv(nom)
+    faux = Faux(gemini_dit({"classe": "reponse"}))
+    rendu = compose(project, inv, autorise(inv), faux)
+    garde(rendu).classer_reponse(CLASSER)
+    raison = rendu.presentation.usages[0].raison
+    assert faux.appels == [] and type(rendu.moteur) is MoteurSansModele
+    assert f"grimoire providers set-key {ident} {provider_key_var(ident)}" in raison and KEY not in raison
+
+
+def test_la_cle_retiree_entre_la_detection_et_la_construction_n_a_pas_de_client(project: Path) -> None:
+    inv = inventaire(project)
+    remove_secret("google-gemini")
     backend, why = fab._backend(inv.by_key()[cle_ligne(inv)], project, "un", inv, 3.0, None, None)
-    assert backend is None and "aucune clé" in why
+    assert backend is None and "set-key google-gemini GOOGLE_GEMINI_API_KEY" in why
 
 
-def test_la_cle_du_magasin_prime_sur_l_environnement(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "grimoire.providers.secrets.env_for_provider", lambda pid: {"GEMINI_API_KEY": "AIzaMAGASIN-FAUSSE"} if pid == "google-gemini" else {})
+def test_la_cle_posee_comme_la_documentation_le_dit_est_celle_qui_part(project: Path) -> None:
+    poser("google-gemini", "AIzaMAGASIN-FAUSSE")
     inv = inventaire(project)
     faux = Faux(gemini_dit({"classe": "reponse"}))
     garde(compose(project, inv, autorise(inv), faux)).classer_reponse(CLASSER)

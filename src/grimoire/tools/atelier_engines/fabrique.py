@@ -26,7 +26,6 @@ le kit ne sait que sonder sa connexion, pas lui poser une question sans lancer u
 from __future__ import annotations
 
 import hashlib
-import os
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -34,7 +33,7 @@ from typing import Any
 
 from grimoire.core.cadrage_conversation_engine import MoteurSansModele
 from grimoire.core.cadrage_conversation_moteur_vue import Presentation, Rendu, UsageVue, sans_modele
-from grimoire.providers.availability import Inventory, ModelAvailability, detect, fingerprint
+from grimoire.providers.availability import Inventory, ModelAvailability, detect, fingerprint, key_command
 from grimoire.providers.direct_use import Decision, choose_for
 from grimoire.providers.direct_use_settings import Settings, build_state, read_settings
 from grimoire.tools.atelier_engines.moteur import MoteurModeles
@@ -115,13 +114,13 @@ def _backend(
                 on_response=lambda raw: am.account_response(root, slug, row.model_id, raw),
             ), ""
         if canonical_provider(spec.id, spec.provider_type) == "google-gemini" and not spec.base_url and not spec.anthropic_base_url:
-            # Adresse officielle CONSTRUITE par l'adaptateur. Clé : magasin du fournisseur puis environnement, sous la variable
-            # documentée (GEMINI_API_KEY) ou celle que la détection attend pour cet identifiant (<ID>_API_KEY).
-            variables = ("GEMINI_API_KEY", provider_key_var(spec.id))
-            stocke = env_for_provider(spec.id)
-            key = next((v.strip() for v in (*(stocke.get(n, "") for n in variables), *(os.environ.get(n, "") for n in variables)) if v.strip()), "")
+            # Adresse officielle CONSTRUITE par l'adaptateur. Clé : le MAGASIN du kit seulement, sous la variable que la détection
+            # attend (``<ID>_API_KEY``), jamais l'environnement : une variable générique exportée pour un autre service Google
+            # ne part pas vers Gemini. (La détection regarde aussi l'environnement : elle peut dire « clé présente » là où ce
+            # tour répond « saisis la clé » ; elle vit sous providers/, hors de ce lot.)
+            key = env_for_provider(spec.id).get(provider_key_var(spec.id), "").strip()
             if not key:
-                return None, "aucune clé posée pour ce fournisseur"
+                return None, f"aucune clé dans le magasin du kit : saisis-la avec `{key_command(spec.id)}`"
             return GeminiBackend(row.model_id, key, timeout_s=delai, transport=transport), ""
         if spec.base_url and spec.provider_type == "local":
             return OpenAICompatBackend(spec.base_url, row.model_id, timeout_s=delai, transport=transport), ""

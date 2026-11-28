@@ -188,8 +188,12 @@ du projet, poser la clé, puis autoriser le modèle sur la page « Modèles auto
 
 - **Étiquettes** : le texte de la conversation SORT de la machine (vers Google) ; payant au jeton, sans offre gratuite pour
   ce modèle. Rien ne part, et rien ne coûte, tant que l'humain n'a pas autorisé ce modèle pour un usage.
-- **Clé** : magasin de secrets (`grimoire providers set-key`) puis environnement, sous `GEMINI_API_KEY` ou
-  `<ID>_API_KEY` (`GOOGLE_GEMINI_API_KEY` pour `google-gemini`, `GEMINI_API_KEY` pour `gemini`). Elle part en en-tête
+- **Clé** : le magasin de secrets du kit SEULEMENT, jamais l'environnement (une variable générique comme `GOOGLE_API_KEY`,
+  exportée pour un autre service, ne part pas vers Gemini). Avec l'id `google-gemini` :
+  `grimoire providers set-key google-gemini GOOGLE_GEMINI_API_KEY` ; la variable est toujours `<ID>_API_KEY`
+  (`GEMINI_API_KEY` pour l'id `gemini`, `GOOGLE_API_KEY` pour l'id `google`). Limite : la détection de disponibilité
+  regarde aussi l'environnement ; une clé seulement exportée peut y paraître présente, mais ce tour répond alors « saisis la
+  clé avec `grimoire providers set-key …` » et rien ne part. Elle part en en-tête
   `x-goog-api-key` vers `https://generativelanguage.googleapis.com/v1beta/models/<modèle>:generateContent` seulement, jamais
   dans l'URL. Un fournisseur Gemini qui déclare un `base_url` n'a pas cet adaptateur ; une adresse réécrite après
   l'autorisation change l'empreinte : rien ne part.
