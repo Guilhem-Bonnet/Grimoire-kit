@@ -119,12 +119,13 @@ def _lower_priority() -> None:
 
 
 def warm_sheet(root: Path, stop: threading.Event | None = None) -> None:
-    """Chauffe le journal des traces, puis les caches de ``sheet`` et de ``tasks`` ; un échec ne coûte que la chauffe.
+    """Chauffe les journaux des traces, puis les caches de ``sheet`` et de ``tasks`` ; un échec ne coûte que la chauffe.
 
     Le premier parcours complet du journal (97 Mo, ~3 s) se paie ici, en premier, plutôt qu'à la première
-    requête : ``attention``, ``agents`` et ``propositions`` s'y disputent le même verrou
-    (``journal_cache``), donc une requête qui arrive pendant le parcours attend celui-ci au lieu d'en lancer
-    un second. Vient ensuite la Flotte (``cockpit_warm.warm_fleet`` : projet courant, puis vue globale), pour que
+    requête. Il y en a deux, chacun derrière son verrou : l'index par tâche (``task_index``, lu par la vue
+    ``attention`` et les cartes de tâche : c'est lui qui rendait le premier affichage lent, #1243), puis le
+    journal complet (``journal_cache``, lu par ``agents`` et ``propositions``). Une requête qui arrive pendant
+    un parcours attend celui-ci au lieu d'en lancer un second. Vient ensuite la Flotte (``cockpit_warm.warm_fleet`` : projet courant, puis vue globale), pour que
     sa première ouverture soit servie à chaud. *stop* annule la suite entre deux étapes (l'étape en cours, elle,
     se termine) ; l'échec d'une étape n'empêche pas les suivantes.
     """
@@ -135,8 +136,10 @@ def warm_sheet(root: Path, stop: threading.Event | None = None) -> None:
         from grimoire.tools import workspace_api
         from grimoire.tools.workspace_pulse import TRACES_RELPATH
         from grimoire.traces.journal_cache import load_trace_journal
+        from grimoire.traces.task_index import traces_by_task
 
         for step in (
+            lambda: traces_by_task(root / TRACES_RELPATH),
             lambda: load_trace_journal(root / TRACES_RELPATH),
             lambda: workspace_api.sheet_view(root),
             lambda: workspace_api.tasks_view(root),
