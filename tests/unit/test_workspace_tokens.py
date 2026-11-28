@@ -87,34 +87,60 @@ def test_aucune_couleur_litterale_hors_du_fichier_de_tokens(source: Path) -> Non
 
 # ── Le plancher typographique ───────────────────────────────────────────────
 
-_FONT_SIZE = re.compile(r"font-size:\s*([0-9.]+)px")
+#: Plancher statique : la plus petite valeur que `--t-min` prend (thème clair).
+#: Le plancher rendu (13 px en sombre) est mesuré par le test e2e.
+_STATIC_FLOOR_PX = 12.0
+_RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+_DECL_SIZE = re.compile(r"(?<![\w-])font-size:\s*([0-9.]+)(px|pt|rem)\b")
+_UNIT_PX = {"px": 1.0, "pt": 4 / 3, "rem": 16.0}
+
+#: Glyphes, pas du texte courant : un caractère unique dans une pastille ou une
+#: touche. Chaque entrée est un `(fichier, sélecteur)` ; une entrée qui ne
+#: correspond plus à une taille sous le plancher fait échouer le test.
+_GLYPH_EXCEPTIONS = {
+    ("shell.css", ".kbd"),
+    ("memoire.css", ".kn-proj .mgram"),
+    ("decision-card.css", ".dc-key"),
+}
+#: Cas dans `spaces/atelier*` : aucun au 2026-11-28 (les `em` y sont relatifs à
+#: un parent d'au moins 12 px, les `pt` ne servent qu'à l'impression). Si un cas
+#: apparaît pendant la PR du guidage, l'inscrire ici avec sa date ; à traiter
+#: après la PR du guidage.
+_ATELIER_EXCEPTIONS: set[tuple[str, str]] = set()
+
+
+def _undersized() -> set[tuple[str, str, str]]:
+    """(fichier, sélecteur, taille) de chaque règle CSS dont le `font-size` est sous le plancher."""
+    found: set[tuple[str, str, str]] = set()
+    for source in [TOKENS, *(_sources())]:
+        if source.suffix != ".css":
+            continue
+        text = re.sub(r"/\*.*?\*/", "", source.read_text(encoding="utf-8"), flags=re.DOTALL)
+        for rule in _RULE.finditer(text):
+            selector = " ".join(rule.group(1).split())
+            for size in _DECL_SIZE.finditer(rule.group(2)):
+                px = float(size.group(1)) * _UNIT_PX[size.group(2)]
+                if px < _STATIC_FLOOR_PX:
+                    found.add((source.name, selector.split("}")[-1].strip(), size.group(1) + size.group(2)))
+    return found
 
 
 def test_aucune_taille_de_police_sous_le_plancher() -> None:
-    """13 px en sombre, 12 px en clair, avec une seule exception nommée.
+    """12 px au moins (plancher clair ; 13 px en sombre, mesuré rendu), glyphes exceptés.
 
     Le `.kbd` est un glyphe de touche, pas du texte courant : 11 px y est
     lisible parce que le contenu est un caractère unique. Toute autre valeur
     sous le plancher est un défaut — la revue en a compté 270 sur une seule
-    page.
+    page. Une taille sous le plancher se corrige par `var(--t-min)`, pas par
+    une exception.
     """
-    # Glyphes, pas du texte courant : le monogramme d'un projet dans sa pastille de 15 px, la touche d'une carte.
-    exceptions = {".kbd", "#palette-list .cmd", ".kn-proj .mgram", ".dc-key"}
-    # Valeur héritée du CSS en ligne des modules, antérieure au plancher ; à traiter dans une PR de design.
-    exceptions |= {".dc-tag", ".dn-facts .mono", ".dn-cmd code", ".kn-diff-cells b", ".pl-path"}
-    offenders: list[str] = []
-    for source in [TOKENS, *(_sources())]:
-        if source.suffix != ".css":
-            continue
-        selector = ""
-        for line_number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
-            if "{" in line and not line.strip().startswith(("@", "/*")):
-                selector = line.split("{")[0].strip()
-            match = _FONT_SIZE.search(line)
-            if match and float(match.group(1)) < 12 and selector not in exceptions:
-                offenders.append(f"{source.name}:{line_number} — {selector} → {match.group(1)}px")
+    allowed = _GLYPH_EXCEPTIONS | _ATELIER_EXCEPTIONS
+    found = _undersized()
+    offenders = sorted(f"{f} — {s} → {v}" for f, s, v in found if (f, s) not in allowed)
 
     assert not offenders, "taille sous le plancher :\n  " + "\n  ".join(offenders)
+    stale = sorted(allowed - {(f, s) for f, s, _ in found})
+    assert not stale, f"exceptions périmées, à retirer : {stale}"
 
 
 def test_le_plancher_est_declare_dans_les_deux_themes() -> None:
