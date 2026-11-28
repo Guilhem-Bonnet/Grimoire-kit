@@ -21,6 +21,8 @@ fourni, `MoteurSansModele`, fonctionne par règles.
 | `core/cadrage_conversation_turn.py` | Les opérations : démarrer, tour, décision, pause, classement, lectures |
 | `core/cadrage_conversation_store.py` | Le fichier `conversation.json` : lecture validée, écriture atomique sous verrou |
 | `core/cadrage_conversation_hygiene.py` | Sommeil, classement doux, réouverture, liste des conversations |
+| `core/cadrage_conversation_redaction.py` | Le geste « proposer une rédaction », sa validation, la proposition enregistrée (lot E) |
+| `core/cadrage_conversation_redaction_ops.py` | Proposer, accepter, écarter, reprendre une rédaction ; la trace de chaque passage (lot E) |
 | `tools/workspace_atelier_conversation.py` | Les routes et le point d'injection du moteur |
 
 ## L'état d'une conversation
@@ -72,6 +74,7 @@ petites et typées :
 | `repondre_question` | texte, pourquoi | un texte |
 | `est_tour_lourd` | texte, étape | un booléen (l'interface montre la réflexion) |
 | `limites` | rien | ce que le moteur ne sait pas faire, dit honnêtement |
+| `proposer_redaction` (facultatif, lot E) | `EntreeRedaction` | une `Redaction` (phrases, fondements) ; voir « Le document à la fin » |
 
 Un moteur ne reçoit **jamais** de chemin, de document ni de moyen d'écrire. `Garde` enveloppe tout moteur : type,
 longueur, classe et rubrique de la liste fermée sont vérifiés ; chaque appel est borné dans le temps ; une exception,
@@ -208,9 +211,15 @@ liste réelle des chantiers, jamais construit depuis le slug.
 | `POST …/conversation/tour` | un tour de l'humain | `rev`, `texte` ; 409 si `rev` a changé |
 | `POST …/conversation/elements/<id>` | confirmer, corriger, écarter | `rev`, `decision`, `texte` |
 | `POST …/conversation/pause`, `terminer`, `classer`, `rouvrir` | change le mode ou le classement | `rev` |
+| `GET …/conversation/redaction` | rubriques rédigeables, propositions en attente, passages écrits et leur trace | lecture seule |
+| `GET …/conversation/redaction/<id>` | une rédaction (tout statut) et la trace de chaque phrase | lecture seule |
+| `POST …/conversation/redaction/proposer` | propose une rédaction ; n'écrit rien dans le document | `rev`, `rubrique` (clé de la liste fermée) |
+| `POST …/conversation/redaction/<id>/accepter` | écrit la rédaction (le seul geste qui écrit) | `rev`, `texte` (le texte exact affiché) |
+| `POST …/conversation/redaction/<id>/ecarter`, `reprendre` | ferme la proposition, sans rien écrire | `rev` |
 
-Aucun corps n'accepte un autre champ que ceux du tableau : pas de phase, de rubrique ni de chemin. Un élément déjà
-tranché ou une conversation en pause, terminée ou classée donne 409 ou 400 sans rien écrire.
+Aucun corps n'accepte un autre champ que ceux du tableau : pas de phase, de section ni de chemin. La seule rubrique
+qu'un corps peut nommer est la clé `phase/section` de `proposer`, retrouvée dans la liste fermée (sinon 400). Un élément
+déjà tranché ou une conversation en pause, terminée ou classée donne 409 ou 400 sans rien écrire.
 
 ## Les moteurs à modèle (lot B2)
 
@@ -228,7 +237,8 @@ appelé, la conversation fonctionne comme avant.
 
 **Quel modèle, quand.** Les usages sont ceux de `direct_use` : `conversation` (le modèle rapide : classer, extraire, formuler,
 reformuler, répondre) et `brainstorm` (le modèle plus fort : proposer des pistes ; il demande au moins un palier
-« intermédiaire »). L'usage `redaction` n'a pas encore de geste. La décision est recalculée à CHAQUE tour et à chaque lecture,
+« intermédiaire »). L'usage `redaction` porte le geste « proposer une rédaction » (lot E), mais la fabrique ne lui donne
+pas encore de modèle : la rédaction est celle du programme (voir « Le document à la fin »). La décision est recalculée à CHAQUE tour et à chaque lecture,
 sans mémoire : un modèle devenu indisponible, une autorisation retirée ou une empreinte périmée change le moteur au tour
 suivant, sans casser la conversation. Le modèle « courant » de chaque usage est le premier de la liste de l'humain : s'il
 tombe, on ne bascule que vers un modèle ni plus coûteux ni plus exposé ; sinon `choose_for` PROPOSE, le tour est rendu par
@@ -327,7 +337,90 @@ Essai manuel contre l'Ollama local, jamais lancé par les tests : `python script
   texte entier de chaque élément, y compris en pause ; les réactions de `pause` et de `demarrer` portent la même liste.
 - **Lot D (voix)** : la réaction d'un tour porte `accuse` (texte du programme, immédiat), `message` et `lourd` : une
   interface peut dire l'accusé tout de suite et attendre le message.
-- **Lot E (rédaction finale)** : lit `ranges()` et les sources (numéro de tour) pour relier chaque passage à l'échange ;
-  il n'a pas d'autre porte d'écriture que `cadrage_conversation_document`.
+- **Lot E (rédaction finale)** : côté serveur, fait (voir ci-dessous). L'interface viendra avec la scène d'appel : elle
+  affiche `proposition.texte` tel quel et le renvoie à l'acceptation, et montre pour chaque phrase ses `fondements` et
+  `tours` (« voir d'où vient cette phrase »).
+
+## Le document à la fin (lot E)
+
+Quand ce qui est compris est confirmé, la mascotte peut proposer une **rédaction** plus lisible d'une rubrique. Le
+principe ne change pas : le moteur propose, l'humain décide, et rien n'entre dans le document sans un geste explicite sur
+le texte exact affiché.
+
+**Le geste borné.** `proposer_redaction(EntreeRedaction) -> Redaction`. L'entrée : la rubrique (`phase/section`), son nom
+en mots simples, et les éléments **confirmés et rangés** de cette rubrique, et eux seuls (identifiant, texte). La sortie :
+la rubrique visée et des phrases, chacune avec la liste des identifiants des éléments qui la fondent. Le gardien la
+revalide (`valider_redaction`) et la refuse si :
+
+- elle n'est pas une `Redaction`, ou vise une autre rubrique que celle demandée (ou « Questions ouvertes », hors cadre) ;
+- elle a zéro ou plus de 12 phrases, une phrase sans fondement ou avec plus de 12, un identifiant inconnu ou non confirmé ;
+- une phrase dépasse 804 caractères, le tout 4 000, ou une phrase commence par une marque de mise en forme (`#`, `*`, `-`,
+  `>`, `|`, `<`, `` ` ``…) ; les retours à la ligne sont repliés (une phrase ne peut pas créer de titre) ;
+- une phrase commence comme une exigence : la ligne `- <phrase>` serait reconnue par l'ancre d'exigence du kit
+  (`cadrage_requirements._ANCHOR`, `REQ-n`), donc lue par `read_requirements` et le gate ;
+- un élément confirmé n'est cité par aucune phrase (l'accepter le retirerait du document).
+
+Refusée (ou délai dépassé, exception), elle est remplacée par la **rédaction fidèle** du programme, avec une note : chaque
+élément confirmé, tel quel, une phrase chacun ; un élément qui commence comme une exigence y est mis entre guillemets
+(`« REQ-042 … »`), pour que la ligne écrite ne soit jamais lue comme une exigence (l'ancienne ligne, précédée de sa
+question en italique, ne l'était pas non plus). Sans modèle, c'est elle qui est proposée. Un moteur qui n'a pas ce geste
+donne la rédaction fidèle, sans note. Côté modèle, `MoteurModeles.proposer_redaction` est un appel à sortie JSON contrainte
+(rubrique et identifiants en liste fermée dans le schéma) sur le seul modèle autorisé pour l'usage `redaction`, jamais
+celui de la conversation à sa place.
+
+**Une proposition n'écrit rien.** Elle est enregistrée dans `conversation.json` (clé `redactions`, absente tant qu'aucune
+rédaction n'a été proposée) avec le statut `attente`, ses phrases, pour chacune ses fondements et leurs **tours d'origine**,
+les éléments confirmés au moment de la proposition (`base`), le tour où la mascotte l'a présentée et l'**empreinte** du
+document (fichier de phase et `entretien.json`). Le moteur rédige hors du verrou ; sous le verrou, la conversation et le
+document doivent être ceux qu'il a vus, sinon 409. Une nouvelle proposition pour la même rubrique remplace celle en attente.
+`cadrage check` est inchangé par une proposition non acceptée.
+
+**Les trois gestes de l'humain.**
+
+- **Accepter** renvoie le texte exact affiché (`texte`, une puce par phrase). Refus si ce n'est pas le texte de la
+  proposition (409 `proposition-differente`), si les éléments confirmés de la rubrique ont changé (409 `base-changee`), si
+  le document a changé depuis la proposition (409 `document-change`, « le document a changé depuis la proposition : relis la
+  proposition »), si le document est au statut accepté. Sinon, dans la rubrique, les **seules lignes que la conversation
+  possède** sont remplacées par la rédaction, à la place de la première ; les lignes écrites par l'humain restent où elles
+  sont (une ligne humaine intercalée se retrouve juste après la rédaction). Les réponses de l'entretien ne bougent pas et
+  aucune exigence n'apparaît ni ne disparaît (`read_requirements` identique) : `cadrage check` rend le même verdict.
+- **Écarter** ferme la proposition, le document reste tel quel.
+- **Reprendre ce point** ferme la proposition et rouvre la discussion sur la rubrique : la conversation repasse en mode
+  `cadrage`, la question en cours vise cette rubrique, et la réponse suivante de l'humain y est rangée comme un élément
+  proposé (à confirmer), jamais écrite d'office.
+
+**Quelles lignes la conversation possède.** Celles que la trace de l'entretien lui attribue : les lignes de ses éléments
+(`origin` = `conv:<création>:<élément>`) et celles de sa dernière rédaction acceptée, inscrites dans `entretien.json` sous la
+clé `redactions` (`{"<phase>/<section>": {"origin": "conv:<création>:<rédaction>", "lines": [...]}}`). À l'acceptation, la
+trace de chaque ligne brute remplacée reçoit `replaced_by` (l'origine de la rédaction) : elle n'est plus à la conversation, la
+possession d'une rubrique rédigée vient de la seule clé `redactions`. Une ligne brute retapée à l'identique par l'humain
+reste donc à lui. `interview_plan` conserve la clé `redactions` quand il refait l'état (profondeur ou nature changée). Comme pour `origin`,
+c'est la trace qui fait foi, jamais `conversation.json` : une rédaction « acceptée » forgée dans `conversation.json` ne
+donne la propriété d'aucune ligne. Fail-closed : proposer (et accepter) est refusé, sans rien écrire, si une ligne possédée
+est plusieurs fois dans la rubrique (l'humain l'a recopiée), si la rédaction acceptée a été retouchée en partie, si la ligne
+d'un élément confirmé n'y est plus telle quelle (elle est à l'humain désormais), ou si la rubrique a disparu du document.
+Une trace `redactions` mal formée ne donne aucune propriété.
+
+**La traçabilité.** `GET …/conversation/redaction` rend, pour chaque passage écrit par acceptation : son texte, la ligne
+exacte, ses fondements (identifiant, texte au moment de la proposition, statut actuel, tour source), ses tours d'origine
+(numéro, auteur, texte coupé à 300 caractères, date), `perimee` (les éléments confirmés de la rubrique ont changé depuis) et
+`dans_le_document` (ses lignes y sont encore telles quelles). Il rend aussi les rubriques rédigeables, les propositions en
+attente et l'historique des rédactions (statuts `attente`, `acceptee`, `ecartee`, `reprise`, `remplacee` ; 60 au plus, les
+plus anciennes déjà tranchées partent les premières).
+
+**Limites connues.**
+
+- Le gardien vérifie la structure (fondements cités, connus, confirmés, tous couverts), pas le sens : une phrase peut citer
+  le bon élément et dire autre chose. C'est pourquoi l'humain accepte le texte exact, avec la liste des fondements de chaque
+  phrase sous les yeux.
+- **Une rubrique rédigée ne se modifie que par une nouvelle rédaction.** Corriger ou écarter un de ses éléments (ou un
+  élément rangé après lui sur le même angle) par la conversation est refusé avant tout geste : « cette rubrique a été
+  rédigée : propose une nouvelle rédaction pour la modifier ». Ajouter un élément confirmé reste possible (sa ligne brute
+  s'ajoute, la proposition suivante l'intègre).
+- **L'entretien guidé ne retire pas une réponse rédigée.** `retract` refuse, sans rien supprimer ni modifier, quand la
+  dernière réponse de l'angle a sa ligne remplacée par une rédaction (`replaced_by`) : modifier le document à la main ou
+  proposer une nouvelle rédaction. Hors de ce cas, l'entretien guidé est inchangé.
+- La fabrique des moteurs ne décide pas encore de l'usage `redaction` : en service, la rédaction proposée est la rédaction
+  fidèle du programme, tant qu'un lot suivant ne branche pas cet usage.
 
 Un essai sans interface : `python scripts/cadrage-converse.py --chantier <slug>`.

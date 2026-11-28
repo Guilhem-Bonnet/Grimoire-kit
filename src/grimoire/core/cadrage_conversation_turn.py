@@ -364,6 +364,7 @@ def _journaliser(ctx: Contexte, conv: Conversation, retire: Element | None) -> l
     porte plus : des lignes de l'humain perdues en silence. Avec cela, la reprise les remet à confirmer. Rend ces éléments.
     """
     defaits = [] if retire is None else rangement.a_defaire(conv, retire)
+    rangement.verifier_modifiable(ctx.root, ctx.slug, conv, defaits)  # lot E : une rubrique rédigée se modifie par une rédaction
     for el in defaits:
         el.intention = "ecrire"
     store.save(ctx.directory, conv)

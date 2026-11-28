@@ -315,6 +315,8 @@ class Conversation:
     plus_tard: list[Note] = field(default_factory=list)
     rang: int = 0
     seq: int = 0
+    #: Les rédactions proposées pour le document (lot E) : rien n'est écrit sans le geste d'acceptation de l'humain.
+    redactions: list[Any] = field(default_factory=list)
     #: Non enregistré : un fichier lisible mais à réparer à la main (identifiants en double) ne se modifie pas.
     reparer: str = ""
 
@@ -363,7 +365,7 @@ class Conversation:
     # ── (dé)sérialisation ──────────────────────────────────────────────────
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "schema": self.schema, "rev": self.rev, "chantier": self.chantier, "cree": self.cree,
             "active_le": self.active_le, "classee_le": self.classee_le, "mode": self.mode,
             "mode_avant_pause": self.mode_avant_pause, "document": self.document, "moteur": self.moteur,
@@ -372,6 +374,9 @@ class Conversation:
             "ouvertes": [_plain(n) for n in self.ouvertes], "plus_tard": [_plain(n) for n in self.plus_tard],
             "rang": self.rang, "seq": self.seq,
         }
+        if self.redactions:  # absent tant qu'aucune rédaction n'a été proposée : les fichiers d'avant le lot E restent identiques
+            out["redactions"] = [r.to_dict() for r in self.redactions]
+        return out
 
     @classmethod
     def from_dict(cls, raw: Any, *, chantier: str | None = None) -> Conversation:
@@ -496,7 +501,7 @@ def _notes(raw: dict[str, Any], key: str, turns: int) -> list[Note]:
 
 
 _KEYS = {"schema", "rev", "chantier", "cree", "active_le", "classee_le", "mode", "mode_avant_pause", "document",
-         "moteur", "question", "tours", "elements", "ouvertes", "plus_tard", "rang", "seq"}
+         "moteur", "question", "tours", "elements", "ouvertes", "plus_tard", "rang", "seq", "redactions"}
 
 
 def _parse(raw: Any, chantier: str | None) -> Conversation:
@@ -528,4 +533,8 @@ def _parse(raw: Any, chantier: str | None) -> Conversation:
     )
     conv.seq = max(conv.seq, *(int(e.id[1:]) for e in elements), 0)  # jamais un identifiant déjà pris
     conv.reparer = reparer
+    if "redactions" in data:  # lot E : validées comme le reste (fondements connus, rubrique de la liste fermée…)
+        from grimoire.core.cadrage_conversation_redaction import lire_propositions
+
+        conv.redactions = lire_propositions(data["redactions"], {e.id for e in elements}, len(tours))
     return conv

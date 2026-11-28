@@ -8,7 +8,8 @@ moteur sans modèle pour ce tour et note la raison (le nom de l'erreur) dans la 
 comme hostile : le gardien revalide chaque sortie, et rien n'entre dans le document sans le « oui » de l'humain.
 
 Usages (ceux de :mod:`grimoire.providers.direct_use`) : ``conversation`` (le modèle rapide : classer, extraire, formuler,
-reformuler, répondre) et ``brainstorm`` (le modèle plus fort : proposer des pistes). ``redaction`` n'a pas encore de geste.
+reformuler, répondre) et ``brainstorm`` (le modèle plus fort : proposer des pistes). ``redaction`` porte le geste « proposer une
+rédaction » (lot E) ; la fabrique ne lui donne pas encore de modèle, il est donc rendu par le programme (rédaction fidèle).
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from grimoire.core.cadrage_conversation_engine import (
     MoteurSansModele,
 )
 from grimoire.core.cadrage_conversation_moteur_vue import reflexion
+from grimoire.core.cadrage_conversation_redaction import EntreeRedaction, Redaction, redaction_fidele
 from grimoire.tools.atelier_engines import gestes
 from grimoire.tools.atelier_engines.schema import decoder
 from grimoire.tools.atelier_engines.transport import Backend, EngineRefus
@@ -96,6 +98,12 @@ class MoteurModeles:
         if not self._a("conversation") or ("pourquoi" in texte.lower() and pourquoi):  # le « pourquoi » est une phrase du programme
             return self.repli.repondre_question(texte, pourquoi)
         return gestes.lire_texte(self._appel("conversation", gestes.repondre(texte, pourquoi)))
+
+    def proposer_redaction(self, entree: EntreeRedaction) -> Redaction:
+        # Lot E : seulement un modèle autorisé pour l'usage « redaction » (jamais celui de la conversation à sa place).
+        if not self._a("redaction"):
+            return redaction_fidele(entree)
+        return gestes.lire_redaction(self._appel("redaction", gestes.rediger(entree)), entree)
 
     def est_tour_lourd(self, texte: str, etape: str) -> bool:
         return etape == "brainstorm" and self._a("brainstorm")  # les pistes viennent du modèle fort, plus lent

@@ -169,11 +169,13 @@ def _written_ok(entry: Any, angle: Angle, *, skip: bool = False) -> bool:
     ligne, ``À préciser`` ou la mention « Sans objet »). Une trace éditée à la main ne peut pas viser une exigence."""
     if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) for k in ("phase", "section", "line")):
         return False
-    if not isinstance(entry.get("text", ""), str) or set(entry) - {"phase", "section", "line", "text", "origin"}:
+    if not isinstance(entry.get("text", ""), str) or set(entry) - {"phase", "section", "line", "text", "origin", "replaced_by"}:
         return False
     origin = entry.get("origin", "")  # d'où vient la ligne (conversation de cadrage) ; absent pour l'entretien guidé
-    if not isinstance(origin, str) or len(origin) > 120 or not all(c.isalnum() or c in ":_.+-" for c in origin):
-        return False
+    # ``replaced_by`` : la ligne a été réécrite par une rédaction acceptée de la conversation (épique #1477, lot E).
+    for mark in (origin, entry.get("replaced_by", "")):
+        if not isinstance(mark, str) or len(mark) > 120 or not all(c.isalnum() or c in ":_.+-" for c in mark):
+            return False
     line = entry["line"]
     if "\n" in line or "\r" in line or len(line) > 5000:
         return False
@@ -295,7 +297,8 @@ def interview_plan(
         return view
     old_kind = (state or {}).get("kind")
     if state is None or state["depth"] != depth or old_kind != current.value:
-        state = {"depth": depth, "kind": current.value, "angles": (state or {}).get("angles", {})}
+        kept_redactions = {"redactions": state["redactions"]} if state is not None and "redactions" in state else {}
+        state = {"depth": depth, "kind": current.value, "angles": (state or {}).get("angles", {}), **kept_redactions}
         _save(root, chantier, state)
     return _render(state, source, kind_source)
 
@@ -565,6 +568,10 @@ def retract(root: Path, chantier: str | None, angle_id: str) -> dict[str, Any]:
                 _phase_file(root, chantier, mark["phase"]), mark["section"], mark["line"])
     elif answers:
         _pad(rec)
+        last = rec["lines"][-1]
+        if isinstance(last, dict) and last.get("replaced_by"):  # sa ligne n'est plus dans le document : une rédaction l'a remplacée
+            raise ValueError(f"la dernière réponse de l'angle {angle.id!r} a été réécrite dans le document par une rédaction "
+                             "acceptée : je ne la retire pas ; modifie le document à la main ou propose une nouvelle rédaction")
         text = str(answers.pop())
         entry = rec["lines"].pop()
         if entry is not None:  # la trace dit où la ligne a été posée et ce qu'elle disait

@@ -25,11 +25,19 @@ from grimoire.core.cadrage_conversation_engine import (
     EntreeQuestion,
     EntreeReformulation,
 )
+from grimoire.core.cadrage_conversation_redaction import (
+    MAX_FONDEMENTS,
+    MAX_PHRASE_CHARS,
+    MAX_PHRASES,
+    EntreeRedaction,
+    PhraseRedigee,
+    Redaction,
+)
 from grimoire.tools.atelier_engines.schema import valider
 
 __all__ = [
     "Geste", "classer", "donnee", "extraire", "formuler", "lire_classe", "lire_elements", "lire_pistes", "lire_question",
-    "lire_texte", "pistes", "reformuler", "repondre",
+    "lire_redaction", "lire_texte", "pistes", "rediger", "reformuler", "repondre",
 ]
 
 #: Les bornes d'entrée : ce qui part vers le modèle est court, quoi qu'il arrive.
@@ -195,6 +203,44 @@ def lire_pistes(data: Any) -> list[str]:
 
 
 # ── Répondre à une question de la personne ──────────────────────────────────
+
+
+def _schema_redaction(entree: EntreeRedaction) -> dict[str, Any]:
+    ids = [f.id for f in entree.elements][:MAX_FONDEMENTS * MAX_PHRASES]
+    phrase = {
+        "type": "object",
+        "properties": {
+            "texte": {"type": "string", "minLength": 1, "maxLength": MAX_PHRASE_CHARS},
+            "fondements": {"type": "array", "maxItems": MAX_FONDEMENTS, "items": {"type": "string", "enum": ids, "maxLength": 20}},
+        },
+        "required": ["texte", "fondements"],
+    }
+    return {
+        "type": "object",
+        "properties": {"rubrique": {"type": "string", "enum": [entree.rubrique], "maxLength": 120},
+                       "phrases": {"type": "array", "maxItems": MAX_PHRASES, "items": phrase}},
+        "required": ["rubrique", "phrases"],
+    }
+
+
+def rediger(entree: EntreeRedaction) -> Geste:
+    """Proposer une rédaction d'UNE rubrique à partir de ses seuls éléments confirmés, chaque phrase citant ses fondements."""
+    systeme = (
+        f"{_COMMUN}\nRédige la partie du document de cadrage indiquée, en phrases claires et lisibles, à partir UNIQUEMENT des "
+        "éléments confirmés listés (chacun précédé de son identifiant entre crochets). N'ajoute aucune information, garde les "
+        "négations et les restrictions, n'oublie aucun élément. Pour chaque phrase, donne la liste des identifiants des éléments "
+        f"qui la fondent. Au plus {MAX_PHRASES} phrases, chacune sans titre ni mise en forme. "
+        "Objet : {\"rubrique\": la rubrique indiquée, \"phrases\": [{\"texte\": ..., \"fondements\": [identifiants]}]}."
+    )
+    items = "\n".join(f"- [{f.id}] {donnee(f.texte, MAX_PETIT)}" for f in entree.elements[:MAX_LISTE * 4])
+    user = (f"Rubrique : {entree.rubrique}.\n" + _bloc("Nom de la partie", entree.nom, MAX_PETIT)
+            + f"\n\nÉléments confirmés :\n<donnee>\n{items}\n</donnee>")
+    return Geste(systeme, user, _schema_redaction(entree), 1500)
+
+
+def lire_redaction(data: Any, entree: EntreeRedaction) -> Redaction:
+    valider(data, _schema_redaction(entree))
+    return Redaction(str(data["rubrique"]), tuple(PhraseRedigee(str(p["texte"]), tuple(p["fondements"])) for p in data["phrases"]))
 
 
 def repondre(texte: str, pourquoi: str) -> Geste:
