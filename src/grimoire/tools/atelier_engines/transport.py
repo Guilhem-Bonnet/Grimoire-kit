@@ -195,6 +195,7 @@ class _Https(http.client.HTTPSConnection):
 
     def __init__(self, host: str, port: int | None, timeout: float, gardes: list[threading.Timer]) -> None:
         self._contexte = ssl.create_default_context()
+        self._contexte.minimum_version = ssl.TLSVersion.TLSv1_2  # aucune version plus ancienne, dite explicitement
         super().__init__(host, port, timeout=timeout, context=self._contexte)
         self._echeance = time.monotonic() + timeout
         self._gardes = gardes

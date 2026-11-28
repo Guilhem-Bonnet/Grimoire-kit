@@ -223,6 +223,7 @@ def test_la_connexion_https_verifie_le_certificat_et_http_n_est_que_local() -> N
     https = tr._connexion(urlsplit("https://api.exemple.test/v1"), 1.0)
     assert isinstance(https, http.client.HTTPSConnection) and https.timeout == 1.0
     assert https._context.check_hostname and https._context.verify_mode == ssl.CERT_REQUIRED  # type: ignore[attr-defined]
+    assert https._context.minimum_version >= ssl.TLSVersion.TLSv1_2  # type: ignore[attr-defined]
     local = tr._connexion(urlsplit("http://127.0.0.1:1/"), 1.0)
     assert isinstance(local, http.client.HTTPConnection) and not isinstance(local, http.client.HTTPSConnection)
 
