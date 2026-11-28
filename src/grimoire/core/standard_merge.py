@@ -25,6 +25,8 @@ n'est jamais touché : il est copié à côté et signalé.
 from __future__ import annotations
 
 import io
+import os
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +35,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from grimoire.core.fsio import atomic_write
 from grimoire.core.standard_generation import STANDARD_DIR
 
 #: Dernier gabarit synchronisé, par nom de fichier : la base de la fusion.
@@ -47,6 +50,73 @@ class MergeOutcome:
 
     changed: bool = False
     notices: list[str] = field(default_factory=list)
+    #: Conflits sur un champ de sûreté : le projet l'emporte, mais ce n'est pas anodin.
+    conflicts: list[str] = field(default_factory=list)
+
+
+class _Notes(list[str]):
+    """Messages de fusion, avec à part les conflits sur des champs de sûreté."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conflicts: list[str] = []
+
+
+#: Champs qui gouvernent les verdicts de sûreté du standard.
+_SAFETY_KEYS = frozenset({"risk", "permissions", "out_of_scope", "out_of_scope_reason"})
+
+
+#: Champs des serveurs MCP lus par les vérificateurs.
+_MCP_SAFETY_KEYS = frozenset({"owner", "scopes", "timeout_s", "logging"})
+
+
+def _is_safety_field(where: str, key: str) -> bool:
+    path = f"{where}{key}"
+    return (
+        key in _SAFETY_KEYS
+        or path == "error_capture.policy"
+        or path.startswith("allowed.")  # vocabulaire qui sert à juger le registre
+        or (where.startswith("mcp_servers[") and key in _MCP_SAFETY_KEYS)
+    )
+
+
+def _plain(value: Any) -> Any:
+    """Valeur YAML en types natifs, pour l'affichage."""
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    return value
+
+
+def _ids(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(i, dict) and i.get("id") is not None for i in value)
+
+
+def _diff(proj: Any, tmpl: Any, where: str, out: list[str]) -> None:
+    """Liste ce que le projet a posé et que le gabarit du kit ne reprend pas."""
+    if isinstance(proj, dict) and isinstance(tmpl, dict):
+        for key in proj:
+            if key in tmpl:
+                _diff(proj[key], tmpl[key], f"{where}{key}.", out)
+            else:
+                out.append(f"{where}{key} : projet = {_plain(proj[key])!r} -> kit = (absent)")
+        for key in tmpl:
+            if key not in proj:
+                out.append(f"{where}{key} : projet = (absent) -> kit = {_plain(tmpl[key])!r}")
+    elif _ids(proj) and _ids(tmpl) and (proj or tmpl):
+        pmap = {i["id"]: i for i in proj}
+        tmap = {i["id"]: i for i in tmpl}
+        for tid, item in pmap.items():
+            if tid in tmap:
+                _diff(item, tmap[tid], f"{where.rstrip('.')}[{tid}].", out)
+            else:
+                out.append(f"{where.rstrip('.')}[{tid}] : projet = {_plain(item)!r} -> kit = (absent)")
+        for tid, item in tmap.items():
+            if tid not in pmap:
+                out.append(f"{where.rstrip('.')}[{tid}] : projet = (absent) -> kit = {_plain(item)!r}")
+    elif proj != tmpl:
+        out.append(f"{where.rstrip('.')} : projet = {_plain(proj)!r} -> kit = {_plain(tmpl)!r}")
 
 
 def _yaml() -> YAML:
@@ -82,7 +152,7 @@ def _id_list(value: Any) -> bool:
     )
 
 
-def _merge_list(proj: list[Any], base: Any, tmpl: list[Any], where: str, notes: list[str]) -> bool:
+def _merge_list(proj: list[Any], base: Any, tmpl: list[Any], where: str, notes: _Notes) -> bool:
     if not isinstance(base, list):
         return False  # sans base on ne sait pas distinguer « nouveau » de « retiré »
     changed = False
@@ -104,7 +174,7 @@ def _merge_list(proj: list[Any], base: Any, tmpl: list[Any], where: str, notes: 
     return changed
 
 
-def _merge_map(proj: Any, base: Any, tmpl: dict[str, Any], where: str, notes: list[str]) -> bool:
+def _merge_map(proj: Any, base: Any, tmpl: dict[str, Any], where: str, notes: _Notes) -> bool:
     base = base if isinstance(base, dict) else None
     changed = False
     for key, tv in tmpl.items():
@@ -124,6 +194,10 @@ def _merge_map(proj: Any, base: Any, tmpl: dict[str, Any], where: str, notes: li
             proj[key] = tv
             notes.append(f"mise à jour kit : {where}{key}")
             changed = True
+        elif bv is not _MISSING and pv != bv and tv != bv and pv != tv:
+            if _is_safety_field(where, key):
+                notes.conflicts.append(f"{where}{key} : projet = {_plain(pv)!r}, kit = {_plain(tv)!r}")
+            notes.append(f"conflit sur {where}{key} : valeur du projet conservée")
     if base is not None:
         for key in base:
             if key not in tmpl and key in proj:
@@ -131,16 +205,28 @@ def _merge_map(proj: Any, base: Any, tmpl: dict[str, Any], where: str, notes: li
     return changed
 
 
-def _backup_unreadable(path: Path) -> str:
-    """Copie à côté un fichier qu'on ne sait pas lire, une fois par contenu."""
+def _backup_unreadable(path: Path, tag: str = "unreadable") -> str:
+    """Copie à côté un fichier, horodatée, une fois par contenu."""
     try:
         data = path.read_bytes()
-        for old in path.parent.glob(f"{path.name}.unreadable-*"):
-            if old.read_bytes() == data:
+        for old in path.parent.glob(f"{path.name}.{tag}-*"):
+            if not old.is_symlink() and old.is_file() and old.read_bytes() == data:
                 return old.name
-        target = path.with_name(f"{path.name}.unreadable-{datetime.now(UTC):%Y%m%dT%H%M%S}")
-        target.write_bytes(data)
-        return target.name
+        stamp = f"{path.name}.{tag}-{datetime.now(UTC):%Y%m%dT%H%M%S}"
+        # Nom libre d'abord (``lstat`` : fichier, lien ou autre chose, tout nom
+        # pris est écarté, jamais suivi), puis écriture atomique de ``fsio``.
+        # ``os.replace`` remplace l'entrée du dossier sans suivre un lien posé au
+        # nom cible : rien n'est écrit hors du projet. Limite connue : entre la
+        # vérification et l'écriture, un fichier créé au même nom serait remplacé ;
+        # la vraie création exclusive demanderait une fonction dans ``fsio``.
+        for attempt in range(8):
+            name = stamp if attempt == 0 else f"{stamp}-{secrets.token_hex(3)}"
+            try:
+                os.lstat(path.with_name(name))
+            except FileNotFoundError:
+                atomic_write(path.with_name(name), data)
+                return name
+        return "(sauvegarde impossible)"
     except OSError:
         return "(sauvegarde impossible)"
 
@@ -169,7 +255,10 @@ def merge_project_registry(
         base = _loads(base_file.read_text(encoding="utf-8")) if base_file.is_file() else None
     except (OSError, UnicodeDecodeError, YAMLError):
         base = None
-    outcome.changed = _merge_map(proj, base, tmpl, "", outcome.notices)
+    notes = _Notes()
+    outcome.changed = _merge_map(proj, base, tmpl, "", notes)
+    outcome.notices.extend(notes)
+    outcome.conflicts.extend(notes.conflicts)
     if dry_run:
         return outcome
     if outcome.changed:
@@ -180,9 +269,40 @@ def merge_project_registry(
     return outcome
 
 
+def _force_report(root: Path, destination: str | Path, rendered: str, dry_run: bool) -> tuple[list[str], bool]:
+    """Sauvegarde le registre existant et dit ce que le gabarit va remplacer.
+
+    Renvoie (messages, écrasement permis) : sans sauvegarde réussie, il ne l'est pas.
+    """
+    path = root / destination
+    name = Path(destination).name
+    verb = "serait sauvegardé" if dry_run else "sauvegardé"
+    saved = "" if dry_run else _backup_unreadable(path, "backup")
+    backup_failed = saved == "(sauvegarde impossible)"
+    where = f"{path.parent.relative_to(root).as_posix()}/{saved}" if saved else "(à côté du registre)"
+    try:
+        tmpl = YAML(typ="safe").load(rendered)
+        proj = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, YAMLError):
+        proj = None
+    lost: list[str] = []
+    unreadable = not isinstance(proj, dict) or not isinstance(tmpl, dict) or proj.get("$schema") != tmpl.get("$schema")
+    if not unreadable:
+        _diff(proj, tmpl, "", lost)
+    lines = [f"  - {line}" for line in lost]
+    if backup_failed:
+        head = f"--force : sauvegarde impossible : registre laissé en place, rien écrasé ({name})"
+        return [head, *(["réglages du projet qui auraient été perdus :", *lines] if lines else [])], False
+    if unreadable:
+        return [f"--force : {name} illisible ou de schéma inattendu, {verb} dans {where} puis remplacé par le gabarit du kit"], True
+    if not lost:
+        return [], True
+    return [f"--force : {name} remplacé par le gabarit du kit ({verb} dans {where}) ; réglages du projet non repris :", *lines], True
+
+
 def sync_registry(
     root: Path, destination: str | Path, rendered: str, action: str,
-    refresh: bool, dry_run: bool, result: Any,
+    refresh: bool, dry_run: bool, result: Any, *, force: bool = False,
 ) -> bool:
     """Branche la fusion sur ``setup_standard_profile`` ; True si l'artefact est traité.
 
@@ -191,9 +311,21 @@ def sync_registry(
     jour (*refresh*) ; sinon l'appelant écrit ou saute comme avant, et la base
     de fusion suit ce qui vient d'être écrit ou adopté.
     """
+    if force and action == "write" and (root / destination).is_file():
+        # ``--force`` : le kit reprend l'autorité, mais jamais en silence. Le
+        # registre du projet est copié à côté et ce qui n'est pas repris est listé.
+        notices, may_overwrite = _force_report(root, destination, rendered, dry_run)
+        result.notices.extend(notices)
+        if not may_overwrite:
+            result.skipped.append(Path(destination))
+            return True  # sans sauvegarde, le registre reste en place
+        if not dry_run:
+            record_base(root, destination, rendered)
+        return False  # l'appelant écrit le gabarit
     if action == "keep" and refresh:
         merged = merge_project_registry(root, destination, rendered, dry_run=dry_run)
         result.notices.extend(merged.notices)
+        result.conflicts.extend(merged.conflicts)
         (result.written if merged.changed else result.skipped).append(Path(destination))
         return True
     if action in {"adopt", "write"} and not dry_run:

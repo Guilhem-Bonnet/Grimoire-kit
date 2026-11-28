@@ -719,7 +719,7 @@ def init_profile(
     provider: list[str] | None = typer.Option(None, "--provider", help="Provider to enable. Can be repeated."),  # noqa: B008
     providers: str | None = typer.Option(None, "--providers", help="Comma-separated providers to enable."),
     provider_policy: str = typer.Option("hosted-safe", "--provider-policy", help="hosted-safe | local-first | mixed."),
-    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing standard artifacts."),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing standard artifacts with the kit's templates. tool-registry.yaml is first copied beside itself (tool-registry.yaml.backup-<timestamp>) and the project settings that are not carried over are listed."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show generated paths without writing files."),
     claude_hook: bool = typer.Option(
         True,
@@ -838,6 +838,8 @@ def init_profile(
         console.print(f"  [green][OK][/green] {path}")
     for path in result.skipped:
         console.print(f"  [yellow]↷[/yellow] {path} already exists; use --force to overwrite")
+    for notice in result.notices:
+        console.print(f"  [cyan]registre[/cyan] {escape(notice)}", soft_wrap=True)
     if provider_ids:
         console.print(f"  [cyan]providers[/cyan] {', '.join(provider_ids)} ({provider_policy})")
     if activation is not None:
