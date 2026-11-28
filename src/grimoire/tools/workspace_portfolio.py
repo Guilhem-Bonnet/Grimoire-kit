@@ -29,6 +29,7 @@ même table que ``board._PRIORITY_BY_RISK``), consignes non lues (B — voir
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -196,9 +197,18 @@ def sessions_index(project_root: Path) -> dict[str, dict[str, Any]]:
     index: dict[str, dict[str, Any]] = {}
     if not runs.is_dir():
         return index
-    for path in sorted(runs.glob("session-*.json")):
+    journal_dir = RUNS_RELPATH.as_posix()
+    try:
+        with os.scandir(runs) as scan:
+            entries = sorted(
+                (e for e in scan if e.name.startswith("session-") and e.name.endswith(".json")), key=lambda e: e.name
+            )
+    except OSError:
+        return index
+    for entry in entries:  # un seul parcours du dossier : ni glob ni objet Path par journal avant la mémoire
+        path = Path(entry.path)
         try:
-            data = journal_fields(path)
+            data = file_memo.derived(path, "session-journal", _journal_fields, info=entry.stat())
         except (OSError, ValueError):
             continue
         if data is None:
@@ -212,7 +222,7 @@ def sessions_index(project_root: Path) -> dict[str, dict[str, Any]]:
             "ended": bool(data.get("ended_at")),
             "task_id": str(data.get("task_id") or ""),
             "host": str(data.get("host") or data.get("host_id") or ""),
-            "journal": path.relative_to(project_root).as_posix(),
+            "journal": f"{journal_dir}/{path.name}",  # = path.relative_to(project_root), sans un objet Path par journal
         }
     return index
 
