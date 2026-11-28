@@ -39,7 +39,8 @@ SECRET = "sk-test-valeur-de-test-0003"  # noqa: S105 - valeur factice, jamais un
 STANDARD = Path("_grimoire/standard")
 REGISTRY_PATH = STANDARD / "llm-provider-registry.yaml"
 GW = "https://gw.example/anthropic"
-CMD = "gw-cli {model} {prompt}"
+CMD = f"{sys.executable} -c pass {{model}} {{prompt}}"
+PROGRAMS = [str(Path(sys.executable).resolve())]
 runner = CliRunner()
 
 
@@ -100,19 +101,19 @@ def test_registre_reecrit_en_local_sans_adresse_la_cle_n_est_remise_a_aucune_com
     sent: list[dict[str, str]] = []
     monkeypatch.setattr(dispatch_mod.subprocess, "run", lambda *a, **k: sent.append(dict(k["env"])))
     code, _out, err, _dur, kind, _sig = _run_provider_call(project, read_registry(project)[0], "m1", "go", call_timeout=5)
-    assert sent == [] and code != 0 and kind == "error" and SECRET not in err
+    assert sent == [] and code != 0 and kind == "key_binding" and SECRET not in err
 
 
 # ── 2. La commande d'invocation entre dans la liaison ────────────────────────────────────────────────────────────────
 
 
 def test_la_cle_n_est_remise_qu_a_la_commande_approuvee() -> None:
-    set_secret("gw", "GW_API_KEY", SECRET, endpoints=[GW], invocation=CMD)
-    assert env_for_provider("gw", endpoints=[GW], invocation=CMD) == {"GW_API_KEY": SECRET}
+    set_secret("gw", "GW_API_KEY", SECRET, endpoints=[GW], invocation=CMD, command="prog")
+    assert env_for_provider("gw", endpoints=[GW], invocation=CMD, command="prog") == {"GW_API_KEY": SECRET}
     assert env_for_provider("gw", endpoints=[GW]) == {"GW_API_KEY": SECRET}  # envoi HTTP par le kit : pas concerné
     for other in ("evil-cli {prompt}", ""):
         with pytest.raises(KeyEndpointError) as caught:
-            env_for_provider("gw", endpoints=[GW], invocation=other)
+            env_for_provider("gw", endpoints=[GW], invocation=other, command="prog")
         text = str(caught.value)
         assert "invocation" in text and "saisis-la de nouveau pour l'approuver" in text
         assert "set-key gw GW_API_KEY" in text
@@ -149,7 +150,7 @@ def test_adresse_inchangee_invocation_reecrite_la_cle_n_est_remise_a_aucun_sous_
     sent.clear()
     _write(project, _provider(invocation="evil-cli {model} {prompt}"))
     code, _out, err, _dur, kind, _sig = _run_provider_call(project, read_registry(project)[0], "m1", "go", call_timeout=5)
-    assert sent == [] and code != 0 and kind == "error" and "invocation" in err and SECRET not in err
+    assert sent == [] and code != 0 and kind == "key_binding" and "invocation" in err and SECRET not in err
 
 
 # ── 3. La saisie montre ce qu'elle approuve ──────────────────────────────────────────────────────────────────────────
@@ -164,7 +165,10 @@ def test_set_key_montre_les_adresses_et_la_commande_avant_de_demander_la_cle_pui
     assert "Valeur pour" not in refused.output  # la clé n'a pas été demandée
     accepted = runner.invoke(app, args, input=f"y\n{SECRET}\n")
     assert accepted.exit_code == 0, accepted.output
-    assert env_for_provider("gw", endpoints=[GW], invocation=CMD) == {"GW_API_KEY": SECRET}
+    from grimoire.providers.key_endpoint import binding_command
+
+    command = binding_command(project, "gw")
+    assert env_for_provider("gw", endpoints=[GW], invocation=CMD, command=command) == {"GW_API_KEY": SECRET}
     assert SECRET not in accepted.output
 
 
@@ -186,7 +190,7 @@ def test_la_route_du_cockpit_rend_la_liste_liee_et_la_lecture_dit_ce_qui_serait_
 
     _write(project, _provider())
     shown = workspace_config.providers_view(project)["providers"][0]["key_binding"]
-    assert shown == {"endpoints": [GW], "invocation": CMD}
+    assert shown == {"endpoints": [GW], "invocation": CMD, "programs": PROGRAMS}
     body = {
         "provider_id": "gw",
         "env_var": "GW_API_KEY",
@@ -194,7 +198,7 @@ def test_la_route_du_cockpit_rend_la_liste_liee_et_la_lecture_dit_ce_qui_serait_
         "control_key": md.ensure_control_key().read_text(encoding="utf-8").strip(),
     }
     result = POST_ROUTES[f"{PREFIX}providers/set-key"](project, body)
-    assert result["bound"] == {"endpoints": [GW], "invocation": CMD}
+    assert result["bound"] == {"endpoints": [GW], "invocation": CMD, "programs": PROGRAMS}
     assert SECRET not in json.dumps(result)
 
 
@@ -269,7 +273,7 @@ def test_un_refus_de_liaison_est_une_seule_tentative_claire_sans_relance(
     report = run_dispatch(service, task.id, checks=("test -f marker.txt",))
     assert not (project / "marker.txt").exists()  # la commande réécrite n'a rien reçu ni rien lancé
     refused = [a for a in report.attempts if a.provider == "anthropic"]
-    assert len(refused) == 1 and refused[0].verdict == "error"  # une tentative, pas de relance en boucle
+    assert len(refused) == 1 and refused[0].verdict == "key_binding"  # une tentative, pas de relance en boucle
     assert "providers set-key anthropic ANTHROPIC_API_KEY" in caplog.text and SECRET not in caplog.text
 
 

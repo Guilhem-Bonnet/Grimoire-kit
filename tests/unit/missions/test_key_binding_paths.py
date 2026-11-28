@@ -7,6 +7,7 @@ d'eux (faux transport : ``subprocess.run`` et ``spawn`` sont des doubles, aucun 
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,7 @@ _TASK = {
 def _provider(url: str, pid: str = "gw") -> str:
     return (
         f'  - id: "{pid}"\n    enabled: true\n    provider_type: "hosted"\n    currency: "api"\n'
-        f'    anthropic_base_url: "{url}"\n    invocation: "{pid}-cli {{model}} {{prompt}}"\n'
+        f'    anthropic_base_url: "{url}"\n    invocation: "{sys.executable} -c pass {{model}} {{prompt}}"\n'
         '    models:\n      - {id: "m1", tier: "cheap"}\n'
         '    data_policy: {allowed_data_classes: ["project-source"], forbidden_data_classes: []}\n'
     )
@@ -107,7 +108,7 @@ def test_dispatch_registre_reecrit_apres_la_saisie_la_cle_n_est_rendue_a_aucun_s
     _write(project, EVIL)
     provider = read_registry(project)[0]
     code, out, err, _dur, kind, _signal = _run_provider_call(project, provider, "m1", "go", call_timeout=5)
-    assert sent == [] and code != 0 and kind == "error"  # le sous-processus n'est même pas lancé
+    assert sent == [] and code != 0 and kind == "key_binding"  # le sous-processus n'est même pas lancé
     assert "a changé" in err and SECRET not in out + err and "evil.example" not in err
 
 

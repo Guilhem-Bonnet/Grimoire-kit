@@ -15,8 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from grimoire.providers.key_command import command_fingerprint, resolve_program
 from grimoire.providers.registry import ProviderRegistryError, ProviderSpec, read_registry
-from grimoire.providers.secrets import normalize_endpoint, official_endpoint
+from grimoire.providers.secrets import KeyEndpointError, normalize_endpoint, official_endpoint
 
 #: Ce que la vue montre à la place d'une adresse non admise (jamais l'adresse : elle peut porter des identifiants).
 UNADMITTED = "(adresse non admise)"
@@ -59,13 +60,39 @@ def binding_invocation(root: Path, provider_id: str) -> str:
     return (spec.invocation or "").strip() if spec is not None else ""
 
 
-def binding_view(endpoints: tuple[str, ...], invocation: str) -> dict[str, Any]:
-    """Ce qui serait (ou a été) lié, pour l'humain : adresses normalisées, jamais une adresse non admise telle quelle."""
+def binding_programs(root: Path, provider_id: str) -> tuple[Path, ...]:
+    """Les programmes (chemins absolus réels) que la commande approuvée lancerait ; ``()`` sans commande.
+
+    :class:`~grimoire.providers.secrets.KeyEndpointError` si elle est introuvable ou sous la racine du projet.
+    """
+    invocation = binding_invocation(root, provider_id)
+    return resolve_program(invocation, root, provider_id) if invocation else ()
+
+
+def binding_command(root: Path, provider_id: str) -> str | None:
+    """L'empreinte (chemin résolu et contenu) du programme que la saisie approuve ; ``None`` sans commande."""
+    invocation = binding_invocation(root, provider_id)
+    return command_fingerprint(invocation, root, provider_id) if invocation else None
+
+
+def binding_view(endpoints: tuple[str, ...], invocation: str, programs: tuple[Path, ...] = ()) -> dict[str, Any]:
+    """Ce qui serait (ou a été) lié, pour l'humain : adresses normalisées (jamais une adresse non admise telle quelle),
+    commande et chemins absolus des programmes résolus."""
     shown = dict.fromkeys(normalize_endpoint(url) or UNADMITTED for url in endpoints)
-    return {"endpoints": list(shown), "invocation": invocation}
+    return {"endpoints": list(shown), "invocation": invocation, "programs": [str(path) for path in programs]}
 
 
-def spec_binding_view(spec: ProviderSpec) -> dict[str, Any]:
-    """:func:`binding_view` de ce que la saisie lierait pour *spec* (lecture seule, sans clé)."""
+def spec_binding_view(spec: ProviderSpec, root: Path | None = None) -> dict[str, Any]:
+    """:func:`binding_view` de ce que la saisie lierait pour *spec* (lecture seule, sans clé).
+
+    Avec *root*, les programmes sont résolus ; un refus (introuvable, sous la racine) est dit dans ``program_refusal``.
+    """
     official = official_endpoint(spec.id, spec.provider_type)
-    return binding_view((*_declared(spec), *((official,) if official else ())), (spec.invocation or "").strip())
+    invocation = (spec.invocation or "").strip()
+    view = binding_view((*_declared(spec), *((official,) if official else ())), invocation)
+    if root is not None and invocation:
+        try:
+            view["programs"] = [str(path) for path in resolve_program(invocation, root, spec.id)]
+        except KeyEndpointError as exc:
+            view["program_refusal"] = str(exc)
+    return view

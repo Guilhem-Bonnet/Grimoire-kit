@@ -118,10 +118,8 @@ _OPENER = urllib.request.build_opener(_NoRedirect())
 
 def _key_target(endpoint: _Endpoint) -> str:
     """Le point d'accès où la clé part : la base déclarée au registre, ou l'origine d'une adresse documentée."""
-    if endpoint.target:
+    if endpoint.target:  # l'adresse déclarée BRUTE, celle que la saisie a liée : la même sur tous les chemins d'envoi
         return endpoint.target
-    if endpoint.store_only:
-        return endpoint.url.removesuffix("/v1/models")
     parts = urlsplit(endpoint.url)
     return f"{parts.scheme}://{parts.netloc}"
 

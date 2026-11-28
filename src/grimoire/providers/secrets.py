@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -103,6 +104,11 @@ _INVOCATION = (
     "la clé n'est jamais remise à une commande tirée du registre sans cette approbation ; saisis-la de nouveau "
     "pour l'approuver (`grimoire providers set-key {provider} {var}`)."
 )
+_PROGRAM = (
+    "le programme que lance la commande d'invocation de ce fournisseur n'est plus celui approuvé à la saisie de la clé "
+    "(chemin résolu ou contenu différent, ou saisie antérieure à cette liaison) : aucune clé ne lui est remise ; "
+    "saisis-la de nouveau pour l'approuver (`grimoire providers set-key {provider} {var}`)."
+)
 _NOT_ADMITTED = (
     "adresse du fournisseur non admise pour une clé (https requis hors boucle locale, ni identifiants, ni requête, "
     "ni fragment) ; corrige la déclaration du fournisseur."
@@ -164,9 +170,34 @@ class SecretEntry:
     bound: bool = False
 
 
+_LINK = "le magasin de clés refuse d'écrire à travers un lien symbolique ({name}) : retire-le puis saisis la clé de nouveau."
+
+
+def _refuse_link(path: Path) -> None:
+    if path.is_symlink():
+        raise ValueError(_LINK.format(name=path.name))
+
+
 def _ensure_store() -> None:
+    _refuse_link(store_dir())
     store_dir().mkdir(parents=True, exist_ok=True)
     store_dir().chmod(0o700)
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Écrit *text* en 0600 sans suivre de lien : fichier temporaire créé exclusivement, puis ``os.replace``."""
+    _refuse_link(path)
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(temp, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        temp.replace(path)
+    except OSError:
+        temp.unlink(missing_ok=True)
+        raise
+    path.chmod(0o600)
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -184,8 +215,7 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 def _write_env_file(path: Path, values: dict[str, str]) -> None:
     body = "\n".join(f"{k}={v}" for k, v in values.items())
-    path.write_text(f"{body}\n" if values else "", encoding="utf-8")
-    path.chmod(0o600)
+    _write_private(path, f"{body}\n" if values else "")
 
 
 _Index = dict[str, list[dict[str, Any]]]
@@ -203,9 +233,7 @@ def _load_index() -> _Index:
 
 
 def _save_index(data: _Index) -> None:
-    path = _index_file()
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    _write_private(_index_file(), json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def _entries(index: _Index) -> list[dict[str, Any]]:
@@ -226,13 +254,15 @@ def set_secret(
     *,
     endpoints: Iterable[str] | None = None,
     invocation: str | None = None,
+    command: str | None = None,
 ) -> Path:
     """Pose *value* pour *env_var* du fournisseur *provider_id* ; rend le fichier écrit.
 
     *endpoints* : les points d'accès que le fournisseur déclare à cet instant (geste de saisie de l'humain) ; la clé
     y est liée. ``None`` pose une clé non liée (valable seulement vers l'adresse officielle du fournisseur) ; une liste
     vide lie la clé à « aucune adresse déclarée ». *invocation* : le gabarit de commande que le registre déclare
-    (``""`` : aucun) ; non vide, la clé n'est remise qu'à une commande identique.
+    (``""`` : aucun) ; non vide, la clé n'est remise qu'à une commande identique. *command* : l'empreinte des
+    programmes résolus (:func:`grimoire.providers.key_command.command_fingerprint`), liée de même.
 
     Lève ``ValueError`` sur une valeur vide — un magasin qui accepterait une
     clé vide masquerait l'absence réelle de configuration —, sur un id invalide, ou
@@ -249,6 +279,8 @@ def set_secret(
         fingerprints = sorted({_fingerprint(_official_form(provider_id, url)) for url in normalized})
     path = _provider_file(provider_id)
     _ensure_store()
+    _refuse_link(path)  # avant toute écriture : ni la clé ni l'index ne passent par un lien
+    _refuse_link(_index_file())
     values = _read_env_file(path)
     values[env_var] = value.strip()
     _write_env_file(path, values)
@@ -265,6 +297,8 @@ def set_secret(
         entry["endpoints"] = fingerprints
     if invocation and invocation.strip():
         entry["invocation"] = _fingerprint(invocation.strip())
+    if command:
+        entry["command"] = command
     entries.append(entry)
     index["entries"] = entries
     _save_index(index)
@@ -330,7 +364,12 @@ def _legacy_may_receive(provider_id: str, targets: list[str], invocation: str | 
 
 
 def _check_endpoints(
-    provider_id: str, var: str, entry: Mapping[str, Any] | None, targets: list[str], invocation: str | None
+    provider_id: str,
+    var: str,
+    entry: Mapping[str, Any] | None,
+    targets: list[str],
+    invocation: str | None,
+    command: str | None,
 ) -> None:
     """Lève :class:`KeyEndpointError` si la clé *var* ne peut pas partir vers *targets* (déjà normalisés)."""
     if "" in targets:
@@ -349,9 +388,18 @@ def _check_endpoints(
         declared = invocation.strip()
         if (declared or approved_command) and (not declared or approved_command != _fingerprint(declared)):
             raise KeyEndpointError(_INVOCATION.format(**names))
+        if declared and (command is None or entry.get("command") != command):
+            raise KeyEndpointError(_PROGRAM.format(**names))
 
 
-def env_for_provider(provider_id: str, *, endpoints: Iterable[str], invocation: str | None = None) -> dict[str, str]:
+def has_secret(provider_id: str) -> bool:
+    """Une clé est-elle posée pour *provider_id* ? Présence seulement : aucune valeur n'en sort."""
+    return is_valid_provider_id(provider_id) and bool(_read_env_file(_provider_file(provider_id)))
+
+
+def env_for_provider(
+    provider_id: str, *, endpoints: Iterable[str], invocation: str | None = None, command: str | None = None
+) -> dict[str, str]:
     """Variables déjà posées pour *provider_id*, rendues seulement pour les points d'accès *endpoints*.
 
     *endpoints* : les adresses où l'appelant enverra la clé (au moins celle qu'il vise). *invocation* : pour un appel
@@ -368,5 +416,5 @@ def env_for_provider(provider_id: str, *, endpoints: Iterable[str], invocation: 
     targets = [normalize_endpoint(url) for url in endpoints]
     index = {e["env_var"]: e for e in _entries(_load_index()) if e["provider"] == provider_id}
     for var in values:
-        _check_endpoints(provider_id, var, index.get(var), targets, invocation)
+        _check_endpoints(provider_id, var, index.get(var), targets, invocation, command)
     return values

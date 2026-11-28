@@ -116,6 +116,7 @@ def _provider_json(
     *,
     now: datetime,
     probe: CapabilityProbe | None = None,
+    root: Path | None = None,
 ) -> dict[str, Any]:
     entry = state.get(provider.id)
     cooling_down = entry is not None and entry.is_cooling_down(now=now)
@@ -148,7 +149,7 @@ def _provider_json(
         # Clés saisies avant leur liaison à un point d'accès : valables vers l'adresse officielle seulement.
         "keys_unbound": provider_unbound_keys(provider.id),
         # Ce que la saisie d'une clé lierait maintenant (adresses normalisées, commande d'invocation) : à montrer avant le geste.
-        "key_binding": spec_binding_view(provider),
+        "key_binding": spec_binding_view(provider, root),
     }
 
 
@@ -174,7 +175,8 @@ def providers_status(
     if json_output or _get_fmt(ctx) == "json":
         payload = {
             "providers": [
-                _provider_json(provider, state, now=now, probe=probes.get(provider.id)) for provider in providers
+                _provider_json(provider, state, now=now, probe=probes.get(provider.id), root=root)
+                for provider in providers
             ],
             "next_choice": {tier: (spec.id if spec else None) for tier, spec in next_choice.items()},
         }
@@ -674,18 +676,36 @@ def providers_set_key(
 
     from rich.markup import escape
 
-    from grimoire.providers.key_endpoint import UNADMITTED, binding_endpoints, binding_invocation, binding_view
+    from grimoire.providers.key_endpoint import (
+        UNADMITTED,
+        binding_command,
+        binding_endpoints,
+        binding_invocation,
+        binding_programs,
+        binding_view,
+    )
+    from grimoire.providers.secrets import KeyEndpointError
 
     root = project_root.resolve()
-    view = binding_view(binding_endpoints(root, provider_id), binding_invocation(root, provider_id))
-    console.print(f"Cette clé sera liée, pour {escape(provider_id)}, à :")
+    try:
+        programs = binding_programs(root, provider_id)
+    except KeyEndpointError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        raise typer.Exit(1) from exc
+    view = binding_view(binding_endpoints(root, provider_id), binding_invocation(root, provider_id), programs)
+    def say(text: str) -> None:
+        console.print(text, soft_wrap=True, highlight=False)  # une ligne = une information, jamais coupée
+
+    say(f"Cette clé sera liée, pour {escape(provider_id)}, à :")
     for url in view["endpoints"] or ["(aucune adresse déclarée)"]:
-        console.print(f"  adresse : {escape(url)}")
-    console.print(f"  commande d'invocation : {escape(view['invocation']) or '(aucune)'}")
+        say(f"  adresse : {escape(url)}")
+    say(f"  commande d'invocation : {escape(view['invocation']) or '(aucune)'}")
+    for program in view["programs"]:
+        say(f"  programme résolu : {escape(program)}")
     if UNADMITTED in view["endpoints"]:
         console.print("[red]adresse du fournisseur non admise pour une clé : corrige le registre, rien n'est saisi.[/red]")
         raise typer.Exit(1)
-    if not yes and not typer.confirm("Approuver ces adresses et cette commande ?"):
+    if not yes and not typer.confirm("Approuver ces adresses, cette commande et ce programme ?"):
         raise typer.Exit(1)
     value = getpass.getpass(f"Valeur pour {env_var} ({provider_id}) — saisie masquée : ")
     try:
@@ -695,6 +715,7 @@ def providers_set_key(
             value,
             endpoints=binding_endpoints(root, provider_id),
             invocation=binding_invocation(root, provider_id),
+            command=binding_command(root, provider_id),
         )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")

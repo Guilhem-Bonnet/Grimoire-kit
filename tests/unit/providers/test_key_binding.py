@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,7 @@ def _provider(url: str | None, *, pid: str = "gw", field: str = "anthropic_base_
     declared = f'    {field}: "{url}"\n' if url is not None else ""
     return (
         f'  - id: "{pid}"\n    enabled: true\n    provider_type: "{ptype}"\n    currency: "api"\n'
-        f'{declared}    invocation: "{pid}-cli {{model}} {{prompt}}"\n'
+        f'{declared}    invocation: "{sys.executable} -c pass {{model}} {{prompt}}"\n'
         '    models:\n      - {id: "m1", tier: "mid"}\n'
     )
 

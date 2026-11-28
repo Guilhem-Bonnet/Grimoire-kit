@@ -145,7 +145,7 @@ def providers_view(project_root: Path) -> dict[str, Any]:
     probes = load_probes(root)
     providers: list[dict[str, Any]] = []
     for spec in specs:
-        item = _provider_json(spec, state, now=now, probe=probes.get(spec.id))
+        item = _provider_json(spec, state, now=now, probe=probes.get(spec.id), root=root)
         if not item["enabled"]:
             status, tone = "désactivé", ""
         elif item["suspended"]:
