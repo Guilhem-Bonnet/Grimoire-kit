@@ -45,11 +45,21 @@ _FIELDS: dict[str, frozenset[str]] = {
     "classer": frozenset({"rev"}),
     "rouvrir": frozenset({"rev"}),
 }
-_FABRIQUE: Callable[[Path, str], Any] | None = None
+def _fabrique_modeles(root: Path, slug: str) -> Any:
+    """La fabrique par défaut (lot B2) : décide à chaque appel, d'après les autorisations de l'humain, quel modèle parle.
+
+    Sans aucune autorisation (le défaut), elle rend le moteur sans modèle sans rien détecter ni appeler.
+    """
+    from grimoire.tools.atelier_engines.fabrique import fabrique
+
+    return fabrique(root, slug)
+
+
+_FABRIQUE: Callable[[Path, str], Any] | None = _fabrique_modeles
 
 
 def set_moteur(factory: Callable[[Path, str], Any] | None) -> None:
-    """LE point d'injection du moteur : ``factory(root, slug)`` rend un moteur ; ``None`` rétablit le moteur sans modèle."""
+    """LE point d'injection du moteur : ``factory(root, slug)`` rend un moteur (ou un ``Rendu``) ; ``None`` rétablit le moteur sans modèle."""
     global _FABRIQUE
     _FABRIQUE = factory
 

@@ -238,7 +238,10 @@ def test_le_moteur_vient_d_un_seul_point_d_injection(project: Path) -> None:
     conv_routes.set_moteur(factory)
     out = ok(project, "chantiers/un/conversation/demarrer")
     assert "Question du moteur injecté ?" in out["reaction"]["message"] and out["conversation"]["moteur"]["id"] == "mien"
-    assert out["conversation"]["moteur"] == {"id": "mien", "libelle": "Le mien", "sans_modele": False, "limites": list(MoteurSansModele().limites())}
+    vue = out["conversation"]["moteur"]
+    assert {k: vue[k] for k in ("id", "libelle", "sans_modele", "limites")} == {
+        "id": "mien", "libelle": "Le mien", "sans_modele": False, "limites": list(MoteurSansModele().limites())}
+    assert (vue["local"], vue["sortie_de_texte"], vue["raison"], vue["proposition"], vue["etat"]) == (True, False, "", None, "pret")
     turned = ok(project, "chantiers/un/conversation/tour", {"rev": out["conversation"]["rev"], "texte": "Les mainteneurs"})
     assert turned["reaction"]["lourd"] is True and calls and calls[0] == (project, "un")
     conv_routes.set_moteur(None)
