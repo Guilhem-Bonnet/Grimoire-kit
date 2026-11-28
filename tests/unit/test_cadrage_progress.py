@@ -103,6 +103,42 @@ def test_un_je_ne_sais_pas_ne_suffit_pas_a_remplir_les_autres_rubriques_mais_le_
     assert "dont 1 marqué" in av["resume"]
 
 
+def _mark_page_sans_objet(root: Path, section: str) -> None:
+    """La ligne que pose l'Atelier pour « Marquer sans objet » : le gabarit du kit, puis « sans objet pour ce besoin »."""
+    brief = root / "_grimoire" / "cadrage" / "un" / "01-brief.md"
+    text = brief.read_text(encoding="utf-8")
+    head, _, tail = text.partition(f"## {section}\n")
+    _, _, rest = tail.partition("\n## ")
+    brief.write_text(f"{head}## {section}\n\n> À compléter — sans objet pour ce besoin : déjà tranché (à confirmer)\n\n## {rest}", encoding="utf-8")
+
+
+def test_une_rubrique_marquee_sans_objet_par_la_page_ne_compte_pas_dans_les_points_au_gabarit(root: Path) -> None:
+    from grimoire.core import cadrage
+
+    before = progress(root, "un")
+    gate = cadrage.check(root, "un")
+    _mark_page_sans_objet(root, "Pourquoi maintenant")
+    av = progress(root, "un")
+    brief = next(p for p in av["phases"] if p["id"] == "brief")
+    assert brief["sections"]["Pourquoi maintenant"] == "sans-objet"
+    assert brief["sans_objet"] == 1
+    assert av["a_preciser"] == before["a_preciser"] - 1
+    assert cadrage.check(root, "un") == gate  # le gate ne bouge pas : la rubrique reste au gabarit pour lui
+    interview.interview_plan(root, "un", depth="standard")
+    interview.answer(root, "un", "utilisateurs", "les mainteneurs")
+    av = progress(root, "un")
+    assert f"{av['a_preciser']} points au gabarit" in av["resume"]  # le même nombre que « Voir les N points restants »
+
+
+def test_une_rubrique_marquee_sans_objet_ne_rend_jamais_le_chantier_complet(root: Path) -> None:
+    _fill_everything(root)
+    _mark_page_sans_objet(root, "Pourquoi maintenant")
+    av = progress(root, "un")
+    assert av["a_preciser"] == 0
+    assert av["etat"] != "complet"  # une rubrique nécessaire marquée sans objet reste à confirmer
+    assert "sans objet" in av["resume"]
+
+
 def test_un_chantier_sans_fichiers_n_est_ni_complet_ni_en_erreur(tmp_path: Path) -> None:
     av = progress(tmp_path, None)
     assert av["etat"] == "a-cadrer"

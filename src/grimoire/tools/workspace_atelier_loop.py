@@ -167,10 +167,16 @@ def fact_state(root: Path, slug: str) -> str:
     return "idee" if advance == "a-cadrer" and not written else "en-discussion"
 
 
-def after_write(root: Path, slug: str) -> None:
-    """Après une écriture RÉUSSIE de l'Atelier dans le chantier : date de modification et état d'après les faits."""
+def after_write(root: Path, slug: str) -> dict[str, str] | None:
+    """Après une écriture RÉUSSIE de l'Atelier dans le chantier : date de modification et état d'après les faits.
+
+    Rend ``{etat, modifie}`` tels qu'écrits (la page les adopte sans relire le document), ou ``None`` si rien n'a été noté.
+    """
     from grimoire.core.chantiers import record_write
     from grimoire.core.exceptions import GrimoireError
 
     with contextlib.suppress(GrimoireError, OSError):
-        record_write(root, slug, fact_state(root, slug))
+        noted = record_write(root, slug, fact_state(root, slug))
+        if noted is not None:
+            return {"etat": noted.etat, "modifie": noted.modifie}
+    return None
