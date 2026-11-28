@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.135.0] - 2026-11-28
+
+- fix(cockpit): la tuile « kit » de la fiche Flotte n'est plus coupée en « checkpoi… » quand un checkpoint destructif attend : un mot d'état long passe à la ligne, et la tuile recalcule son titre, sa nature et son ton (#883) (#1496)
+- fix(cockpit): cinq tailles de police restaient sous le plancher typographique (11 et 11,5 px : étiquette de la carte de décision, valeurs et commande de l'espace Données, cellules du diff de la Mémoire, chemin des projets dans Piloter) ; elles suivent désormais `--t-min` (12 px en clair, 13 px en sombre). Le test du plancher lit toutes les règles CSS (déclarations sur plusieurs lignes, `pt`, `rem`), n'admet que trois glyphes en exception et échoue si une exception devient périmée (#1375) (#1494)
+- fix(cadrage): l'échéance totale du transport des moteurs de la conversation couvre aussi la connexion TCP et la poignée de main TLS (épique #1477) : l'échéance absolue est calculée avant la connexion, TCP et TLS n'ont que le temps restant et le gardien est armé dès que le socket existe, au lieu d'environ deux fois le délai dans le pire cas (#1495)
+
 ## [3.134.0] - 2026-11-28
 
 - fix(cockpit): dans l'Atelier de spec, toute écriture de la page est désormais encadrée comme l'édition d'un bloc l'était depuis #1487 : créer, répondre, résoudre, rouvrir, supprimer ou rattacher un commentaire, marquer une rubrique « sans objet » ou la remettre à compléter, restaurer une phase ou un bloc (et annuler), répondre à l'entretien guidé. Un pouls qui répondait pendant l'un de ces gestes relisait le document pour rien, et pouvait annoncer son propre commentaire comme « nouveau commentaire » ; les lectures qui suivent une édition de bloc commentée (avancement, fils) sont aussi couvertes (une troisième lecture parasite). Deux lectures du document qui se croisent ne laissent plus la plus ancienne, arrivée la dernière, redessiner l'ancien texte et l'ancien fil pendant quelques secondes (un « Rattacher ici » fait à ce moment-là visait un bloc périmé et finissait sans confirmation) (#1490)
