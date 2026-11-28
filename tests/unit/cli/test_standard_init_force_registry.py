@@ -120,10 +120,10 @@ def test_force_without_a_backup_does_not_overwrite(tmp_path: Path, monkeypatch: 
     _dump(target / REGISTRY, data)
     before = (target / REGISTRY).read_text(encoding="utf-8")
 
-    def refuse_backup(src, dst, *args, **kwargs):
+    def refuse_backup(path, data):
         raise PermissionError("refusé")
 
-    monkeypatch.setattr("grimoire.core.standard_merge.os.link", refuse_backup)
+    monkeypatch.setattr("grimoire.core.standard_merge.atomic_write", refuse_backup)
 
     result = _invoke("standard", "init", str(target), "--needs", NEEDS, "--force")
 

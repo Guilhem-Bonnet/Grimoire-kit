@@ -27,7 +27,6 @@ from __future__ import annotations
 import io
 import os
 import secrets
-import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +35,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from grimoire.core.fsio import atomic_write
 from grimoire.core.standard_generation import STANDARD_DIR
 
 #: Dernier gabarit synchronisé, par nom de fichier : la base de la fusion.
@@ -213,26 +213,20 @@ def _backup_unreadable(path: Path, tag: str = "unreadable") -> str:
             if not old.is_symlink() and old.is_file() and old.read_bytes() == data:
                 return old.name
         stamp = f"{path.name}.{tag}-{datetime.now(UTC):%Y%m%dT%H%M%S}"
-        # Contenu écrit dans un temporaire privé (0600) du même dossier, puis
-        # ``os.link`` : il échoue si le nom existe (lien symbolique compris) et ne
-        # suit jamais un lien. Un nom pris n'est donc ni écrasé ni suivi : on
-        # tire un autre nom.
-        with tempfile.NamedTemporaryFile(
-            "wb", dir=path.parent, prefix=f".{path.stem}.backup.", delete=False,
-        ) as tmp:
-            tmp.write(data)
-        tmp_path = Path(tmp.name)
-        try:
-            for attempt in range(8):
-                name = stamp if attempt == 0 else f"{stamp}-{secrets.token_hex(3)}"
-                try:
-                    os.link(tmp_path, path.with_name(name))
-                except FileExistsError:
-                    continue
+        # Nom libre d'abord (``lstat`` : fichier, lien ou autre chose, tout nom
+        # pris est écarté, jamais suivi), puis écriture atomique de ``fsio``.
+        # ``os.replace`` remplace l'entrée du dossier sans suivre un lien posé au
+        # nom cible : rien n'est écrit hors du projet. Limite connue : entre la
+        # vérification et l'écriture, un fichier créé au même nom serait remplacé ;
+        # la vraie création exclusive demanderait une fonction dans ``fsio``.
+        for attempt in range(8):
+            name = stamp if attempt == 0 else f"{stamp}-{secrets.token_hex(3)}"
+            try:
+                os.lstat(path.with_name(name))
+            except FileNotFoundError:
+                atomic_write(path.with_name(name), data)
                 return name
-            return "(sauvegarde impossible)"
-        finally:
-            tmp_path.unlink(missing_ok=True)
+        return "(sauvegarde impossible)"
     except OSError:
         return "(sauvegarde impossible)"
 
