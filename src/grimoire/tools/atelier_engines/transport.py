@@ -131,12 +131,82 @@ def _admise(url: str) -> bool:
     return parts.scheme == "https" or (parts.scheme == "http" and is_loopback_url(url))
 
 
-def _connexion(parts: Any, timeout: float) -> http.client.HTTPConnection:
-    """Une connexion directe : ni proxy d'environnement, ni redirection (``http.client`` n'en suit aucune)."""
-    host, port = parts.hostname, parts.port
-    if parts.scheme == "https":
-        return http.client.HTTPSConnection(host, port, timeout=timeout, context=ssl.create_default_context())
-    return http.client.HTTPConnection(host, port, timeout=timeout)
+def _restant(echeance: float) -> float:
+    """Le temps qu'il reste avant l'échéance absolue ; ``EngineDelai`` s'il est épuisé."""
+    reste = echeance - time.monotonic()
+    if reste <= 0:
+        raise EngineDelai("délai dépassé : aucun nouvel essai")
+    return reste
+
+
+def _tcp(host: str, port: int, echeance: float) -> socket.socket:
+    """Connexion TCP directe : chaque adresse essayée n'a que le temps RESTANT avant l'échéance totale."""
+    dernier: OSError | None = None
+    for famille, genre, proto, _, adresse in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+        sock = socket.socket(famille, genre, proto)
+        try:
+            sock.settimeout(_restant(echeance))
+            sock.connect(adresse)
+            return sock
+        except OSError as exc:
+            dernier = exc
+            sock.close()
+        except BaseException:
+            sock.close()
+            raise
+    raise dernier if dernier is not None else OSError("aucune adresse")
+
+
+def _ouvrir(conn: http.client.HTTPConnection, contexte: ssl.SSLContext | None, echeance: float, gardes: list[threading.Timer]) -> None:
+    """Ouvre ``conn`` en direct, sur le temps restant avant ``echeance`` (échéance absolue, calculée avant la connexion).
+
+    Le gardien d'échéance est armé (dans ``gardes``) dès que le socket existe, AVANT la poignée de main TLS ; celle-ci reprend
+    le temps restant comme délai de socket. L'appelant ferme la connexion et attend le gardien.
+    """
+    sock: Any = _tcp(conn.host, conn.port, echeance)
+    conn.sock = sock  # la connexion possède le socket : ``conn.close()`` le ferme, même en cas d'échec de la poignée de main
+    minuteur = threading.Timer(max(0.01, echeance - time.monotonic()), _couper, args=(conn,))
+    minuteur.daemon = True
+    gardes.append(minuteur)
+    minuteur.start()
+    if contexte is not None:
+        sock.settimeout(_restant(echeance))
+        tls = contexte.wrap_socket(sock, server_hostname=conn.host, do_handshake_on_connect=False)
+        conn.sock = tls
+        tls.do_handshake()
+    sock_final: Any = conn.sock
+    sock_final.settimeout(_restant(echeance))
+
+
+class _Http(http.client.HTTPConnection):
+    """``http`` vers la machine : ``connect`` rend le temps restant à chaque étape, gardien armé dès le socket."""
+
+    def __init__(self, host: str, port: int | None, timeout: float, gardes: list[threading.Timer]) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self._echeance = time.monotonic() + timeout
+        self._gardes = gardes
+
+    def connect(self) -> None:
+        _ouvrir(self, None, self._echeance, self._gardes)
+
+
+class _Https(http.client.HTTPSConnection):
+    """``https`` : certificat et nom d'hôte vérifiés (contexte par défaut), mêmes bornes que :class:`_Http`."""
+
+    def __init__(self, host: str, port: int | None, timeout: float, gardes: list[threading.Timer]) -> None:
+        self._contexte = ssl.create_default_context()
+        super().__init__(host, port, timeout=timeout, context=self._contexte)
+        self._echeance = time.monotonic() + timeout
+        self._gardes = gardes
+
+    def connect(self) -> None:
+        _ouvrir(self, self._contexte, self._echeance, self._gardes)
+
+
+def _connexion(parts: Any, timeout: float, gardes: list[threading.Timer] | None = None) -> http.client.HTTPConnection:
+    """Une connexion directe, ni proxy d'environnement ni redirection (``http.client`` n'en suit aucune), pas encore ouverte."""
+    classe = _Https if parts.scheme == "https" else _Http
+    return classe(parts.hostname, parts.port, timeout, gardes if gardes is not None else [])
 
 
 def _couper(conn: http.client.HTTPConnection) -> None:
@@ -152,9 +222,10 @@ def _couper(conn: http.client.HTTPConnection) -> None:
 def default_transport(url: str, headers: dict[str, str], body: bytes, timeout: float) -> tuple[int, bytes]:
     """``POST`` borné, sans redirection ni proxy ; ``(statut, corps)``. Lève une :class:`EngineError`, jamais autre chose.
 
-    ``timeout`` vaut pour l'appel ENTIER (connexion, statut, en-têtes, corps) : la connexion est bornée par ce délai, puis un
-    minuteur de surveillance, armé avant toute lecture, coupe le socket à l'échéance ; il est annulé et attendu à la fin,
-    aucun fil ne survit à l'appel. Le délai d'une opération de socket ne suffirait pas : chaque octet reçu le relance.
+    ``timeout`` vaut pour l'appel ENTIER (connexion, poignée de main, statut, en-têtes, corps) : l'échéance absolue est
+    calculée avant la connexion, TCP et TLS n'ont que le temps restant, et un minuteur de surveillance, armé dès que le socket
+    existe, le coupe à l'échéance ; il est annulé et attendu à la fin, aucun fil ne survit à l'appel. Le délai d'une opération
+    de socket ne suffirait pas : chaque octet reçu le relance. Seule la résolution DNS (``getaddrinfo``) n'est pas interruptible.
     """
     if not _admise(url):
         raise EngineRefus("adresse du service refusée : https, ou http vers la machine seulement")
@@ -163,13 +234,10 @@ def default_transport(url: str, headers: dict[str, str], body: bytes, timeout: f
     echeance = debut + timeout
     erreur: EngineError | None = None
     status, raw = 0, b""
-    conn = _connexion(parts, timeout)
-    garde: threading.Timer | None = None
+    gardes: list[threading.Timer] = []
+    conn = _connexion(parts, timeout, gardes)
     try:
-        conn.connect()  # bornée par ``timeout`` ; la lecture ne commence qu'une fois le gardien armé
-        garde = threading.Timer(max(0.01, echeance - time.monotonic()), _couper, args=(conn,))
-        garde.daemon = True
-        garde.start()
+        conn.connect()  # résolution, TCP et TLS sur le temps restant, gardien armé dès le socket
         conn.request("POST", parts.path or "/", body=body, headers=headers)
         reponse = conn.getresponse()
         status = int(reponse.status)
@@ -180,7 +248,7 @@ def default_transport(url: str, headers: dict[str, str], body: bytes, timeout: f
         tard = isinstance(exc, TimeoutError) or time.monotonic() >= echeance - 0.05
         erreur = EngineDelai("délai dépassé : aucun nouvel essai") if tard else EngineReseau("service injoignable : aucun nouvel essai")
     finally:
-        if garde is not None:
+        for garde in gardes:
             garde.cancel()
             garde.join()
         conn.close()
