@@ -26,6 +26,29 @@ function el(tag, className, text, attrs) {
 
 export const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
 
+/**
+ * Les rubriques encore au gabarit, séparées de celles que la personne a marquées « sans objet » (une ligne de gabarit pour le
+ * contrôle de validation, mais plus un point à faire). `rubs` : les phases du document (`rubriques` avec leur état) ; sans elles,
+ * on garde le décompte du serveur. Rend `{ count, open: [{ id, title, names }], na: [...] }`.
+ */
+export function pendingSplit(av, rubs) {
+  const marked = new Map();
+  for (const phase of rubs || []) {
+    marked.set(phase.id, new Set((phase.rubriques || []).filter((r) => r.etat === 'sans-objet').map((r) => r.section)));
+  }
+  const open = [];
+  const na = [];
+  for (const phase of av.phases) {
+    const skip = marked.get(phase.id) || new Set();
+    const empty = Object.entries(phase.sections).filter(([, state]) => state === 'vide').map(([name]) => name);
+    const here = empty.filter((name) => !skip.has(name));
+    const off = empty.filter((name) => skip.has(name));
+    if (here.length) open.push({ id: phase.id, title: phase.title, names: here });
+    if (off.length) na.push({ id: phase.id, title: phase.title, names: off });
+  }
+  return { count: open.reduce((n, p) => n + p.names.length, 0), open, na };
+}
+
 /** L'état global en quelques mots, pour une ligne de la liste. Jamais « complet » s'il reste un point au gabarit. */
 export function avancementText(av) {
   if (!av) return '';
@@ -141,20 +164,28 @@ export function createLoopPanel(ctx) {
     keepFocus(host, draw);
   };
 
-  const sections = (av) => redraw('sections', detail, av.phases.filter((p) => p.vides > 0).map((p) => [p.id, p.title, p.sections]).concat([av.a_preciser]), () => {
-    detail.replaceChildren();
-    const open = av.phases.filter((p) => p.vides > 0);
-    if (!open.length) return;
-    const box = el('details', 'at-loop-todo', null, { 'data-role': 'avancement-detail' });
-    box.append(el('summary', 'at-muted', `Voir les ${plural(av.a_preciser, 'point restant', 'points restants')} au gabarit`));
-    const list = el('ul');
-    for (const phase of open) {
-      const names = Object.entries(phase.sections).filter(([, state]) => state === 'vide').map(([name]) => name);
-      list.append(el('li', null, `${PHASE_NAMES[phase.id] || phase.title} : ${names.join(', ')}`));
-    }
-    box.append(list);
-    detail.append(box);
-  });
+  const sections = (av, rubs) => {
+    const split = pendingSplit(av, rubs);
+    return redraw('sections', detail, split, () => {
+      detail.replaceChildren();
+      if (!split.open.length && !split.na.length) return;
+      const box = el('details', 'at-loop-todo', null, { 'data-role': 'avancement-detail' });
+      box.append(el('summary', 'at-muted', split.open.length
+        ? `Voir les ${plural(split.count, 'point restant', 'points restants')} au gabarit`
+        : `Voir les ${plural(split.na.length, 'rubrique marquée sans objet', 'rubriques marquées sans objet')}`));
+      if (split.open.length) {
+        const list = el('ul');
+        for (const phase of split.open) list.append(el('li', null, `${PHASE_NAMES[phase.id] || phase.title} : ${phase.names.join(', ')}`));
+        box.append(list);
+      }
+      if (split.na.length) { // marquées sans objet : elles ne comptent plus dans les points restants
+        const list = el('ul', null, null, { 'data-role': 'avancement-sans-objet' });
+        list.append(el('li', 'at-muted', `Marquées sans objet, non comptées : ${split.na.map((p) => `${PHASE_NAMES[p.id] || p.title} : ${p.names.join(', ')}`).join(' ; ')}`));
+        box.append(list);
+      }
+      detail.append(box);
+    });
+  };
 
   const taskList = (list) => redraw('tasks', tasks, list, () => {
     tasks.replaceChildren();
@@ -184,7 +215,7 @@ export function createLoopPanel(ctx) {
       summary.setAttribute('data-etat', av.etat);
       // Cette pastille compte TOUTES les rubriques encore au gabarit, facultatives comprises : le résumé « Ce qu’il me reste à faire » ne compte que le nécessaire.
       summary.title = 'Toutes les rubriques encore au gabarit, facultatives comprises. « Ce qu’il me reste à faire », en haut du document, ne compte que ce qui est nécessaire pour valider.';
-      sections(av);
+      sections(av, doc.phases);
     }
     taskList(doc.taches || []);
     warn(doc.avertissements);

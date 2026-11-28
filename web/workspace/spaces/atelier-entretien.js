@@ -156,9 +156,13 @@ export function createGuided(ctx, slug, hooks) {
     const guide = v.guide || {};
     const body = el('div', 'at-asst-body', null, { 'data-role': 'guided' });
     if (v.agent && !v.agent.available) {
-      // Une seule ligne d'explication (le panneau est un tiroir sur écran étroit) : pourquoi, et le même cadrage au terminal.
-      const off = el('p', 'at-muted', 'Aucun agent n’est joignable. Au terminal : ', { 'data-role': 'assistant-off', title: v.agent.reason || 'aucun agent d’hôte' });
-      off.append(el('code', null, v.equivalent), '.');
+      // Une phrase rassurante (les questions marchent sans modèle) ; le détail technique (pourquoi, commande du terminal) est replié.
+      const off = el('div', 'at-muted at-asst-off', null, { 'data-role': 'assistant-off' });
+      const more = el('details', 'at-asst-off-more', null, { 'data-role': 'assistant-off-detail' });
+      const tech = el('p');
+      tech.append(`${v.agent.reason || 'Aucun agent d’hôte n’est joignable.'} Le même cadrage existe au terminal : `, el('code', null, v.equivalent), '.');
+      more.append(el('summary', null, 'Détail technique'), tech);
+      off.append(el('p', null, 'Les questions fonctionnent sans modèle : réponds une à une, le document se remplit.'), more);
       body.append(off);
     }
     if (v.error || guide.error) { body.append(el('p', 'at-error', v.error || guide.error, { role: 'alert' })); return body; }

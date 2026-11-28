@@ -274,11 +274,41 @@ def reste_a_faire(phases: list[dict[str, Any]], interview: dict[str, Any] | None
                 "phase": angle["phase"], "phase_title": titles.get(angle["phase"], angle["phase"]),
                 "section": angle["section"], "etat": "angle", "kind": "angle", "raison": "", "angle": angle["title"],
             })
+    avancement, etape = _avancement_utile(phases, titles)
     return {
         "pret": not necessaires and not erreur,
         "necessaires": necessaires,
         "utiles": utiles,
         "facultatives": facultatives,
         "sans_objet": sans_objet,
+        "avancement": avancement,
+        "etape": etape,
         "erreur": erreur,
     }
+
+
+def _avancement_utile(phases: list[dict[str, Any]], titles: dict[str, str]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Pour chaque phase entamée, combien de rubriques utiles sont remplies (une rubrique « sans objet » ne compte plus), et
+    l'étape suivante conseillée : la première rubrique utile encore vide de la phase en cours (la première phase entamée qui
+    en a une, à défaut la première phase qui en a une). Information seulement : ce qui est nécessaire pour valider ne change pas.
+    """
+    avancement: list[dict[str, Any]] = []
+    pending: list[tuple[bool, dict[str, Any]]] = []  # (phase entamée, première rubrique utile vide)
+    for phase in phases:
+        rubs = phase["rubriques"]
+        started = any(r["etat"] == "rempli" for r in rubs)
+        useful = [r for r in rubs if r["statut"] == "utile" and r["etat"] != "sans-objet"]
+        done = sum(1 for r in useful if r["etat"] == "rempli")
+        if started and useful:
+            avancement.append({
+                "phase": phase["id"], "phase_title": titles.get(phase["id"], phase["id"]),
+                "utiles_remplies": done, "utiles_total": len(useful),
+            })
+        first = next((r for r in useful if r["etat"] != "rempli"), None)
+        if first is not None:
+            pending.append((started, {
+                "phase": phase["id"], "phase_title": titles.get(phase["id"], phase["id"]),
+                "section": first["section"], "quoi": first["quoi"],
+            }))
+    etape = next((item for started, item in pending if started), pending[0][1] if pending else None)
+    return avancement, etape
