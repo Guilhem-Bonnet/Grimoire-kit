@@ -224,7 +224,7 @@ appelé, la conversation fonctionne comme avant.
 | `moteur.py` | `MoteurModeles` : le protocole `Moteur`, un geste = un appel à sortie JSON validée |
 | `gestes.py`, `schema.py` | L'invite et le schéma de sortie de chaque geste ; validateur strict (aucun champ en trop) |
 | `transport.py` | Transport minimal (https, ou http vers la machine ; ni redirection ni proxy) et erreurs `Engine*` |
-| `ollama.py`, `openai_compat.py`, `anthropic.py` | Les adaptateurs |
+| `ollama.py`, `openai_compat.py`, `anthropic.py`, `gemini.py` | Les adaptateurs |
 
 **Quel modèle, quand.** Les usages sont ceux de `direct_use` : `conversation` (le modèle rapide : classer, extraire, formuler,
 reformuler, répondre) et `brainstorm` (le modèle plus fort : proposer des pistes ; il demande au moins un palier
@@ -242,6 +242,13 @@ de jetons s'appliquent comme partout.
   clé du magasin, sauf si son identifiant est celui d'un fournisseur documenté ; un serveur `local` en boucle locale n'a pas de clé.
 - API Messages d'Anthropic : le client de `atelier_model.py` (URL fixe, clé de l'environnement ou du magasin) ; la
   consommation est inscrite au compteur du jour et au quota du kit (`account_response`), donc les plafonds la voient.
+- API Gemini de Google (`gemini.py`, fournisseur `google-gemini`, alias `gemini` et `google`) : voie native `generateContent`
+  avec sortie JSON contrainte (`responseMimeType` + `responseJsonSchema`), clé en en-tête `x-goog-api-key` (jamais dans l'URL),
+  adresse officielle construite par l'adaptateur (jamais lue du registre ; un fournisseur Gemini avec `base_url` n'a pas
+  d'adaptateur). Le registre par défaut ne le déclare pas ; l'entrée à ajouter est dans `docs/reference/cli/fournisseurs.md`
+  (« Gemini dans la conversation de cadrage »). Étiquettes : le texte sort de la machine, payant à l'usage, aucun appel sans
+  autorisation de l'humain ; sa consommation n'est pas comptée par le kit. Sources :
+  https://ai.google.dev/gemini-api/docs/structured-output et https://ai.google.dev/api/generate-content.
 - L'agent installé (« Claude Code » et autres hôtes ACP) n'a **pas d'adaptateur** : le kit sait sonder sa connexion, pas lui poser
   une question sans lancer un agent autonome. Il n'est jamais appelé.
 

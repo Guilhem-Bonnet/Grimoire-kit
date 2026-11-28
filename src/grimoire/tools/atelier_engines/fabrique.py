@@ -19,7 +19,7 @@ Règles non négociables :
 - **Ce qui est dit** : chaque usage porte ``local`` et ``sortie_de_texte`` d'après la ligne détectée (jamais déclarés par le moteur).
 
 Adaptateurs : Ollama (boucle locale reconnue), serveur au format OpenAI (passerelle admise, ou serveur local sans clé),
-API Messages d'Anthropic (client existant de l'Atelier). L'agent installé sur la machine (source « hôte ») n'a pas d'adaptateur :
+API Messages d'Anthropic (client existant de l'Atelier), API Gemini de Google (``google-gemini``, adresse officielle fixe). L'agent installé sur la machine (source « hôte ») n'a pas d'adaptateur :
 le kit ne sait que sonder sa connexion, pas lui poser une question sans lancer un agent autonome ; il n'est donc jamais appelé.
 """
 
@@ -33,7 +33,7 @@ from typing import Any
 
 from grimoire.core.cadrage_conversation_engine import MoteurSansModele
 from grimoire.core.cadrage_conversation_moteur_vue import Presentation, Rendu, UsageVue, sans_modele
-from grimoire.providers.availability import Inventory, ModelAvailability, detect, fingerprint
+from grimoire.providers.availability import Inventory, ModelAvailability, detect, fingerprint, key_command
 from grimoire.providers.direct_use import Decision, choose_for
 from grimoire.providers.direct_use_settings import Settings, build_state, read_settings
 from grimoire.tools.atelier_engines.moteur import MoteurModeles
@@ -80,6 +80,7 @@ def _backend(
     from grimoire.providers.secrets import env_for_provider, provider_key_var
     from grimoire.tools import atelier_model as am
     from grimoire.tools.atelier_engines.anthropic import AnthropicBackend
+    from grimoire.tools.atelier_engines.gemini import GeminiBackend
     from grimoire.tools.atelier_engines.ollama import OllamaBackend
     from grimoire.tools.atelier_engines.openai_compat import OpenAICompatBackend
 
@@ -112,6 +113,15 @@ def _backend(
                 row.model_id, key, timeout_s=delai, transport=transport,
                 on_response=lambda raw: am.account_response(root, slug, row.model_id, raw),
             ), ""
+        if canonical_provider(spec.id, spec.provider_type) == "google-gemini" and not spec.base_url and not spec.anthropic_base_url:
+            # Adresse officielle CONSTRUITE par l'adaptateur. Clé : le MAGASIN du kit seulement, sous la variable que la détection
+            # attend (``<ID>_API_KEY``), jamais l'environnement : une variable générique exportée pour un autre service Google
+            # ne part pas vers Gemini. (La détection regarde aussi l'environnement : elle peut dire « clé présente » là où ce
+            # tour répond « saisis la clé » ; elle vit sous providers/, hors de ce lot.)
+            key = env_for_provider(spec.id).get(provider_key_var(spec.id), "").strip()
+            if not key:
+                return None, f"aucune clé dans le magasin du kit : saisis-la avec `{key_command(spec.id)}`"
+            return GeminiBackend(row.model_id, key, timeout_s=delai, transport=transport), ""
         if spec.base_url and spec.provider_type == "local":
             return OpenAICompatBackend(spec.base_url, row.model_id, timeout_s=delai, transport=transport), ""
         canon = canonical_provider(spec.id)
@@ -122,7 +132,7 @@ def _backend(
             if not key:
                 return None, "aucune clé posée pour cette passerelle"
             return OpenAICompatBackend(spec.base_url, row.model_id, key=key, timeout_s=delai, transport=transport), ""
-        return None, "aucun adaptateur pour ce fournisseur (Ollama, serveur OpenAI-compatible admis et Anthropic seulement)"
+        return None, "aucun adaptateur pour ce fournisseur (Ollama, serveur OpenAI-compatible admis, Anthropic et Gemini seulement)"
     except EngineError as exc:
         return None, str(exc)
 
