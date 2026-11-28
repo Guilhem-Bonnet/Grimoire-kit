@@ -195,12 +195,11 @@ def composer(
         vues.append(vue)
     if not any(backends.values()):
         return Rendu(MoteurSansModele(), Presentation(tuple(vues)))
-    actifs = [v for u, v in zip(USAGES_MOTEUR, vues, strict=True) if backends[u] is not None]
     # L'en-tête « quel modèle parle » suit l'usage « conversation » (ou dit « sans modèle ») ; les autres usages sont dans par_usage.
     speaking = vues[0] if backends[USAGES_MOTEUR[0]] is not None else sans_modele()
     cle = (str(root.resolve()), slug)
     moteur = MoteurModeles(
-        speaking.id[:_ID_MAX], speaking.libelle, backends, cle=cle, duree_reflexion_s=delai + 2.0, libelle_limites=actifs[0].libelle,
+        speaking.id[:_ID_MAX], speaking.libelle, backends, cle=cle, duree_reflexion_s=delai + 2.0, libelles={u: v.libelle for u, v in zip(USAGES_MOTEUR, vues, strict=True) if backends[u] is not None},
         idents={u: v.id[:_ID_MAX] for u, v in zip(USAGES_MOTEUR, vues, strict=True) if backends[u] is not None},
         sortie_de_texte=any(v.sortie_de_texte for u, v in zip(USAGES_MOTEUR, vues, strict=True) if backends[u] is not None),
     )

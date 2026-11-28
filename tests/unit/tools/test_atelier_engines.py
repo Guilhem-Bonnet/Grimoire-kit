@@ -939,6 +939,25 @@ def test_l_en_tete_est_sans_modele_si_seule_la_redaction_a_un_modele(project: Pa
     assert any("llama" not in x and "qwen2.5:14b" in x for x in rendu.moteur.limites())  # les limites nomment le modèle qui rédige
 
 
+def _premiere_limite(rendu: Any) -> str:
+    return str(rendu.moteur.limites()[0])
+
+
+def test_la_premiere_limite_decrit_les_usages_reellement_actifs(project: Path) -> None:
+    inv = inventaire(project)
+    f = Faux(ollama_dit(REDACTION_OK))
+    redige = _premiere_limite(compose(project, inv, reglages(inv, redaction=[LOCAL_MID]), f))
+    assert redige.startswith("Je parle sans modèle d'IA") and "un modèle d'IA (qwen2.5:14b) rédige les propositions" in redige
+    assert "Je parle avec" not in redige and "pistes" not in redige
+    pistes = _premiere_limite(compose(project, inv, reglages(inv, brainstorm=[LOCAL_MID]), f))
+    assert pistes.startswith("Je parle sans modèle d'IA") and "un modèle d'IA (qwen2.5:14b) propose des pistes" in pistes
+    assert "rédige" not in pistes
+    les_deux = _premiere_limite(compose(project, inv, reglages(inv, brainstorm=[LOCAL_MID], redaction=[LOCAL_MID]), f))
+    assert "rédige les propositions" in les_deux and "propose des pistes" in les_deux and "Je parle avec" not in les_deux
+    avec = _premiere_limite(compose(project, inv, reglages(inv, [LOCAL_FAST], redaction=[LOCAL_MID]), f))
+    assert avec.startswith("Je parle avec un modèle d'IA (llama3.2:3b)")
+
+
 def test_l_en_tete_suit_la_conversation_quand_les_usages_ont_des_modeles_differents(project: Path) -> None:
     inv = inventaire(project)
     rendu = compose(project, inv, reglages(inv, [LOCAL_FAST], redaction=[LOCAL_MID]), Faux(ollama_dit(REDACTION_OK)))
