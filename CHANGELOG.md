@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.136.0] - 2026-11-28
+
+- feat(cadrage): la conversation de cadrage de l'Atelier sait appeler Google Gemini (API native `generateContent`, sortie JSON contrainte par schéma) pour un fournisseur `google-gemini` (alias `gemini`, `google`) que l'humain a autorisé sur la page « Modèles autorisés » ; rien ne part sans cette autorisation, la clé (`GEMINI_API_KEY`, magasin puis environnement) voyage en en-tête `x-goog-api-key` vers l'adresse officielle seulement, jamais dans une URL, et le registre par défaut ne déclare pas Gemini (#1477) (#1499)
+- fix(cockpit): en-tête de l'Atelier de spec cohérent : la liste « Voir les N points restants » et la ligne « Marquées sans objet, non comptées » se suivent sans recouvrement ; la pastille d'avancement se met à jour dès la fin de l'écriture d'un bloc, avec la réponse de l'écriture (plus de relecture du document) ; elle ne compte plus les rubriques marquées « sans objet » dans « N points au gabarit », comme la liste, sans changer le contrôle de validation (#1477) (#1501)
+- perf(cockpit): la route « attention » ne reparse plus à chaque requête la queue de 2 Mo du journal de traces (gardée par date, taille et inode, la fenêtre d'activité se recalcule à l'heure demandée), ne recalcule plus l'usage d'une tâche dont les traces n'ont pas changé, et lit le dossier des journaux de session en un seul parcours ; réponse identique, à chaud environ 3 fois plus rapide sur un projet d'essai à 600 journaux et 2 900 traces (#1243) (#1502)
+- perf(cockpit): la chauffe du démarrage construit aussi l'index des traces par tâche que lit la vue « attention » : le premier affichage ne reparse plus le journal de traces (0,3 s au lieu de 2,2 s sur un projet d'essai à 70 000 traces, 75 Mo, si la page s'ouvre quelques secondes après le démarrage) ; réponse identique, rien d'écrit sur le disque, un seul fil démon annulé à l'arrêt du serveur (#1243) (#1503)
+
 ## [3.135.0] - 2026-11-28
 
 - fix(cockpit): la tuile « kit » de la fiche Flotte n'est plus coupée en « checkpoi… » quand un checkpoint destructif attend : un mot d'état long passe à la ligne, et la tuile recalcule son titre, sa nature et son ton (#883) (#1496)
