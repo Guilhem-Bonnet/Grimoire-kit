@@ -114,21 +114,16 @@ def test_force_dry_run_touches_nothing(tmp_path: Path) -> None:
 
 
 def test_force_without_a_backup_does_not_overwrite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import os
-
     target = _project(tmp_path)
     data = _load(target / REGISTRY)
     data["error_capture"]["note_projet"] = "à garder"
     _dump(target / REGISTRY, data)
     before = (target / REGISTRY).read_text(encoding="utf-8")
-    real_open = os.open
 
-    def refuse_backup(path, *args, **kwargs):
-        if ".backup-" in str(path):
-            raise PermissionError("refusé")
-        return real_open(path, *args, **kwargs)
+    def refuse_backup(src, dst, *args, **kwargs):
+        raise PermissionError("refusé")
 
-    monkeypatch.setattr("grimoire.core.standard_merge.os.open", refuse_backup)
+    monkeypatch.setattr("grimoire.core.standard_merge.os.link", refuse_backup)
 
     result = _invoke("standard", "init", str(target), "--needs", NEEDS, "--force")
 

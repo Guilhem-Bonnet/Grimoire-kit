@@ -27,6 +27,7 @@ from __future__ import annotations
 import io
 import os
 import secrets
+import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -212,19 +213,26 @@ def _backup_unreadable(path: Path, tag: str = "unreadable") -> str:
             if not old.is_symlink() and old.is_file() and old.read_bytes() == data:
                 return old.name
         stamp = f"{path.name}.{tag}-{datetime.now(UTC):%Y%m%dT%H%M%S}"
-        # Création exclusive, sans suivre de lien : un nom déjà pris (fichier ou
-        # lien posé d'avance) n'est jamais écrasé ni suivi, on tire un autre nom.
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        for attempt in range(8):
-            name = stamp if attempt == 0 else f"{stamp}-{secrets.token_hex(3)}"
-            try:
-                fd = os.open(path.with_name(name), flags, 0o600)
-            except FileExistsError:
-                continue
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(data)
-            return name
-        return "(sauvegarde impossible)"
+        # Contenu écrit dans un temporaire privé (0600) du même dossier, puis
+        # ``os.link`` : il échoue si le nom existe (lien symbolique compris) et ne
+        # suit jamais un lien. Un nom pris n'est donc ni écrasé ni suivi : on
+        # tire un autre nom.
+        with tempfile.NamedTemporaryFile(
+            "wb", dir=path.parent, prefix=f".{path.stem}.backup.", delete=False,
+        ) as tmp:
+            tmp.write(data)
+        tmp_path = Path(tmp.name)
+        try:
+            for attempt in range(8):
+                name = stamp if attempt == 0 else f"{stamp}-{secrets.token_hex(3)}"
+                try:
+                    os.link(tmp_path, path.with_name(name))
+                except FileExistsError:
+                    continue
+                return name
+            return "(sauvegarde impossible)"
+        finally:
+            tmp_path.unlink(missing_ok=True)
     except OSError:
         return "(sauvegarde impossible)"
 
