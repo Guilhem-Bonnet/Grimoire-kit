@@ -217,11 +217,15 @@ def test_le_transport_reel_ne_garde_aucune_reference_a_l_erreur_d_origine(monkey
 
 def test_la_connexion_https_verifie_le_certificat_et_http_n_est_que_local() -> None:
     import http.client
+    import ssl
     from urllib.parse import urlsplit
 
     https = tr._connexion(urlsplit("https://api.exemple.test/v1"), 1.0)
     assert isinstance(https, http.client.HTTPSConnection) and https.timeout == 1.0
-    assert type(tr._connexion(urlsplit("http://127.0.0.1:1/"), 1.0)) is http.client.HTTPConnection
+    assert https._context.check_hostname and https._context.verify_mode == ssl.CERT_REQUIRED  # type: ignore[attr-defined]
+    assert https._context.minimum_version >= ssl.TLSVersion.TLSv1_2  # type: ignore[attr-defined]
+    local = tr._connexion(urlsplit("http://127.0.0.1:1/"), 1.0)
+    assert isinstance(local, http.client.HTTPConnection) and not isinstance(local, http.client.HTTPSConnection)
 
 
 # ── 5. Marqueur : un compteur par clé ───────────────────────────────────────
