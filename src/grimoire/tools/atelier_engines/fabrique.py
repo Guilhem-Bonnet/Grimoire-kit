@@ -41,8 +41,8 @@ from grimoire.tools.atelier_engines.transport import Backend, EngineError, Trans
 
 __all__ = ["DELAI_DEFAUT_S", "USAGES_MOTEUR", "composer", "delai_moteur", "fabrique"]
 
-#: Les usages que la conversation fait décider (ceux de ``direct_use`` ; « rédaction » n'a pas encore de geste).
-USAGES_MOTEUR: tuple[str, ...] = ("conversation", "brainstorm")
+#: Les usages que la conversation fait décider (ceux de ``direct_use`` ; « autres » n'a aucun geste).
+USAGES_MOTEUR: tuple[str, ...] = ("conversation", "brainstorm", "redaction")
 #: Délai d'un appel : plus court que celui du gardien (8 s), pour que l'appel finisse avant d'être abandonné.
 DELAI_DEFAUT_S = 6.0
 DELAI_MIN_S, DELAI_MAX_S = 0.5, 7.5
@@ -167,6 +167,7 @@ def composer(
         return Rendu(MoteurSansModele(), Presentation((
             sans_modele("Aucun modèle n'est autorisé pour la conversation : je fonctionne sans modèle."),
             sans_modele("Aucun modèle n'est autorisé pour le brainstorm : je fonctionne sans modèle.", usage="brainstorm"),
+            sans_modele("Aucun modèle n'est autorisé pour la rédaction : je fonctionne sans modèle.", usage="redaction"),
         )))
     delai = delai_moteur(root) if delai_s is None else delai_s
     try:
@@ -194,10 +195,12 @@ def composer(
         vues.append(vue)
     if not any(backends.values()):
         return Rendu(MoteurSansModele(), Presentation(tuple(vues)))
-    speaking = next(v for u, v in zip(USAGES_MOTEUR, vues, strict=True) if backends[u] is not None)
+    # L'en-tête « quel modèle parle » suit l'usage « conversation » (ou dit « sans modèle ») ; les autres usages sont dans par_usage.
+    speaking = vues[0] if backends[USAGES_MOTEUR[0]] is not None else sans_modele()
     cle = (str(root.resolve()), slug)
     moteur = MoteurModeles(
-        speaking.id[:_ID_MAX], speaking.libelle, backends, cle=cle, duree_reflexion_s=delai + 2.0,
+        speaking.id[:_ID_MAX], speaking.libelle, backends, cle=cle, duree_reflexion_s=delai + 2.0, libelles={u: v.libelle for u, v in zip(USAGES_MOTEUR, vues, strict=True) if backends[u] is not None},
+        idents={u: v.id[:_ID_MAX] for u, v in zip(USAGES_MOTEUR, vues, strict=True) if backends[u] is not None},
         sortie_de_texte=any(v.sortie_de_texte for u, v in zip(USAGES_MOTEUR, vues, strict=True) if backends[u] is not None),
     )
     return Rendu(moteur, Presentation(tuple(vues), cle))

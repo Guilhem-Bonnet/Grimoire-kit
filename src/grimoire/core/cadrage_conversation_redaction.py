@@ -176,7 +176,11 @@ def rediger(garde: Garde, entree: EntreeRedaction) -> tuple[Redaction, str]:
     out = garde._appeler(
         "proposer_redaction", lambda m: m.proposer_redaction(entree), lambda o: valider_redaction(o, entree),
         lambda: redaction_fidele(entree), garde.delai_s)
-    return out, ("sans-modele" if len(garde.notes) > avant else garde.id)
+    if len(garde.notes) > avant:
+        return out, "sans-modele"
+    # Un moteur à plusieurs usages dit lui-même qui a rédigé : le modèle de la conversation n'a pas rédigé à la place.
+    auteur = getattr(garde.moteur, "auteur_redaction", None)
+    return out, (auteur() if callable(auteur) else garde.id)
 
 
 # ── La proposition, enregistrée dans la conversation ───────────────────────

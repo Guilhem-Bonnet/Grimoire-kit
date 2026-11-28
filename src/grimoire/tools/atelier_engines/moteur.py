@@ -9,7 +9,8 @@ comme hostile : le gardien revalide chaque sortie, et rien n'entre dans le docum
 
 Usages (ceux de :mod:`grimoire.providers.direct_use`) : ``conversation`` (le modèle rapide : classer, extraire, formuler,
 reformuler, répondre) et ``brainstorm`` (le modèle plus fort : proposer des pistes). ``redaction`` porte le geste « proposer une
-rédaction » (lot E) ; la fabrique ne lui donne pas encore de modèle, il est donc rendu par le programme (rédaction fidèle).
+rédaction » (lot E) ; la fabrique le décide à chaque appel comme les autres usages, et sans modèle autorisé pour lui la
+rédaction est celle du programme (rédaction fidèle).
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ __all__ = ["MoteurModeles"]
 
 #: Les genres de question qu'un modèle reformule ; les autres (pause, fin, document…) sont des phrases du programme.
 _GENRES_REDITS = frozenset({"amorce", "brainstorm"})
+#: Les usages dont l'appel pose le marqueur « la mascotte réfléchit ».
+_USAGES_LENTS = frozenset({"brainstorm", "redaction"})
 
 
 class MoteurModeles:
@@ -43,8 +46,11 @@ class MoteurModeles:
 
     def __init__(
         self, ident: str, libelle: str, backends: Mapping[str, Backend | None], *, cle: tuple[str, str] | None = None,
-        duree_reflexion_s: float = 10.0, sortie_de_texte: bool = False,
+        duree_reflexion_s: float = 10.0, sortie_de_texte: bool = False, idents: Mapping[str, str] | None = None,
+        libelles: Mapping[str, str] | None = None,
     ) -> None:
+        self.libelles = dict(libelles or {})  # le libellé du modèle de chaque usage (les limites décrivent les usages actifs)
+        self.idents = dict(idents or {})  # l'identifiant public du modèle de chaque usage (pour dire qui a rédigé)
         self.id = ident
         self.libelle = libelle
         self.backends = dict(backends)
@@ -57,7 +63,7 @@ class MoteurModeles:
         backend = self.backends[usage]
         if backend is None:  # l'appelant a vérifié : jamais un appel sans modèle
             raise EngineRefus("aucun modèle pour cet usage")
-        if usage == "brainstorm":  # le modèle fort est plus lent : la vue dit que la mascotte réfléchit pendant l'appel
+        if usage in _USAGES_LENTS:  # modèle fort ou rédaction, plus lents : la vue dit que la mascotte réfléchit pendant l'appel
             with reflexion(self.cle, self.duree_reflexion_s):
                 texte, _ = backend.completer(geste.systeme, geste.utilisateur, geste.schema, geste.max_jetons)
         else:
@@ -105,8 +111,27 @@ class MoteurModeles:
             return redaction_fidele(entree)
         return gestes.lire_redaction(self._appel("redaction", gestes.rediger(entree)), entree)
 
+    def auteur_redaction(self) -> str:
+        """Qui rédige : le modèle de l'usage ``redaction``, ``sans-modele`` quand c'est le programme (rédaction fidèle)."""
+        if not self._a("redaction"):
+            return "sans-modele"
+        return self.idents.get("redaction", self.id)
+
     def est_tour_lourd(self, texte: str, etape: str) -> bool:
         return etape == "brainstorm" and self._a("brainstorm")  # les pistes viennent du modèle fort, plus lent
+
+    def _premiere_limite(self) -> str:
+        """Dit qui parle vraiment : « avec un modèle » seulement si l'usage ``conversation`` en a un."""
+        def nom(usage: str) -> str:
+            return self.libelles.get(usage, self.libelle)
+
+        if self._a("conversation"):
+            return f"Je parle avec un modèle d'IA ({nom('conversation')}) : je peux me tromper ou mal te comprendre."
+        roles = [
+            f"un modèle d'IA ({nom(u)}) {quoi}" for u, quoi in (("redaction", "rédige les propositions"), ("brainstorm", "propose des pistes"))
+            if self._a(u)
+        ]
+        return f"Je parle sans modèle d'IA ; {' et '.join(roles)} : il peut se tromper ou mal te comprendre."
 
     def limites(self) -> tuple[str, ...]:
         if not any(self.backends.values()):
@@ -116,7 +141,7 @@ class MoteurModeles:
             else "Ce que tu écris reste sur ta machine."
         )
         return (
-            f"Je parle avec un modèle d'IA ({self.libelle}) : je peux me tromper ou mal te comprendre.",
+            self._premiere_limite(),
             "Rien n'entre dans le document sans ton « oui » : je ne fais que proposer.",
             sortie,
             "Si le modèle tarde, répond n'importe quoi ou n'est plus disponible, je reprends en questions guidées, sans lui, "
