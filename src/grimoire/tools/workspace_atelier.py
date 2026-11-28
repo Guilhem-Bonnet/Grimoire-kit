@@ -628,8 +628,12 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
     every = [_phase_view(root, name, p) for p in PHASES]
     view = next(v for v in every if v["id"] == phase.id)
     # Les invites et le reste à faire suivent l'écriture : la page redessine la rubrique sans relire tout le document.
-    reste = _guidance(root, name, every, progress(root, name))
-    return {"ok": True, "phase": view, "avertissements": loop.duplicate_requirements([view]), "reste_a_faire": reste}
+    avancement = progress(root, name)
+    reste = _guidance(root, name, every, avancement)
+    return {
+        "ok": True, "phase": view, "avertissements": loop.duplicate_requirements([view]), "reste_a_faire": reste,
+        "avancement": avancement,  # le même calcul : la pastille d'en-tête se met à jour sans relire le document
+    }
 
 
 # ── Branchement des hôtes ───────────────────────────────────────────────────

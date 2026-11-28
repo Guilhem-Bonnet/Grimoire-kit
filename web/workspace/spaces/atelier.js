@@ -887,7 +887,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
         drawSection(result.phase);
         announce('Bloc enregistré.');
         loop.warn(result.avertissements); // un identifiant d'exigence en double dans ce fichier
-        reloadProgress();
+        adoptProgress(result);
         liveDoc.refresh(); // une exigence réécrite peut être « modifiée depuis la validation »
         const written = result.phase.blocks.find((b) => b.text === area.value.trimEnd());
         sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`)?.focus();
@@ -947,7 +947,7 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
       drawSection(result.phase);
       announce(checked ? 'Case cochée.' : 'Case décochée.');
       loop.warn(result.avertissements);
-      reloadProgress();
+      adoptProgress(result);
       liveDoc.refresh();
       const written = result.phase.blocks.find((b) => b.text === next.trimEnd());
       const again = sheet.querySelector(`[data-block="${CSS.escape(written ? written.id : '')}"]`);
@@ -1088,26 +1088,17 @@ function documentView(ctx, root, slug, doc, phaseFocus, chantiers = null) {
     if (result && result.reste_a_faire) state.doc.reste_a_faire = result.reste_a_faire;
     rest.update(state.doc.reste_a_faire);
   };
-  /** Après un bloc écrit : l'avancement et les avertissements se relisent, sans redessiner la feuille en cours d'édition. */
-  const reloadProgress = () => ownWrite(readProgress);
-  const readProgress = async () => {
-    try {
-      const fresh = await ctx.api.atelierChantier(slug);
-      if (ctx.signal.aborted) return;
-      state.doc.avancement = fresh.avancement;
-      state.doc.reste_a_faire = fresh.reste_a_faire;
-      rest.update(fresh.reste_a_faire);
-      state.doc.taches = fresh.taches;
-      state.doc.chantier = fresh.chantier;
-      adoptAnnexes(fresh); // l'écriture qui précède est la nôtre : le pouls n'y verra pas un dépôt extérieur
-      paintHead();
-      loop.update(fresh);
-      phaseNav(); // la barre collante lit l'avancement unique
-      drawSteps();
-      assist.refresh();
-    } catch {
-      // Le prochain chargement du document remettra l'avancement à jour.
-    }
+  /**
+   * Après un bloc écrit : la réponse de l'écriture porte l'avancement (le même calcul que le document) ; la pastille d'en-tête,
+   * la barre des phases et le déroulé le lisent aussitôt, sans relire le document ni redessiner la feuille en cours d'édition.
+   */
+  const adoptProgress = (result) => {
+    if (!result || !result.avancement) return;
+    state.doc.avancement = result.avancement;
+    loop.progress(state.doc);
+    phaseNav(); // la barre collante lit l'avancement unique
+    drawSteps();
+    assist.refresh();
   };
   let paintHead = () => {};
   const drawAll = () => {

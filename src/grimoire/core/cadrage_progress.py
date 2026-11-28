@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.cadrage import PHASES, phase_report
+from grimoire.core.cadrage_guidance import _sans_objet, section_bodies
 
 __all__ = ["ETATS", "progress"]
 
@@ -46,10 +47,13 @@ def _angle_marks(view: dict[str, Any] | None) -> dict[tuple[str, str], str]:
 
 def _phase(root: Path, phase: Any, chantier: str | None, marks: dict[tuple[str, str], str]) -> dict[str, Any]:
     report = phase_report(root, phase, chantier)
+    on_page = _page_marked(root, report, phase)
     sections: dict[str, str] = {}
     for name in phase.sections:
         if report["sections"].get(name) == "rempli":
             sections[name] = "rempli"
+        elif name in on_page:  # la ligne « sans objet » posée par la page : une rubrique écartée, pas un point à faire
+            sections[name] = "sans-objet"
         else:  # le « sans objet » de l'entretien reste au gabarit pour le gate : la marque de l'angle le dit
             sections[name] = marks.get((phase.id, name), "vide")
     count = {s: sum(1 for v in sections.values() if v == s) for s in ("rempli", "vide", "je-ne-sais-pas", "sans-objet")}
@@ -57,11 +61,30 @@ def _phase(root: Path, phase: Any, chantier: str | None, marks: dict[tuple[str, 
         "id": phase.id, "title": phase.title, "file": report["file"], "present": report["state"] != "missing",
         "sections": sections, "total": len(sections), "remplis": count["rempli"], "vides": count["vide"],
         "je_ne_sais_pas": count["je-ne-sais-pas"], "sans_objet": count["sans-objet"],
-        "complete": count["vide"] == 0 and report["state"] != "missing",
+        # Une rubrique marquée par la page reste au gabarit pour le gate : la phase n'est « complète » que sans elle.
+        "a_confirmer_page": len(on_page),
+        "complete": count["vide"] == 0 and not on_page and report["state"] != "missing",
     }
 
 
-def _summary(etat: str, vides: int, unknown: int, covered: int, total: int) -> str:
+def _page_marked(root: Path, report: dict[str, Any], phase: Any) -> set[str]:
+    """Les rubriques restées au gabarit que la page a marquées « sans objet » (lecture du fichier que ``phase_report`` a lu)."""
+    if report["state"] == "missing":
+        return set()
+    try:
+        text = (root / report["file"]).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+    bodies = section_bodies(text)
+    return {
+        name for name in phase.sections
+        if report["sections"].get(name) != "rempli" and _sans_objet(bodies.get(name, []))[0]
+    }
+
+
+def _summary(etat: str, vides: int, unknown: int, covered: int, total: int, on_page: int = 0) -> str:
+    if vides == 0 and on_page:  # plus aucun point à faire, mais des rubriques écartées par la page restent à confirmer
+        return f"Plus aucun point au gabarit ; {on_page} rubrique{'s' if on_page > 1 else ''} sans objet à confirmer."
     if etat == "a-cadrer":
         return "À cadrer : rien n’est encore rempli."
     if etat == "en-cours":
@@ -99,7 +122,8 @@ def progress(root: Path, chantier: str | None = None) -> dict[str, Any]:
     required = [a for a in (view or {}).get("angles", []) if a["required"]] if view and view.get("interview", True) else []
     covered = sum(1 for a in required if a["state"] == "couvert" or (a["state"] == "ecarte" and str(a.get("reason", "")).strip()))
     open_required = bool(view and view.get("interview", True) and view.get("open_required"))
-    if vides == 0 and all(p["present"] for p in phases):
+    on_page = sum(p["a_confirmer_page"] for p in phases)
+    if vides == 0 and not on_page and all(p["present"] for p in phases):
         etat = "complet"
     elif not touched:
         etat = "a-cadrer"
@@ -109,7 +133,7 @@ def progress(root: Path, chantier: str | None = None) -> dict[str, Any]:
         etat = "en-cours"
     return {
         "etat": etat,
-        "resume": _summary(etat, vides, unknown, covered, len(required)),
+        "resume": _summary(etat, vides, unknown, covered, len(required), on_page),
         "a_preciser": vides,
         "a_confirmer": unknown,
         "angles": {"couverts": covered, "total": len(required), "complet": bool(required) and not open_required},

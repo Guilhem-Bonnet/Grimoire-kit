@@ -40,9 +40,10 @@ export function pendingSplit(av, rubs) {
   const na = [];
   for (const phase of av.phases) {
     const skip = marked.get(phase.id) || new Set();
+    // Le serveur dit déjà « sans objet » pour la ligne posée par la page ou par l'entretien ; `skip` rattrape un avancement plus ancien que le document.
     const empty = Object.entries(phase.sections).filter(([, state]) => state === 'vide').map(([name]) => name);
     const here = empty.filter((name) => !skip.has(name));
-    const off = empty.filter((name) => skip.has(name));
+    const off = Object.entries(phase.sections).filter(([name, state]) => state === 'sans-objet' || (state === 'vide' && skip.has(name))).map(([name]) => name);
     if (here.length) open.push({ id: phase.id, title: phase.title, names: here });
     if (off.length) na.push({ id: phase.id, title: phase.title, names: off });
   }
@@ -173,16 +174,19 @@ export function createLoopPanel(ctx) {
       box.append(el('summary', 'at-muted', split.open.length
         ? `Voir les ${plural(split.count, 'point restant', 'points restants')} au gabarit`
         : `Voir les ${plural(split.na.length, 'rubrique marquée sans objet', 'rubriques marquées sans objet')}`));
+      // Une seule bulle pour les deux listes : elle est posée sous le bouton, les listes s'y suivent dans le flux (jamais l'une sur l'autre).
+      const pop = el('div', 'at-loop-pop', null, { 'data-role': 'avancement-liste' });
       if (split.open.length) {
         const list = el('ul');
         for (const phase of split.open) list.append(el('li', null, `${PHASE_NAMES[phase.id] || phase.title} : ${phase.names.join(', ')}`));
-        box.append(list);
+        pop.append(list);
       }
       if (split.na.length) { // marquées sans objet : elles ne comptent plus dans les points restants
         const list = el('ul', null, null, { 'data-role': 'avancement-sans-objet' });
         list.append(el('li', 'at-muted', `Marquées sans objet, non comptées : ${split.na.map((p) => `${PHASE_NAMES[p.id] || p.title} : ${p.names.join(', ')}`).join(' ; ')}`));
-        box.append(list);
+        pop.append(list);
       }
+      box.append(pop);
       detail.append(box);
     });
   };
@@ -207,7 +211,8 @@ export function createLoopPanel(ctx) {
     for (const item of list || []) warnings.append(el('p', 'at-live-gap', item.message, { role: 'alert', 'data-req': item.req }));
   });
 
-  const update = (doc) => {
+  /** La pastille et sa liste seules : `doc` porte `avancement` et `phases` (la réponse d'une écriture de bloc suffit). */
+  const progress = (doc) => {
     const av = doc.avancement;
     if (av) {
       const marks = [av.a_confirmer ? `${av.a_confirmer} « je ne sais pas »` : '', av.phases.some((p) => p.sans_objet) ? `${av.phases.reduce((n, p) => n + p.sans_objet, 0)} « sans objet »` : ''].filter(Boolean);
@@ -217,8 +222,11 @@ export function createLoopPanel(ctx) {
       summary.title = 'Toutes les rubriques encore au gabarit, facultatives comprises. « Ce qu’il me reste à faire », en haut du document, ne compte que ce qui est nécessaire pour valider.';
       sections(av, doc.phases);
     }
+  };
+  const update = (doc) => {
+    progress(doc);
     taskList(doc.taches || []);
     warn(doc.avertissements);
   };
-  return { element, pill, update, warn };
+  return { element, pill, update, progress, warn };
 }
